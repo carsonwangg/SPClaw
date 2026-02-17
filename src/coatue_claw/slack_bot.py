@@ -92,7 +92,7 @@ def _format_chart_summary(result) -> str:
         for p in excluded[:8]:
             lines.append(f"  - `{p.ticker}`: `{p.exclusion_reason}`")
 
-    lines.append("- NTM method: Yahoo only exposes `0q/+1q/+1y`; this build imputes missing +2q/+3q and flags it in output artifacts.")
+    lines.append("- NTM method: strict next-4-quarter sum only; tickers missing any of `0q`, `+1q`, `+2q`, `+3q` are excluded.")
     return "\n".join(lines)
 
 
@@ -137,12 +137,18 @@ def handle_mention(event, say):
                 file=str(result.json_path),
                 title="valuation-chart-data.json",
             )
+            app.client.files_upload_v2(
+                channel=channel,
+                thread_ts=thread_ts,
+                file=str(result.raw_path),
+                title="valuation-chart-provider-raw.json",
+            )
         except Exception:
             logger.exception("Failed to upload valuation chart artifacts to Slack")
             say(
                 text=(
                     "Chart generated but file upload failed. "
-                    f"Chart: `{result.chart_path}` CSV: `{result.csv_path}` JSON: `{result.json_path}`"
+                    f"Chart: `{result.chart_path}` CSV: `{result.csv_path}` JSON: `{result.json_path}` RAW: `{result.raw_path}`"
                 ),
                 thread_ts=thread_ts,
             )

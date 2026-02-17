@@ -61,6 +61,7 @@ def main():
         print(f"chart: {result.chart_path}")
         print(f"csv: {result.csv_path}")
         print(f"json: {result.json_path}")
+        print(f"raw: {result.raw_path}")
 
 
 if __name__ == "__main__":
