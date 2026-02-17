@@ -80,6 +80,21 @@ Return exclusion reasons such as:
 - `stale_market_data`
 - `stale_estimates`
 
+
+## Execute in OpenClaw Runtime
+
+When asked to produce this chart from Slack/OpenClaw, execute:
+
+- `cd /opt/coatue-claw && /opt/coatue-claw/.venv/bin/python -m coatue_claw.cli valuation-chart TICKER1,TICKER2,...`
+
+Then return:
+
+- PNG chart path
+- CSV/JSON artifact paths
+- provider used and fallback reason
+- as-of timestamps
+- included/excluded counts
+
 ## Render and Return Chart
 
 Render a scatter plot where:
