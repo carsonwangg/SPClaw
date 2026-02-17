@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coatue-claw"
+version = "0.1.0"
+requires-python = ">=3.9"
+dependencies = [
+  "python-dotenv>=1.0.1",
+  "slack-bolt>=1.18.1",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.scripts]
+claw = "coatue_claw.cli:main"
