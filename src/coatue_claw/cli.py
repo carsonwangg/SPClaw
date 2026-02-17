@@ -54,9 +54,10 @@ def main():
         print(f"provider_used: {result.provider_used}")
         if result.provider_fallback_reason:
             print(f"provider_fallback_reason: {result.provider_fallback_reason}")
+        print(f"metric_mode: {result.metric_mode}")
         print(f"request_received_at: {result.request_received_at}")
         print(f"market_data_as_of: {result.market_data_as_of}")
-        print(f"estimates_as_of: {result.estimates_as_of}")
+        print(f"fundamentals_as_of: {result.fundamentals_as_of}")
         print(f"included: {result.included_count} excluded: {result.excluded_count}")
         print(f"chart: {result.chart_path}")
         print(f"csv: {result.csv_path}")

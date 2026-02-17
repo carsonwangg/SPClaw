@@ -16,12 +16,11 @@ import yfinance as yf
 
 ARTIFACTS_DIR = Path("/opt/coatue-claw-data/artifacts/charts")
 CACHE_DIR = Path("/opt/coatue-claw-data/cache/valuation")
-CACHE_SCHEMA_VERSION = "v3"
-REQUIRED_NTM_PERIODS = ("0q", "+1q", "+2q", "+3q")
+CACHE_SCHEMA_VERSION = "v4"
 
 # Freshness policy.
 MARKET_MAX_AGE_HOURS = 48
-ESTIMATES_MAX_AGE_DAYS = 7
+FUNDAMENTALS_MAX_AGE_DAYS = 180
 
 
 class ProviderUnavailableError(RuntimeError):
@@ -38,7 +37,6 @@ class ProviderSnapshot:
     provider: str
     fetched_at: str
     market_data_as_of: str | None
-    estimates_as_of: str | None
     currency: str | None
     financial_currency: str | None
     market_cap: float | None
@@ -49,7 +47,7 @@ class ProviderSnapshot:
     latest_quarter_end: str | None
     revenue_q: float | None
     revenue_q_1y: float | None
-    revenue_estimates_quarterly: dict[str, float]
+    revenue_last_4q_sum: float | None
     errors: list[str]
     raw_payload: dict[str, Any]
 
@@ -62,20 +60,20 @@ class TickerPoint:
     financial_currency: str | None
     request_received_at: str
     market_data_as_of: str | None
-    estimates_as_of: str | None
+    fundamentals_as_of: str | None
     latest_quarter_end: str | None
     revenue_q: float | None
     revenue_q_1y: float | None
     yoy_growth_pct: float | None
-    ntm_revenue: float | None
-    ntm_estimate_method: str
+    ltm_revenue: float | None
+    ltm_method: str
     market_cap: float | None
     total_debt: float | None
     preferred_equity: float | None
     minority_interest: float | None
     cash_eq: float | None
     enterprise_value: float | None
-    ev_ntm_revenue: float | None
+    ev_ltm_revenue: float | None
     quality_flags: list[str]
     included: bool
     exclusion_reason: str | None
@@ -87,10 +85,10 @@ class ChartResult:
     provider_requested: str
     provider_used: str
     provider_fallback_reason: str | None
-    ntm_mode: str
+    metric_mode: str
     request_received_at: str
     market_data_as_of: str | None
-    estimates_as_of: str | None
+    fundamentals_as_of: str | None
     chart_path: Path
     csv_path: Path
     json_path: Path
@@ -204,26 +202,6 @@ def _retry_call(fn, *, label: str, max_attempts: int = 3, base_sleep_seconds: fl
     raise ProviderFetchError(f"{label} failed after retries: {last_error}")
 
 
-def _compute_ntm_revenue(
-    quarterly_estimates: dict[str, float],
-    *,
-    ntm_mode: str,
-) -> tuple[float | None, str, list[str]]:
-    if ntm_mode != "strict":
-        raise ValueError("Only strict NTM mode is supported")
-
-    flags: list[str] = []
-    missing_required = [k for k in REQUIRED_NTM_PERIODS if quarterly_estimates.get(k) is None]
-
-    if not missing_required:
-        ntm = sum(float(quarterly_estimates[k]) for k in REQUIRED_NTM_PERIODS)
-        return ntm, "strict_4q", flags
-
-    flags.append("missing_ntm_estimates")
-    flags.append("missing_estimate_periods:" + ",".join(missing_required))
-    return None, "strict_missing", flags
-
-
 def _is_market_data_stale(market_as_of: str | None, now_utc: datetime) -> bool:
     market_dt = _parse_iso(market_as_of)
     if market_dt is None:
@@ -237,11 +215,11 @@ def _is_market_data_stale(market_as_of: str | None, now_utc: datetime) -> bool:
     return age > max_age
 
 
-def _is_estimates_data_stale(estimates_as_of: str | None, now_utc: datetime) -> bool:
-    est_dt = _parse_iso(estimates_as_of)
-    if est_dt is None:
+def _is_fundamentals_stale(fundamentals_as_of: str | None, now_utc: datetime) -> bool:
+    fund_dt = _parse_iso(fundamentals_as_of)
+    if fund_dt is None:
         return True
-    return (now_utc - est_dt) > timedelta(days=ESTIMATES_MAX_AGE_DAYS)
+    return (now_utc - fund_dt) > timedelta(days=FUNDAMENTALS_MAX_AGE_DAYS)
 
 
 class GoogleAdapter:
@@ -250,7 +228,7 @@ class GoogleAdapter:
     def fetch_many(self, tickers: list[str], _cache: LocalTtlJsonCache, _request_at: str) -> list[ProviderSnapshot]:
         raise ProviderUnavailableError(
             "google_provider_unavailable_for_required_fields: "
-            "Google Finance endpoint in this build cannot reliably provide EV components and explicit next 4 quarterly revenue estimates."
+            "Google Finance endpoint in this build cannot reliably provide EV components and LTM revenue fields."
         )
 
 
@@ -291,7 +269,6 @@ class YahooAdapter:
 
             qis = _retry_call(lambda: yf_ticker.quarterly_income_stmt, label=f"{ticker}:quarterly_income_stmt")
             qbs = _retry_call(lambda: yf_ticker.quarterly_balance_sheet, label=f"{ticker}:quarterly_balance_sheet")
-            rev_est = _retry_call(lambda: yf_ticker.revenue_estimate, label=f"{ticker}:revenue_estimate")
 
             quote_currency = fast_info.get("currency") or info.get("currency")
             financial_currency = info.get("financialCurrency") or info.get("currency")
@@ -325,6 +302,7 @@ class YahooAdapter:
 
             revenue_q = None
             revenue_q_1y = None
+            revenue_last_4q_sum = None
             latest_quarter_end = None
             revenue_series_export: list[dict[str, Any]] = []
             if isinstance(qis, pd.DataFrame) and not qis.empty:
@@ -335,19 +313,15 @@ class YahooAdapter:
                         val = _as_float(value)
                         if val is not None:
                             revenue_series_export.append({"asOfDate": _safe_iso(idx), "revenue": val})
+                    if len(revenue_series) >= 1:
+                        latest_quarter_end = _safe_iso(revenue_series.index[-1])
+                    if len(revenue_series) >= 4:
+                        recent_4 = [_as_float(v) for v in revenue_series.iloc[-4:]]
+                        if all(v is not None for v in recent_4):
+                            revenue_last_4q_sum = float(sum(v for v in recent_4 if v is not None))
                     if len(revenue_series) >= 5:
                         revenue_q = _as_float(revenue_series.iloc[-1])
                         revenue_q_1y = _as_float(revenue_series.iloc[-5])
-                        latest_quarter_end = _safe_iso(revenue_series.index[-1])
-
-            estimates_as_of = fetched_at
-            quarterly_estimates: dict[str, float] = {}
-            if isinstance(rev_est, pd.DataFrame) and not rev_est.empty and "avg" in rev_est.columns:
-                for key in ["0q", "+1q", "+2q", "+3q", "0y", "+1y"]:
-                    if key in rev_est.index:
-                        val = _as_float(rev_est.loc[key, "avg"])
-                        if val is not None:
-                            quarterly_estimates[key] = val
 
             raw_payload = {
                 "market_data_as_of": market_data_as_of,
@@ -359,7 +333,6 @@ class YahooAdapter:
                     "quoteCurrency": quote_currency,
                     "financialCurrency": financial_currency,
                 },
-                "revenue_estimate": quarterly_estimates,
                 "quarterly_revenue_series": revenue_series_export,
             }
 
@@ -368,7 +341,6 @@ class YahooAdapter:
                 provider=self.name,
                 fetched_at=fetched_at,
                 market_data_as_of=market_data_as_of,
-                estimates_as_of=estimates_as_of,
                 currency=currency,
                 financial_currency=financial_currency,
                 market_cap=market_cap,
@@ -379,7 +351,7 @@ class YahooAdapter:
                 latest_quarter_end=latest_quarter_end,
                 revenue_q=revenue_q,
                 revenue_q_1y=revenue_q_1y,
-                revenue_estimates_quarterly=quarterly_estimates,
+                revenue_last_4q_sum=revenue_last_4q_sum,
                 errors=[],
                 raw_payload=raw_payload,
             )
@@ -391,7 +363,6 @@ class YahooAdapter:
                 provider=self.name,
                 fetched_at=fetched_at,
                 market_data_as_of=None,
-                estimates_as_of=None,
                 currency=None,
                 financial_currency=None,
                 market_cap=None,
@@ -402,7 +373,7 @@ class YahooAdapter:
                 latest_quarter_end=None,
                 revenue_q=None,
                 revenue_q_1y=None,
-                revenue_estimates_quarterly={},
+                revenue_last_4q_sum=None,
                 errors=[f"provider_fetch_error:{exc.__class__.__name__}"],
                 raw_payload={"error": str(exc)},
             )
@@ -414,7 +385,6 @@ def _build_point(
     snapshot: ProviderSnapshot,
     *,
     request_at: str,
-    ntm_mode: str,
     now_utc: datetime,
 ) -> TickerPoint:
     flags: list[str] = list(snapshot.errors)
@@ -425,14 +395,16 @@ def _build_point(
     else:
         flags.append("missing_yoy_inputs")
 
-    ntm_revenue, ntm_method, ntm_flags = _compute_ntm_revenue(
-        snapshot.revenue_estimates_quarterly,
-        ntm_mode=ntm_mode,
-    )
-    flags.extend(ntm_flags)
-    if ntm_revenue is not None and ntm_revenue <= 0:
-        flags.append("nonpositive_ntm_revenue")
-        ntm_revenue = None
+    ltm_revenue = snapshot.revenue_last_4q_sum
+    if ltm_revenue is None:
+        flags.append("missing_ltm_revenue")
+        ltm_method = "missing"
+    elif ltm_revenue <= 0:
+        flags.append("nonpositive_ltm_revenue")
+        ltm_revenue = None
+        ltm_method = "invalid"
+    else:
+        ltm_method = "reported_4q_sum"
 
     ev = None
     if snapshot.market_cap is not None and snapshot.total_debt is not None and snapshot.cash_eq is not None:
@@ -450,35 +422,36 @@ def _build_point(
         flags.append("currency_mismatch")
 
     multiple = None
-    if ev is not None and ntm_revenue is not None and ntm_revenue > 0:
-        multiple = ev / ntm_revenue
+    if ev is not None and ltm_revenue is not None and ltm_revenue > 0:
+        multiple = ev / ltm_revenue
     else:
-        flags.append("missing_ev_ntm_inputs")
+        flags.append("missing_ev_ltm_inputs")
 
     if _is_market_data_stale(snapshot.market_data_as_of, now_utc):
         flags.append("stale_market_data")
-    if _is_estimates_data_stale(snapshot.estimates_as_of, now_utc):
-        flags.append("stale_estimates")
+    if _is_fundamentals_stale(snapshot.latest_quarter_end, now_utc):
+        flags.append("stale_fundamentals")
 
     required_fields = {
         "market_cap": snapshot.market_cap,
         "total_debt": snapshot.total_debt,
         "cash_eq": snapshot.cash_eq,
         "yoy_growth_pct": yoy_growth,
-        "ntm_revenue": ntm_revenue,
-        "ev_ntm_revenue": multiple,
+        "ltm_revenue": ltm_revenue,
+        "ev_ltm_revenue": multiple,
     }
     missing_required = [k for k, v in required_fields.items() if v is None]
+
     if "stale_market_data" in flags:
         exclusion_reason = "stale_market_data"
-    elif "stale_estimates" in flags:
-        exclusion_reason = "stale_estimates"
+    elif "stale_fundamentals" in flags:
+        exclusion_reason = "stale_fundamentals"
     elif "currency_mismatch" in flags:
         exclusion_reason = "currency_mismatch"
-    elif "missing_ntm_estimates" in flags:
-        exclusion_reason = "missing_ntm_estimates"
-    elif "nonpositive_ntm_revenue" in flags:
-        exclusion_reason = "nonpositive_ntm_revenue"
+    elif "missing_ltm_revenue" in flags:
+        exclusion_reason = "missing_ltm_revenue"
+    elif "nonpositive_ltm_revenue" in flags:
+        exclusion_reason = "nonpositive_ltm_revenue"
     elif snapshot.total_debt is None:
         exclusion_reason = "missing_debt"
     elif missing_required:
@@ -494,20 +467,20 @@ def _build_point(
         financial_currency=snapshot.financial_currency,
         request_received_at=request_at,
         market_data_as_of=snapshot.market_data_as_of,
-        estimates_as_of=snapshot.estimates_as_of,
+        fundamentals_as_of=snapshot.latest_quarter_end,
         latest_quarter_end=snapshot.latest_quarter_end,
         revenue_q=snapshot.revenue_q,
         revenue_q_1y=snapshot.revenue_q_1y,
         yoy_growth_pct=yoy_growth,
-        ntm_revenue=ntm_revenue,
-        ntm_estimate_method=ntm_method,
+        ltm_revenue=ltm_revenue,
+        ltm_method=ltm_method,
         market_cap=snapshot.market_cap,
         total_debt=snapshot.total_debt,
         preferred_equity=snapshot.preferred_equity,
         minority_interest=snapshot.minority_interest,
         cash_eq=snapshot.cash_eq,
         enterprise_value=ev,
-        ev_ntm_revenue=multiple,
+        ev_ltm_revenue=multiple,
         quality_flags=flags,
         included=included,
         exclusion_reason=exclusion_reason,
@@ -515,18 +488,18 @@ def _build_point(
 
 
 def _render_chart(points: list[TickerPoint], out_path: Path, title_suffix: str) -> None:
-    included = [p for p in points if p.included and p.yoy_growth_pct is not None and p.ev_ntm_revenue is not None]
+    included = [p for p in points if p.included and p.yoy_growth_pct is not None and p.ev_ltm_revenue is not None]
     if not included:
         fig, ax = plt.subplots(figsize=(11, 7))
         ax.text(0.5, 0.5, "No valid points after quality filters", ha="center", va="center")
         ax.set_axis_off()
-        fig.suptitle(f"EV/NTM Revenue vs YoY Revenue Growth ({title_suffix})")
+        fig.suptitle(f"EV/LTM Revenue vs YoY Revenue Growth ({title_suffix})")
         fig.savefig(out_path, dpi=160, bbox_inches="tight")
         plt.close(fig)
         return
 
     x = np.array([p.yoy_growth_pct * 100.0 for p in included], dtype=float)
-    y = np.array([p.ev_ntm_revenue for p in included], dtype=float)
+    y = np.array([p.ev_ltm_revenue for p in included], dtype=float)
 
     fig, ax = plt.subplots(figsize=(11, 7))
     ax.scatter(x, y, s=64, alpha=0.9)
@@ -540,8 +513,8 @@ def _render_chart(points: list[TickerPoint], out_path: Path, title_suffix: str) 
         ax.plot(line_x, line_y, linestyle="--", linewidth=1.8)
 
     ax.set_xlabel("YoY Revenue Growth (%)")
-    ax.set_ylabel("EV / NTM Revenue (x)")
-    ax.set_title(f"EV / NTM Revenue vs YoY Revenue Growth ({title_suffix})")
+    ax.set_ylabel("EV / LTM Revenue (x)")
+    ax.set_title(f"EV / LTM Revenue vs YoY Revenue Growth ({title_suffix})")
     ax.grid(alpha=0.25)
 
     fig.savefig(out_path, dpi=160, bbox_inches="tight")
@@ -551,15 +524,11 @@ def _render_chart(points: list[TickerPoint], out_path: Path, title_suffix: str) 
 def run_valuation_chart(
     tickers: list[str],
     provider_preference: list[str] | None = None,
-    *,
-    ntm_mode: str = "strict",
 ) -> ChartResult:
     provider_preference = provider_preference or ["google", "yahoo"]
     tickers = [t.strip().upper() for t in tickers if t and t.strip()]
     if not tickers:
         raise ValueError("No tickers provided")
-    if ntm_mode != "strict":
-        raise ValueError("ntm_mode must be 'strict'")
 
     request_at = _utc_now_iso()
     now_utc = datetime.now(UTC)
@@ -589,7 +558,7 @@ def run_valuation_chart(
     if provider_used is None:
         raise RuntimeError("No data provider succeeded")
 
-    points = [_build_point(s, request_at=request_at, ntm_mode=ntm_mode, now_utc=now_utc) for s in snapshots]
+    points = [_build_point(s, request_at=request_at, now_utc=now_utc) for s in snapshots]
 
     ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -603,25 +572,24 @@ def run_valuation_chart(
 
     raw_export = {
         "field_contract": {
-            "ntm_required_periods": list(REQUIRED_NTM_PERIODS),
-            "strict_ntm_only": True,
+            "metric_mode": "ev_ltm_vs_yoy",
+            "denominator": "sum_last_4_reported_quarters",
             "freshness": {
                 "market_max_age_hours": MARKET_MAX_AGE_HOURS,
-                "estimates_max_age_days": ESTIMATES_MAX_AGE_DAYS,
+                "fundamentals_max_age_days": FUNDAMENTALS_MAX_AGE_DAYS,
             },
         },
         "provider_used": provider_used,
         "provider_fallback_reason": fallback_reason,
         "request_received_at": request_at,
-        "ntm_mode": ntm_mode,
         "ticker_snapshots": [asdict(s) for s in snapshots],
     }
     raw_path.write_text(json.dumps(raw_export, indent=2))
 
     market_as_of = max((p.market_data_as_of for p in points if p.market_data_as_of), default=None)
-    estimates_as_of = max((p.estimates_as_of for p in points if p.estimates_as_of), default=None)
+    fundamentals_as_of = max((p.fundamentals_as_of for p in points if p.fundamentals_as_of), default=None)
 
-    title_suffix = f"provider={provider_used}, ntm_mode={ntm_mode}, market_as_of={market_as_of or 'n/a'}"
+    title_suffix = f"provider={provider_used}, metric=ltm, market_as_of={market_as_of or 'n/a'}"
     _render_chart(points, chart_path, title_suffix)
 
     included_count = sum(1 for p in points if p.included)
@@ -632,10 +600,10 @@ def run_valuation_chart(
         provider_requested=provider_preference[0],
         provider_used=provider_used,
         provider_fallback_reason=fallback_reason,
-        ntm_mode=ntm_mode,
+        metric_mode="ltm",
         request_received_at=request_at,
         market_data_as_of=market_as_of,
-        estimates_as_of=estimates_as_of,
+        fundamentals_as_of=fundamentals_as_of,
         chart_path=chart_path,
         csv_path=csv_path,
         json_path=json_path,

@@ -1,22 +1,22 @@
 ---
 name: valuation-charting
-description: Implement and operate an equity scatter chart of EV/NTM revenue vs YoY revenue growth. Use when the user asks to plan, build, validate, or troubleshoot EV/NTM vs growth charts, including strict metric definitions, provider standardization (Google Finance preferred, Yahoo fallback), as-of timestamp checks, data quality gates, Slack command behavior, and audit artifacts.
+description: Implement and operate an equity scatter chart of EV/LTM revenue vs YoY revenue growth. Use when the user asks to plan, build, validate, or troubleshoot EV/LTM vs growth charts, including metric definitions, provider standardization (Google Finance preferred, Yahoo fallback), as-of timestamp checks, data quality gates, Slack command behavior, and audit artifacts.
 ---
 
 # Valuation Charting
 
-Follow this workflow to deliver a reliable EV/NTM revenue vs YoY revenue growth chart with a line of best fit.
+Follow this workflow to deliver a reliable EV/LTM revenue vs YoY revenue growth chart with a line of best fit.
 
 ## Freeze Metric Definitions
 
 Use these definitions exactly.
 
 - YoY revenue growth: `(latest reported quarter revenue / same quarter prior year revenue) - 1`.
-- NTM revenue: `sum of next 4 quarterly revenue estimates`.
+- LTM revenue: `sum of last 4 reported quarterly revenues`.
 - Enterprise value (EV): `market cap + total debt + preferred equity + minority interest - cash and equivalents`.
-- EV/NTM revenue: `EV / NTM revenue`.
+- EV/LTM revenue: `EV / LTM revenue`.
 
-Reject rows where `NTM revenue <= 0`.
+Reject rows where `LTM revenue <= 0`.
 
 ## Enforce Provider Standardization
 
@@ -33,7 +33,7 @@ Stamp all outputs with exact dates/times.
 
 - Record `request_received_at`.
 - Record `market_data_as_of` for price/EV fields.
-- Record `estimates_as_of` for NTM estimate fields.
+- Record `fundamentals_as_of` from the latest reported quarter end used for LTM.
 - Record `provider_used`.
 
 When data is stale, flag clearly and include the stale reason per ticker.
@@ -46,19 +46,19 @@ Emit an artifact row per ticker with at least:
 - `provider`
 - `currency`
 - `market_data_as_of`
-- `estimates_as_of`
+- `fundamentals_as_of`
 - `latest_quarter_end`
 - `revenue_q`
 - `revenue_q_1y`
 - `yoy_growth_pct`
-- `ntm_revenue`
+- `ltm_revenue`
 - `market_cap`
 - `total_debt`
 - `preferred_equity`
 - `minority_interest`
 - `cash_eq`
 - `enterprise_value`
-- `ev_ntm_revenue`
+- `ev_ltm_revenue`
 - `quality_flags`
 
 Treat missing required inputs as explicit exclusions, not silent fills.
@@ -68,18 +68,17 @@ Treat missing required inputs as explicit exclusions, not silent fills.
 Gate each ticker before plotting.
 
 - Reject if required fields are missing.
-- Reject if currencies are inconsistent for EV numerator vs NTM denominator.
+- Reject if currencies are inconsistent for EV numerator vs LTM denominator.
 - Reject if denominator is non-positive.
 - Reject if freshness policy fails.
 
 Return exclusion reasons such as:
 
-- `missing_ntm_estimates`
+- `missing_ltm_revenue`
 - `missing_debt`
 - `currency_mismatch`
 - `stale_market_data`
-- `stale_estimates`
-
+- `stale_fundamentals`
 
 ## Execute in OpenClaw Runtime
 
@@ -100,7 +99,7 @@ Then return:
 Render a scatter plot where:
 
 - x-axis: YoY revenue growth (%).
-- y-axis: EV/NTM revenue (x).
+- y-axis: EV/LTM revenue (x).
 - point label: ticker.
 - include a linear regression line of best fit across included points.
 

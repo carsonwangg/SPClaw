@@ -57,10 +57,10 @@ def _extract_chart_tickers(text: str) -> list[str]:
     if "graph" not in lower and "chart" not in lower:
         return []
 
-    if "ev" not in lower and "ntm" not in lower and "growth" not in lower:
+    if "ev" not in lower and "ltm" not in lower and "growth" not in lower and "ntm" not in lower:
         return []
 
-    cleaned = re.sub(r"\b(graph|chart|valuation|ev|ntm|revenue|vs|yoy|growth)\b", " ", stripped, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b(graph|chart|valuation|ev|ltm|ntm|revenue|vs|yoy|growth)\b", " ", stripped, flags=re.IGNORECASE)
     candidates = re.findall(r"\$?[A-Za-z][A-Za-z.\-]{0,9}", cleaned)
     out = []
     seen = set()
@@ -76,14 +76,14 @@ def _extract_chart_tickers(text: str) -> list[str]:
 
 def _format_chart_summary(result) -> str:
     lines = []
-    lines.append("*Valuation chart generated* (EV/NTM vs YoY growth)")
+    lines.append("*Valuation chart generated* (EV/LTM vs YoY growth)")
     lines.append(f"- Provider requested: `{result.provider_requested}`")
     lines.append(f"- Provider used: `{result.provider_used}`")
     if result.provider_fallback_reason:
         lines.append(f"- Fallback reason: `{result.provider_fallback_reason}`")
     lines.append(f"- Request time (UTC): `{result.request_received_at}`")
     lines.append(f"- Market data as-of: `{result.market_data_as_of}`")
-    lines.append(f"- Estimates as-of: `{result.estimates_as_of}`")
+    lines.append(f"- Fundamentals as-of: `{result.fundamentals_as_of}`")
     lines.append(f"- Included: `{result.included_count}` | Excluded: `{result.excluded_count}`")
 
     excluded = [p for p in result.points if not p.included]
@@ -92,7 +92,7 @@ def _format_chart_summary(result) -> str:
         for p in excluded[:8]:
             lines.append(f"  - `{p.ticker}`: `{p.exclusion_reason}`")
 
-    lines.append("- NTM method: strict next-4-quarter sum only; tickers missing any of `0q`, `+1q`, `+2q`, `+3q` are excluded.")
+    lines.append("- LTM method: sum of last 4 reported quarterly revenues.")
     return "\n".join(lines)
 
 
@@ -123,7 +123,7 @@ def handle_mention(event, say):
                 channel=channel,
                 thread_ts=thread_ts,
                 file=str(result.chart_path),
-                title="EV/NTM vs YoY Growth (with line of best fit)",
+                title="EV/LTM vs YoY Growth (with line of best fit)",
             )
             app.client.files_upload_v2(
                 channel=channel,
@@ -160,7 +160,7 @@ def handle_mention(event, say):
             text=(
                 "Usage:\n"
                 "- `diligence TICKER`\n"
-                "- `graph ev ntm growth SNOW,MDB,DDOG`"
+                "- `graph ev ltm growth SNOW,MDB,DDOG`"
             ),
             thread_ts=thread_ts,
         )

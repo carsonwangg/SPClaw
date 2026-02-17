@@ -15,7 +15,7 @@
 
 ## Valuation Charting Command
 - CLI: `claw valuation-chart SNOW,MDB,DDOG,NOW,CRWD`
-- Slack mention: `@Coatue Claw graph ev ntm growth SNOW,MDB,DDOG,NOW,CRWD`
+- Slack mention: `@Coatue Claw graph ev ltm growth SNOW,MDB,DDOG,NOW,CRWD`
 - Artifacts are written to `/opt/coatue-claw-data/artifacts/charts/`.
 
 ## Slack Integration Checklist
