@@ -709,17 +709,39 @@ def _render_chart(
 
     ax.set_xlabel(metric_label(x_metric), color="#2B2D37", fontsize=12, labelpad=12)
     ax.set_ylabel(metric_label(y_metric), color="#2B2D37", fontsize=12, labelpad=12)
-    legend = ax.legend(
-        title="Category",
-        loc="upper left",
-        bbox_to_anchor=(0.0, 1.01),
-        ncol=2,
+    legend_handles = [
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            linestyle="",
+            markerfacecolor=color_map[category],
+            markeredgecolor=color_map[category],
+            markersize=7,
+            label=category,
+        )
+        for category in category_order
+    ]
+    legend_ncol = 2 if len(category_order) >= 8 else 1
+    legend = fig.legend(
+        handles=legend_handles,
+        labels=category_order,
+        title="Category Guide",
+        loc="upper right",
+        bbox_to_anchor=(0.945, 0.775),
+        ncol=legend_ncol,
         fontsize=9,
         title_fontsize=9,
-        frameon=False,
+        frameon=True,
     )
     if legend is not None:
         legend.get_title().set_color("#2B2D37")
+        frame = legend.get_frame()
+        frame.set_facecolor("#E9EAED")
+        frame.set_edgecolor("#6F727A")
+        frame.set_linewidth(1.1)
+        frame.set_linestyle((0, (2, 2)))
+        frame.set_alpha(1.0)
 
     fig.text(0.025, 0.044, f"{title_suffix}", fontsize=9, color="#3C3E49")
 
