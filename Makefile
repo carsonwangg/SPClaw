@@ -1,4 +1,4 @@
-.PHONY: openclaw-status openclaw-restart openclaw-logs openclaw-slack-status openclaw-slack-logs openclaw-slack-probe openclaw-slack-audit valuation-chart
+.PHONY: openclaw-status openclaw-restart openclaw-logs openclaw-dev openclaw-bot-status openclaw-bot-logs openclaw-schedulers-status openclaw-slack-status openclaw-slack-logs openclaw-slack-probe openclaw-slack-audit valuation-chart
 
 openclaw-status:
 	openclaw gateway status
@@ -8,6 +8,19 @@ openclaw-restart:
 
 openclaw-logs:
 	openclaw logs --follow
+
+openclaw-dev:
+	$(MAKE) openclaw-status
+	$(MAKE) openclaw-slack-status
+
+openclaw-bot-status:
+	$(MAKE) openclaw-slack-status
+
+openclaw-bot-logs:
+	$(MAKE) openclaw-slack-logs
+
+openclaw-schedulers-status:
+	@echo "No scheduled OpenClaw jobs are wired yet (weekly idea scan and X digest are pending implementation)."
 
 openclaw-slack-status:
 	openclaw channels status --probe --json

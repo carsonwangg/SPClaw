@@ -52,11 +52,12 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Chart headline context now follows prompt theme; citation/footer is left-aligned for cleaner layout
 - Category guide placement now defaults to adaptive in-plot whitespace positioning to reduce wasted space while avoiding key chart overlays
 - Laptop/Codex/OpenClaw runbook now exists in-repo (`docs/laptop-codex-openclaw-workflow.md`) and AGENTS includes explicit canonical-path + ship/restart workflow rules
-- OpenClaw-native runtime spec is not yet fully codified
+- OpenClaw runtime contract is now codified in `docs/openclaw-runtime.md` (execution model, job classes, ops + triage checklist)
+- Make targets now include explicit `dev`, `bot`, and `schedulers` runtime controls for operator workflows
 - Git shipping protocol is now explicit: every Codex change ships to `origin` with handoff updates
 
 ## Immediate Next Actions
-1. Write OpenClaw runtime spec in repo (`docs/openclaw-runtime.md`)
-2. Add OpenClaw run targets (dev, bot, schedulers) in `Makefile`
-3. Validate universe commands and online-vs-universe prompt flow in Slack (`#charting`)
+1. Validate universe commands and online-vs-universe prompt flow in Slack (`#charting`)
+2. Validate post-chart follow-up prompt delivery in-thread across multiple chart runs
+3. Wire first scheduled jobs (weekly idea scan + X digest) and replace scheduler status placeholder target
 4. Convert skill stubs into runnable procedures

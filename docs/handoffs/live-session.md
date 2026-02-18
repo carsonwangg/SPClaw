@@ -30,6 +30,8 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - Post-chart Slack follow-up prompt is now sent via resilient thread posting (`chat_postMessage` with retry on rate limits, fallback to `say`) so the adjustments question is consistently delivered.
 - OpenClaw charting skill contract now explicitly requires a final post-chart follow-up question (stock screen/data/formatting adjustments) after successful chart output.
 - Added a dedicated laptop/Codex/OpenClaw operations runbook at `docs/laptop-codex-openclaw-workflow.md` and mirrored key guardrails into `AGENTS.md` (canonical repo path, ship loop, restart/verify loop).
+- Expanded runtime spec in `docs/openclaw-runtime.md` with execution model, job classes, artifact contract, and incident triage runbook.
+- Added explicit OpenClaw operator targets in `Makefile` for `openclaw-dev`, `openclaw-bot-status`, `openclaw-bot-logs`, and `openclaw-schedulers-status`.
 - Chart outputs remain PNG + CSV + JSON + raw provider payload.
 - Session shipping protocol is codified in `AGENTS.md` and templated in `docs/handoffs/ship-template.md`.
 
@@ -94,4 +96,5 @@ Then confirm bot returns:
 2. Validate guide placement across at least 3 chart shapes (left-clustered, right-clustered, mixed) to confirm no overlap with key visuals.
 3. Validate each chart run emits the post-chart adjustments prompt in-thread.
 4. Validate universe CRUD commands write/read expected CSVs under `/opt/coatue-claw-data/db/universes/`.
-5. If response fails, capture first failing line with `openclaw channels logs --channel slack --lines 300`.
+5. Wire first scheduled jobs (weekly idea scan + X digest) to replace scheduler status placeholder behavior.
+6. If response fails, capture first failing line with `openclaw channels logs --channel slack --lines 300`.
