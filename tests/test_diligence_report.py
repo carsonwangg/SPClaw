@@ -4,7 +4,11 @@ from datetime import UTC, datetime
 
 import pandas as pd
 
-from coatue_claw.diligence_report import build_neutral_investment_memo
+from coatue_claw.diligence_report import (
+    LocalResearchLookup,
+    LocalResearchReport,
+    build_neutral_investment_memo,
+)
 
 
 class _FakeTicker:
@@ -96,3 +100,31 @@ def test_build_neutral_investment_memo_contains_evidence_and_sources():
     assert "| Period | Revenue |" in memo
     assert "2025" in memo
     assert "Snowflake announces product expansion" in memo
+
+
+def test_build_neutral_investment_memo_checks_local_reports_first():
+    now = datetime(2026, 2, 18, 4, 0, tzinfo=UTC)
+    lookup = LocalResearchLookup(
+        query="SNOW",
+        checked_at_utc="2026-02-18T03:59:00+00:00",
+        reports=[
+            LocalResearchReport(
+                source="file_ingest",
+                title="SNOW - prior diligence report",
+                path="/opt/coatue-claw-data/files/incoming/Companies/SNOW-prior.md",
+                category="Companies",
+                recorded_at_utc="2026-02-17T20:00:00+00:00",
+            )
+        ],
+    )
+
+    memo = build_neutral_investment_memo(
+        "SNOW",
+        ticker_factory=lambda _ticker: _FakeTicker(),
+        now_utc=now,
+        local_report_lookup=lambda _query: lookup,
+    )
+
+    assert "Database-first check found `1` internal report(s) for `SNOW` before external data pull." in memo
+    assert "Local report reference: `SNOW - prior diligence report`" in memo
+    assert "Local research database (file ingest + prior packets)" in memo

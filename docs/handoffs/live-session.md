@@ -59,6 +59,9 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `claw diligence TICKER` now outputs the 8-section neutral investment memo format with evidence-based citations
   - data sources in memo: company profile, statements, valuation/balance sheet metrics, and recent reporting metadata (via Yahoo Finance/yfinance)
   - Slack mention parsing now accepts both `diligence` and common typo `dilligence`
+  - diligence now performs a database-first local report check before online fetch:
+    - local sources: `/opt/coatue-claw-data/db/file_ingest.sqlite` + `/opt/coatue-claw-data/artifacts/packets/*.md`
+    - memo now includes matched local report references and local-check timestamp in sources
 - Added hybrid memory subsystem (structured-first + semantic fallback):
   - SQLite + FTS5 memory DB: `/opt/coatue-claw-data/db/memory.sqlite`
   - auto fact extraction from Slack mentions (`profile`, `relationship`, `decision`, `convention`)
@@ -141,7 +144,8 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - Hybrid memory runtime deployed on Mac mini (`33650f2`): structured memory active; semantic fallback currently disabled until `OPENAI_API_KEY` is set in runtime env.
   - File bridge Drive root configured + validated on Mac mini (`9db4643` + latest pull): `make openclaw-files-init`, `make openclaw-files-sync`, and `make openclaw-files-status` pass using `/Users/spclaw/Documents/Google Drive Local`.
   - Recursive subfolder sync validation passed on Mac mini: file dropped into `01_DROP_HERE_Incoming/Companies` mirrored to local `incoming/Companies`, then cleaned up.
-  - Slack file ingest tests added/validated: classification, routing, dedupe, and SQLite write path.
+- Slack file ingest tests added/validated: classification, routing, dedupe, and SQLite write path.
+- Diligence tests extended/validated for local-report precheck behavior before external research.
 
 ## Next Step to Validate in Slack
 Send in `#charting`:
@@ -174,9 +178,10 @@ Then confirm bot returns:
    - `@Coatue Claw show pipeline status`
    - `@Coatue Claw show deploy history`
 6. Validate diligence memo output in Slack:
-   - `@Coatue Claw diligence SNOW`
-   - `@Coatue Claw dilligence MDB` (typo alias path)
-   - confirm memo includes all required neutral sections plus source/timestamp attribution
+    - `@Coatue Claw diligence SNOW`
+    - `@Coatue Claw dilligence MDB` (typo alias path)
+    - confirm memo includes all required neutral sections plus source/timestamp attribution
+    - confirm memo includes local database precheck summary and local report references when available
 7. Validate memory flows in Slack:
    - `@Coatue Claw remember my daughter's birthday is June 3rd`
    - `@Coatue Claw what is my daughter's birthday?`

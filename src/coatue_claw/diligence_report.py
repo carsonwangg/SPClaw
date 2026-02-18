@@ -3,12 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import math
+import os
+from pathlib import Path
+import sqlite3
 from typing import Any, Callable
 
 import pandas as pd
 import yfinance as yf
 
 SOURCE_NAME = "Yahoo Finance via yfinance"
+LOCAL_SOURCE_NAME = "Local research database (file ingest + prior packets)"
 
 
 @dataclass(frozen=True)
@@ -26,11 +30,28 @@ class NewsPoint:
 
 
 @dataclass(frozen=True)
+class LocalResearchReport:
+    source: str
+    title: str
+    path: str
+    category: str | None
+    recorded_at_utc: str | None
+
+
+@dataclass(frozen=True)
+class LocalResearchLookup:
+    query: str
+    checked_at_utc: str
+    reports: list[LocalResearchReport]
+
+
+@dataclass(frozen=True)
 class DiligenceSnapshot:
     requested_ticker: str
     ticker: str
     company_name: str
     generated_at_utc: str
+    local_research: LocalResearchLookup
     summary: str
     sector: str | None
     industry: str | None
@@ -62,11 +83,148 @@ def build_neutral_investment_memo(
     *,
     ticker_factory: Callable[[str], Any] | None = None,
     now_utc: datetime | None = None,
+    local_report_lookup: Callable[[str], LocalResearchLookup] | None = None,
 ) -> str:
     ticker_factory = ticker_factory or yf.Ticker
     now = now_utc or datetime.now(UTC)
-    snapshot = _load_snapshot(ticker_or_company=ticker_or_company, ticker_factory=ticker_factory, now=now)
+    local_lookup = (
+        local_report_lookup(ticker_or_company)
+        if local_report_lookup is not None
+        else find_local_research_reports(ticker_or_company)
+    )
+    snapshot = _load_snapshot(
+        ticker_or_company=ticker_or_company,
+        ticker_factory=ticker_factory,
+        now=now,
+        local_research=local_lookup,
+    )
     return _render_memo(snapshot)
+
+
+def _file_ingest_db_path() -> Path:
+    data_root = Path(os.environ.get("COATUE_CLAW_DATA_ROOT", "/opt/coatue-claw-data"))
+    return Path(os.environ.get("COATUE_CLAW_FILE_INGEST_DB_PATH", str(data_root / "db/file_ingest.sqlite")))
+
+
+def _packets_dir() -> Path:
+    data_root = Path(os.environ.get("COATUE_CLAW_DATA_ROOT", "/opt/coatue-claw-data"))
+    return Path(os.environ.get("COATUE_CLAW_PACKETS_DIR", str(data_root / "artifacts/packets")))
+
+
+def _search_tokens(query: str) -> list[str]:
+    raw = query.strip().upper().lstrip("$")
+    if not raw:
+        return []
+    tokens = [token.lower() for token in raw.replace("-", " ").replace("_", " ").split() if token.strip()]
+    if raw.lower() not in tokens:
+        tokens.insert(0, raw.lower())
+    return tokens
+
+
+def _lookup_file_ingest_reports(query: str, *, limit: int) -> list[LocalResearchReport]:
+    db_path = _file_ingest_db_path()
+    if not db_path.exists():
+        return []
+
+    tokens = _search_tokens(query)
+    if not tokens:
+        return []
+
+    clauses: list[str] = []
+    params: list[Any] = []
+    for token in tokens:
+        pattern = f"%{token}%"
+        for col in ("original_name", "title", "source_text", "local_path", "drive_path"):
+            clauses.append(f"lower(coalesce({col}, '')) LIKE ?")
+            params.append(pattern)
+
+    sql = (
+        "SELECT original_name, title, category, local_path, drive_path, ingested_at_utc "
+        "FROM slack_file_ingest "
+        f"WHERE {' OR '.join(clauses)} "
+        "ORDER BY ingested_at_utc DESC "
+        "LIMIT ?"
+    )
+    params.append(limit)
+
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(sql, params).fetchall()
+    except sqlite3.Error:
+        return []
+
+    out: list[LocalResearchReport] = []
+    for row in rows:
+        drive_path = str(row["drive_path"] or "").strip()
+        local_path = str(row["local_path"] or "").strip()
+        path = drive_path or local_path
+        if not path:
+            continue
+        out.append(
+            LocalResearchReport(
+                source="file_ingest",
+                title=str(row["title"] or row["original_name"] or "untitled"),
+                path=path,
+                category=(str(row["category"]) if row["category"] else None),
+                recorded_at_utc=(str(row["ingested_at_utc"]) if row["ingested_at_utc"] else None),
+            )
+        )
+    return out
+
+
+def _lookup_packet_reports(query: str, *, limit: int) -> list[LocalResearchReport]:
+    packets = _packets_dir()
+    if not packets.exists():
+        return []
+
+    tokens = _search_tokens(query)
+    if not tokens:
+        return []
+
+    candidates: list[Path] = sorted(
+        (path for path in packets.glob("*.md") if path.is_file()),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+
+    out: list[LocalResearchReport] = []
+    for path in candidates:
+        name = path.name.lower()
+        if not any(token in name for token in tokens):
+            continue
+        out.append(
+            LocalResearchReport(
+                source="packets",
+                title=path.name,
+                path=str(path),
+                category="Packets",
+                recorded_at_utc=datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).isoformat(),
+            )
+        )
+        if len(out) >= limit:
+            break
+    return out
+
+
+def find_local_research_reports(query: str, *, limit: int = 8, now_utc: datetime | None = None) -> LocalResearchLookup:
+    now = now_utc or datetime.now(UTC)
+    reports = _lookup_file_ingest_reports(query, limit=limit)
+    if len(reports) < limit:
+        reports.extend(_lookup_packet_reports(query, limit=limit - len(reports)))
+
+    dedupe: dict[str, LocalResearchReport] = {}
+    for report in reports:
+        key = report.path.lower()
+        if key in dedupe:
+            continue
+        dedupe[key] = report
+
+    return LocalResearchLookup(
+        query=query.strip().upper().lstrip("$"),
+        checked_at_utc=now.isoformat(),
+        reports=list(dedupe.values())[:limit],
+    )
 
 
 def _safe_getattr(obj: Any, name: str, default: Any) -> Any:
@@ -240,7 +398,13 @@ def _extract_news(news_raw: Any, *, limit: int = 5) -> list[NewsPoint]:
     return points
 
 
-def _load_snapshot(ticker_or_company: str, ticker_factory: Callable[[str], Any], now: datetime) -> DiligenceSnapshot:
+def _load_snapshot(
+    ticker_or_company: str,
+    ticker_factory: Callable[[str], Any],
+    now: datetime,
+    *,
+    local_research: LocalResearchLookup,
+) -> DiligenceSnapshot:
     requested = ticker_or_company.strip().upper().lstrip("$")
     ticker_obj = ticker_factory(requested)
 
@@ -258,6 +422,7 @@ def _load_snapshot(ticker_or_company: str, ticker_factory: Callable[[str], Any],
         ticker=ticker,
         company_name=company_name,
         generated_at_utc=now.isoformat(),
+        local_research=local_research,
         summary=str(info.get("longBusinessSummary") or "Business summary not available from public sources reviewed."),
         sector=(str(info.get("sector")) if info.get("sector") else None),
         industry=(str(info.get("industry")) if info.get("industry") else None),
@@ -307,6 +472,17 @@ def _top_news_lines(points: list[NewsPoint], limit: int = 3) -> list[str]:
 
 def _build_key_takeaways(s: DiligenceSnapshot) -> list[str]:
     takeaways: list[str] = []
+
+    if s.local_research.reports:
+        takeaways.append(
+            f"Database-first check found `{len(s.local_research.reports)}` internal report(s) for `{s.requested_ticker}` before external data pull. "
+            f"[Source: {LOCAL_SOURCE_NAME}, checked {s.local_research.checked_at_utc}]"
+        )
+    else:
+        takeaways.append(
+            f"Database-first check found no prior internal reports for `{s.requested_ticker}` before external data pull. "
+            f"[Source: {LOCAL_SOURCE_NAME}, checked {s.local_research.checked_at_utc}]"
+        )
 
     annual_latest = s.annual_revenue[0] if s.annual_revenue else None
     annual_prev = s.annual_revenue[1] if len(s.annual_revenue) > 1 else None
@@ -379,6 +555,12 @@ def _render_memo(s: DiligenceSnapshot) -> str:
 
     lines.append("## 2. Business Overview")
     lines.append("")
+    lines.append(f"- Internal database-first check: `{len(s.local_research.reports)}` matching report artifact(s) identified before online research. [Source: {LOCAL_SOURCE_NAME}, checked {s.local_research.checked_at_utc}]")
+    if s.local_research.reports:
+        for report in s.local_research.reports[:5]:
+            lines.append(
+                f"- Local report reference: `{report.title}` ({report.source}, {report.category or 'Uncategorized'}) -> `{report.path}`"
+            )
     lines.append(f"- What the company does: {s.summary} {source_line}")
     lines.append(f"- Core value delivery context: sector `{s.sector or 'Not disclosed'}`, industry `{s.industry or 'Not disclosed'}`, geography `{s.country or 'Not disclosed'}`. {source_line}")
     lines.append(f"- Target customer and acquisition details are not fully disclosed in the dataset reviewed; additional channel checks are required. {source_line}")
@@ -498,6 +680,10 @@ def _render_memo(s: DiligenceSnapshot) -> str:
     lines.append("")
     lines.append("### Sources")
     lines.append("")
+    lines.append(f"- {LOCAL_SOURCE_NAME}; check timestamp (UTC): `{s.local_research.checked_at_utc}`.")
+    if s.local_research.reports:
+        for report in s.local_research.reports[:8]:
+            lines.append(f"- Local report: `{report.title}` ({report.source}, {report.category or 'Uncategorized'}) -> `{report.path}`")
     lines.append(f"- {SOURCE_NAME} company profile, valuation, balance-sheet, margins, and statement metadata for `{s.ticker}`.")
     lines.append(f"- Access timestamp (UTC): `{s.generated_at_utc}`")
 

@@ -60,6 +60,9 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Slack deploy pipeline controls are implemented (`deploy latest`, `undo last deploy`, `run checks`, `show pipeline status`, `show deploy history`, `build: ...`) with one-job-at-a-time locking and admin gating
 - Deploy history now persists to `/opt/coatue-claw-data/db/deploy-history.json`
 - Diligence command now generates a structured neutral investment memo (deep data pull from company profile, financials, valuation, balance sheet, and recent reporting headlines) instead of template placeholders
+- Diligence now runs a local database-first report lookup before external research:
+  - checks `/opt/coatue-claw-data/db/file_ingest.sqlite` and prior packet markdowns in `/opt/coatue-claw-data/artifacts/packets/`
+  - includes local match references directly in memo output for continuity and auditability
 - Hybrid memory system is implemented:
   - SQLite + FTS5 structured memory store in `/opt/coatue-claw-data/db/memory.sqlite`
   - auto extraction of profile facts, decisions, and conventions from Slack messages
@@ -91,5 +94,5 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 6. Validate Slack file upload auto-ingest (`Slack upload` -> categorized `incoming/<Category>` + DB record in `file_ingest.sqlite`)
 7. Schedule hourly `make openclaw-memory-prune` on runtime host
 8. Validate daily backfill flow (`claw memory extract-daily --dry-run --days 14`)
-9. Validate new diligence memo output in Slack (`diligence TICKER`) and confirm section completeness/citations
+9. Validate new diligence memo output in Slack (`diligence TICKER`) and confirm section completeness/citations + local database-first precheck behavior
 10. Wire first scheduled jobs (weekly idea scan + X digest) and replace scheduler status placeholder target

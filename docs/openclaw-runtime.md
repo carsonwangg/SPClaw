@@ -33,6 +33,7 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
 Diligence output contract:
 - `claw diligence TICKER` generates a neutral, evidence-first 8-section investment memo with source/timestamp attribution.
 - Memo source baseline is Yahoo Finance via yfinance (profile, financial statements, valuation/balance-sheet metrics, and recent reporting metadata).
+- Before external fetches, diligence checks local research artifacts first (`file_ingest.sqlite` + prior packet markdowns) and includes matches in memo sources.
 
 Memory output contract:
 - Primary memory store: SQLite + FTS5 (`/opt/coatue-claw-data/db/memory.sqlite`).
