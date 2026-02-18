@@ -562,6 +562,10 @@ def _resolve_axis_formatter(metric_id: str) -> Callable[[float, int | None], str
     return lambda v, _p: f"{v:.2f}"
 
 
+def _format_callout_value(metric_id: str, value: float) -> str:
+    return _resolve_axis_formatter(metric_id)(value, None)
+
+
 def _is_metric_eligible(point: TickerPoint, metric_id: str) -> bool:
     # Keep strict freshness gating for any plotted series.
     if "stale_market_data" in point.quality_flags:
@@ -672,22 +676,21 @@ def _render_chart(
         r2 = 0.0 if ss_tot <= 0 else max(0.0, min(1.0, 1.0 - (ss_res / ss_tot)))
         ax.text(0.995, 1.01, f"R^2 = {r2:.0%}", transform=ax.transAxes, ha="right", va="bottom", fontsize=16, color="#121318", weight="bold")
 
-    if metric_axis_kind(x_metric) == "multiple":
-        today_x = float(np.median(x))
-        ax.axvline(today_x, linestyle=(0, (4, 4)), color="#39A778", linewidth=2.0, alpha=0.95, zorder=1)
-        x_frac = (today_x - x_min) / (x_max - x_min) if x_max > x_min else 0.5
-        x_frac = min(0.92, max(0.08, x_frac))
-        ax.text(
-            x_frac,
-            1.005,
-            f"{metric_label(x_metric)} median = {today_x:.1f}x",
-            transform=ax.transAxes,
-            ha="center",
-            va="bottom",
-            fontsize=13,
-            color="#39A778",
-            weight="bold",
-        )
+    today_x = float(np.median(x))
+    ax.axvline(today_x, linestyle=(0, (4, 4)), color="#39A778", linewidth=2.0, alpha=0.95, zorder=1)
+    x_frac = (today_x - x_min) / (x_max - x_min) if x_max > x_min else 0.5
+    x_frac = min(0.92, max(0.08, x_frac))
+    ax.text(
+        x_frac,
+        1.005,
+        f"{metric_label(x_metric)} median = {_format_callout_value(x_metric, today_x)}",
+        transform=ax.transAxes,
+        ha="center",
+        va="bottom",
+        fontsize=13,
+        color="#39A778",
+        weight="bold",
+    )
 
     ax.axhline(0, color="#B8BAC1", linewidth=1.0, zorder=1)
 
