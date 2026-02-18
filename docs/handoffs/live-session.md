@@ -5,9 +5,13 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Current Status (2026-02-18)
 - Repo is synced on `main` and used as the cross-device source of truth.
-- Valuation chart feature is implemented and unit-tested.
-- Remaining validation is Slack mention-to-reply behavior in channel.
-- Session shipping protocol is now codified in `AGENTS.md` and templated in `docs/handoffs/ship-template.md`.
+- Slack channel/user policy is open in OpenClaw (`groupPolicy=open`, `dmPolicy=open`, `allowFrom=["*"]`).
+- Natural-language chart intent parsing is implemented:
+  - detects plot/chart/graph requests
+  - defaults y-axis to YoY revenue growth unless user specifies otherwise
+  - supports configurable axis metrics (EV/LTM multiple, YoY growth, LTM revenue, market cap, enterprise value, debt, cash, latest quarter revenue)
+- Chart outputs remain PNG + CSV + JSON + raw provider payload.
+- Session shipping protocol is codified in `AGENTS.md` and templated in `docs/handoffs/ship-template.md`.
 
 ## What Was Implemented
 - Added valuation chart engine in `/opt/coatue-claw/src/coatue_claw/valuation_chart.py`.
@@ -21,7 +25,8 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `/Users/spclaw/.openclaw/workspace/skills/valuation-charting/SKILL.md`
 
 ## Current Data Behavior
-- Metric is now **EV/LTM revenue vs YoY growth**.
+- Default metric orientation is **EV/LTM revenue on x-axis** and **YoY revenue growth on y-axis**.
+- User can override x/y metrics in natural language (`x axis ...`, `y axis ...`, or `A vs B` phrasing).
 - LTM revenue is **sum of last 4 reported quarters**.
 - Provider preference is `google` then `yahoo`.
 - In this build, Google adapter is unavailable for required EV + LTM inputs, so run falls back to Yahoo.
@@ -40,7 +45,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `valuation-scatter-*-raw.json`
 
 ## Validation Completed
-- `pytest`: `6 passed` for valuation-chart unit tests.
+- `pytest`: `13 passed` (valuation chart + chart-intent parser tests).
 - CLI smoke run (latest):
   - provider used: `yahoo`
   - included/excluded counts returned
@@ -49,8 +54,9 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `openclaw skills info valuation-charting` => ready, source `openclaw-workspace`
 
 ## Next Step to Validate in Slack
-Send in `#all-coatue-claw`:
-- `@Coatue Claw graph ev ltm growth SNOW,MDB,DDOG,NOW,CRWD`
+Send in `#charting`:
+- `@Coatue Claw plot EV/Revenue multiples and revenue growth for SNOW,MDB,DDOG,NOW,CRWD`
+- `@Coatue Claw graph SNOW,MDB,DDOG with x axis market cap and y axis ltm revenue`
 
 Then confirm bot returns:
 - as-of timestamps
@@ -59,6 +65,6 @@ Then confirm bot returns:
 - CSV/JSON/raw attachments
 
 ## Immediate Next Steps
-1. Run the Slack mention test command above in `#all-coatue-claw`.
-2. Capture first failing log line via `make openclaw-slack-logs` if no reply is posted.
-3. Ship fix to git with updated handoff status and next steps.
+1. Run both Slack validation prompts above in `#charting`.
+2. If response fails, capture first failing line with `openclaw channels logs --channel slack --lines 300`.
+3. Expand metric alias map only if users request additional metric phrases not currently recognized.

@@ -6,7 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 import time
-from typing import Any
+from typing import Any, Callable
 
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
@@ -14,6 +14,8 @@ from matplotlib.ticker import FuncFormatter
 import numpy as np
 import pandas as pd
 import yfinance as yf
+
+from coatue_claw.chart_metrics import DEFAULT_X_METRIC, DEFAULT_Y_METRIC, METRIC_SPECS, metric_axis_kind, metric_label
 
 
 ARTIFACTS_DIR = Path("/opt/coatue-claw-data/artifacts/charts")
@@ -91,6 +93,8 @@ class ChartResult:
     provider_used: str
     provider_fallback_reason: str | None
     metric_mode: str
+    x_metric: str
+    y_metric: str
     request_received_at: str
     market_data_as_of: str | None
     fundamentals_as_of: str | None
@@ -513,9 +517,75 @@ def _build_point(
     )
 
 
-def _render_chart(points: list[TickerPoint], out_path: Path, title_suffix: str) -> None:
+def _resolve_metric_value(point: TickerPoint, metric_id: str) -> float | None:
+    if metric_id == "ev_ltm_revenue":
+        return point.ev_ltm_revenue
+    if metric_id == "yoy_revenue_growth_pct":
+        if point.yoy_growth_pct is None:
+            return None
+        return point.yoy_growth_pct * 100.0
+    if metric_id == "ltm_revenue":
+        return point.ltm_revenue
+    if metric_id == "revenue_q":
+        return point.revenue_q
+    if metric_id == "enterprise_value":
+        return point.enterprise_value
+    if metric_id == "market_cap":
+        return point.market_cap
+    if metric_id == "total_debt":
+        return point.total_debt
+    if metric_id == "cash_eq":
+        return point.cash_eq
+    raise ValueError(f"Unsupported metric: {metric_id}")
+
+
+def _format_usd_axis(value: float, _pos: int | None = None) -> str:
+    abs_value = abs(value)
+    if abs_value >= 1e12:
+        return f"${value / 1e12:.1f}T"
+    if abs_value >= 1e9:
+        return f"${value / 1e9:.1f}B"
+    if abs_value >= 1e6:
+        return f"${value / 1e6:.0f}M"
+    return f"${value:,.0f}"
+
+
+def _resolve_axis_formatter(metric_id: str) -> Callable[[float, int | None], str]:
+    axis_kind = metric_axis_kind(metric_id)
+    if axis_kind == "multiple":
+        return lambda v, _p: f"{v:.1f}x"
+    if axis_kind == "percent":
+        return lambda v, _p: f"{v:.0f}%"
+    if axis_kind == "usd":
+        return _format_usd_axis
+    return lambda v, _p: f"{v:.2f}"
+
+
+def _is_metric_eligible(point: TickerPoint, metric_id: str) -> bool:
+    # Keep strict freshness gating for any plotted series.
+    if "stale_market_data" in point.quality_flags:
+        return False
+    if "stale_fundamentals" in point.quality_flags:
+        return False
+    if metric_id == "ev_ltm_revenue" and "currency_mismatch" in point.quality_flags:
+        return False
+    return _resolve_metric_value(point, metric_id) is not None
+
+
+def _render_chart(points: list[TickerPoint], out_path: Path, title_suffix: str, *, x_metric: str, y_metric: str) -> None:
     plt.rcParams["font.family"] = COATUE_FONT_FAMILY
-    included = [p for p in points if p.included and p.yoy_growth_pct is not None and p.ev_ltm_revenue is not None]
+    included_rows = []
+    for point in points:
+        if not _is_metric_eligible(point, x_metric):
+            continue
+        if not _is_metric_eligible(point, y_metric):
+            continue
+        x_value = _resolve_metric_value(point, x_metric)
+        y_value = _resolve_metric_value(point, y_metric)
+        if x_value is None or y_value is None:
+            continue
+        included_rows.append((point, x_value, y_value))
+    included = [row[0] for row in included_rows]
 
     fig = plt.figure(figsize=(14, 9), facecolor="#E9EAED")
     ax = fig.add_axes([0.08, 0.14, 0.86, 0.56], facecolor="#F3F4F6")
@@ -523,7 +593,7 @@ def _render_chart(points: list[TickerPoint], out_path: Path, title_suffix: str) 
     fig.text(
         0.05,
         0.92,
-        "EV/LTM revenue vs. YoY growth",
+        f"{metric_label(x_metric)} vs. {metric_label(y_metric)}",
         fontsize=34,
         color="#191A2B",
         family=COATUE_FONT_FAMILY,
@@ -547,9 +617,8 @@ def _render_chart(points: list[TickerPoint], out_path: Path, title_suffix: str) 
         plt.close(fig)
         return
 
-    # Match Coatue-style orientation: valuation on x-axis, growth on y-axis.
-    x = np.array([p.ev_ltm_revenue for p in included], dtype=float)
-    y = np.array([p.yoy_growth_pct * 100.0 for p in included], dtype=float)
+    x = np.array([row[1] for row in included_rows], dtype=float)
+    y = np.array([row[2] for row in included_rows], dtype=float)
 
     x_span = float(np.max(x) - np.min(x)) if len(x) else 0.0
     y_span = float(np.max(y) - np.min(y)) if len(y) else 0.0
@@ -607,18 +676,29 @@ def _render_chart(points: list[TickerPoint], out_path: Path, title_suffix: str) 
         r2 = 0.0 if ss_tot <= 0 else max(0.0, min(1.0, 1.0 - (ss_res / ss_tot)))
         ax.text(0.995, 1.01, f"R^2 = {r2:.0%}", transform=ax.transAxes, ha="right", va="bottom", fontsize=16, color="#121318", weight="bold")
 
-    today_x = float(np.median(x))
-    ax.axvline(today_x, linestyle=(0, (4, 4)), color="#39A778", linewidth=2.0, alpha=0.95, zorder=1)
-    x_frac = (today_x - x_min) / (x_max - x_min) if x_max > x_min else 0.5
-    x_frac = min(0.92, max(0.08, x_frac))
-    ax.text(x_frac, 1.005, f"EV/LTM today = {today_x:.1f}x", transform=ax.transAxes, ha="center", va="bottom", fontsize=13, color="#39A778", weight="bold")
+    if metric_axis_kind(x_metric) == "multiple":
+        today_x = float(np.median(x))
+        ax.axvline(today_x, linestyle=(0, (4, 4)), color="#39A778", linewidth=2.0, alpha=0.95, zorder=1)
+        x_frac = (today_x - x_min) / (x_max - x_min) if x_max > x_min else 0.5
+        x_frac = min(0.92, max(0.08, x_frac))
+        ax.text(
+            x_frac,
+            1.005,
+            f"{metric_label(x_metric)} median = {today_x:.1f}x",
+            transform=ax.transAxes,
+            ha="center",
+            va="bottom",
+            fontsize=13,
+            color="#39A778",
+            weight="bold",
+        )
 
     ax.axhline(0, color="#B8BAC1", linewidth=1.0, zorder=1)
 
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(y_min, y_max)
-    ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _p: f"{v:.1f}x"))
-    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _p: f"{v:.0f}%"))
+    ax.xaxis.set_major_formatter(FuncFormatter(_resolve_axis_formatter(x_metric)))
+    ax.yaxis.set_major_formatter(FuncFormatter(_resolve_axis_formatter(y_metric)))
     ax.tick_params(axis="both", colors="#595B63", labelsize=11)
 
     for spine in ("top", "right"):
@@ -628,8 +708,8 @@ def _render_chart(points: list[TickerPoint], out_path: Path, title_suffix: str) 
     ax.spines["left"].set_linewidth(1.0)
     ax.spines["bottom"].set_linewidth(1.0)
 
-    ax.set_xlabel("EV / LTM Revenue", color="#2B2D37", fontsize=12, labelpad=12)
-    ax.set_ylabel("YoY Revenue Growth", color="#2B2D37", fontsize=12, labelpad=12)
+    ax.set_xlabel(metric_label(x_metric), color="#2B2D37", fontsize=12, labelpad=12)
+    ax.set_ylabel(metric_label(y_metric), color="#2B2D37", fontsize=12, labelpad=12)
     legend = ax.legend(
         title="Category",
         loc="upper left",
@@ -652,11 +732,18 @@ def _render_chart(points: list[TickerPoint], out_path: Path, title_suffix: str) 
 def run_valuation_chart(
     tickers: list[str],
     provider_preference: list[str] | None = None,
+    *,
+    x_metric: str = DEFAULT_X_METRIC,
+    y_metric: str = DEFAULT_Y_METRIC,
 ) -> ChartResult:
     provider_preference = provider_preference or ["google", "yahoo"]
     tickers = [t.strip().upper() for t in tickers if t and t.strip()]
     if not tickers:
         raise ValueError("No tickers provided")
+    if x_metric not in METRIC_SPECS:
+        raise ValueError(f"Unsupported x_metric: {x_metric}")
+    if y_metric not in METRIC_SPECS:
+        raise ValueError(f"Unsupported y_metric: {y_metric}")
 
     request_at = _utc_now_iso()
     now_utc = datetime.now(UTC)
@@ -700,7 +787,9 @@ def run_valuation_chart(
 
     raw_export = {
         "field_contract": {
-            "metric_mode": "ev_ltm_vs_yoy",
+            "metric_mode": f"{x_metric}_vs_{y_metric}",
+            "x_metric": x_metric,
+            "y_metric": y_metric,
             "denominator": "sum_last_4_reported_quarters",
             "freshness": {
                 "market_max_age_hours": MARKET_MAX_AGE_HOURS,
@@ -718,8 +807,8 @@ def run_valuation_chart(
     fundamentals_as_of = max((p.fundamentals_as_of for p in points if p.fundamentals_as_of), default=None)
 
     market_as_of_display = _format_readable_date(market_as_of)
-    title_suffix = f"Provider: {provider_used} | Metric: LTM | As of: {market_as_of_display}"
-    _render_chart(points, chart_path, title_suffix)
+    title_suffix = f"Provider: {provider_used} | X: {metric_label(x_metric)} | Y: {metric_label(y_metric)} | As of: {market_as_of_display}"
+    _render_chart(points, chart_path, title_suffix, x_metric=x_metric, y_metric=y_metric)
 
     included_count = sum(1 for p in points if p.included)
     excluded_count = len(points) - included_count
@@ -729,7 +818,9 @@ def run_valuation_chart(
         provider_requested=provider_preference[0],
         provider_used=provider_used,
         provider_fallback_reason=fallback_reason,
-        metric_mode="ltm",
+        metric_mode=f"{x_metric}_vs_{y_metric}",
+        x_metric=x_metric,
+        y_metric=y_metric,
         request_received_at=request_at,
         market_data_as_of=market_as_of,
         fundamentals_as_of=fundamentals_as_of,

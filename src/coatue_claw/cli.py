@@ -4,6 +4,7 @@ import argparse
 from datetime import UTC, datetime
 from pathlib import Path
 
+from coatue_claw.chart_metrics import DEFAULT_X_METRIC, DEFAULT_Y_METRIC, METRIC_SPECS
 from coatue_claw.valuation_chart import run_valuation_chart
 
 
@@ -40,6 +41,8 @@ def main():
 
     g = sub.add_parser("valuation-chart")
     g.add_argument("tickers", type=_parse_tickers, help="Comma-separated tickers, e.g. SNOW,MDB,DDOG")
+    g.add_argument("--x-metric", choices=sorted(METRIC_SPECS.keys()), default=DEFAULT_X_METRIC)
+    g.add_argument("--y-metric", choices=sorted(METRIC_SPECS.keys()), default=DEFAULT_Y_METRIC)
 
     args = parser.parse_args()
 
@@ -49,12 +52,14 @@ def main():
         return
 
     if args.cmd == "valuation-chart":
-        result = run_valuation_chart(args.tickers)
+        result = run_valuation_chart(args.tickers, x_metric=args.x_metric, y_metric=args.y_metric)
         print(f"provider_requested: {result.provider_requested}")
         print(f"provider_used: {result.provider_used}")
         if result.provider_fallback_reason:
             print(f"provider_fallback_reason: {result.provider_fallback_reason}")
         print(f"metric_mode: {result.metric_mode}")
+        print(f"x_metric: {result.x_metric}")
+        print(f"y_metric: {result.y_metric}")
         print(f"request_received_at: {result.request_received_at}")
         print(f"market_data_as_of: {result.market_data_as_of}")
         print(f"fundamentals_as_of: {result.fundamentals_as_of}")

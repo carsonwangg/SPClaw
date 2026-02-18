@@ -9,6 +9,8 @@ from dotenv import load_dotenv
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
+from coatue_claw.chart_intent import parse_chart_intent
+from coatue_claw.chart_metrics import METRIC_SPECS, metric_label
 from coatue_claw.cli import run_diligence
 from coatue_claw.valuation_chart import _format_readable_date, run_valuation_chart
 
@@ -51,32 +53,11 @@ def _extract_diligence_ticker(text: str) -> Optional[str]:
     return ticker or None
 
 
-def _extract_chart_tickers(text: str) -> list[str]:
-    stripped = _strip_slack_mentions(text)
-    lower = stripped.lower()
-    if "graph" not in lower and "chart" not in lower:
-        return []
-
-    if "ev" not in lower and "ltm" not in lower and "growth" not in lower and "ntm" not in lower:
-        return []
-
-    cleaned = re.sub(r"\b(graph|chart|valuation|ev|ltm|ntm|revenue|vs|yoy|growth)\b", " ", stripped, flags=re.IGNORECASE)
-    candidates = re.findall(r"\$?[A-Za-z][A-Za-z.\-]{0,9}", cleaned)
-    out = []
-    seen = set()
-    for c in candidates:
-        t = c.upper().lstrip("$").strip(".,;:!?)]}")
-        if t in {"AND", "WITH", "FROM", "THE", "LINE", "BEST", "FIT", "OF"}:
-            continue
-        if t and t not in seen:
-            seen.add(t)
-            out.append(t)
-    return out
-
-
 def _format_chart_summary(result) -> str:
     lines = []
-    lines.append("*Valuation chart generated* (EV/LTM vs YoY growth)")
+    lines.append("*Valuation chart generated*")
+    lines.append(f"- X-axis: `{metric_label(result.x_metric)}`")
+    lines.append(f"- Y-axis: `{metric_label(result.y_metric)}`")
     lines.append(f"- Provider requested: `{result.provider_requested}`")
     lines.append(f"- Provider used: `{result.provider_used}`")
     if result.provider_fallback_reason:
@@ -103,12 +84,35 @@ def handle_mention(event, say):
     thread_ts = event.get("thread_ts") or event.get("ts")
     logger.info("app_mention received channel=%s ts=%s text=%r", event.get("channel"), event.get("ts"), text)
 
-    chart_tickers = _extract_chart_tickers(text)
-    if chart_tickers:
+    chart_intent = parse_chart_intent(text)
+    if chart_intent is not None:
+        if not chart_intent.tickers:
+            metric_examples = ", ".join(METRIC_SPECS.keys())
+            say(
+                text=(
+                    "I detected a chart request but could not find tickers.\n"
+                    "Please include explicit tickers, e.g. `SNOW,MDB,DDOG`.\n"
+                    "Metric ids: "
+                    f"`{metric_examples}`\n"
+                    "Default behavior: YoY Revenue Growth on y-axis unless you specify otherwise."
+                ),
+                thread_ts=thread_ts,
+            )
+            return
+
         try:
-            result = run_valuation_chart(chart_tickers)
+            result = run_valuation_chart(
+                chart_intent.tickers,
+                x_metric=chart_intent.x_metric,
+                y_metric=chart_intent.y_metric,
+            )
         except Exception:
-            logger.exception("Failed to build valuation chart for tickers=%s", chart_tickers)
+            logger.exception(
+                "Failed to build valuation chart for tickers=%s x_metric=%s y_metric=%s",
+                chart_intent.tickers,
+                chart_intent.x_metric,
+                chart_intent.y_metric,
+            )
             say(
                 text="Failed to build valuation chart. Check bot logs for details.",
                 thread_ts=thread_ts,
@@ -123,7 +127,7 @@ def handle_mention(event, say):
                 channel=channel,
                 thread_ts=thread_ts,
                 file=str(result.chart_path),
-                title="EV/LTM vs YoY Growth (with line of best fit)",
+                title=f"{metric_label(result.y_metric)} vs {metric_label(result.x_metric)} (with line of best fit)",
             )
             app.client.files_upload_v2(
                 channel=channel,
@@ -160,7 +164,9 @@ def handle_mention(event, say):
             text=(
                 "Usage:\n"
                 "- `diligence TICKER`\n"
-                "- `graph ev ltm growth SNOW,MDB,DDOG`"
+                "- `graph ev ltm growth SNOW,MDB,DDOG`\n"
+                "- natural language: `@Coatue Claw plot EV/Revenue multiples vs revenue growth for SNOW,MDB,DDOG`\n"
+                "- default: YoY Revenue Growth is y-axis unless you specify axes"
             ),
             thread_ts=thread_ts,
         )
