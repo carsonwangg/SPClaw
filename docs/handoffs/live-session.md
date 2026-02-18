@@ -72,6 +72,18 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - natural lookup (`what is my ...`, `when is my ...`, `do you remember ...`)
   - pre-flight pipeline checkpoints now auto-write before `deploy_latest`, `undo_last_deploy`, and `build_request`
   - optional semantic retrieval path via LanceDB/OpenAI embeddings when configured
+- Added file management bridge (local-first + shared mirror):
+  - module: `src/coatue_claw/file_bridge.py`
+  - config: `config/file-bridge.json`
+  - runbook: `docs/file-management-system.md`
+  - Make targets:
+    - `openclaw-files-init`
+    - `openclaw-files-status`
+    - `openclaw-files-sync-pull`
+    - `openclaw-files-sync-push`
+    - `openclaw-files-sync`
+    - `openclaw-files-index`
+  - published index artifacts generated to `published/index.json` and `published/index.md`
 - Chart outputs remain PNG + CSV + JSON + raw provider payload.
 - Session shipping protocol is codified in `AGENTS.md` and templated in `docs/handoffs/ship-template.md`.
 
@@ -119,6 +131,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `make openclaw-restart` failed locally with `openclaw: No such file or directory`; runtime restart/status validation must be executed on Mac mini runtime host.
   - Mac mini runtime validation succeeded after pull (`d5099bb`): gateway running, Slack probe `ok=true`; root cause of earlier SSH failure was minimal PATH in non-login shell.
   - Makefile PATH hardening validated on Mac mini after pull (`0862aa0`): non-login SSH `make openclaw-restart` and `make openclaw-slack-status` now execute with resolved `openclaw` + `node`.
+  - Hybrid memory runtime deployed on Mac mini (`33650f2`): structured memory active; semantic fallback currently disabled until `OPENAI_API_KEY` is set in runtime env.
 
 ## Next Step to Validate in Slack
 Send in `#charting`:
@@ -161,5 +174,11 @@ Then confirm bot returns:
    - `@Coatue Claw memory checkpoint`
 8. Configure `SLACK_PIPELINE_ADMINS` and optional `COATUE_CLAW_SLACK_BUILD_COMMAND` in runtime env for production permissions/runner control.
 9. Schedule hourly `make openclaw-memory-prune` on runtime host and validate cleanup counts.
-10. Wire first scheduled jobs (weekly idea scan + X digest) to replace scheduler status placeholder behavior.
-11. If response fails, capture first failing line with `openclaw channels logs --channel slack --lines 300`.
+10. Configure `config/file-bridge.json` Drive root to the real Google Drive shared folder path on Mac mini.
+11. Validate file bridge pipeline:
+    - `make openclaw-files-init`
+    - `make openclaw-files-sync`
+    - `make openclaw-files-status`
+    - confirm Spencer can reference files in Drive `Latest`/`Archive`.
+12. Wire first scheduled jobs (weekly idea scan + X digest) to replace scheduler status placeholder behavior.
+13. If response fails, capture first failing line with `openclaw channels logs --channel slack --lines 300`.

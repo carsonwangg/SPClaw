@@ -1,0 +1,22 @@
+{
+  "mode": "local-drive-copy",
+  "local": {
+    "working": "/opt/coatue-claw-data/files/working",
+    "archive": "/opt/coatue-claw-data/files/archive",
+    "published": "/opt/coatue-claw-data/files/published",
+    "incoming": "/opt/coatue-claw-data/files/incoming"
+  },
+  "drive": {
+    "root": "/opt/coatue-claw-data/files/drive-share",
+    "latest": "Latest",
+    "archive": "Archive",
+    "incoming": "Incoming"
+  },
+  "rclone": {
+    "enabled": false,
+    "remote_root": "",
+    "latest": "Latest",
+    "archive": "Archive",
+    "incoming": "Incoming"
+  }
+}

@@ -9,6 +9,7 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
 - Gateway logs: `/tmp/openclaw/openclaw-YYYY-MM-DD.log`
 - App repo: `/opt/coatue-claw`
 - Runtime data: `/opt/coatue-claw-data`
+- File management runbook: `docs/file-management-system.md`
 
 ## Execution Model
 - OpenClaw gateway is the long-running control plane and Slack channel transport.
@@ -70,6 +71,12 @@ Memory output contract:
   - `make openclaw-memory-status`
   - `make openclaw-memory-prune`
   - `make openclaw-memory-extract-daily DAYS=14`
+  - `make openclaw-files-init`
+  - `make openclaw-files-status`
+  - `make openclaw-files-sync-pull`
+  - `make openclaw-files-sync-push`
+  - `make openclaw-files-sync`
+  - `make openclaw-files-index`
 - Slack diagnostics:
   - `make openclaw-slack-status`
   - `make openclaw-slack-probe`
@@ -83,6 +90,18 @@ Memory output contract:
   - `valuation-scatter-*.json`
   - `valuation-scatter-*-raw.json`
 - Every generated insight must retain source attribution and timestamps.
+
+File bridge contract:
+- Local canonical bot-managed paths:
+  - `/opt/coatue-claw-data/files/working`
+  - `/opt/coatue-claw-data/files/archive`
+  - `/opt/coatue-claw-data/files/published`
+  - `/opt/coatue-claw-data/files/incoming`
+- Shared mirror paths (Google Drive or local fallback) are configured in `config/file-bridge.json`.
+- `openclaw-files-sync` performs pull (`Incoming` -> local incoming), push (`published/archive` -> shared paths), and index regeneration.
+- Published index artifacts are generated at:
+  - `/opt/coatue-claw-data/files/published/index.json`
+  - `/opt/coatue-claw-data/files/published/index.md`
 
 ## Runtime Settings Contract
 - Live Slack-configurable settings are stored outside git:

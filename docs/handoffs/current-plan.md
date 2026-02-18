@@ -67,6 +67,11 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - pre-flight pipeline checkpoints for deploy/build/undo operations
   - optional LanceDB/OpenAI semantic fallback
   - CLI ops: `claw memory status|query|prune|extract-daily|checkpoint`
+- File management bridge is implemented:
+  - local-first canonical storage in `/opt/coatue-claw-data/files/{working,archive,published,incoming}`
+  - share mirror sync to configurable Drive root via `config/file-bridge.json`
+  - operations via `make openclaw-files-{init,status,sync-pull,sync-push,sync,index}`
+  - published index artifacts generated to `published/index.{json,md}`
 - Git shipping protocol is now explicit: every Codex change ships to `origin` with handoff updates
 
 ## Immediate Next Actions
@@ -77,7 +82,9 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
    - `what is my ...` retrieval
    - `memory status`
    - `memory checkpoint`
-4. Schedule hourly `make openclaw-memory-prune` on runtime host
-5. Validate daily backfill flow (`claw memory extract-daily --dry-run --days 14`)
-6. Validate new diligence memo output in Slack (`diligence TICKER`) and confirm section completeness/citations
-7. Wire first scheduled jobs (weekly idea scan + X digest) and replace scheduler status placeholder target
+4. Set `config/file-bridge.json` Drive root to the real Google Drive shared folder path on Mac mini and run `make openclaw-files-init`
+5. Validate file bridge flow (`make openclaw-files-sync`, `make openclaw-files-status`) with Spencer-visible files
+6. Schedule hourly `make openclaw-memory-prune` on runtime host
+7. Validate daily backfill flow (`claw memory extract-daily --dry-run --days 14`)
+8. Validate new diligence memo output in Slack (`diligence TICKER`) and confirm section completeness/citations
+9. Wire first scheduled jobs (weekly idea scan + X digest) and replace scheduler status placeholder target
