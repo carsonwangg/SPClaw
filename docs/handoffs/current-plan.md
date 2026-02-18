@@ -73,7 +73,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - Drive mirror root is configured on Mac mini as `/Users/spclaw/Documents/Google Drive Local`
   - category subfolders provisioned for Spencer-facing workflows under `01_DROP_HERE_Incoming/02_READ_ONLY_Latest_AUTO/03_READ_ONLY_Archive_AUTO`
   - `01_DROP_HERE_Incoming/_Latest_Reference_READ_ONLY` auto-mirrors Latest and is excluded from pull ingestion
-  - Slack file uploads now auto-ingest into knowledge folders with SQLite audit tracking (`/opt/coatue-claw-data/db/file_ingest.sqlite`)
+  - Slack file uploads now auto-ingest into knowledge folders with SQLite audit tracking (`/opt/coatue-claw-data/db/file_ingest.sqlite`) via `message` + `file_shared` + `app_mention` event handlers
   - operations via `make openclaw-files-{init,status,sync-pull,sync-push,sync,index}`
   - published index artifacts generated to `published/index.{json,md}`
 - Git shipping protocol is now explicit: every Codex change ships to `origin` with handoff updates

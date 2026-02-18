@@ -226,6 +226,7 @@ def _handle_file_ingest_event(
     event: dict,
     source_event: str,
     thread_ts: str | None,
+    reply_in_thread: bool = True,
     say,
 ) -> None:
     files = _extract_event_files(event)
@@ -237,7 +238,9 @@ def _handle_file_ingest_event(
     user_id = event.get("user") or message.get("user")
     text = (event.get("text") or message.get("text") or "").strip()
     message_ts = event.get("ts") or event.get("event_ts") or message.get("ts")
-    effective_thread_ts = thread_ts or event.get("thread_ts") or message.get("thread_ts") or message_ts
+    effective_thread_ts = None
+    if reply_in_thread:
+        effective_thread_ts = thread_ts or event.get("thread_ts") or message.get("thread_ts") or message_ts
 
     result = ingest_slack_files(
         files=files,
@@ -870,6 +873,33 @@ def handle_message(event, say):
         event=event,
         source_event="slack-message",
         thread_ts=event.get("thread_ts") or event.get("ts"),
+        say=say,
+    )
+
+
+@app.event("file_shared")
+def handle_file_shared(event, say):
+    file_id = str(event.get("file_id") or "").strip()
+    if not file_id:
+        return
+    try:
+        info = app.client.files_info(file=file_id)
+        file_obj = info.get("file") if isinstance(info, dict) else None
+    except SlackApiError:
+        logger.exception("Failed to load Slack file info for file_id=%s", file_id)
+        return
+    if not isinstance(file_obj, dict):
+        return
+
+    enriched = dict(event)
+    enriched["files"] = [file_obj]
+    enriched["channel"] = event.get("channel_id")
+    enriched["user"] = event.get("user_id")
+    _handle_file_ingest_event(
+        event=enriched,
+        source_event="slack-file-shared",
+        thread_ts=None,
+        reply_in_thread=False,
         say=say,
     )
 

@@ -90,7 +90,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - Slack file uploads are now auto-ingested (download + category routing + SQLite audit + Drive mirror):
     - module: `src/coatue_claw/slack_file_ingest.py`
     - DB: `/opt/coatue-claw-data/db/file_ingest.sqlite`
-    - wired in `src/coatue_claw/slack_bot.py` (`message` + `app_mention` with file attachments)
+    - wired in `src/coatue_claw/slack_bot.py` (`message`, `file_shared`, and `app_mention` with file attachments)
 - Chart outputs remain PNG + CSV + JSON + raw provider payload.
 - Session shipping protocol is codified in `AGENTS.md` and templated in `docs/handoffs/ship-template.md`.
 
