@@ -9,6 +9,8 @@ import time
 from typing import Any
 
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+from matplotlib.ticker import FuncFormatter
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -489,35 +491,110 @@ def _build_point(
 
 def _render_chart(points: list[TickerPoint], out_path: Path, title_suffix: str) -> None:
     included = [p for p in points if p.included and p.yoy_growth_pct is not None and p.ev_ltm_revenue is not None]
+
+    fig = plt.figure(figsize=(14, 9), facecolor="#E9EAED")
+    ax = fig.add_axes([0.08, 0.14, 0.86, 0.56], facecolor="#F3F4F6")
+
+    fig.text(
+        0.05,
+        0.92,
+        "EV/LTM revenue vs. YoY growth",
+        fontsize=34,
+        color="#191A2B",
+        family="DejaVu Sans",
+    )
+    fig.text(
+        0.05,
+        0.81,
+        "Public growth comp set (latest snapshot)",
+        fontsize=17,
+        color="#242637",
+        family="DejaVu Sans",
+    )
+    fig.add_artist(Line2D([0.05, 0.95], [0.785, 0.785], transform=fig.transFigure, color="#202130", linewidth=2.0))
+
     if not included:
-        fig, ax = plt.subplots(figsize=(11, 7))
-        ax.text(0.5, 0.5, "No valid points after quality filters", ha="center", va="center")
+        ax.text(0.5, 0.5, "No valid points after quality filters", ha="center", va="center", color="#4B4D57", fontsize=16)
         ax.set_axis_off()
-        fig.suptitle(f"EV/LTM Revenue vs YoY Revenue Growth ({title_suffix})")
-        fig.savefig(out_path, dpi=160, bbox_inches="tight")
+        fig.text(0.025, 0.04, "COATUE CLAW", fontsize=16, color="#121318", weight="bold")
+        fig.text(0.14, 0.044, f"{title_suffix}", fontsize=9, color="#3C3E49")
+        fig.savefig(out_path, dpi=180, bbox_inches="tight")
         plt.close(fig)
         return
 
-    x = np.array([p.yoy_growth_pct * 100.0 for p in included], dtype=float)
-    y = np.array([p.ev_ltm_revenue for p in included], dtype=float)
+    # Match Coatue-style orientation: valuation on x-axis, growth on y-axis.
+    x = np.array([p.ev_ltm_revenue for p in included], dtype=float)
+    y = np.array([p.yoy_growth_pct * 100.0 for p in included], dtype=float)
 
-    fig, ax = plt.subplots(figsize=(11, 7))
-    ax.scatter(x, y, s=64, alpha=0.9)
-    for p, xv, yv in zip(included, x, y):
-        ax.annotate(p.ticker, (xv, yv), textcoords="offset points", xytext=(5, 5), fontsize=9)
+    x_span = float(np.max(x) - np.min(x)) if len(x) else 0.0
+    y_span = float(np.max(y) - np.min(y)) if len(y) else 0.0
+    x_pad = max(0.5, x_span * 0.10)
+    y_pad = max(1.5, y_span * 0.16)
+
+    x_min = float(np.min(x) - x_pad)
+    x_max = float(np.max(x) + x_pad)
+    y_min = float(np.min(y) - y_pad)
+    y_max = float(np.max(y) + y_pad)
+    if y_min > 0:
+        y_min = min(-2.0, y_min)
+
+    x_cut = float(np.percentile(x, 70)) if len(x) >= 4 else float(np.median(x))
+    y_cut = float(np.percentile(y, 45)) if len(y) >= 4 else float(np.median(y))
+
+    focus_mask = (x >= x_cut) & (y <= y_cut)
+    if int(np.sum(focus_mask)) == 0:
+        focus_mask = x >= x_cut
+
+    shade_top = max(0.0, y_cut)
+    ax.fill_between([x_cut, x_max], [y_min, y_min], [shade_top, shade_top], color="#DCE8F8", alpha=0.8, zorder=0)
+
+    ax.scatter(x[~focus_mask], y[~focus_mask], s=52, color="#7E8084", alpha=0.95, zorder=3)
+    ax.scatter(x[focus_mask], y[focus_mask], s=56, color="#2A73C5", alpha=0.98, zorder=4)
+
+    for p, xv, yv, is_focus in zip(included, x, y, focus_mask):
+        if is_focus or len(included) <= 14:
+            ax.annotate(p.ticker, (xv, yv), textcoords="offset points", xytext=(5, 5), fontsize=9, color="#2A2C36")
 
     if len(included) >= 2:
         coeff = np.polyfit(x, y, 1)
-        line_x = np.linspace(float(np.min(x)), float(np.max(x)), 100)
+        line_x = np.linspace(x_min, x_max, 120)
         line_y = coeff[0] * line_x + coeff[1]
-        ax.plot(line_x, line_y, linestyle="--", linewidth=1.8)
+        ax.plot(line_x, line_y, color="#4B4D57", linewidth=1.6, alpha=0.9, zorder=2)
 
-    ax.set_xlabel("YoY Revenue Growth (%)")
-    ax.set_ylabel("EV / LTM Revenue (x)")
-    ax.set_title(f"EV / LTM Revenue vs YoY Revenue Growth ({title_suffix})")
-    ax.grid(alpha=0.25)
+        y_hat = coeff[0] * x + coeff[1]
+        ss_res = float(np.sum((y - y_hat) ** 2))
+        ss_tot = float(np.sum((y - np.mean(y)) ** 2))
+        r2 = 0.0 if ss_tot <= 0 else max(0.0, min(1.0, 1.0 - (ss_res / ss_tot)))
+        ax.text(0.995, 1.01, f"R^2 = {r2:.0%}", transform=ax.transAxes, ha="right", va="bottom", fontsize=16, color="#121318", weight="bold")
 
-    fig.savefig(out_path, dpi=160, bbox_inches="tight")
+    today_x = float(np.median(x))
+    ax.axvline(today_x, linestyle=(0, (4, 4)), color="#39A778", linewidth=2.0, alpha=0.95, zorder=1)
+    x_frac = (today_x - x_min) / (x_max - x_min) if x_max > x_min else 0.5
+    x_frac = min(0.92, max(0.08, x_frac))
+    ax.text(x_frac, 1.005, f"EV/LTM today = {today_x:.1f}x", transform=ax.transAxes, ha="center", va="bottom", fontsize=13, color="#39A778", weight="bold")
+
+    ax.axhline(0, color="#B8BAC1", linewidth=1.0, zorder=1)
+
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(y_min, y_max)
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _p: f"{v:.1f}x"))
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _p: f"{v:.0f}%"))
+    ax.tick_params(axis="both", colors="#595B63", labelsize=11)
+
+    for spine in ("top", "right"):
+        ax.spines[spine].set_visible(False)
+    ax.spines["left"].set_color("#BABCC3")
+    ax.spines["bottom"].set_color("#BABCC3")
+    ax.spines["left"].set_linewidth(1.0)
+    ax.spines["bottom"].set_linewidth(1.0)
+
+    ax.set_xlabel("EV / LTM Revenue", color="#2B2D37", fontsize=12, labelpad=12)
+    ax.set_ylabel("YoY Revenue Growth", color="#2B2D37", fontsize=12, labelpad=12)
+
+    fig.text(0.025, 0.04, "COATUE CLAW", fontsize=16, color="#121318", weight="bold")
+    fig.text(0.14, 0.044, f"{title_suffix}", fontsize=9, color="#3C3E49")
+
+    fig.savefig(out_path, dpi=180, bbox_inches="tight")
     plt.close(fig)
 
 

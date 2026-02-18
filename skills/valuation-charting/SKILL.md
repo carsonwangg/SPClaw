@@ -7,7 +7,7 @@ description: Implement and operate an equity scatter chart of EV/LTM revenue vs 
 
 Follow this workflow to deliver a reliable EV/LTM revenue vs YoY revenue growth chart with a line of best fit.
 
-## Freeze Metric Definitions
+## Metric Definitions
 
 Use these definitions exactly.
 
@@ -18,119 +18,62 @@ Use these definitions exactly.
 
 Reject rows where `LTM revenue <= 0`.
 
-## Enforce Provider Standardization
+## Provider Standardization
 
 Use one provider for the full run.
 
 - Prefer Google Finance for all required fields.
 - Use Yahoo Finance only if Google cannot provide required fields.
-- Do not mix Google and Yahoo fields in the same run.
-- If provider fallback occurs, state it explicitly in output.
+- Do not mix providers in one run.
+- If fallback occurs, state it explicitly.
 
-## Capture As-Of Dates and Freshness
-
-Stamp all outputs with exact dates/times.
+## As-Of and Quality Gates
 
 - Record `request_received_at`.
-- Record `market_data_as_of` for price/EV fields.
-- Record `fundamentals_as_of` from the latest reported quarter end used for LTM.
+- Record `market_data_as_of`.
+- Record `fundamentals_as_of`.
 - Record `provider_used`.
 
-When data is stale, flag clearly and include the stale reason per ticker.
+Reject rows for:
 
-## Produce Deterministic Data Contract
-
-Emit an artifact row per ticker with at least:
-
-- `ticker`
-- `provider`
-- `currency`
-- `market_data_as_of`
-- `fundamentals_as_of`
-- `latest_quarter_end`
-- `revenue_q`
-- `revenue_q_1y`
-- `yoy_growth_pct`
-- `ltm_revenue`
-- `market_cap`
-- `total_debt`
-- `preferred_equity`
-- `minority_interest`
-- `cash_eq`
-- `enterprise_value`
-- `ev_ltm_revenue`
-- `quality_flags`
-
-Treat missing required inputs as explicit exclusions, not silent fills.
-
-## Apply Quality Gates
-
-Gate each ticker before plotting.
-
-- Reject if required fields are missing.
-- Reject if currencies are inconsistent for EV numerator vs LTM denominator.
-- Reject if denominator is non-positive.
-- Reject if freshness policy fails.
-
-Return exclusion reasons such as:
-
-- `missing_ltm_revenue`
-- `missing_debt`
+- missing required fields
 - `currency_mismatch`
-- `stale_market_data`
-- `stale_fundamentals`
+- non-positive denominator
+- stale market/fundamentals data
 
-## Execute in OpenClaw Runtime
+## Coatue Visual Style Prompting
 
-When asked to produce this chart from Slack/OpenClaw, execute:
+When rendering chart visuals, enforce this style block:
 
-- `cd /opt/coatue-claw && /opt/coatue-claw/.venv/bin/python -m coatue_claw.cli valuation-chart TICKER1,TICKER2,...`
+- Narrative headline above chart, sentence case, dark navy text.
+- Subtitle under headline + strong horizontal divider line.
+- Light gray canvas and slightly lighter chart panel.
+- X-axis = `EV/LTM (x)`; Y-axis = `YoY growth (%)`.
+- Two-color point system:
+  - base universe in muted gray
+  - focus regime in Coatue blue
+- Add a subtle blue-shaded regime box on right-side valuation region.
+- Add dashed green vertical line for current valuation marker with label:
+  - `EV/LTM today = {value}x`
+- Keep a linear best-fit line and print `R^2` in top-right.
+- Minimal axes: no heavy grid, thin neutral axis lines, zero baseline on growth axis.
+- Footer branding + source/as-of timestamp.
 
-Then return:
+## OpenClaw Runtime (Required)
 
-- PNG chart path
-- CSV/JSON artifact paths
-- provider used and fallback reason
-- as-of timestamps
-- included/excluded counts
+When asked from Slack/OpenClaw, run:
 
-## Render and Return Chart
+- `/opt/coatue-claw/.venv/bin/python -m coatue_claw.cli valuation-chart TICKER1,TICKER2,...`
 
-Render a scatter plot where:
+Use artifacts from `/opt/coatue-claw-data/artifacts/charts/`.
 
-- x-axis: YoY revenue growth (%).
-- y-axis: EV/LTM revenue (x).
-- point label: ticker.
-- include a linear regression line of best fit across included points.
+## Slack Delivery Contract (Required)
 
-Always return:
+To ensure the chart image appears in Slack:
 
-- Chart image.
-- Provider used.
-- As-of timestamps.
-- Included/excluded counts.
-- Exclusion list with reasons.
-- Audit artifact link or attachment (`csv`/`json`).
+1. Copy PNG to allowed OpenClaw media root:
+   - `/Users/spclaw/.openclaw/media/charts/`
+2. Return media via payload `mediaUrl` or a `MEDIA:` line pointing to copied PNG.
+3. Include concise text with provider, as-of dates, and included/excluded counts.
 
-## Implement in Small Slices
-
-Build in this order.
-
-1. Metric engine with pure functions and unit tests.
-2. Provider adapters with run-level provider lock.
-3. Dataset assembler with quality flags and timestamps.
-4. Chart renderer.
-5. Slack command wiring.
-
-Keep each change small and reversible.
-
-## Validate Accuracy Before Rollout
-
-Use this acceptance routine.
-
-1. Run on a 5-ticker basket.
-2. Manually reconcile at least 1-2 tickers against provider pages.
-3. Add regression tests from reconciled cases.
-4. Launch command only after reconciliations pass.
-
-Do not claim production readiness without passing the reconciliation step.
+Do not return text-only scatter values when chart output is requested.
