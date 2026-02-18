@@ -74,6 +74,9 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - PNG/CSV/JSON/raw generated
 - OpenClaw skill recognized:
   - `openclaw skills info valuation-charting` => ready, source `openclaw-workspace`
+- Repo-session validation (this session):
+  - `PYTHONPATH=src pytest -q` => `20 passed`
+  - `make openclaw-restart` failed locally with `openclaw: No such file or directory`; runtime restart/status validation must be executed on Mac mini runtime host.
 
 ## Next Step to Validate in Slack
 Send in `#charting`:
