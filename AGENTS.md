@@ -16,6 +16,29 @@ Build and operate a 24/7 equity research system for Spencer + Carson, with Slack
 - Secondary interface: CLI for development/ops
 - All major outputs also written as markdown artifacts
 
+## Operator Workflow (Laptop + Codex + Mac mini)
+- Canonical production repo path on Mac mini: `/opt/coatue-claw`
+- Runtime control path on Mac mini: `openclaw` CLI + `make` targets in `/opt/coatue-claw/Makefile`
+- If Codex opens an empty/local mirror repo (for example `/Users/spclaw/Documents/Coatue Claw` with no commits), switch immediately to `/opt/coatue-claw` before making changes.
+
+Required end-to-end loop for every Codex task:
+1. Edit code/docs in `/opt/coatue-claw`.
+2. Run validation (tests and/or compile checks appropriate to the change).
+3. Commit and push to `origin/main`.
+4. Update handoff docs:
+   - `docs/handoffs/live-session.md`
+   - `docs/handoffs/current-plan.md`
+5. Restart and verify runtime on Mac mini:
+   - `make openclaw-restart`
+   - `make openclaw-slack-status`
+   - `make openclaw-slack-logs` (if needed)
+
+New Codex session boot prompt (recommended):
+- "Read `/opt/coatue-claw/AGENTS.md` and `/opt/coatue-claw/docs/handoffs/live-session.md`, then continue from there. Use `/opt/coatue-claw` as the active repo and ship all changes to git."
+
+Detailed runbook for humans and Codex:
+- `docs/laptop-codex-openclaw-workflow.md`
+
 ## Data/Storage Contracts
 - Code path: /opt/coatue-claw
 - Runtime path: /opt/coatue-claw-data

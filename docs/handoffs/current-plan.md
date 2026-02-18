@@ -51,6 +51,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - OpenClaw valuation-charting skill now requires a post-chart adjustments follow-up question after each successful chart response
 - Chart headline context now follows prompt theme; citation/footer is left-aligned for cleaner layout
 - Category guide placement now defaults to adaptive in-plot whitespace positioning to reduce wasted space while avoiding key chart overlays
+- Laptop/Codex/OpenClaw runbook now exists in-repo (`docs/laptop-codex-openclaw-workflow.md`) and AGENTS includes explicit canonical-path + ship/restart workflow rules
 - OpenClaw-native runtime spec is not yet fully codified
 - Git shipping protocol is now explicit: every Codex change ships to `origin` with handoff updates
 
