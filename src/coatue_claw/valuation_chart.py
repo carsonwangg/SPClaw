@@ -601,7 +601,8 @@ def _render_chart(
     included = [row[0] for row in included_rows]
 
     fig = plt.figure(figsize=(14, 9), facecolor="#E9EAED")
-    ax = fig.add_axes([0.08, 0.14, 0.86, 0.56], facecolor="#F3F4F6")
+    # Reserve a dedicated right-side gutter for the category guide so it never overlaps plot visuals.
+    ax = fig.add_axes([0.08, 0.14, 0.70, 0.56], facecolor="#F3F4F6")
 
     headline = (title_context or "").strip() or f"{metric_label(x_metric)} vs. {metric_label(y_metric)}"
     subheadline = f"{metric_label(y_metric)} vs {metric_label(x_metric)} (latest snapshot)"
@@ -722,14 +723,13 @@ def _render_chart(
         )
         for category in category_order
     ]
-    legend_ncol = 2 if len(category_order) >= 8 else 1
     legend = fig.legend(
         handles=legend_handles,
         labels=category_order,
         title="Category Guide",
-        loc="upper right",
-        bbox_to_anchor=(0.945, 0.775),
-        ncol=legend_ncol,
+        loc="center right",
+        bbox_to_anchor=(0.955, 0.43),
+        ncol=1,
         fontsize=9,
         title_fontsize=9,
         frameon=True,

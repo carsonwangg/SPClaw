@@ -26,6 +26,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - Footer citation/footnote text now sits at the left corner since logo text was removed.
 - Coatue-style median dotted line + callout has been restored for chart outputs after configurable-axis refactor.
 - Category legend/key is now moved out of the plot area into the grey header zone in a dotted guide box (`Category Guide`).
+- Category guide placement is now in a dedicated right-side gutter outside the plotting area, preventing overlap with `R^2` and other visual callouts.
 - Chart outputs remain PNG + CSV + JSON + raw provider payload.
 - Session shipping protocol is codified in `AGENTS.md` and templated in `docs/handoffs/ship-template.md`.
 
