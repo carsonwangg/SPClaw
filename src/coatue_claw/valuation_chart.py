@@ -23,6 +23,7 @@ CACHE_SCHEMA_VERSION = "v4"
 # Freshness policy.
 MARKET_MAX_AGE_HOURS = 48
 FUNDAMENTALS_MAX_AGE_DAYS = 180
+COATUE_FONT_FAMILY = ["Avenir Next", "Avenir", "Helvetica Neue", "Arial", "DejaVu Sans"]
 
 
 class ProviderUnavailableError(RuntimeError):
@@ -490,6 +491,7 @@ def _build_point(
 
 
 def _render_chart(points: list[TickerPoint], out_path: Path, title_suffix: str) -> None:
+    plt.rcParams["font.family"] = COATUE_FONT_FAMILY
     included = [p for p in points if p.included and p.yoy_growth_pct is not None and p.ev_ltm_revenue is not None]
 
     fig = plt.figure(figsize=(14, 9), facecolor="#E9EAED")
@@ -501,7 +503,7 @@ def _render_chart(points: list[TickerPoint], out_path: Path, title_suffix: str) 
         "EV/LTM revenue vs. YoY growth",
         fontsize=34,
         color="#191A2B",
-        family="DejaVu Sans",
+        family=COATUE_FONT_FAMILY,
     )
     fig.text(
         0.05,
@@ -509,7 +511,7 @@ def _render_chart(points: list[TickerPoint], out_path: Path, title_suffix: str) 
         "Public growth comp set (latest snapshot)",
         fontsize=17,
         color="#242637",
-        family="DejaVu Sans",
+        family=COATUE_FONT_FAMILY,
     )
     fig.add_artist(Line2D([0.05, 0.95], [0.785, 0.785], transform=fig.transFigure, color="#202130", linewidth=2.0))
 

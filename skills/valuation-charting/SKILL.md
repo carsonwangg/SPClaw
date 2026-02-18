@@ -45,6 +45,9 @@ Reject rows for:
 
 When rendering chart visuals, enforce this style block:
 
+- Typeface should mimic Coatue decks: prefer Avenir Next/Avenir/Helvetica Neue (fallback Arial/DejaVu Sans).
+- Do not use emoji callout bubbles or playful stickers in chart annotations.
+
 - Narrative headline above chart, sentence case, dark navy text.
 - Subtitle under headline + strong horizontal divider line.
 - Light gray canvas and slightly lighter chart panel.
