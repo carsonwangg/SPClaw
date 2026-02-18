@@ -32,6 +32,15 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - Added a dedicated laptop/Codex/OpenClaw operations runbook at `docs/laptop-codex-openclaw-workflow.md` and mirrored key guardrails into `AGENTS.md` (canonical repo path, ship loop, restart/verify loop).
 - Expanded runtime spec in `docs/openclaw-runtime.md` with execution model, job classes, artifact contract, and incident triage runbook.
 - Added explicit OpenClaw operator targets in `Makefile` for `openclaw-dev`, `openclaw-bot-status`, `openclaw-bot-logs`, and `openclaw-schedulers-status`.
+- Added plain-English Slack settings workflow:
+  - `show my settings` / `how are you configured`
+  - conversational setting updates (peer count target, default x/y axes, post-chart follow-up wording)
+  - `promote current settings` to auto-commit/push runtime defaults to `main`
+  - `undo last promotion` to auto-`git revert` the last settings promotion commit
+- Added runtime settings persistence and audit modules:
+  - `src/coatue_claw/runtime_settings.py`
+  - `src/coatue_claw/slack_config_intent.py`
+  - defaults file tracked in git: `config/runtime-defaults.json`
 - Chart outputs remain PNG + CSV + JSON + raw provider payload.
 - Session shipping protocol is codified in `AGENTS.md` and templated in `docs/handoffs/ship-template.md`.
 
@@ -75,7 +84,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - OpenClaw skill recognized:
   - `openclaw skills info valuation-charting` => ready, source `openclaw-workspace`
 - Repo-session validation (this session):
-  - `PYTHONPATH=src pytest -q` => `20 passed`
+  - `PYTHONPATH=src pytest -q` => `29 passed`
   - `make openclaw-restart` failed locally with `openclaw: No such file or directory`; runtime restart/status validation must be executed on Mac mini runtime host.
 
 ## Next Step to Validate in Slack
@@ -96,8 +105,12 @@ Then confirm bot returns:
 
 ## Immediate Next Steps
 1. Run all Slack validation prompts above in `#charting`.
-2. Validate guide placement across at least 3 chart shapes (left-clustered, right-clustered, mixed) to confirm no overlap with key visuals.
-3. Validate each chart run emits the post-chart adjustments prompt in-thread.
-4. Validate universe CRUD commands write/read expected CSVs under `/opt/coatue-claw-data/db/universes/`.
+2. Validate plain-English settings commands in Slack:
+   - `@Coatue Claw show my settings`
+   - `@Coatue Claw going forward look for 12 peers`
+   - `@Coatue Claw use market cap as the default x-axis`
+   - `@Coatue Claw when you finish a chart, ask us if we want ticker changes`
+3. Validate `@Coatue Claw promote current settings` commits/pushes to `main` and reports commit hash in-thread.
+4. Validate `@Coatue Claw undo last promotion` produces a revert commit and restarts runtime.
 5. Wire first scheduled jobs (weekly idea scan + X digest) to replace scheduler status placeholder behavior.
 6. If response fails, capture first failing line with `openclaw channels logs --channel slack --lines 300`.

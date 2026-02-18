@@ -60,6 +60,23 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
   - `valuation-scatter-*-raw.json`
 - Every generated insight must retain source attribution and timestamps.
 
+## Runtime Settings Contract
+- Live Slack-configurable settings are stored outside git:
+  - `/opt/coatue-claw-data/db/runtime-settings.json`
+- Change audits are written to:
+  - `/opt/coatue-claw-data/artifacts/config-audit/*.md`
+- Git-tracked baseline defaults are stored in:
+  - `/opt/coatue-claw/config/runtime-defaults.json`
+- Promotion ledger is stored in:
+  - `/opt/coatue-claw-data/db/settings-promotions.json`
+
+Slack conversational controls:
+1. `@Coatue Claw show my settings`
+2. `@Coatue Claw going forward look for 12 peers`
+3. `@Coatue Claw use market cap as the default x-axis`
+4. `@Coatue Claw promote current settings` (direct commit/push to `main`)
+5. `@Coatue Claw undo last promotion` (auto-revert of last promoted settings commit)
+
 ## Slack Validation Checklist
 1. `make openclaw-slack-status` reports `running=true` and successful probe status.
 2. `make openclaw-slack-logs` shows active Slack connection.

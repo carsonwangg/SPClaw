@@ -41,3 +41,13 @@ def test_parse_chart_intent_detects_request_even_without_tickers():
     assert intent.x_metric == "ev_ltm_revenue"
     assert intent.y_metric == "yoy_revenue_growth_pct"
 
+
+def test_parse_chart_intent_uses_runtime_default_axes_when_unspecified():
+    intent = parse_chart_intent(
+        "@Coatue Claw chart SNOW,MDB",
+        default_x_metric="market_cap",
+        default_y_metric="ltm_revenue",
+    )
+    assert intent is not None
+    assert intent.x_metric == "market_cap"
+    assert intent.y_metric == "ltm_revenue"

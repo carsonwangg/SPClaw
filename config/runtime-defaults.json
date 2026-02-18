@@ -1,0 +1,6 @@
+{
+  "default_x_metric": "ev_ltm_revenue",
+  "default_y_metric": "yoy_revenue_growth_pct",
+  "peer_discovery_limit": 8,
+  "followup_prompt": "Any adjustments to the stock screen or data you'd like me to double-check?\nFormatting tweaks too. Reply in-thread with updates like:\n- `@Coatue Claw include AVAV,HII`\n- `@Coatue Claw exclude GD`"
+}

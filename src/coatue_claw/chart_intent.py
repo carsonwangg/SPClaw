@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 
-from coatue_claw.chart_metrics import DEFAULT_X_METRIC, DEFAULT_Y_METRIC
+from coatue_claw.chart_metrics import DEFAULT_X_METRIC, DEFAULT_Y_METRIC, METRIC_SPECS
 
 
 @dataclass(frozen=True)
@@ -226,7 +226,12 @@ def _extract_tickers(text: str) -> list[str]:
     return out
 
 
-def parse_chart_intent(text: str) -> ChartIntent | None:
+def parse_chart_intent(
+    text: str,
+    *,
+    default_x_metric: str = DEFAULT_X_METRIC,
+    default_y_metric: str = DEFAULT_Y_METRIC,
+) -> ChartIntent | None:
     stripped = _strip_slack_mentions(text)
     if not _looks_like_chart_request(stripped):
         return None
@@ -234,8 +239,13 @@ def parse_chart_intent(text: str) -> ChartIntent | None:
     lower = stripped.lower()
     tickers = _extract_tickers(stripped)
 
-    x_metric = DEFAULT_X_METRIC
-    y_metric = DEFAULT_Y_METRIC
+    if default_x_metric not in METRIC_SPECS:
+        default_x_metric = DEFAULT_X_METRIC
+    if default_y_metric not in METRIC_SPECS:
+        default_y_metric = DEFAULT_Y_METRIC
+
+    x_metric = default_x_metric
+    y_metric = default_y_metric
     y_specified = False
     pair_applied = False
 
@@ -257,20 +267,20 @@ def parse_chart_intent(text: str) -> ChartIntent | None:
         pair_applied = True
 
     # If user did not explicitly set y-axis, keep YoY on y-axis when present.
-    if not y_axis_metric and DEFAULT_Y_METRIC in {x_metric, y_metric} and x_metric == DEFAULT_Y_METRIC and y_metric != DEFAULT_Y_METRIC:
+    if not y_axis_metric and default_y_metric in {x_metric, y_metric} and x_metric == default_y_metric and y_metric != default_y_metric:
         x_metric, y_metric = y_metric, x_metric
 
     metrics_found = _all_metrics(lower)
     if not x_axis_metric and not pair_applied and metrics_found:
-        first_non_yoy = next((m for m in metrics_found if m != DEFAULT_Y_METRIC), None)
+        first_non_yoy = next((m for m in metrics_found if m != default_y_metric), None)
         if first_non_yoy:
             x_metric = first_non_yoy
 
     # User preference: default YoY on y-axis unless they specify otherwise.
     if not y_specified:
-        y_metric = DEFAULT_Y_METRIC
+        y_metric = default_y_metric
         if x_metric == y_metric:
-            fallback_x = next((m for m in metrics_found if m != DEFAULT_Y_METRIC), None)
+            fallback_x = next((m for m in metrics_found if m != default_y_metric), None)
             if fallback_x:
                 x_metric = fallback_x
 

@@ -17,6 +17,17 @@ from coatue_claw.chart_metrics import METRIC_SPECS, metric_label
 from coatue_claw.chart_title_context import infer_chart_title_context
 from coatue_claw.cli import run_diligence
 from coatue_claw.online_universe import discover_online_tickers
+from coatue_claw.runtime_settings import (
+    PromotionError,
+    RuntimeSettingsError,
+    format_settings_summary,
+    list_promotion_history,
+    load_runtime_settings,
+    promote_current_settings_to_main,
+    undo_last_settings_promotion,
+    update_runtime_setting,
+)
+from coatue_claw.slack_config_intent import parse_config_intent
 from coatue_claw.universe_store import (
     add_to_universe,
     find_relevant_universe_name,
@@ -168,8 +179,143 @@ def _format_chart_usage() -> str:
         "- natural language: `@Coatue Claw plot EV/Revenue multiples vs revenue growth for SNOW,MDB,DDOG`\n"
         "- create universe: `@Coatue Claw create universe defense with PLTR,LMT,RTX,NOC,GD,LDOS`\n"
         "- list universes: `@Coatue Claw list universes`\n"
+        "- settings: `@Coatue Claw show my settings` or `@Coatue Claw going forward look for 12 peers`\n"
         "- default: YoY Revenue Growth is y-axis unless you specify axes"
     )
+
+
+def _is_settings_admin(user_id: str | None) -> bool:
+    allowed_raw = os.environ.get("SLACK_CONFIG_ADMINS", "").strip()
+    if not allowed_raw:
+        return True
+    if not user_id:
+        return False
+    allowed = {item.strip() for item in allowed_raw.split(",") if item.strip()}
+    return user_id in allowed
+
+
+def _friendly_metric_label(metric_id: str) -> str:
+    return METRIC_SPECS[metric_id].label
+
+
+def _format_promotion_history(limit: int = 5) -> str:
+    entries = list_promotion_history(limit=limit)
+    if not entries:
+        return "No settings promotions have been recorded yet."
+    lines = ["Recent settings promotions:"]
+    for entry in reversed(entries):
+        commit = entry.get("commit", "unknown")
+        actor = entry.get("actor", "unknown")
+        ts = entry.get("timestamp_utc", "unknown")
+        reverted_by = entry.get("reverted_by")
+        status = "reverted" if reverted_by else "active"
+        lines.append(f"- `{commit[:10]}` by `{actor}` at `{ts}` ({status})")
+    return "\n".join(lines)
+
+
+def _handle_settings_command(*, text: str, user_id: str | None, thread_ts: str, say) -> bool:
+    intent = parse_config_intent(text)
+    if intent is None:
+        return False
+
+    if not _is_settings_admin(user_id):
+        say(
+            text="You are not authorized to change bot settings. Ask an admin to run this command.",
+            thread_ts=thread_ts,
+        )
+        return True
+
+    actor = user_id or "unknown"
+
+    if intent.kind == "show":
+        settings = load_runtime_settings()
+        say(text=format_settings_summary(settings), thread_ts=thread_ts)
+        return True
+
+    if intent.kind == "set":
+        assert intent.key is not None
+        assert intent.value is not None
+        try:
+            settings, audit_path = update_runtime_setting(
+                key=intent.key,
+                value=intent.value,
+                actor=actor,
+                source_text=text,
+            )
+        except RuntimeSettingsError as exc:
+            say(text=f"I couldn't apply that settings change: {exc}", thread_ts=thread_ts)
+            return True
+
+        if intent.key == "peer_discovery_limit":
+            response = f"Done. Going forward I'll target `{settings.peer_discovery_limit}` peers by default."
+        elif intent.key == "default_x_metric":
+            response = f"Done. Going forward default x-axis is `{_friendly_metric_label(settings.default_x_metric)}`."
+        elif intent.key == "default_y_metric":
+            response = f"Done. Going forward default y-axis is `{_friendly_metric_label(settings.default_y_metric)}`."
+        elif intent.key == "followup_prompt":
+            response = f"Done. I updated the post-chart follow-up to: `{settings.followup_prompt}`"
+        else:
+            response = "Done. Settings updated."
+
+        response = f"{response}\nAudit: `{audit_path}`"
+        say(text=response, thread_ts=thread_ts)
+        return True
+
+    if intent.kind == "promote":
+        try:
+            result = promote_current_settings_to_main(actor=actor)
+        except PromotionError as exc:
+            say(text=f"Promotion failed: {exc}", thread_ts=thread_ts)
+            return True
+        say(
+            text=(
+                "Promoted current runtime settings to `main`.\n"
+                f"- commit: `{result.commit}`\n"
+                f"- defaults file: `{result.repo_defaults_path}`\n"
+                f"- restart_ok: `{result.restart_ok}`\n"
+                f"- slack_status_ok: `{result.status_ok}`"
+            ),
+            thread_ts=thread_ts,
+        )
+        return True
+
+    if intent.kind == "undo_promotion":
+        try:
+            result = undo_last_settings_promotion(actor=actor)
+        except PromotionError as exc:
+            say(text=f"Undo failed: {exc}", thread_ts=thread_ts)
+            return True
+        say(
+            text=(
+                "Undid the last settings promotion.\n"
+                f"- reverted promotion commit: `{result.reverted_target_commit}`\n"
+                f"- new revert commit: `{result.revert_commit}`\n"
+                f"- restart_ok: `{result.restart_ok}`\n"
+                f"- slack_status_ok: `{result.status_ok}`"
+            ),
+            thread_ts=thread_ts,
+        )
+        return True
+
+    if intent.kind == "history":
+        say(text=_format_promotion_history(limit=5), thread_ts=thread_ts)
+        return True
+
+    if intent.kind == "help":
+        say(
+            text=(
+                "I can update these settings in plain English:\n"
+                "- peer count target (example: `going forward look for 12 peers`)\n"
+                "- default x/y axis (example: `use market cap as the default x-axis`)\n"
+                "- post-chart follow-up wording (example: `after each chart ask if we want ticker changes`)\n"
+                "- promote settings to code (`promote current settings`)\n"
+                "- undo last promotion (`undo last promotion`)"
+            ),
+            thread_ts=thread_ts,
+        )
+        return True
+
+    return False
 
 
 def _format_chart_summary(result) -> str:
@@ -345,6 +491,7 @@ def _run_chart_and_respond(
     y_metric: str,
     title_context: str | None,
     source_label: str | None,
+    followup_prompt: str,
 ) -> bool:
     effective_title_context = title_context or infer_chart_title_context("", source_label)
     try:
@@ -418,12 +565,7 @@ def _run_chart_and_respond(
         say=say,
         channel=channel,
         thread_ts=thread_ts,
-        text=(
-            "Any adjustments to the stock screen or data you'd like me to double-check?\n"
-            "Formatting tweaks too. Reply in-thread with updates like:\n"
-            "- `@Coatue Claw include AVAV,HII`\n"
-            "- `@Coatue Claw exclude GD`"
-        ),
+        text=followup_prompt,
     )
     return True
 
@@ -432,8 +574,19 @@ def _run_chart_and_respond(
 def handle_mention(event, say):
     text = event.get("text") or ""
     channel = event.get("channel")
+    user_id = event.get("user")
     thread_ts = event.get("thread_ts") or event.get("ts")
     logger.info("app_mention received channel=%s ts=%s text=%r", event.get("channel"), event.get("ts"), text)
+
+    if _handle_settings_command(text=text, user_id=user_id, thread_ts=thread_ts, say=say):
+        return
+
+    try:
+        settings = load_runtime_settings()
+    except RuntimeSettingsError as exc:
+        logger.exception("Failed to load runtime settings: %s", exc)
+        say(text=f"Failed to load runtime settings: {exc}", thread_ts=thread_ts)
+        return
 
     if _handle_universe_command(text, thread_ts=thread_ts, say=say):
         return
@@ -444,7 +597,7 @@ def handle_mention(event, say):
         if choice is not None:
             mode, selected_name = choice
             if mode == "online":
-                discovered = discover_online_tickers(pending_choice.query, limit=8)
+                discovered = discover_online_tickers(pending_choice.query, limit=settings.peer_discovery_limit)
                 merged = []
                 seen = set()
                 for ticker in pending_choice.seed_tickers + discovered:
@@ -472,6 +625,7 @@ def handle_mention(event, say):
                     y_metric=pending_choice.y_metric,
                     title_context=pending_choice.title_context,
                     source_label=f"online:{pending_choice.query}",
+                    followup_prompt=settings.followup_prompt,
                 )
                 return
 
@@ -499,10 +653,15 @@ def handle_mention(event, say):
                 y_metric=pending_choice.y_metric,
                 title_context=pending_choice.title_context,
                 source_label=f"universe:{use_name}",
+                followup_prompt=settings.followup_prompt,
             )
             return
 
-    chart_intent = parse_chart_intent(text)
+    chart_intent = parse_chart_intent(
+        text,
+        default_x_metric=settings.default_x_metric,
+        default_y_metric=settings.default_y_metric,
+    )
     if chart_intent is not None:
         if _is_chart_peer_expansion_request(text, chart_intent.tickers):
             suggested_universe = find_relevant_universe_name(text)
@@ -522,10 +681,11 @@ def handle_mention(event, say):
                         y_metric=chart_intent.y_metric,
                         title_context=title_context,
                         source_label=f"universe:{suggested_universe}",
+                        followup_prompt=settings.followup_prompt,
                     )
                     return
 
-            discovered = discover_online_tickers(query, limit=8)
+            discovered = discover_online_tickers(query, limit=settings.peer_discovery_limit)
             auto_tickers = _merge_unique_tickers(chart_intent.tickers, discovered)
             if len(auto_tickers) >= 2:
                 _run_chart_and_respond(
@@ -537,6 +697,7 @@ def handle_mention(event, say):
                     y_metric=chart_intent.y_metric,
                     title_context=title_context,
                     source_label=f"online:{query}",
+                    followup_prompt=settings.followup_prompt,
                 )
                 return
 
@@ -576,6 +737,7 @@ def handle_mention(event, say):
             y_metric=chart_intent.y_metric,
             title_context=infer_chart_title_context(text),
             source_label="explicit_tickers",
+            followup_prompt=settings.followup_prompt,
         )
         return
 
@@ -603,6 +765,7 @@ def handle_mention(event, say):
                 y_metric=pending_feedback.y_metric,
                 title_context=pending_feedback.title_context,
                 source_label=(pending_feedback.source_label or "feedback_update"),
+                followup_prompt=settings.followup_prompt,
             )
             return
 
