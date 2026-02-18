@@ -57,10 +57,13 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Makefile OpenClaw targets now prepend `/opt/homebrew/bin` to PATH and use binary fallback detection so remote non-login SSH sessions can restart/status without manual PATH export
 - Plain-English Slack settings controls are now implemented (`show settings`, conversational default updates, promote-to-main, undo last promotion)
 - Runtime settings now persist under `/opt/coatue-claw-data/db/runtime-settings.json` with markdown audit logs in `/opt/coatue-claw-data/artifacts/config-audit/`
+- Slack deploy pipeline controls are implemented (`deploy latest`, `undo last deploy`, `run checks`, `show pipeline status`, `show deploy history`, `build: ...`) with one-job-at-a-time locking and admin gating
+- Deploy history now persists to `/opt/coatue-claw-data/db/deploy-history.json`
 - Git shipping protocol is now explicit: every Codex change ships to `origin` with handoff updates
 
 ## Immediate Next Actions
-1. Validate universe commands and online-vs-universe prompt flow in Slack (`#charting`)
-2. Validate plain-English settings commands in Slack (`show my settings`, `going forward look for 12 peers`, `promote current settings`, `undo last promotion`)
-3. Validate post-chart follow-up prompt delivery in-thread across multiple chart runs with updated settings
-4. Wire first scheduled jobs (weekly idea scan + X digest) and replace scheduler status placeholder target
+1. Validate Slack deploy pipeline commands in `#claw-lab` (`deploy latest`, `undo last deploy`, `run checks`, `build: ...`)
+2. Configure `SLACK_PIPELINE_ADMINS` on runtime host and validate permission boundaries
+3. Validate universe commands and online-vs-universe prompt flow in Slack (`#charting`)
+4. Validate plain-English settings commands in Slack (`show my settings`, `going forward look for 12 peers`, `promote current settings`, `undo last promotion`)
+5. Wire first scheduled jobs (weekly idea scan + X digest) and replace scheduler status placeholder target

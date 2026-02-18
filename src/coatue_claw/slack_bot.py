@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import logging
 import os
 import re
+import threading
 import time
 from typing import Optional
 
@@ -28,6 +29,17 @@ from coatue_claw.runtime_settings import (
     update_runtime_setting,
 )
 from coatue_claw.slack_config_intent import parse_config_intent
+from coatue_claw.slack_pipeline import (
+    PipelineError,
+    deploy_history,
+    format_pipeline_result,
+    pipeline_status,
+    run_build_request,
+    run_checks,
+    run_deploy_latest,
+    undo_last_deploy,
+)
+from coatue_claw.slack_pipeline_intent import parse_pipeline_intent
 from coatue_claw.universe_store import (
     add_to_universe,
     find_relevant_universe_name,
@@ -69,6 +81,7 @@ class PendingChartFeedback:
 
 PENDING_CHART_CHOICES: dict[str, PendingChartChoice] = {}
 PENDING_CHART_FEEDBACK: dict[str, PendingChartFeedback] = {}
+PIPELINE_LOCK = threading.Lock()
 
 
 @app.use
@@ -180,12 +193,25 @@ def _format_chart_usage() -> str:
         "- create universe: `@Coatue Claw create universe defense with PLTR,LMT,RTX,NOC,GD,LDOS`\n"
         "- list universes: `@Coatue Claw list universes`\n"
         "- settings: `@Coatue Claw show my settings` or `@Coatue Claw going forward look for 12 peers`\n"
+        "- pipeline: `@Coatue Claw deploy latest` or `@Coatue Claw undo last deploy`\n"
         "- default: YoY Revenue Growth is y-axis unless you specify axes"
     )
 
 
 def _is_settings_admin(user_id: str | None) -> bool:
     allowed_raw = os.environ.get("SLACK_CONFIG_ADMINS", "").strip()
+    if not allowed_raw:
+        return True
+    if not user_id:
+        return False
+    allowed = {item.strip() for item in allowed_raw.split(",") if item.strip()}
+    return user_id in allowed
+
+
+def _is_pipeline_admin(user_id: str | None) -> bool:
+    allowed_raw = os.environ.get("SLACK_PIPELINE_ADMINS", "").strip()
+    if not allowed_raw:
+        allowed_raw = os.environ.get("SLACK_CONFIG_ADMINS", "").strip()
     if not allowed_raw:
         return True
     if not user_id:
@@ -314,6 +340,83 @@ def _handle_settings_command(*, text: str, user_id: str | None, thread_ts: str, 
             thread_ts=thread_ts,
         )
         return True
+
+    return False
+
+
+def _handle_pipeline_command(*, text: str, user_id: str | None, thread_ts: str, say) -> bool:
+    intent = parse_pipeline_intent(text)
+    if intent is None:
+        return False
+
+    if not _is_pipeline_admin(user_id):
+        say(
+            text="You are not authorized to run deploy pipeline commands. Ask an admin to run this command.",
+            thread_ts=thread_ts,
+        )
+        return True
+
+    if intent.kind == "help":
+        say(
+            text=(
+                "Deploy pipeline commands:\n"
+                "- `deploy latest`\n"
+                "- `undo last deploy`\n"
+                "- `run checks`\n"
+                "- `show pipeline status`\n"
+                "- `show deploy history`\n"
+                "- `build: <request>`"
+            ),
+            thread_ts=thread_ts,
+        )
+        return True
+
+    if not PIPELINE_LOCK.acquire(blocking=False):
+        say(text="A pipeline job is already running. Please retry in a minute.", thread_ts=thread_ts)
+        return True
+
+    actor = user_id or "unknown"
+    try:
+        if intent.kind == "deploy_latest":
+            say(text="Starting deploy now: pulling latest, restarting, and checking Slack health.", thread_ts=thread_ts)
+            result = run_deploy_latest(actor=actor)
+            say(text=format_pipeline_result(result), thread_ts=thread_ts)
+            return True
+
+        if intent.kind == "undo_last_deploy":
+            say(text="Starting undo now: reverting last deploy, pushing, restarting, and checking Slack health.", thread_ts=thread_ts)
+            result = undo_last_deploy(actor=actor)
+            say(text=format_pipeline_result(result), thread_ts=thread_ts)
+            return True
+
+        if intent.kind == "run_checks":
+            say(text="Running checks now (`PYTHONPATH=src pytest -q`).", thread_ts=thread_ts)
+            result = run_checks()
+            say(text=format_pipeline_result(result), thread_ts=thread_ts)
+            return True
+
+        if intent.kind == "status":
+            say(text=pipeline_status(), thread_ts=thread_ts)
+            return True
+
+        if intent.kind == "history":
+            say(text=deploy_history(limit=8), thread_ts=thread_ts)
+            return True
+
+        if intent.kind == "build_request":
+            request = (intent.request or "").strip()
+            if not request:
+                say(text="Please provide a build request, e.g. `build: add XYZ behavior`.", thread_ts=thread_ts)
+                return True
+            say(text=f"Starting build request: `{request}`", thread_ts=thread_ts)
+            result = run_build_request(request=request, actor=actor)
+            say(text=format_pipeline_result(result), thread_ts=thread_ts)
+            return True
+    except PipelineError as exc:
+        say(text=f"Pipeline failed: {exc}", thread_ts=thread_ts)
+        return True
+    finally:
+        PIPELINE_LOCK.release()
 
     return False
 
@@ -579,6 +682,9 @@ def handle_mention(event, say):
     logger.info("app_mention received channel=%s ts=%s text=%r", event.get("channel"), event.get("ts"), text)
 
     if _handle_settings_command(text=text, user_id=user_id, thread_ts=thread_ts, say=say):
+        return
+
+    if _handle_pipeline_command(text=text, user_id=user_id, thread_ts=thread_ts, say=say):
         return
 
     try:

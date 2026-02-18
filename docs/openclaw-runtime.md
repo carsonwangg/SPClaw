@@ -80,6 +80,19 @@ Slack conversational controls:
 4. `@Coatue Claw promote current settings` (direct commit/push to `main`)
 5. `@Coatue Claw undo last promotion` (auto-revert of last promoted settings commit)
 
+Slack deploy pipeline controls:
+1. `@Coatue Claw deploy latest` (pull + restart + Slack health probe)
+2. `@Coatue Claw undo last deploy` (revert last deploy target + push + restart + probe)
+3. `@Coatue Claw run checks` (`PYTHONPATH=src pytest -q`)
+4. `@Coatue Claw show pipeline status`
+5. `@Coatue Claw show deploy history`
+6. `@Coatue Claw build: <request>` (runs Codex CLI by default if installed, otherwise requires custom runner)
+
+Pipeline environment controls:
+- `SLACK_PIPELINE_ADMINS`: optional comma-separated Slack user IDs allowed to run pipeline commands
+- `COATUE_CLAW_SLACK_BUILD_COMMAND`: optional custom build command template with `{request}` placeholder
+- `COATUE_CLAW_DEPLOY_HISTORY_PATH`: optional deploy history JSON path (default under `/opt/coatue-claw-data/db/`)
+
 ## Slack Validation Checklist
 1. `make openclaw-slack-status` reports `running=true` and successful probe status.
 2. `make openclaw-slack-logs` shows active Slack connection.

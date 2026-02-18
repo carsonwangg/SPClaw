@@ -44,6 +44,16 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `src/coatue_claw/runtime_settings.py`
   - `src/coatue_claw/slack_config_intent.py`
   - defaults file tracked in git: `config/runtime-defaults.json`
+- Added Slack deploy pipeline workflow (admin-gated, single-job lock):
+  - `deploy latest` -> pull + restart + Slack probe status
+  - `undo last deploy` -> revert last deploy target + push + restart + probe
+  - `run checks` -> `PYTHONPATH=src pytest -q`
+  - `show pipeline status` / `show deploy history`
+  - `build: <request>` -> runs Codex CLI on runtime host by default (or custom command via env)
+- Added deploy pipeline modules:
+  - `src/coatue_claw/slack_pipeline.py`
+  - `src/coatue_claw/slack_pipeline_intent.py`
+  - deploy history file: `/opt/coatue-claw-data/db/deploy-history.json`
 - Chart outputs remain PNG + CSV + JSON + raw provider payload.
 - Session shipping protocol is codified in `AGENTS.md` and templated in `docs/handoffs/ship-template.md`.
 
@@ -90,6 +100,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `PYTHONPATH=src pytest -q` => `29 passed`
   - `make openclaw-restart` failed locally with `openclaw: No such file or directory`; runtime restart/status validation must be executed on Mac mini runtime host.
   - Mac mini runtime validation succeeded after pull (`d5099bb`): gateway running, Slack probe `ok=true`; root cause of earlier SSH failure was minimal PATH in non-login shell.
+  - Makefile PATH hardening validated on Mac mini after pull (`0862aa0`): non-login SSH `make openclaw-restart` and `make openclaw-slack-status` now execute with resolved `openclaw` + `node`.
 
 ## Next Step to Validate in Slack
 Send in `#charting`:
@@ -116,5 +127,11 @@ Then confirm bot returns:
    - `@Coatue Claw when you finish a chart, ask us if we want ticker changes`
 3. Validate `@Coatue Claw promote current settings` commits/pushes to `main` and reports commit hash in-thread.
 4. Validate `@Coatue Claw undo last promotion` produces a revert commit and restarts runtime.
-5. Wire first scheduled jobs (weekly idea scan + X digest) to replace scheduler status placeholder behavior.
-6. If response fails, capture first failing line with `openclaw channels logs --channel slack --lines 300`.
+5. Validate Slack deploy pipeline in `#claw-lab`:
+   - `@Coatue Claw deploy latest`
+   - `@Coatue Claw run checks`
+   - `@Coatue Claw show pipeline status`
+   - `@Coatue Claw show deploy history`
+6. Configure `SLACK_PIPELINE_ADMINS` and optional `COATUE_CLAW_SLACK_BUILD_COMMAND` in runtime env for production permissions/runner control.
+7. Wire first scheduled jobs (weekly idea scan + X digest) to replace scheduler status placeholder behavior.
+8. If response fails, capture first failing line with `openclaw channels logs --channel slack --lines 300`.
