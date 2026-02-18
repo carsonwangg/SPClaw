@@ -13,9 +13,12 @@ Keep file operations local on Mac mini (so OpenClaw can freely rearrange) while 
 
 ### Shared Drive mirror (human-facing)
 Configured under `drive.root` in `config/file-bridge.json`:
-- `Latest`
-- `Archive`
-- `Incoming`
+- `01_DROP_HERE_Incoming`
+- `02_READ_ONLY_Latest_AUTO`
+- `03_READ_ONLY_Archive_AUTO`
+
+Incoming contains an auto-generated read-only reference mirror:
+- `01_DROP_HERE_Incoming/_Latest_Reference_READ_ONLY`
 
 Default fallback in repo is local-only:
 - `/opt/coatue-claw-data/files/drive-share`
@@ -24,10 +27,11 @@ Replace this with the actual Google Drive folder path on Mac mini (Google Drive 
 
 ## Ownership Rules
 - Bot writes locally (`working`, `archive`, `published`).
-- Bot publishes to Drive `Latest` and `Archive`.
-- Humans drop files into Drive `Incoming`.
-- Bot pulls Drive `Incoming` into local `incoming`.
+- Bot publishes to Drive `02_READ_ONLY_Latest_AUTO` and `03_READ_ONLY_Archive_AUTO`.
+- Humans drop files into Drive `01_DROP_HERE_Incoming` (category subfolders).
+- Bot pulls Drive `01_DROP_HERE_Incoming` into local `incoming`.
 - Subfolders are preserved recursively (Drive -> local and local -> Drive), so humans can organize by topic and the bot keeps the same paths.
+- `01_DROP_HERE_Incoming/_Latest_Reference_READ_ONLY` is a carbon copy of Latest for visibility and is ignored during pull ingestion.
 
 Avoid direct human edits inside bot-owned local folders to prevent sync conflicts.
 
@@ -59,7 +63,7 @@ make openclaw-files-sync
 ```
 
 ## Recommended Shared Folder Map (Spencer-facing)
-Create and use the same category folders under all three Drive folders: `Incoming`, `Latest`, and `Archive`.
+Create and use the same category folders under all three Drive folders: `01_DROP_HERE_Incoming`, `02_READ_ONLY_Latest_AUTO`, and `03_READ_ONLY_Archive_AUTO`.
 
 - `Companies`
 - `Sectors`
@@ -76,10 +80,10 @@ Create and use the same category folders under all three Drive folders: `Incomin
 - `Misc`
 
 Example human workflow:
-- Spencer drops source material into `Incoming/Companies` or `Incoming/Earnings`.
+- Spencer drops source material into `01_DROP_HERE_Incoming/Companies` or `01_DROP_HERE_Incoming/Earnings`.
 - OpenClaw pulls files to matching local paths (for example `.../incoming/Companies/...`).
-- Generated outputs are published to `Latest/<same category>`.
-- Older outputs are moved to `Archive/<same category>`.
+- Generated outputs are published to `02_READ_ONLY_Latest_AUTO/<same category>`.
+- Older outputs are moved to `03_READ_ONLY_Archive_AUTO/<same category>`.
 
 ### Rebuild published index files
 ```bash

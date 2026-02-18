@@ -98,7 +98,8 @@ File bridge contract:
   - `/opt/coatue-claw-data/files/published`
   - `/opt/coatue-claw-data/files/incoming`
 - Shared mirror paths (Google Drive or local fallback) are configured in `config/file-bridge.json`.
-- `openclaw-files-sync` performs pull (`Incoming` -> local incoming), push (`published/archive` -> shared paths), and index regeneration.
+- `openclaw-files-sync` performs pull (`01_DROP_HERE_Incoming` -> local incoming), push (`published/archive` -> shared paths), and index regeneration.
+- `01_DROP_HERE_Incoming/_Latest_Reference_READ_ONLY` is auto-mirrored from published outputs and excluded from pull ingestion.
 - Published index artifacts are generated at:
   - `/opt/coatue-claw-data/files/published/index.json`
   - `/opt/coatue-claw-data/files/published/index.md`

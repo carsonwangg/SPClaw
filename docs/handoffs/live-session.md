@@ -85,7 +85,8 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `openclaw-files-index`
   - published index artifacts generated to `published/index.json` and `published/index.md`
   - Drive mirror root is now set to `/Users/spclaw/Documents/Google Drive Local` for Mac mini sync
-  - Spencer-facing category subfolders are provisioned under `Incoming`, `Latest`, and `Archive` (Companies, Sectors, Themes, Earnings, Filings, Transcripts, Decks, Models, Notes, Calls, Macro, Admin, Misc)
+  - Spencer-facing category subfolders are provisioned under `01_DROP_HERE_Incoming`, `02_READ_ONLY_Latest_AUTO`, and `03_READ_ONLY_Archive_AUTO` (Companies, Sectors, Themes, Earnings, Filings, Transcripts, Decks, Models, Notes, Calls, Macro, Admin, Misc)
+  - `01_DROP_HERE_Incoming/_Latest_Reference_READ_ONLY` auto-mirrors Latest for visibility and is excluded from pull ingestion
 - Chart outputs remain PNG + CSV + JSON + raw provider payload.
 - Session shipping protocol is codified in `AGENTS.md` and templated in `docs/handoffs/ship-template.md`.
 
@@ -135,7 +136,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - Makefile PATH hardening validated on Mac mini after pull (`0862aa0`): non-login SSH `make openclaw-restart` and `make openclaw-slack-status` now execute with resolved `openclaw` + `node`.
   - Hybrid memory runtime deployed on Mac mini (`33650f2`): structured memory active; semantic fallback currently disabled until `OPENAI_API_KEY` is set in runtime env.
   - File bridge Drive root configured + validated on Mac mini (`9db4643` + latest pull): `make openclaw-files-init`, `make openclaw-files-sync`, and `make openclaw-files-status` pass using `/Users/spclaw/Documents/Google Drive Local`.
-  - Recursive subfolder sync validation passed on Mac mini: file dropped into `Incoming/Companies` mirrored to local `incoming/Companies`, then cleaned up.
+  - Recursive subfolder sync validation passed on Mac mini: file dropped into `01_DROP_HERE_Incoming/Companies` mirrored to local `incoming/Companies`, then cleaned up.
 
 ## Next Step to Validate in Slack
 Send in `#charting`:
@@ -178,9 +179,9 @@ Then confirm bot returns:
    - `@Coatue Claw memory checkpoint`
 8. Configure `SLACK_PIPELINE_ADMINS` and optional `COATUE_CLAW_SLACK_BUILD_COMMAND` in runtime env for production permissions/runner control.
 9. Schedule hourly `make openclaw-memory-prune` on runtime host and validate cleanup counts.
-10. Confirm Spencer has Drive access to `/Users/spclaw/Documents/Google Drive Local` and can drag/drop by category under `Incoming/*`.
+10. Confirm Spencer has Drive access to `/Users/spclaw/Documents/Google Drive Local` and can drag/drop by category under `01_DROP_HERE_Incoming/*`.
 11. Validate end-to-end category workflow with Spencer:
-    - Spencer drops a file into `Incoming/<Category>`
+    - Spencer drops a file into `01_DROP_HERE_Incoming/<Category>`
     - run `make openclaw-files-sync-pull`
     - confirm file appears in `/opt/coatue-claw-data/files/incoming/<Category>`
 12. Wire first scheduled jobs (weekly idea scan + X digest) to replace scheduler status placeholder behavior.

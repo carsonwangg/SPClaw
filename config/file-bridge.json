@@ -8,9 +8,11 @@
   },
   "drive": {
     "root": "/Users/spclaw/Documents/Google Drive Local",
-    "latest": "Latest",
-    "archive": "Archive",
-    "incoming": "Incoming"
+    "latest": "02_READ_ONLY_Latest_AUTO",
+    "archive": "03_READ_ONLY_Archive_AUTO",
+    "incoming": "01_DROP_HERE_Incoming",
+    "incoming_reference_from_latest": true,
+    "incoming_reference_folder": "_Latest_Reference_READ_ONLY"
   },
   "rclone": {
     "enabled": false,

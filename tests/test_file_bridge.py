@@ -17,9 +17,11 @@ def _write_config(path: Path, *, root: Path) -> None:
         },
         "drive": {
             "root": str(root / "drive"),
-            "latest": "Latest",
-            "archive": "Archive",
-            "incoming": "Incoming",
+            "latest": "READ_ONLY_Latest_AUTO",
+            "archive": "READ_ONLY_Archive_AUTO",
+            "incoming": "DROP_HERE_Incoming",
+            "incoming_reference_from_latest": True,
+            "incoming_reference_folder": "_Latest_Reference_READ_ONLY",
         },
         "rclone": {
             "enabled": False,
@@ -49,11 +51,16 @@ def test_init_status_push_pull_index(tmp_path: Path):
     assert push["latest"]["copied"] >= 1
     assert (config.drive.latest / "reports/a.md").exists()
     assert (config.drive.archive / "old.txt").exists()
+    assert config.drive.incoming_latest_reference is not None
+    assert (config.drive.incoming_latest_reference / "reports/a.md").exists()
 
     (config.drive.incoming / "new.txt").write_text("incoming", encoding="utf-8")
+    assert config.drive.incoming_latest_reference is not None
+    (config.drive.incoming_latest_reference / "ignore.txt").write_text("mirror-reference", encoding="utf-8")
     pull = sync_pull(config)
     assert pull["incoming"]["copied"] >= 1
     assert (config.local.incoming / "new.txt").exists()
+    assert not (config.local.incoming / "_Latest_Reference_READ_ONLY/ignore.txt").exists()
 
     idx = build_index(config)
     assert idx["ok"] is True

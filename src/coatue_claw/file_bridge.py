@@ -34,6 +34,7 @@ class DrivePaths:
     latest: Path
     archive: Path
     incoming: Path
+    incoming_latest_reference: Path | None
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,11 @@ def load_config(path: Path | None = None) -> FileBridgeConfig:
         latest=drive_root / str(drive_raw.get("latest", "Latest")),
         archive=drive_root / str(drive_raw.get("archive", "Archive")),
         incoming=drive_root / str(drive_raw.get("incoming", "Incoming")),
+        incoming_latest_reference=(
+            (drive_root / str(drive_raw.get("incoming", "Incoming")) / str(drive_raw.get("incoming_reference_folder", "_Latest_Reference_READ_ONLY")))
+            if bool(drive_raw.get("incoming_reference_from_latest", False))
+            else None
+        ),
     )
 
     rclone = RcloneConfig(
@@ -135,10 +141,18 @@ def _same_file(src: Path, dst: Path) -> bool:
     return _file_hash(src) == _file_hash(dst)
 
 
-def _sync_dir(src_root: Path, dst_root: Path, *, delete: bool = False) -> SyncResult:
+def _is_ignored(rel: Path, ignored_prefixes: set[Path]) -> bool:
+    for prefix in ignored_prefixes:
+        if rel == prefix or prefix in rel.parents:
+            return True
+    return False
+
+
+def _sync_dir(src_root: Path, dst_root: Path, *, delete: bool = False, ignore_prefixes: list[Path] | None = None) -> SyncResult:
     copied = 0
     skipped = 0
     deleted = 0
+    ignored = set(ignore_prefixes or [])
 
     src_root.mkdir(parents=True, exist_ok=True)
     dst_root.mkdir(parents=True, exist_ok=True)
@@ -148,6 +162,8 @@ def _sync_dir(src_root: Path, dst_root: Path, *, delete: bool = False) -> SyncRe
         if not src.is_file():
             continue
         rel = src.relative_to(src_root)
+        if _is_ignored(rel, ignored):
+            continue
         src_files.add(rel)
         dst = dst_root / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
@@ -162,6 +178,8 @@ def _sync_dir(src_root: Path, dst_root: Path, *, delete: bool = False) -> SyncRe
             if not dst.is_file():
                 continue
             rel = dst.relative_to(dst_root)
+            if _is_ignored(rel, ignored):
+                continue
             if rel not in src_files:
                 dst.unlink()
                 deleted += 1
@@ -190,6 +208,8 @@ def init_layout(config: FileBridgeConfig) -> dict[str, Any]:
         config.drive.archive,
         config.drive.incoming,
     ]
+    if config.drive.incoming_latest_reference is not None:
+        paths.append(config.drive.incoming_latest_reference)
     for path in paths:
         path.mkdir(parents=True, exist_ok=True)
 
@@ -201,42 +221,59 @@ def init_layout(config: FileBridgeConfig) -> dict[str, Any]:
 
 
 def sync_push(config: FileBridgeConfig, *, delete: bool = False) -> dict[str, Any]:
+    incoming_reference_result: dict[str, Any] | None = None
     if config.rclone.enabled and config.rclone.remote_root:
         latest_remote = f"{config.rclone.remote_root.rstrip('/')}/{config.rclone.latest}"
         archive_remote = f"{config.rclone.remote_root.rstrip('/')}/{config.rclone.archive}"
         latest_cmd = ["rclone", "sync" if delete else "copy", str(config.local.published), latest_remote]
         archive_cmd = ["rclone", "sync" if delete else "copy", str(config.local.archive), archive_remote]
+        if config.drive.incoming_latest_reference is not None:
+            incoming_reference_remote = (
+                f"{config.rclone.remote_root.rstrip('/')}/{config.rclone.incoming}/"
+                f"{config.drive.incoming_latest_reference.name}"
+            )
+            incoming_reference_cmd = ["rclone", "sync" if delete else "copy", str(config.local.published), incoming_reference_remote]
+            incoming_reference_result = _run_rclone(incoming_reference_cmd)
         return {
             "mode": "rclone",
             "latest": _run_rclone(latest_cmd),
             "archive": _run_rclone(archive_cmd),
+            "incoming_reference": incoming_reference_result,
             "timestamp_utc": _now_utc_iso(),
         }
 
     latest_result = _sync_dir(config.local.published, config.drive.latest, delete=delete)
     archive_result = _sync_dir(config.local.archive, config.drive.archive, delete=delete)
+    if config.drive.incoming_latest_reference is not None:
+        incoming_reference_result = _sync_dir(config.local.published, config.drive.incoming_latest_reference, delete=delete).__dict__
     return {
         "mode": "local-drive-copy",
         "latest": latest_result.__dict__,
         "archive": archive_result.__dict__,
+        "incoming_reference": incoming_reference_result,
         "timestamp_utc": _now_utc_iso(),
     }
 
 
 def sync_pull(config: FileBridgeConfig, *, delete: bool = False) -> dict[str, Any]:
+    ignored_prefixes: list[Path] = []
+    if config.drive.incoming_latest_reference is not None:
+        ignored_prefixes = [Path(config.drive.incoming_latest_reference.name)]
     if config.rclone.enabled and config.rclone.remote_root:
         incoming_remote = f"{config.rclone.remote_root.rstrip('/')}/{config.rclone.incoming}"
         incoming_cmd = ["rclone", "sync" if delete else "copy", incoming_remote, str(config.local.incoming)]
         return {
             "mode": "rclone",
             "incoming": _run_rclone(incoming_cmd),
+            "ignored_prefixes": [str(path) for path in ignored_prefixes],
             "timestamp_utc": _now_utc_iso(),
         }
 
-    incoming_result = _sync_dir(config.drive.incoming, config.local.incoming, delete=delete)
+    incoming_result = _sync_dir(config.drive.incoming, config.local.incoming, delete=delete, ignore_prefixes=ignored_prefixes)
     return {
         "mode": "local-drive-copy",
         "incoming": incoming_result.__dict__,
+        "ignored_prefixes": [str(path) for path in ignored_prefixes],
         "timestamp_utc": _now_utc_iso(),
     }
 
@@ -344,6 +381,15 @@ def status(config: FileBridgeConfig) -> dict[str, Any]:
             "latest": {"path": str(config.drive.latest), "exists": config.drive.latest.exists(), "files": _count_files(config.drive.latest)},
             "archive": {"path": str(config.drive.archive), "exists": config.drive.archive.exists(), "files": _count_files(config.drive.archive)},
             "incoming": {"path": str(config.drive.incoming), "exists": config.drive.incoming.exists(), "files": _count_files(config.drive.incoming)},
+            "incoming_reference": (
+                {
+                    "path": str(config.drive.incoming_latest_reference),
+                    "exists": config.drive.incoming_latest_reference.exists(),
+                    "files": _count_files(config.drive.incoming_latest_reference),
+                }
+                if config.drive.incoming_latest_reference is not None
+                else None
+            ),
         },
         "rclone": {
             "enabled": config.rclone.enabled,
