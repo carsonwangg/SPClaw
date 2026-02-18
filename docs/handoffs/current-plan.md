@@ -54,6 +54,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Laptop/Codex/OpenClaw runbook now exists in-repo (`docs/laptop-codex-openclaw-workflow.md`) and AGENTS includes explicit canonical-path + ship/restart workflow rules
 - OpenClaw runtime contract is now codified in `docs/openclaw-runtime.md` (execution model, job classes, ops + triage checklist)
 - Make targets now include explicit `dev`, `bot`, and `schedulers` runtime controls for operator workflows
+- Makefile OpenClaw targets now use binary fallback detection so remote non-login SSH sessions can restart/status without manual PATH export
 - Plain-English Slack settings controls are now implemented (`show settings`, conversational default updates, promote-to-main, undo last promotion)
 - Runtime settings now persist under `/opt/coatue-claw-data/db/runtime-settings.json` with markdown audit logs in `/opt/coatue-claw-data/artifacts/config-audit/`
 - Git shipping protocol is now explicit: every Codex change ships to `origin` with handoff updates

@@ -1,13 +1,15 @@
 .PHONY: openclaw-status openclaw-restart openclaw-logs openclaw-dev openclaw-bot-status openclaw-bot-logs openclaw-schedulers-status openclaw-slack-status openclaw-slack-logs openclaw-slack-probe openclaw-slack-audit valuation-chart
 
+OPENCLAW ?= $(shell command -v openclaw 2>/dev/null || echo /opt/homebrew/bin/openclaw)
+
 openclaw-status:
-	openclaw gateway status
+	$(OPENCLAW) gateway status
 
 openclaw-restart:
-	openclaw gateway restart
+	$(OPENCLAW) gateway restart
 
 openclaw-logs:
-	openclaw logs --follow
+	$(OPENCLAW) logs --follow
 
 openclaw-dev:
 	$(MAKE) openclaw-status
@@ -23,10 +25,10 @@ openclaw-schedulers-status:
 	@echo "No scheduled OpenClaw jobs are wired yet (weekly idea scan and X digest are pending implementation)."
 
 openclaw-slack-status:
-	openclaw channels status --probe --json
+	$(OPENCLAW) channels status --probe --json
 
 openclaw-slack-logs:
-	openclaw channels logs --channel slack --lines 300
+	$(OPENCLAW) channels logs --channel slack --lines 300
 
 openclaw-slack-probe:
 	python3 scripts/openclaw_slack_probe.py

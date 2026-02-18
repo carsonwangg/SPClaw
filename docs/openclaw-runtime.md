@@ -36,6 +36,8 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
   - `SLACK_APP_TOKEN`
 
 ## Operational Commands
+- OpenClaw binary resolution:
+  - `Makefile` targets auto-resolve `openclaw` from PATH, with fallback to `/opt/homebrew/bin/openclaw` for non-login SSH shells.
 - Runtime health:
   - `make openclaw-dev` (gateway + Slack status check)
   - `make openclaw-status`

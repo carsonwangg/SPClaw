@@ -32,6 +32,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - Added a dedicated laptop/Codex/OpenClaw operations runbook at `docs/laptop-codex-openclaw-workflow.md` and mirrored key guardrails into `AGENTS.md` (canonical repo path, ship loop, restart/verify loop).
 - Expanded runtime spec in `docs/openclaw-runtime.md` with execution model, job classes, artifact contract, and incident triage runbook.
 - Added explicit OpenClaw operator targets in `Makefile` for `openclaw-dev`, `openclaw-bot-status`, `openclaw-bot-logs`, and `openclaw-schedulers-status`.
+- Hardened `Makefile` OpenClaw targets to auto-resolve binary path (`openclaw` on PATH or `/opt/homebrew/bin/openclaw`) so restart/status commands work in non-login SSH shells.
 - Added plain-English Slack settings workflow:
   - `show my settings` / `how are you configured`
   - conversational setting updates (peer count target, default x/y axes, post-chart follow-up wording)
@@ -86,6 +87,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - Repo-session validation (this session):
   - `PYTHONPATH=src pytest -q` => `29 passed`
   - `make openclaw-restart` failed locally with `openclaw: No such file or directory`; runtime restart/status validation must be executed on Mac mini runtime host.
+  - Mac mini runtime validation succeeded after pull (`d5099bb`): gateway running, Slack probe `ok=true`; root cause of earlier SSH failure was minimal PATH in non-login shell.
 
 ## Next Step to Validate in Slack
 Send in `#charting`:
