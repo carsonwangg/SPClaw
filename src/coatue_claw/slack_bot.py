@@ -4,11 +4,13 @@ from dataclasses import dataclass
 import logging
 import os
 import re
+import time
 from typing import Optional
 
 from dotenv import load_dotenv
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
+from slack_sdk.errors import SlackApiError
 
 from coatue_claw.chart_intent import parse_chart_intent
 from coatue_claw.chart_metrics import METRIC_SPECS, metric_label
@@ -194,6 +196,48 @@ def _format_chart_summary(result) -> str:
     return "\n".join(lines)
 
 
+def _post_thread_message(
+    *,
+    say,
+    channel: str | None,
+    thread_ts: str,
+    text: str,
+) -> None:
+    if channel:
+        for attempt in range(1, 4):
+            try:
+                app.client.chat_postMessage(
+                    channel=channel,
+                    thread_ts=thread_ts,
+                    text=text,
+                )
+                return
+            except SlackApiError as exc:
+                status = exc.response.status_code if exc.response is not None else None
+                if status == 429 and attempt < 3:
+                    retry_after_raw = "1"
+                    if exc.response is not None:
+                        retry_after_raw = exc.response.headers.get("Retry-After", "1")
+                    retry_after = max(1, int(retry_after_raw))
+                    logger.warning(
+                        "Rate limited posting thread message (attempt=%s), sleeping %ss",
+                        attempt,
+                        retry_after,
+                    )
+                    time.sleep(retry_after)
+                    continue
+                logger.exception("chat_postMessage failed for thread=%s", thread_ts)
+                break
+            except Exception:
+                logger.exception("chat_postMessage failed for thread=%s", thread_ts)
+                break
+
+    try:
+        say(text=text, thread_ts=thread_ts)
+    except Exception:
+        logger.exception("Failed to post thread message via both chat_postMessage and say thread=%s", thread_ts)
+
+
 def _handle_universe_command(text: str, *, thread_ts: str, say) -> bool:
     stripped = _strip_slack_mentions(text).strip()
     lower = stripped.lower()
@@ -318,7 +362,12 @@ def _run_chart_and_respond(
     summary = _format_chart_summary(result)
     if source_label:
         summary = f"{summary}\n- Universe source: `{source_label}`"
-    say(text=summary, thread_ts=thread_ts)
+    _post_thread_message(
+        say=say,
+        channel=channel,
+        thread_ts=thread_ts,
+        text=summary,
+    )
 
     try:
         app.client.files_upload_v2(
@@ -347,12 +396,14 @@ def _run_chart_and_respond(
         )
     except Exception:
         logger.exception("Failed to upload valuation chart artifacts to Slack")
-        say(
+        _post_thread_message(
+            say=say,
+            channel=channel,
+            thread_ts=thread_ts,
             text=(
                 "Chart generated but file upload failed. "
                 f"Chart: `{result.chart_path}` CSV: `{result.csv_path}` JSON: `{result.json_path}` RAW: `{result.raw_path}`"
             ),
-            thread_ts=thread_ts,
         )
         return False
 
@@ -363,14 +414,16 @@ def _run_chart_and_respond(
         title_context=result.title_context,
         source_label=source_label,
     )
-    say(
+    _post_thread_message(
+        say=say,
+        channel=channel,
+        thread_ts=thread_ts,
         text=(
             "Any adjustments to the stock screen or data you'd like me to double-check?\n"
             "Formatting tweaks too. Reply in-thread with updates like:\n"
             "- `@Coatue Claw include AVAV,HII`\n"
             "- `@Coatue Claw exclude GD`"
         ),
-        thread_ts=thread_ts,
     )
     return True
 

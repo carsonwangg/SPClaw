@@ -47,6 +47,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - CSV-backed universe management is implemented for Slack-driven create/edit/reuse flows
 - Missing-ticker chart prompts now ask for source choice (`online` discovery vs saved universe CSV)
 - Post-chart feedback loop is implemented for include/exclude reruns
+- Post-chart feedback prompt delivery now uses resilient thread posting (retry + fallback) for higher Slack reliability
 - Chart headline context now follows prompt theme; citation/footer is left-aligned for cleaner layout
 - Category guide placement now defaults to adaptive in-plot whitespace positioning to reduce wasted space while avoiding key chart overlays
 - OpenClaw-native runtime spec is not yet fully codified
