@@ -84,6 +84,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `openclaw-files-sync`
     - `openclaw-files-index`
   - published index artifacts generated to `published/index.json` and `published/index.md`
+  - Drive mirror root is now set to `/Users/spclaw/Documents/Google Drive Local` for Mac mini sync
 - Chart outputs remain PNG + CSV + JSON + raw provider payload.
 - Session shipping protocol is codified in `AGENTS.md` and templated in `docs/handoffs/ship-template.md`.
 
@@ -132,6 +133,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - Mac mini runtime validation succeeded after pull (`d5099bb`): gateway running, Slack probe `ok=true`; root cause of earlier SSH failure was minimal PATH in non-login shell.
   - Makefile PATH hardening validated on Mac mini after pull (`0862aa0`): non-login SSH `make openclaw-restart` and `make openclaw-slack-status` now execute with resolved `openclaw` + `node`.
   - Hybrid memory runtime deployed on Mac mini (`33650f2`): structured memory active; semantic fallback currently disabled until `OPENAI_API_KEY` is set in runtime env.
+  - File bridge Drive root configured + validated on Mac mini (`9db4643` + latest pull): `make openclaw-files-init`, `make openclaw-files-sync`, and `make openclaw-files-status` pass using `/Users/spclaw/Documents/Google Drive Local`.
 
 ## Next Step to Validate in Slack
 Send in `#charting`:
@@ -174,8 +176,8 @@ Then confirm bot returns:
    - `@Coatue Claw memory checkpoint`
 8. Configure `SLACK_PIPELINE_ADMINS` and optional `COATUE_CLAW_SLACK_BUILD_COMMAND` in runtime env for production permissions/runner control.
 9. Schedule hourly `make openclaw-memory-prune` on runtime host and validate cleanup counts.
-10. Configure `config/file-bridge.json` Drive root to the real Google Drive shared folder path on Mac mini.
-11. Validate file bridge pipeline:
+10. Confirm Google Drive desktop client is actively syncing `/Users/spclaw/Documents/Google Drive Local` to Spencer-shared Drive.
+11. Validate file bridge pipeline with Spencer:
     - `make openclaw-files-init`
     - `make openclaw-files-sync`
     - `make openclaw-files-status`
