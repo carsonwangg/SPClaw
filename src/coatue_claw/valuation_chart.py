@@ -566,6 +566,139 @@ def _format_callout_value(metric_id: str, value: float) -> str:
     return _resolve_axis_formatter(metric_id)(value, None)
 
 
+def _legend_rect(loc: str, anchor_x: float, anchor_y: float, box_w: float, box_h: float) -> tuple[float, float, float, float]:
+    if loc == "upper right":
+        return (anchor_x - box_w, anchor_y - box_h, anchor_x, anchor_y)
+    if loc == "upper left":
+        return (anchor_x, anchor_y - box_h, anchor_x + box_w, anchor_y)
+    if loc == "lower right":
+        return (anchor_x - box_w, anchor_y, anchor_x, anchor_y + box_h)
+    if loc == "lower left":
+        return (anchor_x, anchor_y, anchor_x + box_w, anchor_y + box_h)
+    if loc == "center right":
+        return (anchor_x - box_w, anchor_y - (box_h / 2), anchor_x, anchor_y + (box_h / 2))
+    if loc == "center left":
+        return (anchor_x, anchor_y - (box_h / 2), anchor_x + box_w, anchor_y + (box_h / 2))
+    if loc == "center":
+        return (
+            anchor_x - (box_w / 2),
+            anchor_y - (box_h / 2),
+            anchor_x + (box_w / 2),
+            anchor_y + (box_h / 2),
+        )
+    return (anchor_x - box_w, anchor_y - box_h, anchor_x, anchor_y)
+
+
+def _choose_category_guide_position(
+    x: np.ndarray,
+    y: np.ndarray,
+    *,
+    x_min: float,
+    x_max: float,
+    y_min: float,
+    y_max: float,
+    x_frac_for_callout: float,
+    category_count: int,
+) -> tuple[str, tuple[float, float]]:
+    # Approximate legend footprint in axes coordinates.
+    box_w = 0.21 if category_count <= 6 else 0.27
+    box_h = min(0.30, 0.08 + 0.03 * category_count)
+
+    if x_max <= x_min or y_max <= y_min or len(x) == 0:
+        return ("center", (0.82, 0.42))
+
+    xn = (x - x_min) / (x_max - x_min)
+    yn = (y - y_min) / (y_max - y_min)
+
+    candidates: list[tuple[str, tuple[float, float]]] = [
+        ("center", (0.82, 0.76)),
+        ("center", (0.82, 0.58)),
+        ("center", (0.82, 0.40)),
+        ("center", (0.82, 0.22)),
+        ("center", (0.62, 0.76)),
+        ("center", (0.62, 0.40)),
+        ("center", (0.62, 0.22)),
+        ("center", (0.42, 0.76)),
+        ("center", (0.42, 0.40)),
+        ("center", (0.42, 0.22)),
+        ("center", (0.22, 0.76)),
+        ("center", (0.22, 0.40)),
+        ("center", (0.22, 0.22)),
+        ("center right", (0.98, 0.50)),
+        ("lower right", (0.98, 0.04)),
+        ("upper left", (0.02, 0.98)),
+        ("lower left", (0.02, 0.04)),
+        ("center left", (0.02, 0.50)),
+    ]
+
+    # Reserve top overlays for R^2 and median callout.
+    reserved_r2 = (0.78, 0.93, 1.00, 1.03)
+    callout_half_w = 0.18
+    reserved_callout = (max(0.0, x_frac_for_callout - callout_half_w), 0.93, min(1.0, x_frac_for_callout + callout_half_w), 1.03)
+
+    trend_x: np.ndarray | None = None
+    trend_y: np.ndarray | None = None
+    if len(x) >= 2 and float(np.max(x) - np.min(x)) > 1e-9:
+        coeff = np.polyfit(x, y, 1)
+        trend_x = np.linspace(x_min, x_max, 80)
+        trend_y = coeff[0] * trend_x + coeff[1]
+        trend_x = (trend_x - x_min) / (x_max - x_min)
+        trend_y = (trend_y - y_min) / (y_max - y_min)
+
+    best = candidates[0]
+    best_score = float("inf")
+
+    for loc, (ax_x, ax_y) in candidates:
+        x0, y0r, x1, y1r = _legend_rect(loc, ax_x, ax_y, box_w, box_h)
+        # Clamp to axes.
+        x0 = max(0.0, x0)
+        y0r = max(0.0, y0r)
+        x1 = min(1.0, x1)
+        y1r = min(1.0, y1r)
+
+        # Count points in or near the box and prefer maximum clearance from points.
+        in_box = np.sum((xn >= x0) & (xn <= x1) & (yn >= y0r) & (yn <= y1r))
+        near_pad = 0.06
+        near_box = np.sum(
+            (xn >= (x0 - near_pad)) & (xn <= (x1 + near_pad)) & (yn >= (y0r - near_pad)) & (yn <= (y1r + near_pad))
+        )
+        score = float(in_box) * 200.0 + float(near_box) * 25.0
+
+        # Penalize overlap with top annotations.
+        def _overlap(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> bool:
+            return not (a[2] <= b[0] or a[0] >= b[2] or a[3] <= b[1] or a[1] >= b[3])
+
+        rect = (x0, y0r, x1, y1r)
+        if _overlap(rect, reserved_r2):
+            score += 500.0
+        if _overlap(rect, reserved_callout):
+            score += 500.0
+
+        if trend_x is not None and trend_y is not None:
+            trend_overlap = np.sum(
+                (trend_x >= (x0 - 0.01))
+                & (trend_x <= (x1 + 0.01))
+                & (trend_y >= (y0r - 0.01))
+                & (trend_y <= (y1r + 0.01))
+            )
+            score += float(trend_overlap) * 4.0
+
+        dx = np.maximum(np.maximum(x0 - xn, 0.0), xn - x1)
+        dy = np.maximum(np.maximum(y0r - yn, 0.0), yn - y1r)
+        nearest_dist = float(np.min(np.sqrt((dx * dx) + (dy * dy)))) if len(xn) else 0.0
+        score -= nearest_dist * 80.0
+
+        # Prefer right side when equally good (readability with left-heavy clusters).
+        center_x = (x0 + x1) / 2
+        score += (0.5 - center_x) * 0.2
+
+        if score < best_score:
+            best_score = score
+            best = (loc, (ax_x, ax_y))
+
+    return best
+
+
 def _is_metric_eligible(point: TickerPoint, metric_id: str) -> bool:
     # Keep strict freshness gating for any plotted series.
     if "stale_market_data" in point.quality_flags:
@@ -601,8 +734,7 @@ def _render_chart(
     included = [row[0] for row in included_rows]
 
     fig = plt.figure(figsize=(14, 9), facecolor="#E9EAED")
-    # Reserve a dedicated right-side gutter for the category guide so it never overlaps plot visuals.
-    ax = fig.add_axes([0.08, 0.14, 0.70, 0.56], facecolor="#F3F4F6")
+    ax = fig.add_axes([0.08, 0.14, 0.86, 0.56], facecolor="#F3F4F6")
 
     headline = (title_context or "").strip() or f"{metric_label(x_metric)} vs. {metric_label(y_metric)}"
     subheadline = f"{metric_label(y_metric)} vs {metric_label(x_metric)} (latest snapshot)"
@@ -723,16 +855,27 @@ def _render_chart(
         )
         for category in category_order
     ]
-    legend = fig.legend(
+    legend_loc, legend_anchor = _choose_category_guide_position(
+        x,
+        y,
+        x_min=x_min,
+        x_max=x_max,
+        y_min=y_min,
+        y_max=y_max,
+        x_frac_for_callout=x_frac,
+        category_count=len(category_order),
+    )
+    legend = ax.legend(
         handles=legend_handles,
         labels=category_order,
         title="Category Guide",
-        loc="center right",
-        bbox_to_anchor=(0.955, 0.43),
+        loc=legend_loc,
+        bbox_to_anchor=legend_anchor,
         ncol=1,
         fontsize=9,
         title_fontsize=9,
         frameon=True,
+        borderaxespad=0.4,
     )
     if legend is not None:
         legend.get_title().set_color("#2B2D37")

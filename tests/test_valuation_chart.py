@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import numpy as np
+
 from coatue_claw.valuation_chart import (
     ProviderSnapshot,
     _build_point,
+    _choose_category_guide_position,
     _format_readable_date,
 )
 
@@ -125,3 +128,36 @@ def test_build_point_propagates_category():
 
 def test_format_readable_date_uses_month_name():
     assert _format_readable_date("2026-02-18T13:20:00+00:00") == "Feb 18, 2026"
+
+
+def test_choose_category_guide_position_avoids_dense_cluster():
+    x = np.array([1.4, 1.8, 2.1, 2.4, 2.8, 3.0, 78.0], dtype=float)
+    y = np.array([7.0, 9.0, 8.6, 10.2, 11.1, 12.3, 63.0], dtype=float)
+    loc, anchor = _choose_category_guide_position(
+        x,
+        y,
+        x_min=0.0,
+        x_max=85.0,
+        y_min=-5.0,
+        y_max=70.0,
+        x_frac_for_callout=0.42,
+        category_count=2,
+    )
+    assert loc in {"center", "center right", "lower right"}
+    assert anchor[0] >= 0.62
+
+
+def test_choose_category_guide_position_avoids_top_overlay_band():
+    x = np.array([2.0, 2.5, 3.0, 3.6, 4.1], dtype=float)
+    y = np.array([8.0, 9.2, 10.0, 11.0, 12.0], dtype=float)
+    loc, anchor = _choose_category_guide_position(
+        x,
+        y,
+        x_min=0.0,
+        x_max=10.0,
+        y_min=0.0,
+        y_max=20.0,
+        x_frac_for_callout=0.82,
+        category_count=3,
+    )
+    assert not (loc == "center" and anchor[1] >= 0.72)

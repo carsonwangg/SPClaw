@@ -25,8 +25,8 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - Chart titles now infer context from user prompt/source (example: `Defense Stocks`) and use that as headline.
 - Footer citation/footnote text now sits at the left corner since logo text was removed.
 - Coatue-style median dotted line + callout has been restored for chart outputs after configurable-axis refactor.
-- Category legend/key is now moved out of the plot area into the grey header zone in a dotted guide box (`Category Guide`).
-- Category guide placement is now in a dedicated right-side gutter outside the plotting area, preventing overlap with `R^2` and other visual callouts.
+- Category guide/key is now auto-placed inside plot whitespace (dotted `Category Guide` box) using a density-aware heuristic.
+- Default guide placement behavior now optimizes for low point density and distance from datapoints while avoiding `R^2` and median-callout zones (and de-prioritizing trendline overlap).
 - Chart outputs remain PNG + CSV + JSON + raw provider payload.
 - Session shipping protocol is codified in `AGENTS.md` and templated in `docs/handoffs/ship-template.md`.
 
@@ -62,7 +62,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `valuation-scatter-*-raw.json`
 
 ## Validation Completed
-- `pytest`: `13 passed` (valuation chart + chart-intent parser tests).
+- `pytest`: `20 passed` (valuation chart + chart-intent parser tests).
 - CLI smoke run (latest):
   - provider used: `yahoo`
   - included/excluded counts returned
@@ -77,6 +77,7 @@ Send in `#charting`:
 - `@Coatue Claw create universe defense with PLTR,LMT,RTX,NOC,GD,LDOS`
 - `@Coatue Claw make me a valuation chart for defense stocks` then reply `@Coatue Claw use universe defense` or `@Coatue Claw online`
 - Confirm rendered title headline is prompt-relevant (`Defense Stocks` / similar) and footnote is left-aligned.
+- Confirm category guide appears inside unused plot whitespace and does not consume a dedicated right gutter.
 
 Then confirm bot returns:
 - as-of timestamps
@@ -86,5 +87,6 @@ Then confirm bot returns:
 
 ## Immediate Next Steps
 1. Run all Slack validation prompts above in `#charting`.
-2. Validate universe CRUD commands write/read expected CSVs under `/opt/coatue-claw-data/db/universes/`.
-3. If response fails, capture first failing line with `openclaw channels logs --channel slack --lines 300`.
+2. Validate guide placement across at least 3 chart shapes (left-clustered, right-clustered, mixed) to confirm no overlap with key visuals.
+3. Validate universe CRUD commands write/read expected CSVs under `/opt/coatue-claw-data/db/universes/`.
+4. If response fails, capture first failing line with `openclaw channels logs --channel slack --lines 300`.
