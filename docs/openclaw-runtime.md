@@ -53,6 +53,7 @@ Memory output contract:
   - `SLACK_BOT_TOKEN`
   - `SLACK_SIGNING_SECRET`
   - `SLACK_APP_TOKEN`
+  - bot OAuth scope `files:read` for automatic Slack file ingest
 
 ## Operational Commands
 - OpenClaw binary resolution:
@@ -103,6 +104,11 @@ File bridge contract:
 - Published index artifacts are generated at:
   - `/opt/coatue-claw-data/files/published/index.json`
   - `/opt/coatue-claw-data/files/published/index.md`
+- Slack file ingest contract:
+  - Slack message/app_mention events with file attachments trigger automatic file intake.
+  - Files are downloaded with bot token auth and categorized into `incoming/<Category>`.
+  - Files are mirrored into Drive `01_DROP_HERE_Incoming/<Category>` for shared visibility.
+  - Intake metadata is stored in `/opt/coatue-claw-data/db/file_ingest.sqlite`.
 
 ## Runtime Settings Contract
 - Live Slack-configurable settings are stored outside git:
@@ -139,6 +145,10 @@ Memory environment controls:
 - `COATUE_CLAW_MEMORY_VECTOR_DIR`: optional LanceDB directory path
 - `COATUE_CLAW_MEMORY_EMBED_MODEL`: optional embedding model (default `text-embedding-3-small`)
 - `OPENAI_API_KEY`: required only for semantic memory fallback
+
+File ingest environment controls:
+- `COATUE_CLAW_FILE_INGEST_DB_PATH`: optional override for Slack file ingest SQLite path
+- `COATUE_CLAW_SLACK_FILE_MAX_MB`: optional max Slack file size in MB for auto-ingest (default `50`)
 
 ## Slack Validation Checklist
 1. `make openclaw-slack-status` reports `running=true` and successful probe status.

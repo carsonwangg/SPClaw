@@ -32,6 +32,11 @@ Replace this with the actual Google Drive folder path on Mac mini (Google Drive 
 - Bot pulls Drive `01_DROP_HERE_Incoming` into local `incoming`.
 - Subfolders are preserved recursively (Drive -> local and local -> Drive), so humans can organize by topic and the bot keeps the same paths.
 - `01_DROP_HERE_Incoming/_Latest_Reference_READ_ONLY` is a carbon copy of Latest for visibility and is ignored during pull ingestion.
+- Slack uploads are also ingested automatically:
+  - user uploads a file in Slack
+  - bot downloads, classifies, and stores under local `incoming/<Category>`
+  - bot mirrors the same file to Drive `01_DROP_HERE_Incoming/<Category>`
+  - ingest metadata is written to SQLite (`/opt/coatue-claw-data/db/file_ingest.sqlite`)
 
 Avoid direct human edits inside bot-owned local folders to prevent sync conflicts.
 
@@ -84,6 +89,11 @@ Example human workflow:
 - OpenClaw pulls files to matching local paths (for example `.../incoming/Companies/...`).
 - Generated outputs are published to `02_READ_ONLY_Latest_AUTO/<same category>`.
 - Older outputs are moved to `03_READ_ONLY_Archive_AUTO/<same category>`.
+
+Slack upload workflow:
+- Spencer uploads files directly in Slack.
+- Bot auto-acks with category routing summary in thread.
+- Files become available in the same category structure as Drive drop-offs.
 
 ### Rebuild published index files
 ```bash

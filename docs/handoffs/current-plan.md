@@ -73,6 +73,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - Drive mirror root is configured on Mac mini as `/Users/spclaw/Documents/Google Drive Local`
   - category subfolders provisioned for Spencer-facing workflows under `01_DROP_HERE_Incoming/02_READ_ONLY_Latest_AUTO/03_READ_ONLY_Archive_AUTO`
   - `01_DROP_HERE_Incoming/_Latest_Reference_READ_ONLY` auto-mirrors Latest and is excluded from pull ingestion
+  - Slack file uploads now auto-ingest into knowledge folders with SQLite audit tracking (`/opt/coatue-claw-data/db/file_ingest.sqlite`)
   - operations via `make openclaw-files-{init,status,sync-pull,sync-push,sync,index}`
   - published index artifacts generated to `published/index.{json,md}`
 - Git shipping protocol is now explicit: every Codex change ships to `origin` with handoff updates
@@ -87,7 +88,8 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
    - `memory checkpoint`
 4. Confirm Google Drive desktop client is syncing `/Users/spclaw/Documents/Google Drive Local` to Spencer-shared Drive
 5. Validate category-based file flow with Spencer (`01_DROP_HERE_Incoming/<Category>` -> local incoming mirror -> `02_READ_ONLY_Latest_AUTO/<Category>`)
-6. Schedule hourly `make openclaw-memory-prune` on runtime host
-7. Validate daily backfill flow (`claw memory extract-daily --dry-run --days 14`)
-8. Validate new diligence memo output in Slack (`diligence TICKER`) and confirm section completeness/citations
-9. Wire first scheduled jobs (weekly idea scan + X digest) and replace scheduler status placeholder target
+6. Validate Slack file upload auto-ingest (`Slack upload` -> categorized `incoming/<Category>` + DB record in `file_ingest.sqlite`)
+7. Schedule hourly `make openclaw-memory-prune` on runtime host
+8. Validate daily backfill flow (`claw memory extract-daily --dry-run --days 14`)
+9. Validate new diligence memo output in Slack (`diligence TICKER`) and confirm section completeness/citations
+10. Wire first scheduled jobs (weekly idea scan + X digest) and replace scheduler status placeholder target

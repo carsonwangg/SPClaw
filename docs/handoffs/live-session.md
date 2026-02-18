@@ -87,6 +87,10 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - Drive mirror root is now set to `/Users/spclaw/Documents/Google Drive Local` for Mac mini sync
   - Spencer-facing category subfolders are provisioned under `01_DROP_HERE_Incoming`, `02_READ_ONLY_Latest_AUTO`, and `03_READ_ONLY_Archive_AUTO` (Companies, Sectors, Themes, Earnings, Filings, Transcripts, Decks, Models, Notes, Calls, Macro, Admin, Misc)
   - `01_DROP_HERE_Incoming/_Latest_Reference_READ_ONLY` auto-mirrors Latest for visibility and is excluded from pull ingestion
+  - Slack file uploads are now auto-ingested (download + category routing + SQLite audit + Drive mirror):
+    - module: `src/coatue_claw/slack_file_ingest.py`
+    - DB: `/opt/coatue-claw-data/db/file_ingest.sqlite`
+    - wired in `src/coatue_claw/slack_bot.py` (`message` + `app_mention` with file attachments)
 - Chart outputs remain PNG + CSV + JSON + raw provider payload.
 - Session shipping protocol is codified in `AGENTS.md` and templated in `docs/handoffs/ship-template.md`.
 
@@ -137,6 +141,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - Hybrid memory runtime deployed on Mac mini (`33650f2`): structured memory active; semantic fallback currently disabled until `OPENAI_API_KEY` is set in runtime env.
   - File bridge Drive root configured + validated on Mac mini (`9db4643` + latest pull): `make openclaw-files-init`, `make openclaw-files-sync`, and `make openclaw-files-status` pass using `/Users/spclaw/Documents/Google Drive Local`.
   - Recursive subfolder sync validation passed on Mac mini: file dropped into `01_DROP_HERE_Incoming/Companies` mirrored to local `incoming/Companies`, then cleaned up.
+  - Slack file ingest tests added/validated: classification, routing, dedupe, and SQLite write path.
 
 ## Next Step to Validate in Slack
 Send in `#charting`:
@@ -184,5 +189,10 @@ Then confirm bot returns:
     - Spencer drops a file into `01_DROP_HERE_Incoming/<Category>`
     - run `make openclaw-files-sync-pull`
     - confirm file appears in `/opt/coatue-claw-data/files/incoming/<Category>`
-12. Wire first scheduled jobs (weekly idea scan + X digest) to replace scheduler status placeholder behavior.
-13. If response fails, capture first failing line with `openclaw channels logs --channel slack --lines 300`.
+12. Validate Slack upload ingestion with Spencer:
+    - Spencer uploads a file in Slack (without bot mention)
+    - confirm bot thread ack shows routed category
+    - confirm file appears in `/opt/coatue-claw-data/files/incoming/<Category>`
+    - confirm record exists in `/opt/coatue-claw-data/db/file_ingest.sqlite`
+13. Wire first scheduled jobs (weekly idea scan + X digest) to replace scheduler status placeholder behavior.
+14. If response fails, capture first failing line with `openclaw channels logs --channel slack --lines 300`.

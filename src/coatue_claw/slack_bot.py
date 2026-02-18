@@ -31,6 +31,7 @@ from coatue_claw.runtime_settings import (
     update_runtime_setting,
 )
 from coatue_claw.slack_config_intent import parse_config_intent
+from coatue_claw.slack_file_ingest import ingest_slack_files
 from coatue_claw.slack_pipeline import (
     PipelineError,
     deploy_history,
@@ -203,8 +204,75 @@ def _format_chart_usage() -> str:
         "- settings: `@Coatue Claw show my settings` or `@Coatue Claw going forward look for 12 peers`\n"
         "- pipeline: `@Coatue Claw deploy latest` or `@Coatue Claw undo last deploy`\n"
         "- memory: `@Coatue Claw memory status` or `@Coatue Claw what is my daughter's birthday?`\n"
+        "- file ingest: upload a file in Slack and I'll auto-sort it into the knowledge folders\n"
         "- default: YoY Revenue Growth is y-axis unless you specify axes"
     )
+
+
+def _extract_event_files(event: dict) -> list[dict]:
+    files = event.get("files")
+    if isinstance(files, list):
+        return [item for item in files if isinstance(item, dict)]
+    message = event.get("message")
+    if isinstance(message, dict):
+        files = message.get("files")
+        if isinstance(files, list):
+            return [item for item in files if isinstance(item, dict)]
+    return []
+
+
+def _handle_file_ingest_event(
+    *,
+    event: dict,
+    source_event: str,
+    thread_ts: str | None,
+    say,
+) -> None:
+    files = _extract_event_files(event)
+    if not files:
+        return
+
+    channel = event.get("channel")
+    message = event.get("message") if isinstance(event.get("message"), dict) else {}
+    user_id = event.get("user") or message.get("user")
+    text = (event.get("text") or message.get("text") or "").strip()
+    message_ts = event.get("ts") or event.get("event_ts") or message.get("ts")
+    effective_thread_ts = thread_ts or event.get("thread_ts") or message.get("thread_ts") or message_ts
+
+    result = ingest_slack_files(
+        files=files,
+        channel=channel,
+        user_id=user_id,
+        message_ts=message_ts,
+        message_text=text,
+        source_event=source_event,
+    )
+
+    processed_count = int(result.get("processed_count") or 0)
+    errors = list(result.get("errors") or [])
+    if processed_count == 0 and not errors:
+        return
+
+    lines = [
+        "File ingest:",
+        f"- processed: `{processed_count}`",
+        f"- skipped: `{len(result.get('skipped') or [])}`",
+        f"- errors: `{len(errors)}`",
+    ]
+
+    processed = list(result.get("processed") or [])
+    for item in processed[:5]:
+        lines.append(
+            f"- `{item['original_name']}` -> `{item['category']}`"
+        )
+
+    if errors:
+        lines.append(f"- first_error: `{errors[0]}`")
+
+    if effective_thread_ts:
+        say(text="\n".join(lines), thread_ts=effective_thread_ts)
+    else:
+        say(text="\n".join(lines))
 
 
 def _memory_runtime() -> MemoryRuntime | None:
@@ -789,6 +857,23 @@ def _run_chart_and_respond(
     return True
 
 
+@app.event("message")
+def handle_message(event, say):
+    subtype = str(event.get("subtype") or "")
+    if subtype in {"bot_message", "message_deleted"}:
+        return
+    if event.get("bot_id"):
+        return
+    if not _extract_event_files(event):
+        return
+    _handle_file_ingest_event(
+        event=event,
+        source_event="slack-message",
+        thread_ts=event.get("thread_ts") or event.get("ts"),
+        say=say,
+    )
+
+
 @app.event("app_mention")
 def handle_mention(event, say):
     text = event.get("text") or ""
@@ -797,6 +882,13 @@ def handle_mention(event, say):
     event_ts = event.get("ts")
     thread_ts = event.get("thread_ts") or event.get("ts")
     logger.info("app_mention received channel=%s ts=%s text=%r", event.get("channel"), event.get("ts"), text)
+
+    _handle_file_ingest_event(
+        event=event,
+        source_event="slack-app-mention",
+        thread_ts=thread_ts,
+        say=say,
+    )
 
     if _handle_memory_command(
         text=text,
