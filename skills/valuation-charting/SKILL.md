@@ -78,5 +78,10 @@ To ensure the chart image appears in Slack:
    - `/Users/spclaw/.openclaw/media/charts/`
 2. Return media via payload `mediaUrl` or a `MEDIA:` line pointing to copied PNG.
 3. Include concise text with provider, as-of dates, and included/excluded counts.
+4. After a successful chart post, always send one final follow-up question in-thread:
+   - `Any adjustments to the stock screen, data, or formatting you'd like me to double-check?`
+   - Include quick examples for edits (for example `include TICK1,TICK2` or `exclude TICK3`).
+
+Only skip the follow-up question if chart generation/upload failed.
 
 Do not return text-only scatter values when chart output is requested.
