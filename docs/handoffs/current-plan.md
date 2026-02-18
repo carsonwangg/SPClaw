@@ -44,6 +44,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Basic CLI + Slack bot skeleton are implemented
 - Bot mention delivery is under active debugging
 - OpenClaw-native runtime spec is not yet fully codified
+- Git shipping protocol is now explicit: every Codex change ships to `origin` with handoff updates
 
 ## Immediate Next Actions
 1. Write OpenClaw runtime spec in repo (`docs/openclaw-runtime.md`)

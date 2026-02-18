@@ -3,6 +3,12 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Current Status (2026-02-18)
+- Repo is synced on `main` and used as the cross-device source of truth.
+- Valuation chart feature is implemented and unit-tested.
+- Remaining validation is Slack mention-to-reply behavior in channel.
+- Session shipping protocol is now codified in `AGENTS.md` and templated in `docs/handoffs/ship-template.md`.
+
 ## What Was Implemented
 - Added valuation chart engine in `/opt/coatue-claw/src/coatue_claw/valuation_chart.py`.
 - Added CLI command in `/opt/coatue-claw/src/coatue_claw/cli.py`:
@@ -51,3 +57,8 @@ Then confirm bot returns:
 - provider used + fallback reason
 - chart image with line of best fit
 - CSV/JSON/raw attachments
+
+## Immediate Next Steps
+1. Run the Slack mention test command above in `#all-coatue-claw`.
+2. Capture first failing log line via `make openclaw-slack-logs` if no reply is posted.
+3. Ship fix to git with updated handoff status and next steps.

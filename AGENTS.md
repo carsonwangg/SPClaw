@@ -31,6 +31,7 @@ Build and operate a 24/7 equity research system for Spencer + Carson, with Slack
   - clear input/output contract
   - basic test coverage
   - update to docs/handoffs/current-plan.md
+  - update to docs/handoffs/live-session.md with current status + next steps
 - Prefer small, reversible PR-sized changes
 
 ## Safety/Compliance
@@ -48,3 +49,13 @@ Build and operate a 24/7 equity research system for Spencer + Carson, with Slack
   - at least 2 charts
 - X digest is digest-first (not real-time alert-first)
 - Slack is primary delivery channel for shared workflow
+
+## Git Shipping Protocol (Codex Sessions)
+- Every code or docs change made through Codex must be shipped to git before the session ends.
+- "Shipped" means:
+  - committed with a clear message
+  - pushed to `origin` so the laptop can pull immediately
+- Do not leave local-only deltas unless explicitly requested.
+- Every ship must include handoff continuity updates:
+  - `docs/handoffs/live-session.md`: current status + immediate next steps
+  - `docs/handoffs/current-plan.md`: plan/status changes when scope or priority changes
