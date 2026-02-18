@@ -18,7 +18,7 @@ import yfinance as yf
 
 ARTIFACTS_DIR = Path("/opt/coatue-claw-data/artifacts/charts")
 CACHE_DIR = Path("/opt/coatue-claw-data/cache/valuation")
-CACHE_SCHEMA_VERSION = "v4"
+CACHE_SCHEMA_VERSION = "v5"
 
 # Freshness policy.
 MARKET_MAX_AGE_HOURS = 48
@@ -53,6 +53,7 @@ class ProviderSnapshot:
     revenue_last_4q_sum: float | None
     errors: list[str]
     raw_payload: dict[str, Any]
+    company_category: str | None = None
 
 
 @dataclass
@@ -80,6 +81,7 @@ class TickerPoint:
     quality_flags: list[str]
     included: bool
     exclusion_reason: str | None
+    company_category: str | None = None
 
 
 @dataclass
@@ -166,6 +168,20 @@ def _parse_iso(ts: str | None) -> datetime | None:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
     return dt.astimezone(UTC)
+
+
+def _format_readable_date(ts: str | None) -> str:
+    dt = _parse_iso(ts)
+    if dt is None:
+        return "n/a"
+    return dt.strftime("%b %d, %Y")
+
+
+def _canonical_category(raw_value: Any) -> str:
+    value = str(raw_value or "").strip()
+    if not value:
+        return "Unclassified"
+    return value
 
 
 def _as_float(v: Any) -> float | None:
@@ -281,6 +297,9 @@ class YahooAdapter:
             cash_eq = _as_float(info.get("totalCash"))
             preferred_equity = _as_float(info.get("preferredStock")) or 0.0
             minority_interest = _as_float(info.get("minorityInterest")) or 0.0
+            company_category = _canonical_category(
+                info.get("sectorDisp") or info.get("sector") or info.get("industryDisp") or info.get("industry")
+            )
 
             if isinstance(qbs, pd.DataFrame) and not qbs.empty:
                 qbs = qbs.sort_index(axis=1)
@@ -335,6 +354,7 @@ class YahooAdapter:
                     "totalCash": info.get("totalCash"),
                     "quoteCurrency": quote_currency,
                     "financialCurrency": financial_currency,
+                    "companyCategory": company_category,
                 },
                 "quarterly_revenue_series": revenue_series_export,
             }
@@ -357,6 +377,7 @@ class YahooAdapter:
                 revenue_last_4q_sum=revenue_last_4q_sum,
                 errors=[],
                 raw_payload=raw_payload,
+                company_category=company_category,
             )
             cache.set(cache_key, asdict(snapshot))
             return snapshot
@@ -379,6 +400,7 @@ class YahooAdapter:
                 revenue_last_4q_sum=None,
                 errors=[f"provider_fetch_error:{exc.__class__.__name__}"],
                 raw_payload={"error": str(exc)},
+                company_category=None,
             )
             cache.set(cache_key, asdict(snapshot))
             return snapshot
@@ -487,6 +509,7 @@ def _build_point(
         quality_flags=flags,
         included=included,
         exclusion_reason=exclusion_reason,
+        company_category=_canonical_category(snapshot.company_category),
     )
 
 
@@ -540,21 +563,36 @@ def _render_chart(points: list[TickerPoint], out_path: Path, title_suffix: str) 
     if y_min > 0:
         y_min = min(-2.0, y_min)
 
-    x_cut = float(np.percentile(x, 70)) if len(x) >= 4 else float(np.median(x))
-    y_cut = float(np.percentile(y, 45)) if len(y) >= 4 else float(np.median(y))
+    categories = [p.company_category or "Unclassified" for p in included]
+    category_order = sorted(set(categories), key=str.casefold)
+    palette = [
+        "#1F5AA6",
+        "#2A7F62",
+        "#AA5A19",
+        "#A02755",
+        "#5A4699",
+        "#7E8084",
+        "#2687A8",
+        "#7B6A34",
+        "#BD3E2F",
+        "#3F6E7A",
+    ]
+    color_map = {cat: palette[idx % len(palette)] for idx, cat in enumerate(category_order)}
 
-    focus_mask = (x >= x_cut) & (y <= y_cut)
-    if int(np.sum(focus_mask)) == 0:
-        focus_mask = x >= x_cut
+    for category in category_order:
+        idx = [i for i, c in enumerate(categories) if c == category]
+        ax.scatter(
+            x[idx],
+            y[idx],
+            s=54,
+            color=color_map[category],
+            alpha=0.96,
+            zorder=3,
+            label=category,
+        )
 
-    shade_top = max(0.0, y_cut)
-    ax.fill_between([x_cut, x_max], [y_min, y_min], [shade_top, shade_top], color="#DCE8F8", alpha=0.8, zorder=0)
-
-    ax.scatter(x[~focus_mask], y[~focus_mask], s=52, color="#7E8084", alpha=0.95, zorder=3)
-    ax.scatter(x[focus_mask], y[focus_mask], s=56, color="#2A73C5", alpha=0.98, zorder=4)
-
-    for p, xv, yv, is_focus in zip(included, x, y, focus_mask):
-        if is_focus or len(included) <= 14:
+    for p, xv, yv in zip(included, x, y):
+        if len(included) <= 14:
             ax.annotate(p.ticker, (xv, yv), textcoords="offset points", xytext=(5, 5), fontsize=9, color="#2A2C36")
 
     if len(included) >= 2:
@@ -592,6 +630,17 @@ def _render_chart(points: list[TickerPoint], out_path: Path, title_suffix: str) 
 
     ax.set_xlabel("EV / LTM Revenue", color="#2B2D37", fontsize=12, labelpad=12)
     ax.set_ylabel("YoY Revenue Growth", color="#2B2D37", fontsize=12, labelpad=12)
+    legend = ax.legend(
+        title="Category",
+        loc="upper left",
+        bbox_to_anchor=(0.0, 1.01),
+        ncol=2,
+        fontsize=9,
+        title_fontsize=9,
+        frameon=False,
+    )
+    if legend is not None:
+        legend.get_title().set_color("#2B2D37")
 
     fig.text(0.025, 0.04, "COATUE CLAW", fontsize=16, color="#121318", weight="bold")
     fig.text(0.14, 0.044, f"{title_suffix}", fontsize=9, color="#3C3E49")
@@ -668,7 +717,8 @@ def run_valuation_chart(
     market_as_of = max((p.market_data_as_of for p in points if p.market_data_as_of), default=None)
     fundamentals_as_of = max((p.fundamentals_as_of for p in points if p.fundamentals_as_of), default=None)
 
-    title_suffix = f"provider={provider_used}, metric=ltm, market_as_of={market_as_of or 'n/a'}"
+    market_as_of_display = _format_readable_date(market_as_of)
+    title_suffix = f"Provider: {provider_used} | Metric: LTM | As of: {market_as_of_display}"
     _render_chart(points, chart_path, title_suffix)
 
     included_count = sum(1 for p in points if p.included)

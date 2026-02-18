@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from coatue_claw.valuation_chart import (
     ProviderSnapshot,
     _build_point,
+    _format_readable_date,
 )
 
 
@@ -17,6 +18,7 @@ def _snapshot(
     latest_quarter_end: str | None = None,
     total_debt: float | None = 200.0,
     ltm_revenue: float | None = 460.0,
+    company_category: str | None = "Software",
 ) -> ProviderSnapshot:
     now_utc = datetime.now(UTC).replace(microsecond=0)
     now_iso = now_utc.isoformat()
@@ -38,6 +40,7 @@ def _snapshot(
         revenue_last_4q_sum=ltm_revenue,
         errors=[],
         raw_payload={},
+        company_category=company_category,
     )
 
 
@@ -108,3 +111,17 @@ def test_build_point_excludes_stale_fundamentals():
     )
     assert point.included is False
     assert point.exclusion_reason == "stale_fundamentals"
+
+
+def test_build_point_propagates_category():
+    snap = _snapshot(company_category="Infrastructure")
+    point = _build_point(
+        snap,
+        request_at=datetime.now(UTC).replace(microsecond=0).isoformat(),
+        now_utc=datetime.now(UTC),
+    )
+    assert point.company_category == "Infrastructure"
+
+
+def test_format_readable_date_uses_month_name():
+    assert _format_readable_date("2026-02-18T13:20:00+00:00") == "Feb 18, 2026"

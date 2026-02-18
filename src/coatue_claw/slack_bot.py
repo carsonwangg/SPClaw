@@ -10,7 +10,7 @@ from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 from coatue_claw.cli import run_diligence
-from coatue_claw.valuation_chart import run_valuation_chart
+from coatue_claw.valuation_chart import _format_readable_date, run_valuation_chart
 
 load_dotenv("/opt/coatue-claw/.env.prod")
 
@@ -82,8 +82,8 @@ def _format_chart_summary(result) -> str:
     if result.provider_fallback_reason:
         lines.append(f"- Fallback reason: `{result.provider_fallback_reason}`")
     lines.append(f"- Request time (UTC): `{result.request_received_at}`")
-    lines.append(f"- Market data as-of: `{result.market_data_as_of}`")
-    lines.append(f"- Fundamentals as-of: `{result.fundamentals_as_of}`")
+    lines.append(f"- Market data as-of: `{_format_readable_date(result.market_data_as_of)}`")
+    lines.append(f"- Fundamentals as-of: `{_format_readable_date(result.fundamentals_as_of)}`")
     lines.append(f"- Included: `{result.included_count}` | Excluded: `{result.excluded_count}`")
 
     excluded = [p for p in result.points if not p.included]
