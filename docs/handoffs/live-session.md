@@ -18,6 +18,10 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `online` discovery
     - saved `universe` CSV
   - post-chart feedback loop asks for include/exclude tickers and can rerun chart in-thread
+- Chart pre-output follow-ups are now only asked when strictly necessary:
+  - bot first tries auto universe match and online discovery
+  - if a valid ticker set is found, it renders immediately with no extra question
+  - if not, it asks for `online` vs `use universe NAME`
 - Chart titles now infer context from user prompt/source (example: `Defense Stocks`) and use that as headline.
 - Footer citation/footnote text now sits at the left corner since logo text was removed.
 - Coatue-style median dotted line + callout has been restored for chart outputs after configurable-axis refactor.

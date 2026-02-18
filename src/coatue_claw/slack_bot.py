@@ -131,6 +131,18 @@ def _parse_universe_choice(text: str, suggested_universe: str | None) -> tuple[s
     return None
 
 
+def _merge_unique_tickers(primary: list[str], secondary: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for ticker in primary + secondary:
+        t = ticker.upper().strip()
+        if not t or t in seen:
+            continue
+        seen.add(t)
+        out.append(t)
+    return out
+
+
 def _extract_feedback_changes(text: str) -> tuple[list[str], list[str]]:
     stripped = _strip_slack_mentions(text)
     include: list[str] = []
@@ -353,8 +365,8 @@ def _run_chart_and_respond(
     )
     say(
         text=(
-            "Feedback loop: what should and shouldn't be included?\n"
-            "Reply in this thread with something like:\n"
+            "Any adjustments to the stock screen or data you'd like me to double-check?\n"
+            "Formatting tweaks too. Reply in-thread with updates like:\n"
             "- `@Coatue Claw include AVAV,HII`\n"
             "- `@Coatue Claw exclude GD`"
         ),
@@ -440,8 +452,42 @@ def handle_mention(event, say):
     chart_intent = parse_chart_intent(text)
     if chart_intent is not None:
         if _is_chart_peer_expansion_request(text, chart_intent.tickers):
-            metric_examples = ", ".join(sorted(METRIC_SPECS.keys()))
             suggested_universe = find_relevant_universe_name(text)
+            title_context = infer_chart_title_context(text)
+            query = _build_chart_query(text)
+
+            if suggested_universe:
+                universe_tickers = load_universe(suggested_universe)
+                auto_tickers = _merge_unique_tickers(chart_intent.tickers, universe_tickers)
+                if len(auto_tickers) >= 2:
+                    _run_chart_and_respond(
+                        say=say,
+                        channel=channel,
+                        thread_ts=thread_ts,
+                        tickers=auto_tickers,
+                        x_metric=chart_intent.x_metric,
+                        y_metric=chart_intent.y_metric,
+                        title_context=title_context,
+                        source_label=f"universe:{suggested_universe}",
+                    )
+                    return
+
+            discovered = discover_online_tickers(query, limit=8)
+            auto_tickers = _merge_unique_tickers(chart_intent.tickers, discovered)
+            if len(auto_tickers) >= 2:
+                _run_chart_and_respond(
+                    say=say,
+                    channel=channel,
+                    thread_ts=thread_ts,
+                    tickers=auto_tickers,
+                    x_metric=chart_intent.x_metric,
+                    y_metric=chart_intent.y_metric,
+                    title_context=title_context,
+                    source_label=f"online:{query}",
+                )
+                return
+
+            metric_examples = ", ".join(sorted(METRIC_SPECS.keys()))
             suggested_line = ""
             if suggested_universe:
                 suggested_count = len(load_universe(suggested_universe))
@@ -449,16 +495,17 @@ def handle_mention(event, say):
             PENDING_CHART_CHOICES[thread_ts] = PendingChartChoice(
                 x_metric=chart_intent.x_metric,
                 y_metric=chart_intent.y_metric,
-                title_context=infer_chart_title_context(text),
-                query=_build_chart_query(text),
+                title_context=title_context,
+                query=query,
                 seed_tickers=chart_intent.tickers,
                 suggested_universe=suggested_universe,
             )
             say(
                 text=(
-                    "I can generate this chart in two ways:\n"
-                    "- Reply `@Coatue Claw online` to discover a relevant ticker set online.\n"
-                    "- Reply `@Coatue Claw use universe NAME` to use a saved CSV universe.\n"
+                    "I couldn’t confidently build a full ticker set from that prompt.\n"
+                    "Please choose one of these:\n"
+                    "- `@Coatue Claw online`\n"
+                    "- `@Coatue Claw use universe NAME`\n"
                     f"{suggested_line}"
                     f"Metric ids: `{metric_examples}`\n"
                     "Default behavior: YoY Revenue Growth on y-axis unless you specify otherwise."
