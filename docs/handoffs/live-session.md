@@ -59,6 +59,19 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `claw diligence TICKER` now outputs the 8-section neutral investment memo format with evidence-based citations
   - data sources in memo: company profile, statements, valuation/balance sheet metrics, and recent reporting metadata (via Yahoo Finance/yfinance)
   - Slack mention parsing now accepts both `diligence` and common typo `dilligence`
+- Added hybrid memory subsystem (structured-first + semantic fallback):
+  - SQLite + FTS5 memory DB: `/opt/coatue-claw-data/db/memory.sqlite`
+  - auto fact extraction from Slack mentions (`profile`, `relationship`, `decision`, `convention`)
+  - decay tiers with TTL refresh-on-access (`permanent`, `stable`, `active`, `session`, `checkpoint`)
+  - memory CLI commands: `claw memory status|query|prune|extract-daily|checkpoint`
+  - Slack memory interactions:
+    - `remember ...`
+    - `memory status`
+    - `memory prune`
+    - `memory extract daily [days N]`
+    - natural lookup (`what is my ...`, `when is my ...`, `do you remember ...`)
+  - pre-flight pipeline checkpoints now auto-write before `deploy_latest`, `undo_last_deploy`, and `build_request`
+  - optional semantic retrieval path via LanceDB/OpenAI embeddings when configured
 - Chart outputs remain PNG + CSV + JSON + raw provider payload.
 - Session shipping protocol is codified in `AGENTS.md` and templated in `docs/handoffs/ship-template.md`.
 
@@ -102,7 +115,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - OpenClaw skill recognized:
   - `openclaw skills info valuation-charting` => ready, source `openclaw-workspace`
 - Repo-session validation (this session):
-  - `PYTHONPATH=src pytest -q` => `39 passed`
+  - `PYTHONPATH=src pytest -q` => `48 passed`
   - `make openclaw-restart` failed locally with `openclaw: No such file or directory`; runtime restart/status validation must be executed on Mac mini runtime host.
   - Mac mini runtime validation succeeded after pull (`d5099bb`): gateway running, Slack probe `ok=true`; root cause of earlier SSH failure was minimal PATH in non-login shell.
   - Makefile PATH hardening validated on Mac mini after pull (`0862aa0`): non-login SSH `make openclaw-restart` and `make openclaw-slack-status` now execute with resolved `openclaw` + `node`.
@@ -141,6 +154,12 @@ Then confirm bot returns:
    - `@Coatue Claw diligence SNOW`
    - `@Coatue Claw dilligence MDB` (typo alias path)
    - confirm memo includes all required neutral sections plus source/timestamp attribution
-7. Configure `SLACK_PIPELINE_ADMINS` and optional `COATUE_CLAW_SLACK_BUILD_COMMAND` in runtime env for production permissions/runner control.
-8. Wire first scheduled jobs (weekly idea scan + X digest) to replace scheduler status placeholder behavior.
-9. If response fails, capture first failing line with `openclaw channels logs --channel slack --lines 300`.
+7. Validate memory flows in Slack:
+   - `@Coatue Claw remember my daughter's birthday is June 3rd`
+   - `@Coatue Claw what is my daughter's birthday?`
+   - `@Coatue Claw memory status`
+   - `@Coatue Claw memory checkpoint`
+8. Configure `SLACK_PIPELINE_ADMINS` and optional `COATUE_CLAW_SLACK_BUILD_COMMAND` in runtime env for production permissions/runner control.
+9. Schedule hourly `make openclaw-memory-prune` on runtime host and validate cleanup counts.
+10. Wire first scheduled jobs (weekly idea scan + X digest) to replace scheduler status placeholder behavior.
+11. If response fails, capture first failing line with `openclaw channels logs --channel slack --lines 300`.

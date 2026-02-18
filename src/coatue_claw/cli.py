@@ -4,9 +4,11 @@ import argparse
 from datetime import UTC, datetime
 import logging
 from pathlib import Path
+import json
 
 from coatue_claw.chart_metrics import DEFAULT_X_METRIC, DEFAULT_Y_METRIC, METRIC_SPECS
 from coatue_claw.diligence_report import build_neutral_investment_memo
+from coatue_claw.memory_runtime import MemoryRuntime
 from coatue_claw.valuation_chart import run_valuation_chart
 
 logger = logging.getLogger(__name__)
@@ -42,6 +44,32 @@ def _parse_tickers(value: str) -> list[str]:
     return tickers
 
 
+def _run_memory_command(args) -> None:
+    memory = MemoryRuntime()
+
+    if args.memory_cmd == "status":
+        print(json.dumps(memory.stats(), indent=2, sort_keys=True))
+        return
+
+    if args.memory_cmd == "query":
+        print(memory.format_retrieval(args.query, limit=args.limit))
+        return
+
+    if args.memory_cmd == "prune":
+        result = memory.store.prune_expired()
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return
+
+    if args.memory_cmd == "extract-daily":
+        result = memory.extract_daily(days=args.days, dry_run=args.dry_run)
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return
+
+    if args.memory_cmd == "checkpoint":
+        print(memory.latest_checkpoint_summary(scope=args.scope))
+        return
+
+
 def main():
     parser = argparse.ArgumentParser("coatue-claw")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -55,11 +83,33 @@ def main():
     g.add_argument("--y-metric", choices=sorted(METRIC_SPECS.keys()), default=DEFAULT_Y_METRIC)
     g.add_argument("--title-context", default=None, help="Optional chart title context (e.g. 'Defense Stocks')")
 
+    m = sub.add_parser("memory")
+    memory_sub = m.add_subparsers(dest="memory_cmd", required=True)
+
+    memory_sub.add_parser("status")
+
+    mq = memory_sub.add_parser("query")
+    mq.add_argument("query")
+    mq.add_argument("--limit", type=int, default=6)
+
+    memory_sub.add_parser("prune")
+
+    med = memory_sub.add_parser("extract-daily")
+    med.add_argument("--days", type=int, default=14)
+    med.add_argument("--dry-run", action="store_true")
+
+    mc = memory_sub.add_parser("checkpoint")
+    mc.add_argument("--scope", default=None)
+
     args = parser.parse_args()
 
     if args.cmd == "diligence":
         path = run_diligence(args.ticker)
         print(f"created: {path}")
+        return
+
+    if args.cmd == "memory":
+        _run_memory_command(args)
         return
 
     if args.cmd == "valuation-chart":

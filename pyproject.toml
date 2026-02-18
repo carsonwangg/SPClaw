@@ -12,6 +12,8 @@ dependencies = [
   "matplotlib>=3.8.0",
   "numpy>=1.26.0",
   "pandas>=2.1.0",
+  "openai>=1.0.0",
+  "lancedb>=0.23.0",
   "yfinance>=0.2.40",
 ]
 

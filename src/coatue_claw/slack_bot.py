@@ -17,6 +17,8 @@ from coatue_claw.chart_intent import parse_chart_intent
 from coatue_claw.chart_metrics import METRIC_SPECS, metric_label
 from coatue_claw.chart_title_context import infer_chart_title_context
 from coatue_claw.cli import run_diligence
+from coatue_claw.memory_extraction import parse_memory_lookup_query
+from coatue_claw.memory_runtime import MemoryRuntime
 from coatue_claw.online_universe import discover_online_tickers
 from coatue_claw.runtime_settings import (
     PromotionError,
@@ -82,6 +84,7 @@ class PendingChartFeedback:
 PENDING_CHART_CHOICES: dict[str, PendingChartChoice] = {}
 PENDING_CHART_FEEDBACK: dict[str, PendingChartFeedback] = {}
 PIPELINE_LOCK = threading.Lock()
+_MEMORY_RUNTIME: MemoryRuntime | None = None
 
 
 @app.use
@@ -199,8 +202,21 @@ def _format_chart_usage() -> str:
         "- list universes: `@Coatue Claw list universes`\n"
         "- settings: `@Coatue Claw show my settings` or `@Coatue Claw going forward look for 12 peers`\n"
         "- pipeline: `@Coatue Claw deploy latest` or `@Coatue Claw undo last deploy`\n"
+        "- memory: `@Coatue Claw memory status` or `@Coatue Claw what is my daughter's birthday?`\n"
         "- default: YoY Revenue Growth is y-axis unless you specify axes"
     )
+
+
+def _memory_runtime() -> MemoryRuntime | None:
+    global _MEMORY_RUNTIME
+    if _MEMORY_RUNTIME is not None:
+        return _MEMORY_RUNTIME
+    try:
+        _MEMORY_RUNTIME = MemoryRuntime()
+    except Exception:
+        logger.exception("Failed to initialize memory runtime")
+        _MEMORY_RUNTIME = None
+    return _MEMORY_RUNTIME
 
 
 def _is_settings_admin(user_id: str | None) -> bool:
@@ -344,6 +360,101 @@ def _handle_settings_command(*, text: str, user_id: str | None, thread_ts: str, 
             ),
             thread_ts=thread_ts,
         )
+        return True
+
+    return False
+
+
+def _handle_memory_command(
+    *,
+    text: str,
+    channel: str | None,
+    user_id: str | None,
+    event_ts: str | None,
+    thread_ts: str,
+    say,
+) -> bool:
+    memory = _memory_runtime()
+    if memory is None:
+        return False
+
+    stripped = _strip_slack_mentions(text).strip()
+    lower = stripped.lower()
+
+    if lower.startswith("remember "):
+        persisted = memory.ingest_message(
+            channel=channel,
+            user_id=user_id,
+            text=stripped,
+            source="slack-manual-memory",
+            source_ts_utc=event_ts,
+        )
+        say(
+            text=(
+                f"Captured memory candidates: `{len(persisted)}`. "
+                "Use `memory query <phrase>` to verify retrieval."
+            ),
+            thread_ts=thread_ts,
+        )
+        return True
+
+    if re.fullmatch(r"(show )?memory( status)?", lower):
+        stats = memory.stats()
+        say(
+            text=(
+                "Memory status:\n"
+                f"- facts_total: `{stats['facts_total']}`\n"
+                f"- facts_by_tier: `{stats['facts_by_tier']}`\n"
+                f"- checkpoints_total: `{stats['checkpoints_total']}`\n"
+                f"- events_total: `{stats['events_total']}`\n"
+                f"- semantic_enabled: `{stats['semantic_enabled']}` ({stats['semantic_reason']})"
+            ),
+            thread_ts=thread_ts,
+        )
+        return True
+
+    if lower.startswith("memory prune"):
+        if not _is_pipeline_admin(user_id):
+            say(text="You are not authorized to prune memory.", thread_ts=thread_ts)
+            return True
+        result = memory.store.prune_expired()
+        say(
+            text=(
+                "Memory prune completed:\n"
+                f"- facts_deleted: `{result['facts_deleted']}`\n"
+                f"- checkpoints_deleted: `{result['checkpoints_deleted']}`"
+            ),
+            thread_ts=thread_ts,
+        )
+        return True
+
+    extract_match = re.search(r"memory extract daily(?:\\s+days\\s+(\\d+))?", lower)
+    if extract_match:
+        if not _is_pipeline_admin(user_id):
+            say(text="You are not authorized to run memory extraction.", thread_ts=thread_ts)
+            return True
+        days = int(extract_match.group(1) or "14")
+        dry_run = "dry" in lower
+        result = memory.extract_daily(days=days, dry_run=dry_run)
+        say(
+            text=(
+                "Memory extract-daily completed:\n"
+                f"- events_scanned: `{result['events_scanned']}`\n"
+                f"- facts_extracted: `{result['facts_extracted']}`\n"
+                f"- inserted: `{result['inserted']}`\n"
+                f"- dry_run: `{result['dry_run']}`"
+            ),
+            thread_ts=thread_ts,
+        )
+        return True
+
+    if lower.startswith("memory checkpoint"):
+        say(text=memory.latest_checkpoint_summary(scope="pipeline"), thread_ts=thread_ts)
+        return True
+
+    lookup_query = parse_memory_lookup_query(stripped)
+    if lookup_query:
+        say(text=memory.format_retrieval(lookup_query, limit=6), thread_ts=thread_ts)
         return True
 
     return False
@@ -683,8 +794,32 @@ def handle_mention(event, say):
     text = event.get("text") or ""
     channel = event.get("channel")
     user_id = event.get("user")
+    event_ts = event.get("ts")
     thread_ts = event.get("thread_ts") or event.get("ts")
     logger.info("app_mention received channel=%s ts=%s text=%r", event.get("channel"), event.get("ts"), text)
+
+    if _handle_memory_command(
+        text=text,
+        channel=channel,
+        user_id=user_id,
+        event_ts=event_ts,
+        thread_ts=thread_ts,
+        say=say,
+    ):
+        return
+
+    memory = _memory_runtime()
+    if memory is not None:
+        try:
+            memory.ingest_message(
+                channel=channel,
+                user_id=user_id,
+                text=text,
+                source="slack-app-mention",
+                source_ts_utc=event_ts,
+            )
+        except Exception:
+            logger.exception("Failed to ingest memory from mention")
 
     if _handle_settings_command(text=text, user_id=user_id, thread_ts=thread_ts, say=say):
         return

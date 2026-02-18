@@ -23,13 +23,27 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
 - On-demand:
   - `claw valuation-chart ...`
   - `claw diligence ...`
+  - `claw memory status|query|prune|extract-daily|checkpoint`
 - Scheduled (planned but not yet wired in this repo):
   - Weekly idea scan
   - X digest generation
+  - Hourly memory prune
 
 Diligence output contract:
 - `claw diligence TICKER` generates a neutral, evidence-first 8-section investment memo with source/timestamp attribution.
 - Memo source baseline is Yahoo Finance via yfinance (profile, financial statements, valuation/balance-sheet metrics, and recent reporting metadata).
+
+Memory output contract:
+- Primary memory store: SQLite + FTS5 (`/opt/coatue-claw-data/db/memory.sqlite`).
+- Structured facts are stored as `category/entity/key/value/rationale/source/timestamp` rows with decay tiers.
+- Decay tiers:
+  - `permanent` (no expiry)
+  - `stable` (90 days, refresh on access)
+  - `active` (14 days, refresh on access)
+  - `session` (24 hours)
+  - `checkpoint` (4 hours)
+- Checkpoints are written before risky pipeline operations (`deploy_latest`, `undo_last_deploy`, `build_request`).
+- Semantic fallback is optional via LanceDB/OpenAI embeddings when configured.
 
 ## Secrets and Environment Contract
 - Production secrets live only in `/opt/coatue-claw/.env.prod`.
@@ -53,6 +67,9 @@ Diligence output contract:
   - `make openclaw-bot-logs`
 - Scheduler status:
   - `make openclaw-schedulers-status`
+  - `make openclaw-memory-status`
+  - `make openclaw-memory-prune`
+  - `make openclaw-memory-extract-daily DAYS=14`
 - Slack diagnostics:
   - `make openclaw-slack-status`
   - `make openclaw-slack-probe`
@@ -96,6 +113,12 @@ Pipeline environment controls:
 - `SLACK_PIPELINE_ADMINS`: optional comma-separated Slack user IDs allowed to run pipeline commands
 - `COATUE_CLAW_SLACK_BUILD_COMMAND`: optional custom build command template with `{request}` placeholder
 - `COATUE_CLAW_DEPLOY_HISTORY_PATH`: optional deploy history JSON path (default under `/opt/coatue-claw-data/db/`)
+
+Memory environment controls:
+- `COATUE_CLAW_MEMORY_DB_PATH`: optional SQLite memory DB path
+- `COATUE_CLAW_MEMORY_VECTOR_DIR`: optional LanceDB directory path
+- `COATUE_CLAW_MEMORY_EMBED_MODEL`: optional embedding model (default `text-embedding-3-small`)
+- `OPENAI_API_KEY`: required only for semantic memory fallback
 
 ## Slack Validation Checklist
 1. `make openclaw-slack-status` reports `running=true` and successful probe status.

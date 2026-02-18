@@ -60,12 +60,24 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Slack deploy pipeline controls are implemented (`deploy latest`, `undo last deploy`, `run checks`, `show pipeline status`, `show deploy history`, `build: ...`) with one-job-at-a-time locking and admin gating
 - Deploy history now persists to `/opt/coatue-claw-data/db/deploy-history.json`
 - Diligence command now generates a structured neutral investment memo (deep data pull from company profile, financials, valuation, balance sheet, and recent reporting headlines) instead of template placeholders
+- Hybrid memory system is implemented:
+  - SQLite + FTS5 structured memory store in `/opt/coatue-claw-data/db/memory.sqlite`
+  - auto extraction of profile facts, decisions, and conventions from Slack messages
+  - decay tiers (`permanent`, `stable`, `active`, `session`, `checkpoint`) with TTL refresh-on-access
+  - pre-flight pipeline checkpoints for deploy/build/undo operations
+  - optional LanceDB/OpenAI semantic fallback
+  - CLI ops: `claw memory status|query|prune|extract-daily|checkpoint`
 - Git shipping protocol is now explicit: every Codex change ships to `origin` with handoff updates
 
 ## Immediate Next Actions
 1. Validate Slack deploy pipeline commands in `#claw-lab` (`deploy latest`, `undo last deploy`, `run checks`, `build: ...`)
 2. Configure `SLACK_PIPELINE_ADMINS` on runtime host and validate permission boundaries
-3. Validate new diligence memo output in Slack (`diligence TICKER`) and confirm section completeness/citations
-4. Validate universe commands and online-vs-universe prompt flow in Slack (`#charting`)
-5. Validate plain-English settings commands in Slack (`show my settings`, `going forward look for 12 peers`, `promote current settings`, `undo last promotion`)
-6. Wire first scheduled jobs (weekly idea scan + X digest) and replace scheduler status placeholder target
+3. Validate hybrid memory behavior in Slack:
+   - `remember ...` capture
+   - `what is my ...` retrieval
+   - `memory status`
+   - `memory checkpoint`
+4. Schedule hourly `make openclaw-memory-prune` on runtime host
+5. Validate daily backfill flow (`claw memory extract-daily --dry-run --days 14`)
+6. Validate new diligence memo output in Slack (`diligence TICKER`) and confirm section completeness/citations
+7. Wire first scheduled jobs (weekly idea scan + X digest) and replace scheduler status placeholder target

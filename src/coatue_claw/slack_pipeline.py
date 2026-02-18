@@ -5,11 +5,11 @@ from datetime import UTC, datetime
 import json
 import os
 from pathlib import Path
-import re
 import shlex
 import subprocess
 from typing import Any
 
+from coatue_claw.memory_runtime import MemoryRuntime
 
 class PipelineError(RuntimeError):
     pass
@@ -29,6 +29,30 @@ class PipelineResult:
     action: str
     message: str
     steps: list[PipelineStep]
+
+
+def _write_pipeline_checkpoint(
+    *,
+    action: str,
+    actor: str,
+    state: dict[str, Any],
+    expected_outcome: str,
+    files: list[str],
+) -> None:
+    try:
+        memory = MemoryRuntime()
+        memory.write_checkpoint(
+            scope="pipeline",
+            action=action,
+            state={"actor": actor, **state},
+            expected_outcome=expected_outcome,
+            files=files,
+            source="slack-pipeline",
+            source_ts_utc=_utc_iso(),
+        )
+    except Exception:
+        # Memory checkpointing should never block primary pipeline actions.
+        return
 
 
 def _utc_iso() -> str:
@@ -125,6 +149,13 @@ def run_deploy_latest(*, actor: str) -> PipelineResult:
     _ensure_ok(before, label="git rev-parse before")
     steps.append(before)
     before_head = before.stdout.strip()
+    _write_pipeline_checkpoint(
+        action="deploy_latest",
+        actor=actor,
+        state={"before_head": before_head, "repo_path": str(repo)},
+        expected_outcome="Fast-forward pull, restart runtime, and healthy Slack probe",
+        files=["Makefile", "docs/handoffs/live-session.md", "docs/handoffs/current-plan.md"],
+    )
 
     pull = _run(["git", "pull", "--ff-only", "origin", "main"], cwd=repo)
     _ensure_ok(pull, label="git pull")
@@ -185,6 +216,13 @@ def undo_last_deploy(*, actor: str) -> PipelineResult:
     target_head = str(target.get("after_head") or "").strip()
     if not target_head:
         raise PipelineError("Deploy history entry missing target commit.")
+    _write_pipeline_checkpoint(
+        action="undo_last_deploy",
+        actor=actor,
+        state={"target_head": target_head, "history_index": target_idx},
+        expected_outcome="Revert target deploy commit, push to main, restart runtime, and healthy Slack probe",
+        files=["docs/handoffs/live-session.md", "docs/handoffs/current-plan.md"],
+    )
 
     repo = _repo_path()
     steps: list[PipelineStep] = []
@@ -254,6 +292,13 @@ def run_checks() -> PipelineResult:
 def run_build_request(*, request: str, actor: str) -> PipelineResult:
     repo = _repo_path()
     custom_cmd = os.environ.get("COATUE_CLAW_SLACK_BUILD_COMMAND", "").strip()
+    _write_pipeline_checkpoint(
+        action="build_request",
+        actor=actor,
+        state={"request": request, "repo_path": str(repo)},
+        expected_outcome="Implement request, validate, ship to main, and update handoffs",
+        files=["docs/handoffs/live-session.md", "docs/handoffs/current-plan.md"],
+    )
 
     if custom_cmd:
         command = custom_cmd.replace("{request}", request)
