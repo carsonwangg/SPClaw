@@ -10,6 +10,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - detects plot/chart/graph requests
   - defaults y-axis to YoY revenue growth unless user specifies otherwise
   - supports configurable axis metrics (EV/LTM multiple, YoY growth, LTM revenue, market cap, enterprise value, debt, cash, latest quarter revenue)
+- Chart footer branding text (`COATUE CLAW`) has been removed; only footnote/citation text remains.
 - Chart outputs remain PNG + CSV + JSON + raw provider payload.
 - Session shipping protocol is codified in `AGENTS.md` and templated in `docs/handoffs/ship-template.md`.
 
@@ -67,4 +68,4 @@ Then confirm bot returns:
 ## Immediate Next Steps
 1. Run both Slack validation prompts above in `#charting`.
 2. If response fails, capture first failing line with `openclaw channels logs --channel slack --lines 300`.
-3. Expand metric alias map only if users request additional metric phrases not currently recognized.
+3. Confirm chart visual meets preference with no bottom-left branding label.

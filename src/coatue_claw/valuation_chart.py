@@ -611,7 +611,6 @@ def _render_chart(points: list[TickerPoint], out_path: Path, title_suffix: str, 
     if not included:
         ax.text(0.5, 0.5, "No valid points after quality filters", ha="center", va="center", color="#4B4D57", fontsize=16)
         ax.set_axis_off()
-        fig.text(0.025, 0.04, "COATUE CLAW", fontsize=16, color="#121318", weight="bold")
         fig.text(0.14, 0.044, f"{title_suffix}", fontsize=9, color="#3C3E49")
         fig.savefig(out_path, dpi=180, bbox_inches="tight")
         plt.close(fig)
@@ -722,7 +721,6 @@ def _render_chart(points: list[TickerPoint], out_path: Path, title_suffix: str, 
     if legend is not None:
         legend.get_title().set_color("#2B2D37")
 
-    fig.text(0.025, 0.04, "COATUE CLAW", fontsize=16, color="#121318", weight="bold")
     fig.text(0.14, 0.044, f"{title_suffix}", fontsize=9, color="#3C3E49")
 
     fig.savefig(out_path, dpi=180, bbox_inches="tight")
