@@ -32,7 +32,9 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - Added a dedicated laptop/Codex/OpenClaw operations runbook at `docs/laptop-codex-openclaw-workflow.md` and mirrored key guardrails into `AGENTS.md` (canonical repo path, ship loop, restart/verify loop).
 - Expanded runtime spec in `docs/openclaw-runtime.md` with execution model, job classes, artifact contract, and incident triage runbook.
 - Added explicit OpenClaw operator targets in `Makefile` for `openclaw-dev`, `openclaw-bot-status`, `openclaw-bot-logs`, and `openclaw-schedulers-status`.
-- Hardened `Makefile` OpenClaw targets to auto-resolve binary path (`openclaw` on PATH or `/opt/homebrew/bin/openclaw`) so restart/status commands work in non-login SSH shells.
+- Hardened `Makefile` OpenClaw targets for non-login SSH shells:
+  - prepends `/opt/homebrew/bin` to PATH (so `node` + `openclaw` resolve)
+  - auto-resolves OpenClaw binary path (`openclaw` on PATH or `/opt/homebrew/bin/openclaw`)
 - Added plain-English Slack settings workflow:
   - `show my settings` / `how are you configured`
   - conversational setting updates (peer count target, default x/y axes, post-chart follow-up wording)

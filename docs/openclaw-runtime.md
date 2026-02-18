@@ -37,7 +37,8 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
 
 ## Operational Commands
 - OpenClaw binary resolution:
-  - `Makefile` targets auto-resolve `openclaw` from PATH, with fallback to `/opt/homebrew/bin/openclaw` for non-login SSH shells.
+  - `Makefile` prepends `/opt/homebrew/bin` to PATH for non-login SSH shells.
+  - Targets auto-resolve `openclaw` from PATH, with fallback to `/opt/homebrew/bin/openclaw`.
 - Runtime health:
   - `make openclaw-dev` (gateway + Slack status check)
   - `make openclaw-status`
