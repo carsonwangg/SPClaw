@@ -1,0 +1,87 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from coatue_claw.email_gateway import (
+    EmailAttachment,
+    EmailGatewayStore,
+    _ingest_email_attachments,
+    parse_email_command,
+    run_once,
+)
+
+
+def _write_file_bridge_config(path: Path, *, root: Path) -> None:
+    payload = {
+        "mode": "local-drive-copy",
+        "local": {
+            "working": str(root / "local/working"),
+            "archive": str(root / "local/archive"),
+            "published": str(root / "local/published"),
+            "incoming": str(root / "local/incoming"),
+        },
+        "drive": {
+            "root": str(root / "drive"),
+            "latest": "02_READ_ONLY_Latest_AUTO",
+            "archive": "03_READ_ONLY_Archive_AUTO",
+            "incoming": "01_DROP_HERE_Incoming",
+            "incoming_reference_from_latest": True,
+            "incoming_reference_folder": "_Latest_Reference_READ_ONLY",
+        },
+        "rclone": {
+            "enabled": False,
+            "remote_root": "",
+            "latest": "Latest",
+            "archive": "Archive",
+            "incoming": "Incoming",
+        },
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_parse_email_command() -> None:
+    assert parse_email_command("diligence SNOW", "").kind == "diligence"
+    assert parse_email_command("dilligence MDB", "").arg == "MDB"
+    assert parse_email_command("", "memory status").kind == "memory_status"
+    cmd = parse_email_command("", "memory query daughter's birthday")
+    assert cmd.kind == "memory_query"
+    assert "birthday" in (cmd.arg or "")
+    assert parse_email_command("random", "nonsense").kind == "help"
+
+
+def test_run_once_disabled(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_EMAIL_ENABLED", "false")
+    monkeypatch.setenv("COATUE_CLAW_EMAIL_DB_PATH", str(tmp_path / "email.sqlite"))
+    result = run_once()
+    assert result["ok"] is False
+    assert result["reason"] == "email_disabled"
+
+
+def test_ingest_email_attachments(tmp_path: Path, monkeypatch) -> None:
+    cfg_path = tmp_path / "file-bridge.json"
+    _write_file_bridge_config(cfg_path, root=tmp_path)
+    monkeypatch.setenv("COATUE_CLAW_FILE_BRIDGE_CONFIG", str(cfg_path))
+
+    db_path = tmp_path / "email.sqlite"
+    store = EmailGatewayStore(db_path=db_path)
+    attachments = [
+        EmailAttachment(
+            filename="AAPL-10Q.pdf",
+            content_type="application/pdf",
+            payload=b"test filing content",
+        )
+    ]
+    result = _ingest_email_attachments(
+        attachments=attachments,
+        body_text="please ingest this filing",
+        message_id="<m1@example.com>",
+        store=store,
+    )
+    assert len(result) == 1
+    item = result[0]
+    assert item["category"] == "Filings"
+    assert Path(item["local_path"]).exists()
+    assert Path(item["drive_path"]).exists()
+    stats = store.stats()
+    assert stats["attachments_total"] == 1

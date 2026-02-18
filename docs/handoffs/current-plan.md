@@ -79,6 +79,11 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - Slack file uploads now auto-ingest into knowledge folders with SQLite audit tracking (`/opt/coatue-claw-data/db/file_ingest.sqlite`) via `message` + `file_shared` + `app_mention` event handlers
   - operations via `make openclaw-files-{init,status,sync-pull,sync-push,sync,index}`
   - published index artifacts generated to `published/index.{json,md}`
+- Email channel integration is implemented (optional):
+  - IMAP poll + SMTP reply runtime in `src/coatue_claw/email_gateway.py`
+  - email commands: diligence, memory status/query, files status, help
+  - email attachments auto-ingest to knowledge folders with audit DB (`/opt/coatue-claw-data/db/email_gateway.sqlite`)
+  - operations via `make openclaw-email-{status,run-once,serve}`
 - Git shipping protocol is now explicit: every Codex change ships to `origin` with handoff updates
 
 ## Immediate Next Actions
@@ -95,4 +100,5 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 7. Schedule hourly `make openclaw-memory-prune` on runtime host
 8. Validate daily backfill flow (`claw memory extract-daily --dry-run --days 14`)
 9. Validate new diligence memo output in Slack (`diligence TICKER`) and confirm section completeness/citations + local database-first precheck behavior
-10. Wire first scheduled jobs (weekly idea scan + X digest) and replace scheduler status placeholder target
+10. Configure email env vars in `/opt/coatue-claw/.env.prod` and validate `make openclaw-email-status` + `make openclaw-email-run-once`
+11. Wire first scheduled jobs (weekly idea scan + X digest) and replace scheduler status placeholder target

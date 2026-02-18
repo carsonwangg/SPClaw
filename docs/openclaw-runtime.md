@@ -10,6 +10,7 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
 - App repo: `/opt/coatue-claw`
 - Runtime data: `/opt/coatue-claw-data`
 - File management runbook: `docs/file-management-system.md`
+- Email integration runbook: `docs/email-integration.md`
 
 ## Execution Model
 - OpenClaw gateway is the long-running control plane and Slack channel transport.
@@ -21,6 +22,7 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
 - Long-running:
   - OpenClaw gateway process
   - Slack channel event handling
+  - Optional email poller (`coatue_claw.email_gateway`)
 - On-demand:
   - `claw valuation-chart ...`
   - `claw diligence ...`
@@ -79,6 +81,9 @@ Memory output contract:
   - `make openclaw-files-sync-push`
   - `make openclaw-files-sync`
   - `make openclaw-files-index`
+  - `make openclaw-email-status`
+  - `make openclaw-email-run-once`
+  - `make openclaw-email-serve`
 - Slack diagnostics:
   - `make openclaw-slack-status`
   - `make openclaw-slack-probe`
@@ -150,6 +155,16 @@ Memory environment controls:
 File ingest environment controls:
 - `COATUE_CLAW_FILE_INGEST_DB_PATH`: optional override for Slack file ingest SQLite path
 - `COATUE_CLAW_SLACK_FILE_MAX_MB`: optional max Slack file size in MB for auto-ingest (default `50`)
+
+Email integration environment controls:
+- `COATUE_CLAW_EMAIL_ENABLED`: set `true` to enable email processing
+- `COATUE_CLAW_EMAIL_IMAP_HOST|PORT|USER|PASSWORD|MAILBOX`
+- `COATUE_CLAW_EMAIL_SMTP_HOST|PORT|USER|PASSWORD`
+- `COATUE_CLAW_EMAIL_FROM`: sender address used for replies
+- `COATUE_CLAW_EMAIL_ALLOWED_SENDERS`: optional comma-separated allowlist
+- `COATUE_CLAW_EMAIL_POLL_SECONDS`: poll cadence for `serve` mode (default `60`)
+- `COATUE_CLAW_EMAIL_MAX_ATTACHMENT_MB`: max attachment size to ingest (default `25`)
+- `COATUE_CLAW_EMAIL_DB_PATH`: optional SQLite DB path for email gateway logs
 
 ## Slack Validation Checklist
 1. `make openclaw-slack-status` reports `running=true` and successful probe status.

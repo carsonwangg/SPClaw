@@ -1,4 +1,4 @@
-.PHONY: openclaw-status openclaw-restart openclaw-logs openclaw-dev openclaw-bot-status openclaw-bot-logs openclaw-schedulers-status openclaw-slack-status openclaw-slack-logs openclaw-slack-probe openclaw-slack-audit openclaw-memory-status openclaw-memory-prune openclaw-memory-extract-daily openclaw-files-init openclaw-files-status openclaw-files-index openclaw-files-sync-pull openclaw-files-sync-push openclaw-files-sync valuation-chart
+.PHONY: openclaw-status openclaw-restart openclaw-logs openclaw-dev openclaw-bot-status openclaw-bot-logs openclaw-schedulers-status openclaw-slack-status openclaw-slack-logs openclaw-slack-probe openclaw-slack-audit openclaw-memory-status openclaw-memory-prune openclaw-memory-extract-daily openclaw-files-init openclaw-files-status openclaw-files-index openclaw-files-sync-pull openclaw-files-sync-push openclaw-files-sync openclaw-email-status openclaw-email-run-once openclaw-email-serve valuation-chart
 
 export PATH := /opt/homebrew/bin:$(PATH)
 OPENCLAW ?= $(shell command -v openclaw 2>/dev/null || echo /opt/homebrew/bin/openclaw)
@@ -27,6 +27,7 @@ openclaw-schedulers-status:
 	@echo "- memory prune (hourly target): make openclaw-memory-prune"
 	@echo "- memory extract backfill: make openclaw-memory-extract-daily DAYS=14"
 	@echo "- files sync pull/push: make openclaw-files-sync"
+	@echo "- email ingest poller (if enabled): make openclaw-email-run-once"
 
 openclaw-slack-status:
 	$(OPENCLAW) channels status --probe --json
@@ -66,6 +67,15 @@ openclaw-files-sync-push:
 
 openclaw-files-sync:
 	/opt/coatue-claw/.venv/bin/python -m coatue_claw.file_bridge sync
+
+openclaw-email-status:
+	/opt/coatue-claw/.venv/bin/python -m coatue_claw.email_gateway status
+
+openclaw-email-run-once:
+	/opt/coatue-claw/.venv/bin/python -m coatue_claw.email_gateway run-once
+
+openclaw-email-serve:
+	/opt/coatue-claw/.venv/bin/python -m coatue_claw.email_gateway serve
 
 valuation-chart:
 	/opt/coatue-claw/.venv/bin/python -m coatue_claw.cli valuation-chart $(TICKERS)

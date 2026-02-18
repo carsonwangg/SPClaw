@@ -94,6 +94,21 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - module: `src/coatue_claw/slack_file_ingest.py`
     - DB: `/opt/coatue-claw-data/db/file_ingest.sqlite`
     - wired in `src/coatue_claw/slack_bot.py` (`message`, `file_shared`, and `app_mention` with file attachments)
+- Added email interaction channel (optional poller):
+  - module: `src/coatue_claw/email_gateway.py`
+  - runbook: `docs/email-integration.md`
+  - Make targets:
+    - `openclaw-email-status`
+    - `openclaw-email-run-once`
+    - `openclaw-email-serve`
+  - command support via email subject/body:
+    - `diligence TICKER` / `dilligence TICKER`
+    - `memory status`
+    - `memory query <phrase>`
+    - `files status`
+    - `help`
+  - email attachments auto-ingest into local + Drive category folders with audit DB:
+    - `/opt/coatue-claw-data/db/email_gateway.sqlite`
 - Chart outputs remain PNG + CSV + JSON + raw provider payload.
 - Session shipping protocol is codified in `AGENTS.md` and templated in `docs/handoffs/ship-template.md`.
 
@@ -146,6 +161,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - Recursive subfolder sync validation passed on Mac mini: file dropped into `01_DROP_HERE_Incoming/Companies` mirrored to local `incoming/Companies`, then cleaned up.
 - Slack file ingest tests added/validated: classification, routing, dedupe, and SQLite write path.
 - Diligence tests extended/validated for local-report precheck behavior before external research.
+- Email gateway tests added/validated: command parsing, disabled-mode safety, and attachment ingest routing.
 
 ## Next Step to Validate in Slack
 Send in `#charting`:
@@ -199,5 +215,9 @@ Then confirm bot returns:
     - confirm bot thread ack shows routed category
     - confirm file appears in `/opt/coatue-claw-data/files/incoming/<Category>`
     - confirm record exists in `/opt/coatue-claw-data/db/file_ingest.sqlite`
-13. Wire first scheduled jobs (weekly idea scan + X digest) to replace scheduler status placeholder behavior.
-14. If response fails, capture first failing line with `openclaw channels logs --channel slack --lines 300`.
+13. Configure email env vars in `/opt/coatue-claw/.env.prod` and validate:
+    - `make openclaw-email-status`
+    - `make openclaw-email-run-once`
+    - send test email `diligence SNOW` and confirm reply
+14. Wire first scheduled jobs (weekly idea scan + X digest) to replace scheduler status placeholder behavior.
+15. If response fails, capture first failing line with `openclaw channels logs --channel slack --lines 300`.
