@@ -104,10 +104,15 @@ def _extract_diligence_ticker(text: str) -> Optional[str]:
     normalized = re.sub(r"[^a-z0-9$._-]+", " ", normalized)
     parts = normalized.split()
 
-    if "diligence" not in parts:
+    keyword = None
+    for candidate in ("diligence", "dilligence"):
+        if candidate in parts:
+            keyword = candidate
+            break
+    if keyword is None:
         return None
 
-    i = parts.index("diligence")
+    i = parts.index(keyword)
     if i + 1 >= len(parts):
         return None
 

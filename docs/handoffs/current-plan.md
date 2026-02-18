@@ -59,11 +59,13 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Runtime settings now persist under `/opt/coatue-claw-data/db/runtime-settings.json` with markdown audit logs in `/opt/coatue-claw-data/artifacts/config-audit/`
 - Slack deploy pipeline controls are implemented (`deploy latest`, `undo last deploy`, `run checks`, `show pipeline status`, `show deploy history`, `build: ...`) with one-job-at-a-time locking and admin gating
 - Deploy history now persists to `/opt/coatue-claw-data/db/deploy-history.json`
+- Diligence command now generates a structured neutral investment memo (deep data pull from company profile, financials, valuation, balance sheet, and recent reporting headlines) instead of template placeholders
 - Git shipping protocol is now explicit: every Codex change ships to `origin` with handoff updates
 
 ## Immediate Next Actions
 1. Validate Slack deploy pipeline commands in `#claw-lab` (`deploy latest`, `undo last deploy`, `run checks`, `build: ...`)
 2. Configure `SLACK_PIPELINE_ADMINS` on runtime host and validate permission boundaries
-3. Validate universe commands and online-vs-universe prompt flow in Slack (`#charting`)
-4. Validate plain-English settings commands in Slack (`show my settings`, `going forward look for 12 peers`, `promote current settings`, `undo last promotion`)
-5. Wire first scheduled jobs (weekly idea scan + X digest) and replace scheduler status placeholder target
+3. Validate new diligence memo output in Slack (`diligence TICKER`) and confirm section completeness/citations
+4. Validate universe commands and online-vs-universe prompt flow in Slack (`#charting`)
+5. Validate plain-English settings commands in Slack (`show my settings`, `going forward look for 12 peers`, `promote current settings`, `undo last promotion`)
+6. Wire first scheduled jobs (weekly idea scan + X digest) and replace scheduler status placeholder target

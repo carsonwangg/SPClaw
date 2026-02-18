@@ -54,6 +54,11 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `src/coatue_claw/slack_pipeline.py`
   - `src/coatue_claw/slack_pipeline_intent.py`
   - deploy history file: `/opt/coatue-claw-data/db/deploy-history.json`
+- Replaced diligence template output with deep neutral memo generation:
+  - new module: `src/coatue_claw/diligence_report.py`
+  - `claw diligence TICKER` now outputs the 8-section neutral investment memo format with evidence-based citations
+  - data sources in memo: company profile, statements, valuation/balance sheet metrics, and recent reporting metadata (via Yahoo Finance/yfinance)
+  - Slack mention parsing now accepts both `diligence` and common typo `dilligence`
 - Chart outputs remain PNG + CSV + JSON + raw provider payload.
 - Session shipping protocol is codified in `AGENTS.md` and templated in `docs/handoffs/ship-template.md`.
 
@@ -97,7 +102,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - OpenClaw skill recognized:
   - `openclaw skills info valuation-charting` => ready, source `openclaw-workspace`
 - Repo-session validation (this session):
-  - `PYTHONPATH=src pytest -q` => `29 passed`
+  - `PYTHONPATH=src pytest -q` => `39 passed`
   - `make openclaw-restart` failed locally with `openclaw: No such file or directory`; runtime restart/status validation must be executed on Mac mini runtime host.
   - Mac mini runtime validation succeeded after pull (`d5099bb`): gateway running, Slack probe `ok=true`; root cause of earlier SSH failure was minimal PATH in non-login shell.
   - Makefile PATH hardening validated on Mac mini after pull (`0862aa0`): non-login SSH `make openclaw-restart` and `make openclaw-slack-status` now execute with resolved `openclaw` + `node`.
@@ -132,6 +137,10 @@ Then confirm bot returns:
    - `@Coatue Claw run checks`
    - `@Coatue Claw show pipeline status`
    - `@Coatue Claw show deploy history`
-6. Configure `SLACK_PIPELINE_ADMINS` and optional `COATUE_CLAW_SLACK_BUILD_COMMAND` in runtime env for production permissions/runner control.
-7. Wire first scheduled jobs (weekly idea scan + X digest) to replace scheduler status placeholder behavior.
-8. If response fails, capture first failing line with `openclaw channels logs --channel slack --lines 300`.
+6. Validate diligence memo output in Slack:
+   - `@Coatue Claw diligence SNOW`
+   - `@Coatue Claw dilligence MDB` (typo alias path)
+   - confirm memo includes all required neutral sections plus source/timestamp attribution
+7. Configure `SLACK_PIPELINE_ADMINS` and optional `COATUE_CLAW_SLACK_BUILD_COMMAND` in runtime env for production permissions/runner control.
+8. Wire first scheduled jobs (weekly idea scan + X digest) to replace scheduler status placeholder behavior.
+9. If response fails, capture first failing line with `openclaw channels logs --channel slack --lines 300`.

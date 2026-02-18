@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import argparse
 from datetime import UTC, datetime
+import logging
 from pathlib import Path
 
 from coatue_claw.chart_metrics import DEFAULT_X_METRIC, DEFAULT_Y_METRIC, METRIC_SPECS
+from coatue_claw.diligence_report import build_neutral_investment_memo
 from coatue_claw.valuation_chart import run_valuation_chart
+
+logger = logging.getLogger(__name__)
 
 
 def run_diligence(ticker: str) -> Path:
@@ -13,15 +17,21 @@ def run_diligence(ticker: str) -> Path:
     out_dir = Path("/opt/coatue-claw-data/artifacts/packets")
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / f"{ticker.upper()}-{ts}.md"
-    out_file.write_text(
-        f"# Diligence Packet: {ticker.upper()}\n\n"
-        "## Summary\nTBD\n\n"
-        "## Bull Case\nTBD\n\n"
-        "## Bear Case\nTBD\n\n"
-        "## Key Risks\nTBD\n\n"
-        "## Peer Comparison\nTBD\n\n",
-        encoding="utf-8",
-    )
+    try:
+        memo = build_neutral_investment_memo(ticker)
+    except Exception as exc:
+        logger.exception("Failed to generate deep diligence memo for %s", ticker)
+        memo = (
+            f"# Neutral Investment Memo: {ticker.upper()}\n\n"
+            "> Diligence memo generation failed before full research completion.\n\n"
+            "## Error Context\n\n"
+            f"- runtime error: `{type(exc).__name__}: {exc}`\n"
+            f"- generated_at_utc: `{datetime.now(UTC).isoformat()}`\n\n"
+            "## Next Action\n\n"
+            "- Re-run `diligence TICKER` after validating network/data-provider connectivity.\n"
+            "- If this persists, inspect runtime logs and source data availability.\n"
+        )
+    out_file.write_text(memo, encoding="utf-8")
     return out_file
 
 

@@ -27,6 +27,10 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
   - Weekly idea scan
   - X digest generation
 
+Diligence output contract:
+- `claw diligence TICKER` generates a neutral, evidence-first 8-section investment memo with source/timestamp attribution.
+- Memo source baseline is Yahoo Finance via yfinance (profile, financial statements, valuation/balance-sheet metrics, and recent reporting metadata).
+
 ## Secrets and Environment Contract
 - Production secrets live only in `/opt/coatue-claw/.env.prod`.
 - Do not commit secrets to git.
