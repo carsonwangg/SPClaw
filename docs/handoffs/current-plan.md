@@ -44,11 +44,14 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Basic CLI + Slack bot skeleton are implemented
 - Bot mention delivery is working with open Slack access policy
 - Natural-language chart requests now route into valuation charting with configurable axes
+- CSV-backed universe management is implemented for Slack-driven create/edit/reuse flows
+- Missing-ticker chart prompts now ask for source choice (`online` discovery vs saved universe CSV)
+- Post-chart feedback loop is implemented for include/exclude reruns
 - OpenClaw-native runtime spec is not yet fully codified
 - Git shipping protocol is now explicit: every Codex change ships to `origin` with handoff updates
 
 ## Immediate Next Actions
 1. Write OpenClaw runtime spec in repo (`docs/openclaw-runtime.md`)
 2. Add OpenClaw run targets (dev, bot, schedulers) in `Makefile`
-3. Validate charting prompts in Slack (`#charting`) for both default and explicit x/y-axis requests
+3. Validate universe commands and online-vs-universe prompt flow in Slack (`#charting`)
 4. Convert skill stubs into runnable procedures

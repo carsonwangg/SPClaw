@@ -11,6 +11,13 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - defaults y-axis to YoY revenue growth unless user specifies otherwise
   - supports configurable axis metrics (EV/LTM multiple, YoY growth, LTM revenue, market cap, enterprise value, debt, cash, latest quarter revenue)
 - Chart footer branding text (`COATUE CLAW`) has been removed; only footnote/citation text remains.
+- CSV-backed universe workflow is implemented:
+  - storage path: `/opt/coatue-claw-data/db/universes/*.csv`
+  - Slack natural commands: create/list/show/add/remove universes
+  - chart requests with missing or underspecified tickers now prompt for source:
+    - `online` discovery
+    - saved `universe` CSV
+  - post-chart feedback loop asks for include/exclude tickers and can rerun chart in-thread
 - Chart outputs remain PNG + CSV + JSON + raw provider payload.
 - Session shipping protocol is codified in `AGENTS.md` and templated in `docs/handoffs/ship-template.md`.
 
@@ -58,6 +65,8 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 Send in `#charting`:
 - `@Coatue Claw plot EV/Revenue multiples and revenue growth for SNOW,MDB,DDOG,NOW,CRWD`
 - `@Coatue Claw graph SNOW,MDB,DDOG with x axis market cap and y axis ltm revenue`
+- `@Coatue Claw create universe defense with PLTR,LMT,RTX,NOC,GD,LDOS`
+- `@Coatue Claw make me a valuation chart for defense stocks` then reply `@Coatue Claw use universe defense` or `@Coatue Claw online`
 
 Then confirm bot returns:
 - as-of timestamps
@@ -66,6 +75,6 @@ Then confirm bot returns:
 - CSV/JSON/raw attachments
 
 ## Immediate Next Steps
-1. Run both Slack validation prompts above in `#charting`.
-2. If response fails, capture first failing line with `openclaw channels logs --channel slack --lines 300`.
-3. Confirm chart visual meets preference with no bottom-left branding label.
+1. Run all Slack validation prompts above in `#charting`.
+2. Validate universe CRUD commands write/read expected CSVs under `/opt/coatue-claw-data/db/universes/`.
+3. If response fails, capture first failing line with `openclaw channels logs --channel slack --lines 300`.
