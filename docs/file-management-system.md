@@ -27,6 +27,7 @@ Replace this with the actual Google Drive folder path on Mac mini (Google Drive 
 - Bot publishes to Drive `Latest` and `Archive`.
 - Humans drop files into Drive `Incoming`.
 - Bot pulls Drive `Incoming` into local `incoming`.
+- Subfolders are preserved recursively (Drive -> local and local -> Drive), so humans can organize by topic and the bot keeps the same paths.
 
 Avoid direct human edits inside bot-owned local folders to prevent sync conflicts.
 
@@ -56,6 +57,29 @@ make openclaw-files-sync-push
 ```bash
 make openclaw-files-sync
 ```
+
+## Recommended Shared Folder Map (Spencer-facing)
+Create and use the same category folders under all three Drive folders: `Incoming`, `Latest`, and `Archive`.
+
+- `Companies`
+- `Sectors`
+- `Themes`
+- `Earnings`
+- `Filings`
+- `Transcripts`
+- `Decks`
+- `Models`
+- `Notes`
+- `Calls`
+- `Macro`
+- `Admin`
+- `Misc`
+
+Example human workflow:
+- Spencer drops source material into `Incoming/Companies` or `Incoming/Earnings`.
+- OpenClaw pulls files to matching local paths (for example `.../incoming/Companies/...`).
+- Generated outputs are published to `Latest/<same category>`.
+- Older outputs are moved to `Archive/<same category>`.
 
 ### Rebuild published index files
 ```bash

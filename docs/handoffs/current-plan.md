@@ -71,6 +71,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - local-first canonical storage in `/opt/coatue-claw-data/files/{working,archive,published,incoming}`
   - share mirror sync to configurable Drive root via `config/file-bridge.json`
   - Drive mirror root is configured on Mac mini as `/Users/spclaw/Documents/Google Drive Local`
+  - category subfolders provisioned for Spencer-facing workflows under `Incoming/Latest/Archive`
   - operations via `make openclaw-files-{init,status,sync-pull,sync-push,sync,index}`
   - published index artifacts generated to `published/index.{json,md}`
 - Git shipping protocol is now explicit: every Codex change ships to `origin` with handoff updates
@@ -84,7 +85,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
    - `memory status`
    - `memory checkpoint`
 4. Confirm Google Drive desktop client is syncing `/Users/spclaw/Documents/Google Drive Local` to Spencer-shared Drive
-5. Validate file bridge flow (`make openclaw-files-sync`, `make openclaw-files-status`) with Spencer-visible files in `Latest`/`Archive`
+5. Validate category-based file flow with Spencer (`Incoming/<Category>` -> local incoming mirror -> `Latest/<Category>`)
 6. Schedule hourly `make openclaw-memory-prune` on runtime host
 7. Validate daily backfill flow (`claw memory extract-daily --dry-run --days 14`)
 8. Validate new diligence memo output in Slack (`diligence TICKER`) and confirm section completeness/citations
