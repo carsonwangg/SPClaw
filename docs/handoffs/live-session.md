@@ -18,6 +18,8 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `online` discovery
     - saved `universe` CSV
   - post-chart feedback loop asks for include/exclude tickers and can rerun chart in-thread
+- Chart titles now infer context from user prompt/source (example: `Defense Stocks`) and use that as headline.
+- Footer citation/footnote text now sits at the left corner since logo text was removed.
 - Chart outputs remain PNG + CSV + JSON + raw provider payload.
 - Session shipping protocol is codified in `AGENTS.md` and templated in `docs/handoffs/ship-template.md`.
 
@@ -67,6 +69,7 @@ Send in `#charting`:
 - `@Coatue Claw graph SNOW,MDB,DDOG with x axis market cap and y axis ltm revenue`
 - `@Coatue Claw create universe defense with PLTR,LMT,RTX,NOC,GD,LDOS`
 - `@Coatue Claw make me a valuation chart for defense stocks` then reply `@Coatue Claw use universe defense` or `@Coatue Claw online`
+- Confirm rendered title headline is prompt-relevant (`Defense Stocks` / similar) and footnote is left-aligned.
 
 Then confirm bot returns:
 - as-of timestamps

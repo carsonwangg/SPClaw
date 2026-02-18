@@ -43,6 +43,7 @@ def main():
     g.add_argument("tickers", type=_parse_tickers, help="Comma-separated tickers, e.g. SNOW,MDB,DDOG")
     g.add_argument("--x-metric", choices=sorted(METRIC_SPECS.keys()), default=DEFAULT_X_METRIC)
     g.add_argument("--y-metric", choices=sorted(METRIC_SPECS.keys()), default=DEFAULT_Y_METRIC)
+    g.add_argument("--title-context", default=None, help="Optional chart title context (e.g. 'Defense Stocks')")
 
     args = parser.parse_args()
 
@@ -52,7 +53,12 @@ def main():
         return
 
     if args.cmd == "valuation-chart":
-        result = run_valuation_chart(args.tickers, x_metric=args.x_metric, y_metric=args.y_metric)
+        result = run_valuation_chart(
+            args.tickers,
+            x_metric=args.x_metric,
+            y_metric=args.y_metric,
+            title_context=args.title_context,
+        )
         print(f"provider_requested: {result.provider_requested}")
         print(f"provider_used: {result.provider_used}")
         if result.provider_fallback_reason:
@@ -60,6 +66,8 @@ def main():
         print(f"metric_mode: {result.metric_mode}")
         print(f"x_metric: {result.x_metric}")
         print(f"y_metric: {result.y_metric}")
+        if result.title_context:
+            print(f"title_context: {result.title_context}")
         print(f"request_received_at: {result.request_received_at}")
         print(f"market_data_as_of: {result.market_data_as_of}")
         print(f"fundamentals_as_of: {result.fundamentals_as_of}")

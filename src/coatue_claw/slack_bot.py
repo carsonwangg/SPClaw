@@ -12,6 +12,7 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 from coatue_claw.chart_intent import parse_chart_intent
 from coatue_claw.chart_metrics import METRIC_SPECS, metric_label
+from coatue_claw.chart_title_context import infer_chart_title_context
 from coatue_claw.cli import run_diligence
 from coatue_claw.online_universe import discover_online_tickers
 from coatue_claw.universe_store import (
@@ -38,6 +39,7 @@ app = App(token=os.environ["SLACK_BOT_TOKEN"], signing_secret=os.environ["SLACK_
 class PendingChartChoice:
     x_metric: str
     y_metric: str
+    title_context: str | None
     query: str
     seed_tickers: list[str]
     suggested_universe: str | None
@@ -48,6 +50,7 @@ class PendingChartFeedback:
     tickers: list[str]
     x_metric: str
     y_metric: str
+    title_context: str | None
     source_label: str | None
 
 
@@ -284,10 +287,17 @@ def _run_chart_and_respond(
     tickers: list[str],
     x_metric: str,
     y_metric: str,
+    title_context: str | None,
     source_label: str | None,
 ) -> bool:
+    effective_title_context = title_context or infer_chart_title_context("", source_label)
     try:
-        result = run_valuation_chart(tickers, x_metric=x_metric, y_metric=y_metric)
+        result = run_valuation_chart(
+            tickers,
+            x_metric=x_metric,
+            y_metric=y_metric,
+            title_context=effective_title_context,
+        )
     except Exception:
         logger.exception("Failed to build valuation chart for tickers=%s x_metric=%s y_metric=%s", tickers, x_metric, y_metric)
         say(text="Failed to build valuation chart. Check bot logs for details.", thread_ts=thread_ts)
@@ -338,6 +348,7 @@ def _run_chart_and_respond(
         tickers=result.tickers,
         x_metric=result.x_metric,
         y_metric=result.y_metric,
+        title_context=result.title_context,
         source_label=source_label,
     )
     say(
@@ -394,6 +405,7 @@ def handle_mention(event, say):
                     tickers=merged,
                     x_metric=pending_choice.x_metric,
                     y_metric=pending_choice.y_metric,
+                    title_context=pending_choice.title_context,
                     source_label=f"online:{pending_choice.query}",
                 )
                 return
@@ -420,6 +432,7 @@ def handle_mention(event, say):
                 tickers=universe_tickers,
                 x_metric=pending_choice.x_metric,
                 y_metric=pending_choice.y_metric,
+                title_context=pending_choice.title_context,
                 source_label=f"universe:{use_name}",
             )
             return
@@ -436,6 +449,7 @@ def handle_mention(event, say):
             PENDING_CHART_CHOICES[thread_ts] = PendingChartChoice(
                 x_metric=chart_intent.x_metric,
                 y_metric=chart_intent.y_metric,
+                title_context=infer_chart_title_context(text),
                 query=_build_chart_query(text),
                 seed_tickers=chart_intent.tickers,
                 suggested_universe=suggested_universe,
@@ -460,6 +474,7 @@ def handle_mention(event, say):
             tickers=chart_intent.tickers,
             x_metric=chart_intent.x_metric,
             y_metric=chart_intent.y_metric,
+            title_context=infer_chart_title_context(text),
             source_label="explicit_tickers",
         )
         return
@@ -486,6 +501,7 @@ def handle_mention(event, say):
                 tickers=next_tickers,
                 x_metric=pending_feedback.x_metric,
                 y_metric=pending_feedback.y_metric,
+                title_context=pending_feedback.title_context,
                 source_label=(pending_feedback.source_label or "feedback_update"),
             )
             return

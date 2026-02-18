@@ -95,6 +95,7 @@ class ChartResult:
     metric_mode: str
     x_metric: str
     y_metric: str
+    title_context: str | None
     request_received_at: str
     market_data_as_of: str | None
     fundamentals_as_of: str | None
@@ -572,7 +573,15 @@ def _is_metric_eligible(point: TickerPoint, metric_id: str) -> bool:
     return _resolve_metric_value(point, metric_id) is not None
 
 
-def _render_chart(points: list[TickerPoint], out_path: Path, title_suffix: str, *, x_metric: str, y_metric: str) -> None:
+def _render_chart(
+    points: list[TickerPoint],
+    out_path: Path,
+    title_suffix: str,
+    *,
+    x_metric: str,
+    y_metric: str,
+    title_context: str | None = None,
+) -> None:
     plt.rcParams["font.family"] = COATUE_FONT_FAMILY
     included_rows = []
     for point in points:
@@ -590,28 +599,16 @@ def _render_chart(points: list[TickerPoint], out_path: Path, title_suffix: str, 
     fig = plt.figure(figsize=(14, 9), facecolor="#E9EAED")
     ax = fig.add_axes([0.08, 0.14, 0.86, 0.56], facecolor="#F3F4F6")
 
-    fig.text(
-        0.05,
-        0.92,
-        f"{metric_label(x_metric)} vs. {metric_label(y_metric)}",
-        fontsize=34,
-        color="#191A2B",
-        family=COATUE_FONT_FAMILY,
-    )
-    fig.text(
-        0.05,
-        0.81,
-        "Public growth comp set (latest snapshot)",
-        fontsize=17,
-        color="#242637",
-        family=COATUE_FONT_FAMILY,
-    )
+    headline = (title_context or "").strip() or f"{metric_label(x_metric)} vs. {metric_label(y_metric)}"
+    subheadline = f"{metric_label(y_metric)} vs {metric_label(x_metric)} (latest snapshot)"
+    fig.text(0.05, 0.92, headline, fontsize=34, color="#191A2B", family=COATUE_FONT_FAMILY)
+    fig.text(0.05, 0.81, subheadline, fontsize=17, color="#242637", family=COATUE_FONT_FAMILY)
     fig.add_artist(Line2D([0.05, 0.95], [0.785, 0.785], transform=fig.transFigure, color="#202130", linewidth=2.0))
 
     if not included:
         ax.text(0.5, 0.5, "No valid points after quality filters", ha="center", va="center", color="#4B4D57", fontsize=16)
         ax.set_axis_off()
-        fig.text(0.14, 0.044, f"{title_suffix}", fontsize=9, color="#3C3E49")
+        fig.text(0.025, 0.044, f"{title_suffix}", fontsize=9, color="#3C3E49")
         fig.savefig(out_path, dpi=180, bbox_inches="tight")
         plt.close(fig)
         return
@@ -721,7 +718,7 @@ def _render_chart(points: list[TickerPoint], out_path: Path, title_suffix: str, 
     if legend is not None:
         legend.get_title().set_color("#2B2D37")
 
-    fig.text(0.14, 0.044, f"{title_suffix}", fontsize=9, color="#3C3E49")
+    fig.text(0.025, 0.044, f"{title_suffix}", fontsize=9, color="#3C3E49")
 
     fig.savefig(out_path, dpi=180, bbox_inches="tight")
     plt.close(fig)
@@ -733,6 +730,7 @@ def run_valuation_chart(
     *,
     x_metric: str = DEFAULT_X_METRIC,
     y_metric: str = DEFAULT_Y_METRIC,
+    title_context: str | None = None,
 ) -> ChartResult:
     provider_preference = provider_preference or ["google", "yahoo"]
     tickers = [t.strip().upper() for t in tickers if t and t.strip()]
@@ -788,6 +786,7 @@ def run_valuation_chart(
             "metric_mode": f"{x_metric}_vs_{y_metric}",
             "x_metric": x_metric,
             "y_metric": y_metric,
+            "title_context": title_context,
             "denominator": "sum_last_4_reported_quarters",
             "freshness": {
                 "market_max_age_hours": MARKET_MAX_AGE_HOURS,
@@ -806,7 +805,7 @@ def run_valuation_chart(
 
     market_as_of_display = _format_readable_date(market_as_of)
     title_suffix = f"Provider: {provider_used} | X: {metric_label(x_metric)} | Y: {metric_label(y_metric)} | As of: {market_as_of_display}"
-    _render_chart(points, chart_path, title_suffix, x_metric=x_metric, y_metric=y_metric)
+    _render_chart(points, chart_path, title_suffix, x_metric=x_metric, y_metric=y_metric, title_context=title_context)
 
     included_count = sum(1 for p in points if p.included)
     excluded_count = len(points) - included_count
@@ -819,6 +818,7 @@ def run_valuation_chart(
         metric_mode=f"{x_metric}_vs_{y_metric}",
         x_metric=x_metric,
         y_metric=y_metric,
+        title_context=title_context,
         request_received_at=request_at,
         market_data_as_of=market_as_of,
         fundamentals_as_of=fundamentals_as_of,
