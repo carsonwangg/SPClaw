@@ -14,6 +14,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - labels: `Employees` + `Robots`
     - colors: navy + purple
     - y-axis unit fallback: `Number (thousands)`
+  - fixed immutable dataclass handling in grouped-series normalization (no in-place mutation)
   - added CV fallback for employee/robot charts when vision extraction is unavailable:
     - detects dark/purple bar pairs
     - scales to unit values using latest employee/robot figures from post text

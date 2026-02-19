@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import base64
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 import io
 import json
@@ -695,10 +695,12 @@ def _normalize_grouped_bar_metadata(*, candidate: Candidate | None, bars: Rebuil
     if not bars.secondary_values or len(bars.secondary_values) != len(bars.values):
         return bars
 
+    primary_values = list(bars.values)
+    secondary_values = list(bars.secondary_values)
     p_label = (bars.primary_label or "").strip().lower()
     s_label = (bars.secondary_label or "").strip().lower()
-    primary_sum = float(sum(bars.values))
-    secondary_sum = float(sum(bars.secondary_values))
+    primary_sum = float(sum(primary_values))
+    secondary_sum = float(sum(secondary_values))
     should_swap = False
     if ("robot" in p_label and "employee" in s_label) or ("employee" in s_label and "employee" not in p_label):
         should_swap = True
@@ -706,17 +708,22 @@ def _normalize_grouped_bar_metadata(*, candidate: Candidate | None, bars: Rebuil
         should_swap = True
 
     if should_swap:
-        bars.values, bars.secondary_values = list(bars.secondary_values), list(bars.values)
-        bars.primary_label, bars.secondary_label = bars.secondary_label, bars.primary_label
+        primary_values, secondary_values = secondary_values, primary_values
 
-    bars.primary_label = "Employees"
-    bars.secondary_label = "Robots"
-    bars.color = "#1F2452"
-    bars.secondary_color = "#6D63E7"
-    y_lower = (bars.y_label or "").strip().lower()
+    y_label = bars.y_label
+    y_lower = (y_label or "").strip().lower()
     if (not y_lower) or ("index" in y_lower) or (y_lower == "value"):
-        bars.y_label = "Number (thousands)"
-    return bars
+        y_label = "Number (thousands)"
+    return replace(
+        bars,
+        values=primary_values,
+        secondary_values=secondary_values,
+        primary_label="Employees",
+        secondary_label="Robots",
+        color="#1F2452",
+        secondary_color="#6D63E7",
+        y_label=y_label,
+    )
 
 
 def _bar_data_quality_errors(*, candidate: Candidate | None, bars: RebuiltBars | None) -> list[str]:

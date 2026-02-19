@@ -46,6 +46,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - grouped series metadata normalized before rendering:
     - `Employees` (dark navy) + `Robots` (purple)
     - y-axis defaults to `Number (thousands)` when source units are unclear
+  - fixed grouped metadata normalization for immutable dataclasses (copy/replace instead of in-place mutation)
   - added CV fallback extractor for employee/robot charts when vision is unavailable/quota-limited:
     - reconstructs two series from chart colors (dark employees + purple robots)
     - calibrates to absolute unit values using latest employee/robot figures in post text
