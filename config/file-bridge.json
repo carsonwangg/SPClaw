@@ -7,7 +7,7 @@
     "incoming": "/opt/coatue-claw-data/files/incoming"
   },
   "drive": {
-    "root": "/Users/spclaw/Documents/Google Drive Local",
+    "root": "/Users/spclaw/Documents/SPClaw Database",
     "latest": "02_READ_ONLY_Latest_AUTO",
     "archive": "03_READ_ONLY_Archive_AUTO",
     "incoming": "01_DROP_HERE_Incoming",

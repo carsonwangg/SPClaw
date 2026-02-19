@@ -16,47 +16,103 @@ from coatue_claw.file_bridge import FileBridgeError, load_config
 logger = logging.getLogger(__name__)
 
 KNOWN_CATEGORIES = (
+    "Universes",
     "Companies",
-    "Sectors",
-    "Themes",
-    "Earnings",
-    "Filings",
-    "Transcripts",
-    "Decks",
-    "Models",
-    "Notes",
-    "Calls",
-    "Macro",
-    "Admin",
-    "Misc",
+    "Industries",
 )
 
 _CATEGORY_BY_KEYWORD: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("Transcripts", ("transcript", "call transcript", "earnings call transcript")),
-    ("Filings", ("10-k", "10k", "10-q", "10q", "8-k", "8k", "s-1", "sec filing", "form ")),
-    ("Earnings", ("earnings", "quarterly results", "q1", "q2", "q3", "q4")),
-    ("Decks", ("deck", "presentation", "investor presentation", "pitch")),
-    ("Models", ("model", "valuation", "forecast", "assumption", "scenario")),
-    ("Calls", ("call notes", "investor call", "management call", "analyst call")),
-    ("Macro", ("macro", "cpi", "inflation", "fed", "fomc", "gdp", "rates")),
-    ("Sectors", ("sector", "industry map", "industry update")),
-    ("Themes", ("theme", "narrative", "trend", "thesis")),
-    ("Admin", ("nda", "invoice", "agreement", "contract")),
-    ("Notes", ("memo", "notes", "summary", "meeting notes")),
-    ("Companies", ("company", "ticker", "profile")),
+    ("Universes", ("universe", "watchlist", "basket", "coverage list", "screen", "constituent")),
+    (
+        "Companies",
+        (
+            "transcript",
+            "call transcript",
+            "earnings call transcript",
+            "10-k",
+            "10k",
+            "10-q",
+            "10q",
+            "8-k",
+            "8k",
+            "s-1",
+            "sec filing",
+            "form ",
+            "earnings",
+            "quarterly results",
+            "q1",
+            "q2",
+            "q3",
+            "q4",
+            "deck",
+            "presentation",
+            "investor presentation",
+            "pitch",
+            "model",
+            "valuation",
+            "forecast",
+            "assumption",
+            "scenario",
+            "call notes",
+            "investor call",
+            "management call",
+            "analyst call",
+            "memo",
+            "notes",
+            "summary",
+            "meeting notes",
+            "company",
+            "ticker",
+            "profile",
+            "nda",
+            "invoice",
+            "agreement",
+            "contract",
+        ),
+    ),
+    ("Industries", ("sector", "industry", "theme", "narrative", "trend", "thesis", "macro", "cpi", "inflation", "fed", "fomc", "gdp", "rates")),
 )
 
 _CATEGORY_BY_EXTENSION: dict[str, str] = {
-    ".xlsx": "Models",
-    ".xls": "Models",
-    ".csv": "Models",
-    ".pptx": "Decks",
-    ".ppt": "Decks",
-    ".key": "Decks",
-    ".docx": "Notes",
-    ".doc": "Notes",
-    ".md": "Notes",
-    ".txt": "Notes",
+    ".xlsx": "Companies",
+    ".xls": "Companies",
+    ".csv": "Companies",
+    ".pptx": "Companies",
+    ".ppt": "Companies",
+    ".key": "Companies",
+    ".docx": "Companies",
+    ".doc": "Companies",
+    ".md": "Companies",
+    ".txt": "Companies",
+}
+
+_CATEGORY_ALIASES: dict[str, str] = {
+    "universe": "Universes",
+    "universes": "Universes",
+    "watchlist": "Universes",
+    "basket": "Universes",
+    "company": "Companies",
+    "companies": "Companies",
+    "ticker": "Companies",
+    "earnings": "Companies",
+    "filings": "Companies",
+    "filing": "Companies",
+    "transcripts": "Companies",
+    "transcript": "Companies",
+    "decks": "Companies",
+    "deck": "Companies",
+    "models": "Companies",
+    "model": "Companies",
+    "notes": "Companies",
+    "calls": "Companies",
+    "call": "Companies",
+    "macro": "Industries",
+    "theme": "Industries",
+    "themes": "Industries",
+    "sector": "Industries",
+    "sectors": "Industries",
+    "industry": "Industries",
+    "industries": "Industries",
 }
 
 
@@ -109,6 +165,9 @@ def _normalize_category(name: str) -> str | None:
     for cat in KNOWN_CATEGORIES:
         if cat.lower() == lowered:
             return cat
+    alias = _CATEGORY_ALIASES.get(lowered)
+    if alias:
+        return alias
     return None
 
 
@@ -116,12 +175,12 @@ def _explicit_category_from_text(text: str | None) -> str | None:
     if not text:
         return None
     lowered = text.lower()
-    by_label = re.search(r"category\s*[:=]\s*([a-z]+)", lowered)
+    by_label = re.search(r"category\s*[:=]\s*([a-z][a-z_-]*)", lowered)
     if by_label:
         norm = _normalize_category(by_label.group(1))
         if norm:
             return norm
-    by_phrase = re.search(r"\b(?:to|in|under)\s+(companies|sectors|themes|earnings|filings|transcripts|decks|models|notes|calls|macro|admin|misc)\b", lowered)
+    by_phrase = re.search(r"\b(?:to|in|under)\s+([a-z][a-z_-]*)\b", lowered)
     if by_phrase:
         norm = _normalize_category(by_phrase.group(1))
         if norm:
@@ -151,7 +210,7 @@ def classify_category(
     if mapped:
         return mapped
 
-    return "Misc"
+    return "Companies"
 
 
 @dataclass(frozen=True)
@@ -402,4 +461,3 @@ def ingest_slack_files(
         "skipped": skipped,
         "errors": errors,
     }
-

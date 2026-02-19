@@ -40,6 +40,10 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Drive + file-ingest taxonomy simplification shipped:
+  - Drive root renamed/configured to `/Users/spclaw/Documents/SPClaw Database`
+  - category taxonomy reduced to three folders: `Universes`, `Companies`, `Industries`
+  - ingest classifier now maps legacy labels (`filings`, `themes`, `macro`, `sectors`, etc.) into the new three-folder scheme
 - X chart QA hardening for grouped bar charts (employees vs robots) shipped:
   - two-series requirement enforced for employee/robot charts (single-series outputs now fail closed)
   - grouped charts must use unit values (not normalized index), monotonic year x-axis labels, and non-placeholder labels
@@ -159,8 +163,8 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - File management bridge is implemented:
   - local-first canonical storage in `/opt/coatue-claw-data/files/{working,archive,published,incoming}`
   - share mirror sync to configurable Drive root via `config/file-bridge.json`
-  - Drive mirror root is configured on Mac mini as `/Users/spclaw/Documents/Google Drive Local`
-  - category subfolders provisioned for Spencer-facing workflows under `01_DROP_HERE_Incoming/02_READ_ONLY_Latest_AUTO/03_READ_ONLY_Archive_AUTO`
+  - Drive mirror root is configured on Mac mini as `/Users/spclaw/Documents/SPClaw Database`
+  - category subfolders are simplified for Spencer-facing workflows under `01_DROP_HERE_Incoming/02_READ_ONLY_Latest_AUTO/03_READ_ONLY_Archive_AUTO`: `Universes`, `Companies`, `Industries`
   - `01_DROP_HERE_Incoming/_Latest_Reference_READ_ONLY` auto-mirrors Latest and is excluded from pull ingestion
   - Slack file uploads now auto-ingest into knowledge folders with SQLite audit tracking (`/opt/coatue-claw-data/db/file_ingest.sqlite`) via `message` + `file_shared` + `app_mention` event handlers
   - operations via `make openclaw-files-{init,status,sync-pull,sync-push,sync,index}`
@@ -273,9 +277,9 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
    - `what is my ...` retrieval
    - `memory status`
    - `memory checkpoint`
-4. Confirm Google Drive desktop client is syncing `/Users/spclaw/Documents/Google Drive Local` to Spencer-shared Drive
-5. Validate category-based file flow with Spencer (`01_DROP_HERE_Incoming/<Category>` -> local incoming mirror -> `02_READ_ONLY_Latest_AUTO/<Category>`)
-6. Validate Slack file upload auto-ingest (`Slack upload` -> categorized `incoming/<Category>` + DB record in `file_ingest.sqlite`)
+4. Confirm Google Drive desktop client is syncing `/Users/spclaw/Documents/SPClaw Database` to Spencer-shared Drive
+5. Validate category-based file flow with Spencer (`01_DROP_HERE_Incoming/{Universes|Companies|Industries}` -> local incoming mirror -> `02_READ_ONLY_Latest_AUTO/{Universes|Companies|Industries}`)
+6. Validate Slack file upload auto-ingest (`Slack upload` -> categorized `incoming/{Universes|Companies|Industries}` + DB record in `file_ingest.sqlite`)
 7. Validate launchd service persistence after next Mac mini reboot (`make openclaw-24x7-status`)
 8. Validate daily backfill flow (`claw memory extract-daily --dry-run --days 14`)
 9. Validate new diligence memo output in Slack (`diligence TICKER`) and confirm section completeness/citations + local database-first precheck behavior

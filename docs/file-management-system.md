@@ -13,6 +13,7 @@ Keep file operations local on Mac mini (so OpenClaw can freely rearrange) while 
 
 ### Shared Drive mirror (human-facing)
 Configured under `drive.root` in `config/file-bridge.json`:
+- `/Users/spclaw/Documents/SPClaw Database`
 - `01_DROP_HERE_Incoming`
 - `02_READ_ONLY_Latest_AUTO`
 - `03_READ_ONLY_Archive_AUTO`
@@ -34,8 +35,8 @@ Replace this with the actual Google Drive folder path on Mac mini (Google Drive 
 - `01_DROP_HERE_Incoming/_Latest_Reference_READ_ONLY` is a carbon copy of Latest for visibility and is ignored during pull ingestion.
 - Slack uploads are also ingested automatically:
   - user uploads a file in Slack
-  - bot downloads, classifies, and stores under local `incoming/<Category>`
-  - bot mirrors the same file to Drive `01_DROP_HERE_Incoming/<Category>`
+  - bot downloads, classifies, and stores under local `incoming/{Universes|Companies|Industries}`
+  - bot mirrors the same file to Drive `01_DROP_HERE_Incoming/{Universes|Companies|Industries}`
   - ingest metadata is written to SQLite (`/opt/coatue-claw-data/db/file_ingest.sqlite`)
 
 Avoid direct human edits inside bot-owned local folders to prevent sync conflicts.
@@ -68,24 +69,14 @@ make openclaw-files-sync
 ```
 
 ## Recommended Shared Folder Map (Spencer-facing)
-Create and use the same category folders under all three Drive folders: `01_DROP_HERE_Incoming`, `02_READ_ONLY_Latest_AUTO`, and `03_READ_ONLY_Archive_AUTO`.
+Use the same simplified category folders under all three Drive folders: `01_DROP_HERE_Incoming`, `02_READ_ONLY_Latest_AUTO`, and `03_READ_ONLY_Archive_AUTO`.
 
+- `Universes`
 - `Companies`
-- `Sectors`
-- `Themes`
-- `Earnings`
-- `Filings`
-- `Transcripts`
-- `Decks`
-- `Models`
-- `Notes`
-- `Calls`
-- `Macro`
-- `Admin`
-- `Misc`
+- `Industries`
 
 Example human workflow:
-- Spencer drops source material into `01_DROP_HERE_Incoming/Companies` or `01_DROP_HERE_Incoming/Earnings`.
+- Spencer drops source material into `01_DROP_HERE_Incoming/Companies`, `01_DROP_HERE_Incoming/Industries`, or `01_DROP_HERE_Incoming/Universes`.
 - OpenClaw pulls files to matching local paths (for example `.../incoming/Companies/...`).
 - Generated outputs are published to `02_READ_ONLY_Latest_AUTO/<same category>`.
 - Older outputs are moved to `03_READ_ONLY_Archive_AUTO/<same category>`.

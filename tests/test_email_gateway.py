@@ -119,7 +119,7 @@ def test_ingest_email_attachments(tmp_path: Path, monkeypatch) -> None:
     )
     assert len(result) == 1
     item = result[0]
-    assert item["category"] == "Filings"
+    assert item["category"] == "Companies"
     assert Path(item["local_path"]).exists()
     assert Path(item["drive_path"]).exists()
     stats = store.stats()

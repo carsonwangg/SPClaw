@@ -36,11 +36,12 @@ def _write_file_bridge_config(path: Path, *, root: Path) -> None:
 
 
 def test_classify_category() -> None:
-    assert classify_category(filename="AAPL-10Q.pdf") == "Filings"
-    assert classify_category(filename="Q4 earnings transcript.pdf") == "Transcripts"
-    assert classify_category(filename="valuation_model.xlsx") == "Models"
-    assert classify_category(filename="whatever.bin") == "Misc"
-    assert classify_category(filename="random.pdf", message_text="category: macro") == "Macro"
+    assert classify_category(filename="AAPL-10Q.pdf") == "Companies"
+    assert classify_category(filename="Q4 earnings transcript.pdf") == "Companies"
+    assert classify_category(filename="valuation_model.xlsx") == "Companies"
+    assert classify_category(filename="whatever.bin") == "Companies"
+    assert classify_category(filename="random.pdf", message_text="category: macro") == "Industries"
+    assert classify_category(filename="basket.csv", message_text="please add to universes") == "Universes"
 
 
 def test_ingest_slack_files_downloads_and_dedupes(tmp_path: Path, monkeypatch) -> None:
@@ -75,7 +76,7 @@ def test_ingest_slack_files_downloads_and_dedupes(tmp_path: Path, monkeypatch) -
     assert result["processed_count"] == 1
     assert not result["errors"]
     item = result["processed"][0]
-    assert item["category"] == "Filings"
+    assert item["category"] == "Companies"
     assert Path(item["local_path"]).exists()
     assert Path(item["drive_path"]).exists()
 
@@ -95,4 +96,3 @@ def test_ingest_slack_files_downloads_and_dedupes(tmp_path: Path, monkeypatch) -
     with sqlite3.connect(db_path) as conn:
         count = conn.execute("SELECT COUNT(*) FROM slack_file_ingest").fetchone()[0]
     assert count == 1
-

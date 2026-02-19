@@ -8,8 +8,8 @@ Allow Spencer to interact with Coatue Claw via email using the same core workflo
 - Message subject/body is parsed into a command.
 - Bot executes command and replies by SMTP.
 - Any email attachments are auto-ingested into the knowledge folders:
-  - local: `/opt/coatue-claw-data/files/incoming/<Category>/...`
-  - shared Drive: `01_DROP_HERE_Incoming/<Category>/...`
+  - local: `/opt/coatue-claw-data/files/incoming/{Universes|Companies|Industries}/...`
+  - shared Drive: `01_DROP_HERE_Incoming/{Universes|Companies|Industries}/...`
 - Ingestion and message processing are logged in:
   - `/opt/coatue-claw-data/db/email_gateway.sqlite`
 
@@ -86,4 +86,4 @@ make openclaw-24x7-disable
 1. Send an email with subject `diligence SNOW`.
 2. Confirm reply email arrives with packet preview.
 3. Send an email with attachment `AAPL-10Q.pdf`.
-4. Confirm attachment lands in `incoming/Filings` and appears in Drive `01_DROP_HERE_Incoming/Filings`.
+4. Confirm attachment lands in `incoming/Companies` and appears in Drive `01_DROP_HERE_Incoming/Companies`.

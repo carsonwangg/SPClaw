@@ -4,6 +4,10 @@
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Current Status (2026-02-19)
+- Drive/share taxonomy simplification prepared for deployment:
+  - Drive root path changed to `/Users/spclaw/Documents/SPClaw Database`
+  - category taxonomy simplified to `Universes`, `Companies`, `Industries`
+  - ingest classifier now maps legacy category words (for example `filings`, `themes`, `macro`) into the simplified three-folder set
 - Grouped-bar QA + rendering correctness update shipped (`main`):
   - employee/robot tweet charts now require two reconstructed bar series before posting
   - rejected cases:
@@ -172,8 +176,8 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `openclaw-files-sync`
     - `openclaw-files-index`
   - published index artifacts generated to `published/index.json` and `published/index.md`
-  - Drive mirror root is now set to `/Users/spclaw/Documents/Google Drive Local` for Mac mini sync
-  - Spencer-facing category subfolders are provisioned under `01_DROP_HERE_Incoming`, `02_READ_ONLY_Latest_AUTO`, and `03_READ_ONLY_Archive_AUTO` (Companies, Sectors, Themes, Earnings, Filings, Transcripts, Decks, Models, Notes, Calls, Macro, Admin, Misc)
+  - Drive mirror root is now set to `/Users/spclaw/Documents/SPClaw Database` for Mac mini sync
+  - Spencer-facing category subfolders are provisioned under `01_DROP_HERE_Incoming`, `02_READ_ONLY_Latest_AUTO`, and `03_READ_ONLY_Archive_AUTO` (`Universes`, `Companies`, `Industries`)
   - `01_DROP_HERE_Incoming/_Latest_Reference_READ_ONLY` auto-mirrors Latest for visibility and is excluded from pull ingestion
   - Slack file uploads are now auto-ingested (download + category routing + SQLite audit + Drive mirror):
     - module: `src/coatue_claw/slack_file_ingest.py`
@@ -255,7 +259,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - Mac mini runtime validation succeeded after pull (`d5099bb`): gateway running, Slack probe `ok=true`; root cause of earlier SSH failure was minimal PATH in non-login shell.
   - Makefile PATH hardening validated on Mac mini after pull (`0862aa0`): non-login SSH `make openclaw-restart` and `make openclaw-slack-status` now execute with resolved `openclaw` + `node`.
   - Hybrid memory runtime deployed on Mac mini (`33650f2`): structured memory active; semantic fallback currently disabled until `OPENAI_API_KEY` is set in runtime env.
-  - File bridge Drive root configured + validated on Mac mini (`9db4643` + latest pull): `make openclaw-files-init`, `make openclaw-files-sync`, and `make openclaw-files-status` pass using `/Users/spclaw/Documents/Google Drive Local`.
+  - File bridge Drive root configured + validated on Mac mini (`9db4643` + latest pull): `make openclaw-files-init`, `make openclaw-files-sync`, and `make openclaw-files-status` pass using `/Users/spclaw/Documents/SPClaw Database`.
   - Recursive subfolder sync validation passed on Mac mini: file dropped into `01_DROP_HERE_Incoming/Companies` mirrored to local `incoming/Companies`, then cleaned up.
 - Slack file ingest tests added/validated: classification, routing, dedupe, and SQLite write path.
 - Diligence tests extended/validated for local-report precheck behavior before external research.
@@ -520,15 +524,15 @@ Then confirm bot returns:
 9. Validate 24/7 persistence after next Mac mini reboot:
    - run `make openclaw-24x7-status`
    - confirm both services auto-restart as `loaded=true` and `state=running`
-10. Confirm Spencer has Drive access to `/Users/spclaw/Documents/Google Drive Local` and can drag/drop by category under `01_DROP_HERE_Incoming/*`.
+10. Confirm Spencer has Drive access to `/Users/spclaw/Documents/SPClaw Database` and can drag/drop by category under `01_DROP_HERE_Incoming/{Universes|Companies|Industries}`.
 11. Validate end-to-end category workflow with Spencer:
-    - Spencer drops a file into `01_DROP_HERE_Incoming/<Category>`
+    - Spencer drops a file into `01_DROP_HERE_Incoming/{Universes|Companies|Industries}`
     - run `make openclaw-files-sync-pull`
-    - confirm file appears in `/opt/coatue-claw-data/files/incoming/<Category>`
+    - confirm file appears in `/opt/coatue-claw-data/files/incoming/{Universes|Companies|Industries}`
 12. Validate Slack upload ingestion with Spencer:
     - Spencer uploads a file in Slack (without bot mention)
     - confirm bot thread ack shows routed category
-    - confirm file appears in `/opt/coatue-claw-data/files/incoming/<Category>`
+    - confirm file appears in `/opt/coatue-claw-data/files/incoming/{Universes|Companies|Industries}`
     - confirm record exists in `/opt/coatue-claw-data/db/file_ingest.sqlite`
 13. Configure email env vars in `/opt/coatue-claw/.env.prod` and validate:
     - `make openclaw-email-status`

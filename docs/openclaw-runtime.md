@@ -126,15 +126,17 @@ File bridge contract:
   - `/opt/coatue-claw-data/files/published`
   - `/opt/coatue-claw-data/files/incoming`
 - Shared mirror paths (Google Drive or local fallback) are configured in `config/file-bridge.json`.
+- Default Mac mini Drive root is `/Users/spclaw/Documents/SPClaw Database`.
 - `openclaw-files-sync` performs pull (`01_DROP_HERE_Incoming` -> local incoming), push (`published/archive` -> shared paths), and index regeneration.
 - `01_DROP_HERE_Incoming/_Latest_Reference_READ_ONLY` is auto-mirrored from published outputs and excluded from pull ingestion.
+- Canonical category set is simplified to `Universes`, `Companies`, and `Industries`.
 - Published index artifacts are generated at:
   - `/opt/coatue-claw-data/files/published/index.json`
   - `/opt/coatue-claw-data/files/published/index.md`
 - Slack file ingest contract:
   - Slack message/app_mention events with file attachments trigger automatic file intake.
-  - Files are downloaded with bot token auth and categorized into `incoming/<Category>`.
-  - Files are mirrored into Drive `01_DROP_HERE_Incoming/<Category>` for shared visibility.
+  - Files are downloaded with bot token auth and categorized into `incoming/{Universes|Companies|Industries}`.
+  - Files are mirrored into Drive `01_DROP_HERE_Incoming/{Universes|Companies|Industries}` for shared visibility.
   - Intake metadata is stored in `/opt/coatue-claw-data/db/file_ingest.sqlite`.
 
 ## Runtime Settings Contract
