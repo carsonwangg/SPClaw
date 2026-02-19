@@ -84,6 +84,11 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - email commands: diligence, memory status/query, files status, help
   - email attachments auto-ingest to knowledge folders with audit DB (`/opt/coatue-claw-data/db/email_gateway.sqlite`)
   - operations via `make openclaw-email-{status,run-once,serve}`
+- 24/7 runtime supervision is implemented:
+  - launchd-managed services in `src/coatue_claw/launchd_runtime.py`
+  - services: `com.coatueclaw.email-gateway` (always-on poller), `com.coatueclaw.memory-prune` (hourly prune)
+  - operations via `make openclaw-24x7-{enable,status,disable}`
+  - scheduler status target now reports real launchd state (`make openclaw-schedulers-status`)
 - Git shipping protocol is now explicit: every Codex change ships to `origin` with handoff updates
 
 ## Immediate Next Actions
@@ -97,8 +102,8 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 4. Confirm Google Drive desktop client is syncing `/Users/spclaw/Documents/Google Drive Local` to Spencer-shared Drive
 5. Validate category-based file flow with Spencer (`01_DROP_HERE_Incoming/<Category>` -> local incoming mirror -> `02_READ_ONLY_Latest_AUTO/<Category>`)
 6. Validate Slack file upload auto-ingest (`Slack upload` -> categorized `incoming/<Category>` + DB record in `file_ingest.sqlite`)
-7. Schedule hourly `make openclaw-memory-prune` on runtime host
+7. Enable launchd runtime supervision on Mac mini (`make openclaw-24x7-enable`) and verify status
 8. Validate daily backfill flow (`claw memory extract-daily --dry-run --days 14`)
 9. Validate new diligence memo output in Slack (`diligence TICKER`) and confirm section completeness/citations + local database-first precheck behavior
 10. Configure email env vars in `/opt/coatue-claw/.env.prod` and validate `make openclaw-email-status` + `make openclaw-email-run-once`
-11. Wire first scheduled jobs (weekly idea scan + X digest) and replace scheduler status placeholder target
+11. Wire first scheduled jobs (weekly idea scan + X digest)

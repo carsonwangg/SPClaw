@@ -23,6 +23,7 @@ cd /opt/coatue-claw
 git pull --ff-only origin main
 make openclaw-restart
 make openclaw-slack-status
+make openclaw-24x7-status
 ```
 
 4. Test in Slack by mentioning `@Coatue Claw`.
@@ -61,3 +62,12 @@ Ship every change to git with handoff updates.
   - `docs/handoffs/live-session.md`
   - `docs/handoffs/current-plan.md`
 - OpenClaw runtime is restarted and Slack status is healthy.
+
+## One-Time 24/7 Setup (Mac mini)
+Run once to keep email + memory prune alive continuously:
+
+```bash
+cd /opt/coatue-claw
+make openclaw-24x7-enable
+make openclaw-24x7-status
+```

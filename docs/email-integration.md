@@ -56,6 +56,25 @@ Run continuous poller:
 make openclaw-email-serve
 ```
 
+## 24/7 Production Mode (Recommended)
+Enable launchd supervision so email polling survives logouts/reboots:
+
+```bash
+cd /opt/coatue-claw
+make openclaw-24x7-enable
+make openclaw-24x7-status
+```
+
+This installs:
+- `~/Library/LaunchAgents/com.coatueclaw.email-gateway.plist`
+- `~/Library/LaunchAgents/com.coatueclaw.memory-prune.plist`
+
+Disable/remove:
+
+```bash
+make openclaw-24x7-disable
+```
+
 ## Recommended Initial Validation
 1. Send an email with subject `diligence SNOW`.
 2. Confirm reply email arrives with packet preview.

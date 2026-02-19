@@ -6,6 +6,9 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
 ## Runtime Source of Truth
 - Gateway config: `~/.openclaw/openclaw.json`
 - Gateway service: `~/Library/LaunchAgents/ai.openclaw.gateway.plist`
+- Coatue 24/7 services:
+  - `~/Library/LaunchAgents/com.coatueclaw.email-gateway.plist`
+  - `~/Library/LaunchAgents/com.coatueclaw.memory-prune.plist`
 - Gateway logs: `/tmp/openclaw/openclaw-YYYY-MM-DD.log`
 - App repo: `/opt/coatue-claw`
 - Runtime data: `/opt/coatue-claw-data`
@@ -30,7 +33,8 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
 - Scheduled (planned but not yet wired in this repo):
   - Weekly idea scan
   - X digest generation
-  - Hourly memory prune
+- Scheduled (wired):
+  - Hourly memory prune via `launchd` (`com.coatueclaw.memory-prune`)
 
 Diligence output contract:
 - `claw diligence TICKER` generates a neutral, evidence-first 8-section investment memo with source/timestamp attribution.
@@ -72,6 +76,9 @@ Memory output contract:
   - `make openclaw-bot-logs`
 - Scheduler status:
   - `make openclaw-schedulers-status`
+  - `make openclaw-24x7-enable`
+  - `make openclaw-24x7-status`
+  - `make openclaw-24x7-disable`
   - `make openclaw-memory-status`
   - `make openclaw-memory-prune`
   - `make openclaw-memory-extract-daily DAYS=14`
@@ -84,6 +91,13 @@ Memory output contract:
   - `make openclaw-email-status`
   - `make openclaw-email-run-once`
   - `make openclaw-email-serve`
+
+24/7 runtime bootstrap on Mac mini:
+1. `cd /opt/coatue-claw`
+2. `git pull --ff-only origin main`
+3. `make openclaw-restart`
+4. `make openclaw-24x7-enable`
+5. `make openclaw-24x7-status`
 - Slack diagnostics:
   - `make openclaw-slack-status`
   - `make openclaw-slack-probe`

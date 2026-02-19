@@ -3,7 +3,7 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
-## Current Status (2026-02-18)
+## Current Status (2026-02-19)
 - Repo is synced on `main` and used as the cross-device source of truth.
 - Slack channel/user policy is open in OpenClaw (`groupPolicy=open`, `dmPolicy=open`, `allowFrom=["*"]`).
 - Natural-language chart intent parsing is implemented:
@@ -109,6 +109,16 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `help`
   - email attachments auto-ingest into local + Drive category folders with audit DB:
     - `/opt/coatue-claw-data/db/email_gateway.sqlite`
+- Added 24/7 runtime supervision for email + memory pruning:
+  - module: `src/coatue_claw/launchd_runtime.py`
+  - launchd services:
+    - `com.coatueclaw.email-gateway` (always-on `email_gateway serve` with KeepAlive)
+    - `com.coatueclaw.memory-prune` (hourly `claw memory prune` via StartInterval)
+  - Make targets:
+    - `openclaw-24x7-enable`
+    - `openclaw-24x7-status`
+    - `openclaw-24x7-disable`
+  - `openclaw-schedulers-status` now reports actual launchd service status instead of placeholder text
 - Chart outputs remain PNG + CSV + JSON + raw provider payload.
 - Session shipping protocol is codified in `AGENTS.md` and templated in `docs/handoffs/ship-template.md`.
 
@@ -152,7 +162,8 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - OpenClaw skill recognized:
   - `openclaw skills info valuation-charting` => ready, source `openclaw-workspace`
 - Repo-session validation (this session):
-  - `PYTHONPATH=src pytest -q` => `48 passed`
+  - `PYTHONPATH=src pytest -q` => `58 passed`
+  - `PYTHONPATH=src pytest -q tests/test_launchd_runtime.py tests/test_email_gateway.py` => `6 passed`
   - `make openclaw-restart` failed locally with `openclaw: No such file or directory`; runtime restart/status validation must be executed on Mac mini runtime host.
   - Mac mini runtime validation succeeded after pull (`d5099bb`): gateway running, Slack probe `ok=true`; root cause of earlier SSH failure was minimal PATH in non-login shell.
   - Makefile PATH hardening validated on Mac mini after pull (`0862aa0`): non-login SSH `make openclaw-restart` and `make openclaw-slack-status` now execute with resolved `openclaw` + `node`.
@@ -204,7 +215,9 @@ Then confirm bot returns:
    - `@Coatue Claw memory status`
    - `@Coatue Claw memory checkpoint`
 8. Configure `SLACK_PIPELINE_ADMINS` and optional `COATUE_CLAW_SLACK_BUILD_COMMAND` in runtime env for production permissions/runner control.
-9. Schedule hourly `make openclaw-memory-prune` on runtime host and validate cleanup counts.
+9. Enable 24/7 services on Mac mini and validate:
+   - `make openclaw-24x7-enable`
+   - `make openclaw-24x7-status`
 10. Confirm Spencer has Drive access to `/Users/spclaw/Documents/Google Drive Local` and can drag/drop by category under `01_DROP_HERE_Incoming/*`.
 11. Validate end-to-end category workflow with Spencer:
     - Spencer drops a file into `01_DROP_HERE_Incoming/<Category>`
@@ -219,5 +232,5 @@ Then confirm bot returns:
     - `make openclaw-email-status`
     - `make openclaw-email-run-once`
     - send test email `diligence SNOW` and confirm reply
-14. Wire first scheduled jobs (weekly idea scan + X digest) to replace scheduler status placeholder behavior.
+14. Wire first scheduled jobs (weekly idea scan + X digest).
 15. If response fails, capture first failing line with `openclaw channels logs --channel slack --lines 300`.
