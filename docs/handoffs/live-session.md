@@ -17,6 +17,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - added fallback candidate source for URL requests when X API misses media:
     - `api.vxtwitter.com` fallback fetch for text/media on specific post URLs
   - renderer now attempts vision bar extraction first (before mode heuristics), improving reconstruction rate on tweet charts that lack explicit bar keywords
+  - title heuristics now include explicit employees-vs-robots narrative handling (for posts like `$AMZN ... employees ... robots`) to avoid raw/fragmented headline/subheading text
   - validation: `PYTHONPATH=src pytest -q` => `96 passed`
 - Slack natural-language compound X-post handling shipped (`main`):
   - single message with X post URL can now do both:

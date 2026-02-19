@@ -208,6 +208,15 @@ POSITIVE_MOVE_VERBS = ("surged", "rose", "jumped", "climbed", "rebounded", "acce
 NEGATIVE_MOVE_VERBS = ("fell", "dropped", "declined", "slowed", "rolled over", "sank", "contracted", "decelerated")
 NEUTRAL_MOVE_VERBS = ("hit", "reached", "stands at", "is at")
 NEWS_PREFIX_RE = re.compile(r"^(breaking|update|new chart|chart|alert)\s*:\s*", re.IGNORECASE)
+TICKER_NAME_HINTS: dict[str, str] = {
+    "AMZN": "Amazon",
+    "MSFT": "Microsoft",
+    "GOOGL": "Google",
+    "GOOG": "Google",
+    "META": "Meta",
+    "AAPL": "Apple",
+    "NVDA": "NVIDIA",
+}
 
 
 class XChartError(RuntimeError):
@@ -450,6 +459,18 @@ def _extract_timeframe_snippet(sentence: str) -> str:
     return ""
 
 
+def _entity_hint_from_text(*, sentence: str, fallback: str) -> str:
+    ticker_match = re.search(r"\$([A-Z]{1,5})\b", sentence)
+    if ticker_match:
+        ticker = ticker_match.group(1).upper()
+        return TICKER_NAME_HINTS.get(ticker, ticker)
+    clean_fallback = _shorten_without_ellipsis(_strip_news_prefix(fallback), max_chars=24)
+    clean_fallback = clean_fallback.strip(" ,:-")
+    if clean_fallback:
+        return clean_fallback
+    return "US trend"
+
+
 def _infer_units_snippet(sentence: str) -> str:
     lower = sentence.lower()
     if ("billion" in lower or "million" in lower or "$" in sentence or "usd" in lower):
@@ -647,6 +668,16 @@ def _extract_rebuilt_bars_via_vision(*, candidate: Candidate) -> RebuiltBars | N
 
 
 def _synthesize_chart_label(*, subject: str, sentence: str, mode_hint: str) -> str:
+    lower_sentence = sentence.lower()
+    if "employees" in lower_sentence and "robots" in lower_sentence:
+        entity = _entity_hint_from_text(sentence=sentence, fallback=subject)
+        years = sorted(_extract_years_from_text(sentence))
+        if len(years) >= 2:
+            base = f"{entity} employees vs robots ({years[0]}-{years[-1]})"
+        else:
+            base = f"{entity} employees vs robots"
+        return _shorten_without_ellipsis(base, max_chars=62)
+
     core = _shorten_without_ellipsis(_strip_news_prefix(subject), max_chars=46)
     if not core:
         core = "Chart Context"
@@ -665,6 +696,12 @@ def _synthesize_narrative_title(*, subject: str, verb: str, sentence: str) -> st
     subject_core = _shorten_without_ellipsis(_strip_news_prefix(subject), max_chars=40)
     s_lower = subject_core.lower()
     v_lower = verb.lower()
+    sentence_lower = sentence.lower()
+    if "employees" in sentence_lower and "robots" in sentence_lower:
+        entity = _entity_hint_from_text(sentence=sentence, fallback=subject_core)
+        if "ratio" in sentence_lower or "replacing humans" in sentence_lower:
+            return _shorten_without_ellipsis(f"{entity} is increasing automation intensity", max_chars=56)
+        return _shorten_without_ellipsis(f"{entity} is scaling robots faster than headcount", max_chars=56)
     if "etf inflows" in s_lower:
         if v_lower in POSITIVE_MOVE_VERBS or "record" in sentence.lower():
             return "ETF appetite is re-accelerating"

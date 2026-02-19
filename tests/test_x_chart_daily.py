@@ -592,3 +592,27 @@ def test_style_draft_generates_narrative_title_and_small_label_for_etf_flow() ->
     assert "breaking" not in draft.headline.lower()
     assert "etf" in draft.chart_label.lower()
     assert "..." not in draft.headline
+
+
+def test_style_draft_employees_vs_robots_titles_are_narrative() -> None:
+    candidate = Candidate(
+        candidate_key="x:robots",
+        source_type="x",
+        source_id="oguzerkan",
+        author="@oguzerkan",
+        title="$AMZN has 1.5 million employees and deployed 1 million robots.",
+        text=(
+            "$AMZN has 1.5 million employees and deployed 1 million robots. "
+            "It's actively replacing humans with robots as human/robot ratio declined from 3 in 2020 to 1.5 in 2025."
+        ),
+        url="https://x.com/oguzerkan/status/2024447368137994460",
+        image_url="https://pbs.twimg.com/media/HBhIJlNXQAE4nDw.jpg",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=700,
+        source_priority=1.0,
+        score=80.0,
+    )
+    draft = _select_style_draft(candidate)
+    assert "robots" in draft.headline.lower() or "automation" in draft.headline.lower()
+    assert "employees vs robots" in draft.chart_label.lower()
+    assert "..." not in draft.headline

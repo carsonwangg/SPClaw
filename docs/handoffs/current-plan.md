@@ -52,6 +52,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
     - concise takeaway
   - constrained formatting: no handles, no `BREAKING`, no ellipsis
   - fallback heuristics remain if LLM path fails
+  - added deterministic narrative rule for employees-vs-robots posts so headline/subheading remain Coatue-like when LLM synthesis is unavailable
 - tests added/updated:
   - URL-run fallback coverage
   - URL-run reconstruction gate coverage
