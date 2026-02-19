@@ -272,6 +272,14 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `PYTHONPATH=src pytest -q` => `69 passed`
   - operator note:
     - token was provided in chat; rotate/regenerate it in X Developer portal and set the new token in runtime `.env.prod` only
+  - Mac mini deploy + runtime verification completed:
+    - pulled `main` to `/opt/coatue-claw` at commit `5dfdd03`
+    - set `COATUE_CLAW_X_BEARER_TOKEN` in `/opt/coatue-claw/.env.prod`
+    - restarted runtime: `make openclaw-restart`
+    - verified Slack health: `make openclaw-slack-status` probe `ok=true`
+    - verified live X API path using runtime env:
+      - `build_x_digest("snowflake", hours=24, max_results=10)` succeeded
+      - output written to `/opt/coatue-claw-data/artifacts/x-digest/snowflake-20260219-061237.md`
 
 ## Next Step to Validate in Slack
 Send in `#charting`:

@@ -113,6 +113,11 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - tests:
     - `tests/test_slack_x_intent.py`
     - `tests/test_x_digest.py`
+  - Mac mini runtime status:
+    - deployed on `/opt/coatue-claw` at commit `5dfdd03`
+    - bearer token configured in `.env.prod`
+    - Slack probe healthy after restart (`make openclaw-slack-status` => `ok=true`)
+    - live digest smoke test succeeded and wrote artifact to `/opt/coatue-claw-data/artifacts/x-digest/`
 - 24/7 runtime supervision is implemented:
   - launchd-managed services in `src/coatue_claw/launchd_runtime.py`
   - services: `com.coatueclaw.email-gateway` (always-on poller), `com.coatueclaw.memory-prune` (hourly prune)
