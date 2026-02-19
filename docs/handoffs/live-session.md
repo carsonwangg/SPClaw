@@ -213,6 +213,19 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
       - attachment filename ends with `.pdf`
       - attachment content type `application/pdf`
       - attachment payload starts with `%PDF`
+- Professional PDF brief rendering upgrade (`fb3692c`):
+  - replaced dense raw-memo PDF pages with a clean sectioned brief format:
+    - Key Takeaways
+    - Business Overview
+    - Financial Snapshot
+    - Company Strengths
+    - Key Risks
+    - Open Questions
+  - improved typography, bullet wrapping, spacing, and page footer layout for readability
+  - Mac mini validation:
+    - `tests/test_email_gateway.py` => `4 passed`
+    - generated diligence attachment remains valid PDF (`%PDF`) with consumer-facing summary body
+    - services healthy: `make openclaw-24x7-status`, `make openclaw-slack-status`
 - Slack default routing upgrade (this session):
   - added routing helper module: `src/coatue_claw/slack_routing.py`
   - plain Slack messages now run through OpenClaw request handling by default

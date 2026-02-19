@@ -91,6 +91,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - local filesystem paths are removed from user-facing diligence email output
   - PDF rendering now escapes literal `$` symbols so finance values render reliably
   - diligence attachment PDF now renders as a sectioned, consumer-readable brief (not raw memo text)
+  - professional PDF styling now uses clean section headers, readable bullet spacing, and page footers for Spencer-facing consumption
   - email attachments auto-ingest to knowledge folders with audit DB (`/opt/coatue-claw-data/db/email_gateway.sqlite`)
   - operations via `make openclaw-email-{status,run-once,serve}`
   - Mac mini validation confirms `Testing Dilligence` + `Diligence SNOW please` resolves to ticker `SNOW`
