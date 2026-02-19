@@ -197,4 +197,7 @@ def test_style_draft_prefers_simple_feed_like_copy() -> None:
     draft = _select_style_draft(candidate)
     assert draft.checks["us_relevant"] is True
     assert draft.checks["trend_explicit"] is True
-    assert draft.score >= 5.0
+    assert draft.checks["graph_first_copy"] is True
+    assert len(draft.headline) <= 72
+    assert len(draft.takeaway) <= 96
+    assert draft.score >= 6.0

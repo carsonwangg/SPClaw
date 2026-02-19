@@ -161,11 +161,11 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
     - post copy/style now goes through iterative style-audit checks before final render/post
     - output text is normalized to prevent unsupported glyph/missing-character artifacts
   - presentation update:
-    - card layout shifted from dense slide-style summary blocks to feed-style quick read:
-      - one trend headline
-      - one explicit takeaway
-      - one short why-now line
-      - chart image as dominant visual
+    - card layout shifted to graph-first style for Chart of the Day:
+      - no left-side narrative column
+      - concise headline at top
+      - chart/image carries the core story
+      - minimal bottom footer (takeaway + source)
 - 24/7 runtime supervision is implemented:
   - launchd-managed services in `src/coatue_claw/launchd_runtime.py`
   - services: `com.coatueclaw.email-gateway` (always-on poller), `com.coatueclaw.memory-prune` (hourly prune)

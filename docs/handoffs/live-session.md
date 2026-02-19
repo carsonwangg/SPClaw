@@ -361,13 +361,14 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - US scope + readability/style refinement (this session):
     - added US relevance classifier gate for both X and Visual Capitalist candidates (blocks non-US FX-only trends such as Turkish lira posts)
     - added render-safe normalization for outbound chart text (`_normalize_render_text`) to remove unsupported glyph/emoji artifacts
-    - simplified chart card format to a feed-style layout (single Trend + Takeaway + Why now), with chart image as dominant visual
+    - simplified chart card format to a graph-first layout (no left text panel; headline + large chart + minimal footer only)
     - added iterative post-generation style audit (`StyleDraft`) with checks for:
       - US relevance
       - explicit trend signal
       - concise headline/takeaway
       - plain language (non slide-jargon)
       - clean characters
+      - graph-first copy density (short, feed-readable framing)
     - style audit metadata now persists in:
       - markdown artifact (`style_iteration`, `style_score`, checks)
       - Slack post payload (`style_audit`)

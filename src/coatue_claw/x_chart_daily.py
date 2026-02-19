@@ -370,10 +370,14 @@ def _truncate_words(text: str, *, max_words: int, max_chars: int) -> str:
     words = [w for w in _normalize_render_text(text).split(" ") if w]
     if not words:
         return ""
+    full = " ".join(words).strip()
     clipped = " ".join(words[:max_words]).strip()
     if len(clipped) > max_chars:
         clipped = clipped[:max_chars].rstrip()
-    if len(words) > max_words:
+    truncated = len(words) > max_words or len(full) > len(clipped)
+    if truncated:
+        if len(clipped) > max(0, max_chars - 3):
+            clipped = clipped[: max(0, max_chars - 3)].rstrip()
         return clipped.rstrip(".,;:") + "..."
     return clipped
 
@@ -936,7 +940,7 @@ def _pick_winner(*, store: XChartStore, candidates: list[Candidate]) -> Candidat
 def _build_takeaways(candidate: Candidate) -> list[str]:
     text = _normalize_render_text(candidate.text)
     title = _normalize_render_text(candidate.title)
-    excerpt = _truncate_words(text or title, max_words=24, max_chars=170)
+    excerpt = _truncate_words(text or title, max_words=13, max_chars=96)
     if not excerpt:
         excerpt = "Fresh US-focused chart signal from a prioritized source."
     tone_line = "Keep the takeaway simple and explicit for fast read in a feed."
@@ -951,29 +955,32 @@ def _build_style_draft(candidate: Candidate, *, iteration: int) -> StyleDraft:
     title_text = _normalize_render_text(candidate.title)
     body_text = _normalize_render_text(candidate.text)
     first_sentence = _extract_first_sentence(body_text or title_text)
+    title_core = re.sub(r"^@\w+:\s*", "", title_text).strip()
+    first_core = re.sub(r"^@\w+:\s*", "", first_sentence).strip()
 
     if iteration == 1:
-        headline = _truncate_words(first_sentence or title_text, max_words=14, max_chars=88)
-        takeaway = _truncate_words(body_text or title_text, max_words=22, max_chars=150)
-        why_now = "High-signal US chart that can be understood in one glance."
+        headline = _truncate_words(first_core or title_core or title_text, max_words=8, max_chars=58)
+        takeaway = _truncate_words(body_text or title_core or title_text, max_words=13, max_chars=96)
+        why_now = "Clear US trend; chart carries the story."
     elif iteration == 2:
-        headline = _truncate_words(title_text.replace(candidate.author, ""), max_words=12, max_chars=72)
-        takeaway = _truncate_words(first_sentence or body_text, max_words=16, max_chars=120)
-        why_now = "Simple chart + explicit US trend + clear directional signal."
+        headline = _truncate_words(title_core or first_core or title_text, max_words=8, max_chars=54)
+        takeaway = _truncate_words(first_core or body_text, max_words=11, max_chars=84)
+        why_now = "Fast read in a feed."
     else:
-        anchor = _truncate_words(first_sentence or title_text, max_words=10, max_chars=64)
+        anchor = _truncate_words(first_core or title_core or title_text, max_words=7, max_chars=50)
         headline = anchor or "US Trend Snapshot"
-        takeaway = _truncate_words(body_text or title_text, max_words=14, max_chars=95)
-        why_now = "Designed for a quick feed read, not a full investment slide."
+        takeaway = _truncate_words(body_text or title_core or title_text, max_words=9, max_chars=74)
+        why_now = "Simple trend read."
 
     combined = " ".join([headline, takeaway, why_now]).strip()
     checks = {
         "us_relevant": _is_us_relevant_post(f"{candidate.title} {candidate.text}"),
-        "headline_short": bool(headline) and len(headline) <= 88,
-        "takeaway_short": bool(takeaway) and len(takeaway) <= 150,
+        "headline_short": bool(headline) and len(headline) <= 72,
+        "takeaway_short": bool(takeaway) and len(takeaway) <= 96,
         "trend_explicit": _contains_trend_signal(f"{candidate.title} {candidate.text}"),
         "plain_language": not any(term in combined.lower() for term in SLIDE_JARGON_KEYWORDS),
         "clean_characters": "\ufffd" not in combined and "??" not in combined and "  " not in combined,
+        "graph_first_copy": len(combined.split()) <= 30,
     }
     score = float(sum(1.0 for passed in checks.values() if passed))
     return StyleDraft(
@@ -988,7 +995,7 @@ def _build_style_draft(candidate: Candidate, *, iteration: int) -> StyleDraft:
 
 def _select_style_draft(candidate: Candidate, *, max_iterations: int = 3) -> StyleDraft:
     best = _build_style_draft(candidate, iteration=1)
-    target_score = 5.0
+    target_score = 6.0
     if best.score >= target_score and best.checks.get("us_relevant", False):
         return best
     for iteration in range(2, max_iterations + 1):
@@ -1047,74 +1054,53 @@ def _render_chart_of_day_style(
     generated_line = generated_local.strftime("Generated %b %-d, %Y at %-I:%M %p %Z")
     plt.rcParams["font.family"] = COATUE_FONT_FAMILY
 
-    fig = plt.figure(figsize=(14, 8), facecolor="#F2F4F8")
-    fig.text(0.5, 0.955, "Coatue Chart of the Day", ha="center", va="center", fontsize=32, color="#1D2B4F", weight="bold")
-    fig.text(0.5, 0.92, f"{generated_line} | Slot {windows_text}", ha="center", va="center", fontsize=11, color="#4A4F59")
-    fig.add_artist(Line2D([0.04, 0.96], [0.892, 0.892], transform=fig.transFigure, color="#2A7FBE", linewidth=2.2))
-
-    left = fig.add_axes([0.04, 0.15, 0.22, 0.70], facecolor="#EAF1F9")
-    left.set_xticks([])
-    left.set_yticks([])
-    for spine in left.spines.values():
-        spine.set_visible(False)
-
-    date_line = generated_local.strftime("%m.%d.%Y")
-    left.text(0.07, 0.94, date_line, fontsize=10.5, color="#3F434C", family=COATUE_FONT_FAMILY, transform=left.transAxes)
-    left.text(0.07, 0.89, "US Trend Winner", fontsize=19, color="#111827", family=COATUE_FONT_FAMILY, transform=left.transAxes, weight="bold")
-    left.text(0.07, 0.84, _normalize_render_text(candidate.author), fontsize=13, color="#2A7FBE", family=COATUE_FONT_FAMILY, transform=left.transAxes, weight="bold")
-    left.text(0.07, 0.76, "Trend", fontsize=12, color="#2A7FBE", family=COATUE_FONT_FAMILY, transform=left.transAxes, weight="bold")
-    left.text(
-        0.07,
-        0.71,
-        "\n".join(textwrap.wrap(_normalize_render_text(style_draft.headline), width=28)),
-        fontsize=11.3,
-        color="#1F2937",
+    fig = plt.figure(figsize=(15, 8.4), facecolor="#DCDDDF")
+    fig.text(
+        0.05,
+        0.935,
+        _normalize_render_text(style_draft.headline),
+        ha="left",
+        va="center",
+        fontsize=27,
+        color="#1F2430",
         family=COATUE_FONT_FAMILY,
-        transform=left.transAxes,
-        va="top",
-        weight="bold",
+        weight="medium",
     )
-    left.text(0.07, 0.50, "Takeaway", fontsize=12, color="#2A7FBE", family=COATUE_FONT_FAMILY, transform=left.transAxes, weight="bold")
-    left.text(
-        0.07,
-        0.45,
-        "\n".join(textwrap.wrap(_normalize_render_text(style_draft.takeaway), width=30)),
-        fontsize=10.6,
-        color="#1F2937",
-        family=COATUE_FONT_FAMILY,
-        transform=left.transAxes,
-        va="top",
-    )
-    left.text(0.07, 0.25, "Why now", fontsize=12, color="#2A7FBE", family=COATUE_FONT_FAMILY, transform=left.transAxes, weight="bold")
-    left.text(
-        0.07,
-        0.20,
-        "\n".join(textwrap.wrap(_normalize_render_text(style_draft.why_now), width=30)),
-        fontsize=10.2,
-        color="#1F2937",
-        family=COATUE_FONT_FAMILY,
-        transform=left.transAxes,
-        va="top",
-    )
+    fig.text(0.05, 0.902, generated_line, ha="left", va="center", fontsize=9.8, color="#4A4F59")
+    fig.add_artist(Line2D([0.05, 0.95], [0.886, 0.886], transform=fig.transFigure, color="#2F3745", linewidth=1.1))
 
-    right = fig.add_axes([0.28, 0.15, 0.68, 0.70], facecolor="#FFFFFF")
-    right.set_xticks([])
-    right.set_yticks([])
-    for spine in right.spines.values():
-        spine.set_color("#D4DAE5")
-        spine.set_linewidth(1.0)
+    chart_ax = fig.add_axes([0.05, 0.14, 0.90, 0.72], facecolor="#F4F5F6")
+    chart_ax.set_xticks([])
+    chart_ax.set_yticks([])
+    for spine in chart_ax.spines.values():
+        spine.set_color("#E1E4EA")
+        spine.set_linewidth(1.2)
 
     image = _safe_image_from_url(candidate.image_url)
     if image is not None:
-        right.imshow(image)
-        right.set_aspect("auto")
+        chart_ax.imshow(image)
+        chart_ax.set_aspect("auto")
     else:
-        right.text(0.5, 0.5, "Chart image unavailable", ha="center", va="center", fontsize=16, color="#6B7280", transform=right.transAxes)
-        right.add_patch(Rectangle((0.05, 0.1), 0.9, 0.8, fill=False, linewidth=1.2, linestyle=(0, (4, 3)), edgecolor="#9CA3AF", transform=right.transAxes))
+        chart_ax.text(0.5, 0.5, "Chart image unavailable", ha="center", va="center", fontsize=16, color="#6B7280", transform=chart_ax.transAxes)
+        chart_ax.add_patch(Rectangle((0.05, 0.1), 0.9, 0.8, fill=False, linewidth=1.2, linestyle=(0, (4, 3)), edgecolor="#9CA3AF", transform=chart_ax.transAxes))
 
-    fig.text(0.04, 0.065, f"Trend: {_normalize_render_text(style_draft.headline)}", fontsize=10, color="#1F2937", family=COATUE_FONT_FAMILY, weight="bold")
-    fig.text(0.04, 0.035, f"Source: {candidate.url}", fontsize=9, color="#4B5563", family=COATUE_FONT_FAMILY)
-    fig.text(0.95, 0.03, f"Score {candidate.score:.1f}", fontsize=9, color="#4B5563", ha="right", family=COATUE_FONT_FAMILY)
+    chart_ax.text(
+        0.012,
+        0.985,
+        _normalize_render_text(candidate.author),
+        ha="left",
+        va="top",
+        fontsize=10.5,
+        color="#2A7FBE",
+        family=COATUE_FONT_FAMILY,
+        weight="bold",
+        transform=chart_ax.transAxes,
+        bbox={"boxstyle": "round,pad=0.18", "facecolor": "#EEF4FB", "edgecolor": "#D0E1F3"},
+    )
+
+    fig.text(0.05, 0.082, f"Takeaway: {_normalize_render_text(style_draft.takeaway)}", fontsize=11, color="#1F2430", family=COATUE_FONT_FAMILY, weight="bold")
+    fig.text(0.05, 0.045, f"Source: {candidate.url}", fontsize=9, color="#4B5563", family=COATUE_FONT_FAMILY)
+    fig.text(0.95, 0.045, f"Score {candidate.score:.1f}", fontsize=9, color="#4B5563", ha="right", family=COATUE_FONT_FAMILY)
 
     fig.savefig(out_path, dpi=180, bbox_inches="tight")
     plt.close(fig)
@@ -1142,21 +1128,18 @@ def _post_winner_to_slack(
         style_draft=style_draft,
     )
     clean_author = _normalize_render_text(candidate.author)
-    clean_title = _normalize_render_text(candidate.title)
     clean_takeaway = _normalize_render_text(takeaways[0])
-    style_pass = style_draft.score >= 5.0 and style_draft.checks.get("us_relevant", False)
+    style_pass = style_draft.score >= 6.0 and style_draft.checks.get("us_relevant", False)
     text_lines = [
         "*Coatue Chart of the Day*",
         f"- Slot: `{slot_key}` ({windows_text})",
         f"- Source: `{clean_author}`",
         f"- Score: `{candidate.score:.1f}`",
-        f"- Style fit: `{'pass' if style_pass else 'iterate'} {int(style_draft.score)}/6`",
+        f"- Style fit: `{'pass' if style_pass else 'iterate'} {int(style_draft.score)}/7`",
         f"- Trend: {style_draft.headline}",
         f"- Takeaway: {clean_takeaway}",
         f"- Link: {candidate.url}",
     ]
-    if clean_title:
-        text_lines.insert(4, f"- Context: {clean_title}")
     blocks: list[dict[str, Any]] = [{"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(text_lines)}}]
     last_error: str | None = None
     for token in tokens:
@@ -1269,7 +1252,7 @@ def run_chart_scout_once(
                 f"- url: {winner.url}",
                 f"- image_url: {winner.image_url or 'n/a'}",
                 f"- style_iteration: `{style_draft.iteration}`",
-                f"- style_score: `{style_draft.score:.1f}/6`",
+                f"- style_score: `{style_draft.score:.1f}/7`",
                 "",
                 "## Notes",
                 _normalize_render_text(winner.text),
