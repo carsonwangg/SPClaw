@@ -119,10 +119,6 @@ def _bootstrap(path: str) -> None:
     _run(["launchctl", "bootstrap", _launchctl_domain(), path], check=True)
 
 
-def _kickstart(label: str) -> None:
-    _run(["launchctl", "kickstart", "-k", f"{_launchctl_domain()}/{label}"], check=False)
-
-
 def enable_services(*, services: list[str]) -> dict[str, Any]:
     plists = write_service_plists()
     changed: list[dict[str, str]] = []
@@ -130,7 +126,6 @@ def enable_services(*, services: list[str]) -> dict[str, Any]:
         path = plists[label]
         _bootout(label)
         _bootstrap(path)
-        _kickstart(label)
         changed.append({"label": label, "plist": path, "action": "enabled"})
     return {"ok": True, "services": changed}
 
