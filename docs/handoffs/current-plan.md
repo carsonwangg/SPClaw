@@ -173,6 +173,10 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
     - chart image now omits source-handle overlay and score corner marker
     - pre-save layout checks enforce no overlapping header/chart/footer text
     - Headline/takeaway formatter now enforces no-ellipsis titles (`...` removed and phrasing shortened)
+    - title generation now follows Coatue two-level framing:
+      - small chart label = what the graph is showing
+      - big headline = thematic narrative takeaway
+      - raw news prefixes (for example `BREAKING:`) are rewritten into narrative title language
 - 24/7 runtime supervision is implemented:
   - launchd-managed services in `src/coatue_claw/launchd_runtime.py`
   - services: `com.coatueclaw.email-gateway` (always-on poller), `com.coatueclaw.memory-prune` (hourly prune)

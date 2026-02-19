@@ -198,6 +198,11 @@ BAR_HINT_KEYWORDS = (
     "ranking",
 )
 
+POSITIVE_MOVE_VERBS = ("surged", "rose", "jumped", "climbed", "rebounded", "accelerated", "increased", "grew")
+NEGATIVE_MOVE_VERBS = ("fell", "dropped", "declined", "slowed", "rolled over", "sank", "contracted", "decelerated")
+NEUTRAL_MOVE_VERBS = ("hit", "reached", "stands at", "is at")
+NEWS_PREFIX_RE = re.compile(r"^(breaking|update|new chart|chart|alert)\s*:\s*", re.IGNORECASE)
+
 
 class XChartError(RuntimeError):
     pass
@@ -222,6 +227,7 @@ class Candidate:
 @dataclass(frozen=True)
 class StyleDraft:
     headline: str
+    chart_label: str
     takeaway: str
     why_now: str
     iteration: int
@@ -391,6 +397,98 @@ def _extract_first_sentence(text: str) -> str:
         return normalized
     first = parts[0].strip()
     return first or normalized
+
+
+def _strip_news_prefix(text: str) -> str:
+    return NEWS_PREFIX_RE.sub("", _normalize_render_text(text)).strip()
+
+
+def _mode_hint_from_text(candidate: Candidate) -> str:
+    merged = _normalize_render_text(f"{candidate.title} {candidate.text}").lower()
+    if any(token in merged for token in BAR_HINT_KEYWORDS):
+        return "bar"
+    return "line"
+
+
+def _extract_subject_and_verb(sentence: str) -> tuple[str, str]:
+    clean = _strip_news_prefix(sentence)
+    patterns = list(POSITIVE_MOVE_VERBS) + list(NEGATIVE_MOVE_VERBS) + list(NEUTRAL_MOVE_VERBS)
+    for verb in patterns:
+        m = re.search(rf"^(.*?)\b{re.escape(verb)}\b", clean, flags=re.IGNORECASE)
+        if m:
+            subject = m.group(1).strip(" ,:-")
+            if subject:
+                return subject, verb
+    words = clean.split(" ")
+    if len(words) >= 4:
+        return " ".join(words[:4]).strip(" ,:-"), ""
+    return clean.strip(" ,:-"), ""
+
+
+def _extract_timeframe_snippet(sentence: str) -> str:
+    lower = sentence.lower()
+    m = re.search(r"\bin the first [a-z0-9\s-]{3,28}\b", lower)
+    if m:
+        frag = m.group(0).replace("in the ", "").strip()
+        return frag.title()
+    m = re.search(r"\bsince \d{4}\b", lower)
+    if m:
+        return m.group(0).title()
+    m = re.search(r"\b(last|past)\s+\d+\s+(months|years|quarters|weeks)\b", lower)
+    if m:
+        return m.group(0).title()
+    return ""
+
+
+def _infer_units_snippet(sentence: str) -> str:
+    lower = sentence.lower()
+    if ("billion" in lower or "million" in lower or "$" in sentence or "usd" in lower):
+        return "US$"
+    if "yoy" in lower or "qoq" in lower or "%" in sentence:
+        return "YoY %"
+    if "p/e" in lower or "multiple" in lower or "x" in lower:
+        return "x"
+    if "index" in lower:
+        return "Index"
+    return ""
+
+
+def _synthesize_chart_label(*, subject: str, sentence: str, mode_hint: str) -> str:
+    core = _shorten_without_ellipsis(_strip_news_prefix(subject), max_chars=46)
+    if not core:
+        core = "Chart Context"
+    timeframe = _extract_timeframe_snippet(sentence)
+    units = _infer_units_snippet(sentence)
+    if mode_hint == "bar" and timeframe:
+        base = f"{core} ({timeframe})"
+    else:
+        base = core
+    if units and units.lower() not in base.lower():
+        base = f"{base} ({units})"
+    return _shorten_without_ellipsis(base, max_chars=62)
+
+
+def _synthesize_narrative_title(*, subject: str, verb: str, sentence: str) -> str:
+    subject_core = _shorten_without_ellipsis(_strip_news_prefix(subject), max_chars=40)
+    s_lower = subject_core.lower()
+    v_lower = verb.lower()
+    if "etf inflows" in s_lower:
+        if v_lower in POSITIVE_MOVE_VERBS or "record" in sentence.lower():
+            return "ETF appetite is re-accelerating"
+        if v_lower in NEGATIVE_MOVE_VERBS:
+            return "ETF appetite is cooling"
+    if "consumer sentiment" in s_lower:
+        if v_lower in NEGATIVE_MOVE_VERBS:
+            return "Consumer confidence is weakening"
+        if v_lower in POSITIVE_MOVE_VERBS:
+            return "Consumer confidence is improving"
+    if v_lower in POSITIVE_MOVE_VERBS:
+        return _shorten_without_ellipsis(f"{subject_core} are inflecting higher", max_chars=56)
+    if v_lower in NEGATIVE_MOVE_VERBS:
+        return _shorten_without_ellipsis(f"{subject_core} are rolling over", max_chars=56)
+    if "record" in sentence.lower() or v_lower in NEUTRAL_MOVE_VERBS:
+        return _shorten_without_ellipsis(f"{subject_core} are at an extreme", max_chars=56)
+    return _shorten_without_ellipsis(_strip_news_prefix(sentence), max_chars=56)
 
 
 def _is_us_relevant_post(text: str) -> bool:
@@ -977,7 +1075,7 @@ def _pick_winner(*, store: XChartStore, candidates: list[Candidate]) -> Candidat
 
 
 def _build_takeaways(candidate: Candidate) -> list[str]:
-    text = _normalize_render_text(candidate.text)
+    text = _strip_news_prefix(candidate.text)
     title = _normalize_render_text(candidate.title)
     excerpt = _truncate_words(text or title, max_words=13, max_chars=96)
     if not excerpt:
@@ -992,21 +1090,25 @@ def _build_takeaways(candidate: Candidate) -> list[str]:
 
 def _build_style_draft(candidate: Candidate, *, iteration: int) -> StyleDraft:
     title_text = _normalize_render_text(candidate.title)
-    body_text = _normalize_render_text(candidate.text)
+    body_text = _strip_news_prefix(candidate.text)
     first_sentence = _extract_first_sentence(body_text or title_text)
     title_core = re.sub(r"^@\w+:\s*", "", title_text).strip()
     first_core = re.sub(r"^@\w+:\s*", "", first_sentence).strip()
+    mode_hint = _mode_hint_from_text(candidate)
+    subject, verb = _extract_subject_and_verb(first_core or title_core or title_text)
+    chart_label = _synthesize_chart_label(subject=subject, sentence=first_core or title_core or title_text, mode_hint=mode_hint)
+    narrative = _synthesize_narrative_title(subject=subject, verb=verb, sentence=first_core or title_core or title_text)
 
     if iteration == 1:
-        headline = _truncate_words(first_core or title_core or title_text, max_words=8, max_chars=58)
+        headline = _shorten_without_ellipsis(narrative, max_chars=56)
         takeaway = _truncate_words(body_text or title_core or title_text, max_words=13, max_chars=96)
         why_now = "Clear US trend; chart carries the story."
     elif iteration == 2:
-        headline = _truncate_words(title_core or first_core or title_text, max_words=8, max_chars=54)
+        headline = _shorten_without_ellipsis(_synthesize_narrative_title(subject=subject, verb="", sentence=title_core or first_core or title_text), max_chars=52)
         takeaway = _truncate_words(first_core or body_text, max_words=11, max_chars=84)
         why_now = "Fast read in a feed."
     else:
-        anchor = _truncate_words(first_core or title_core or title_text, max_words=7, max_chars=50)
+        anchor = _shorten_without_ellipsis(subject or first_core or title_core or title_text, max_chars=42)
         headline = anchor or "US Trend Snapshot"
         takeaway = _truncate_words(body_text or title_core or title_text, max_words=9, max_chars=74)
         why_now = "Simple trend read."
@@ -1024,6 +1126,7 @@ def _build_style_draft(candidate: Candidate, *, iteration: int) -> StyleDraft:
     score = float(sum(1.0 for passed in checks.values() if passed))
     return StyleDraft(
         headline=_shorten_without_ellipsis(headline or "US Trend Snapshot", max_chars=58),
+        chart_label=_shorten_without_ellipsis(chart_label or "Chart Context", max_chars=62),
         takeaway=takeaway or "New US-facing data point with clear directional movement.",
         why_now=why_now,
         iteration=iteration,
@@ -1379,10 +1482,21 @@ def _render_chart_of_day_style(
         family=COATUE_FONT_FAMILY,
         weight="medium",
     )
-    meta_obj = fig.text(0.05, 0.902, generated_line, ha="left", va="center", fontsize=9.8, color="#4A4F59")
+    meta_obj = fig.text(0.05, 0.904, generated_line, ha="left", va="center", fontsize=9.8, color="#4A4F59")
     fig.add_artist(Line2D([0.05, 0.95], [0.886, 0.886], transform=fig.transFigure, color="#2F3745", linewidth=1.1))
+    chart_label_text = _shorten_without_ellipsis(_normalize_render_text(style_draft.chart_label), max_chars=62)
+    chart_label_obj = fig.text(
+        0.05,
+        0.872,
+        chart_label_text,
+        ha="left",
+        va="center",
+        fontsize=10.8,
+        color="#2F3745",
+        family=COATUE_FONT_FAMILY,
+    )
 
-    chart_ax = fig.add_axes([0.05, 0.22, 0.90, 0.64], facecolor="#F4F5F6")
+    chart_ax = fig.add_axes([0.05, 0.20, 0.90, 0.64], facecolor="#F4F5F6")
     chart_ax.set_xticks([])
     chart_ax.set_yticks([])
     for spine in chart_ax.spines.values():
@@ -1445,9 +1559,18 @@ def _render_chart_of_day_style(
             headline_obj.set_text(headline_text)
             headline_obj.set_fontsize(max(21, float(headline_obj.get_fontsize()) - 1))
             continue
+        if chart_label_obj.get_window_extent(renderer=renderer).x1 > fig_bbox.x0 + (fig_bbox.width * 0.95):
+            chart_label_text = _shorten_without_ellipsis(chart_label_text, max_chars=max(28, len(chart_label_text) - 8))
+            chart_label_obj.set_text(chart_label_text)
+            continue
         chart_bb = chart_ax.get_tightbbox(renderer=renderer)
         take_bb = takeaway_obj.get_window_extent(renderer=renderer)
         src_bb = source_obj.get_window_extent(renderer=renderer)
+        label_bb = chart_label_obj.get_window_extent(renderer=renderer)
+        if label_bb.y0 < chart_bb.y1 + 4:
+            pos = chart_ax.get_position()
+            chart_ax.set_position([pos.x0, max(0.16, pos.y0 - 0.01), pos.width, max(0.58, pos.height - 0.02)])
+            continue
         if take_bb.y1 > chart_bb.y0 - 4:
             pos = chart_ax.get_position()
             delta = min(0.02, max(0.008, (take_bb.y1 - chart_bb.y0 + 6) / fig_bbox.height))
@@ -1494,6 +1617,7 @@ def _post_winner_to_slack(
         f"- Score: `{candidate.score:.1f}`",
         f"- Style fit: `{'pass' if style_pass else 'iterate'} {int(style_draft.score)}/7`",
         f"- Trend: {style_draft.headline}",
+        f"- Chart label: {style_draft.chart_label}",
         f"- Takeaway: {clean_takeaway}",
         f"- Link: {candidate.url}",
     ]
@@ -1608,6 +1732,7 @@ def run_chart_scout_once(
                 "",
                 "## Style Audit",
                 f"- headline: {_normalize_render_text(style_draft.headline)}",
+                f"- chart_label: {_normalize_render_text(style_draft.chart_label)}",
                 f"- takeaway: {_normalize_render_text(style_draft.takeaway)}",
                 f"- why_now: {_normalize_render_text(style_draft.why_now)}",
                 f"- checks: {json.dumps(style_draft.checks, sort_keys=True)}",

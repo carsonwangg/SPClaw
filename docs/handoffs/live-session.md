@@ -381,11 +381,15 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
       - if bar mode is selected but bar reconstruction confidence is insufficient, renderer now falls back to source image (never fake line output for bar-cue posts)
     - chart headlines are auto-shortened with no `...`; long titles are rephrased to concise header text
     - title/takeaway builders and Slack summary text now avoid ellipsis output
+    - two-level Coatue-style title synthesis added:
+      - small chart label describes what is being measured
+      - big narrative headline expresses thematic takeaway
+    - headline synthesis now strips raw news prefixes (for example `BREAKING:`) and rewrites into narrative language
     - removed source-handle callout and score badge from chart image output
     - render includes pre-save overlap checks that adjust header/plot/footer spacing to avoid text/graphics collisions
   - local validation for this refinement:
-    - `PYTHONPATH=src pytest -q tests/test_x_chart_daily.py tests/test_launchd_runtime.py` => `21 passed`
-    - `PYTHONPATH=src pytest -q` => `87 passed`
+    - `PYTHONPATH=src pytest -q tests/test_x_chart_daily.py tests/test_launchd_runtime.py` => `22 passed`
+    - `PYTHONPATH=src pytest -q` => `88 passed`
 
 ## Next Step to Validate in Slack
 Send in `#charting`:

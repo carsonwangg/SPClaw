@@ -206,6 +206,8 @@ def test_style_draft_prefers_simple_feed_like_copy() -> None:
     assert draft.checks["us_relevant"] is True
     assert draft.checks["trend_explicit"] is True
     assert draft.checks["graph_first_copy"] is True
+    assert "breaking" not in draft.headline.lower()
+    assert draft.chart_label
     assert len(draft.headline) <= 72
     assert len(draft.takeaway) <= 96
     assert draft.score >= 6.0
@@ -349,3 +351,24 @@ def test_extract_rebuilt_bars_from_synthetic_bars() -> None:
     rebuilt = _extract_rebuilt_bars(image=image)
     assert rebuilt is not None
     assert len(rebuilt.values) >= 3
+
+
+def test_style_draft_generates_narrative_title_and_small_label_for_etf_flow() -> None:
+    candidate = Candidate(
+        candidate_key="x:etf",
+        source_type="x",
+        source_id="KobeissiLetter",
+        author="@KobeissiLetter",
+        title="@KobeissiLetter: BREAKING: US ETF inflows surged +94% YoY in first six weeks of 2026",
+        text="BREAKING: US ETF inflows surged +94% YoY in first six weeks of 2026 to a record $245 billion.",
+        url="https://x.com/KobeissiLetter/status/2024543034734768600",
+        image_url="https://pbs.twimg.com/media/HBheTMkWwAA7APy.jpg",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=1000,
+        source_priority=1.2,
+        score=90.0,
+    )
+    draft = _select_style_draft(candidate)
+    assert "breaking" not in draft.headline.lower()
+    assert "etf" in draft.chart_label.lower()
+    assert "..." not in draft.headline
