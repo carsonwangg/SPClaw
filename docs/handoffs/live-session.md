@@ -230,6 +230,13 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - upgraded to an executive-style template with centered report title, metadata row, blue divider, and backdrop callout box
   - improved section hierarchy and typography to match a professional investment brief feel
   - report title now stays generic to diligence topic/company (example: `SNOW Diligence Report`) and avoids third-party naming
+  - Mac mini deployment validation (`26fc61d`):
+    - `tests/test_email_gateway.py` => `4 passed`
+    - generated attachment metadata:
+      - filename: `SNOW-...pdf`
+      - content_type: `application/pdf`
+      - payload begins with `%PDF`
+    - user-facing summary title now reports `Title: SNOW Diligence Report`
 - Slack default routing upgrade (this session):
   - added routing helper module: `src/coatue_claw/slack_routing.py`
   - plain Slack messages now run through OpenClaw request handling by default
