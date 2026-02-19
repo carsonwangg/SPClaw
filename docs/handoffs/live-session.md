@@ -376,11 +376,15 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - chart reconstruction upgrade (this session):
     - chart pipeline now attempts to reconstruct line-series directly from source chart images (color/dark-line extraction + normalization) and re-plots the chart in Coatue style rather than screenshot framing by default
     - when reconstruction succeeds, output is graph-first with normalized axes and redrawn series; original image embed is fallback-only
+    - bar-mode support added:
+      - if the post references bar/histogram language, or bar-like structure is detected in source chart image, renderer outputs rebuilt bar chart instead of line chart
     - chart headlines are auto-shortened with no `...`; long titles are rephrased to concise header text
     - title/takeaway builders and Slack summary text now avoid ellipsis output
+    - removed source-handle callout and score badge from chart image output
+    - render includes pre-save overlap checks that adjust header/plot/footer spacing to avoid text/graphics collisions
   - local validation for this refinement:
-    - `PYTHONPATH=src pytest -q tests/test_x_chart_daily.py tests/test_launchd_runtime.py` => `19 passed`
-    - `PYTHONPATH=src pytest -q` => `85 passed`
+    - `PYTHONPATH=src pytest -q tests/test_x_chart_daily.py tests/test_launchd_runtime.py` => `21 passed`
+    - `PYTHONPATH=src pytest -q` => `87 passed`
 
 ## Next Step to Validate in Slack
 Send in `#charting`:

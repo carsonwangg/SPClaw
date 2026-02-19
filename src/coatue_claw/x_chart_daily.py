@@ -185,6 +185,19 @@ SLIDE_JARGON_KEYWORDS = (
     "contribution margin",
 )
 
+BAR_HINT_KEYWORDS = (
+    "bar chart",
+    "bar graph",
+    "histogram",
+    "by country",
+    "by state",
+    "by cohort",
+    "top 10",
+    "top ten",
+    "ranked",
+    "ranking",
+)
+
 
 class XChartError(RuntimeError):
     pass
@@ -223,6 +236,13 @@ class RebuiltSeries:
     y: list[float]
     color: str
     weight: float
+
+
+@dataclass(frozen=True)
+class RebuiltBars:
+    labels: list[str]
+    values: list[float]
+    color: str
 
 
 def _data_root() -> Path:
@@ -1174,6 +1194,104 @@ def _extract_rebuilt_series(*, candidate: Candidate, image) -> list[RebuiltSerie
     return out[:2]
 
 
+def _looks_like_bar_chart(image) -> bool:
+    try:
+        import numpy as np
+    except Exception:
+        return False
+    if image is None:
+        return False
+    arr = np.asarray(image)
+    if arr.ndim != 3 or arr.shape[2] < 3:
+        return False
+    if arr.dtype.kind in {"u", "i"}:
+        rgb = arr[:, :, :3].astype(float) / 255.0
+    else:
+        rgb = np.clip(arr[:, :, :3].astype(float), 0.0, 1.0)
+    h, w, _ = rgb.shape
+    if h < 200 or w < 280:
+        return False
+    crop = rgb[int(h * 0.20) : int(h * 0.90), int(w * 0.10) : int(w * 0.95), :]
+    ch, cw, _ = crop.shape
+    gray = crop.mean(axis=2)
+    dark = gray < 0.55
+    col_density = dark.sum(axis=0).astype(float) / max(1.0, float(ch))
+    strong_cols = col_density > 0.22
+    if int(strong_cols.sum()) < max(6, int(cw * 0.06)):
+        return False
+    transitions = int((strong_cols[1:] != strong_cols[:-1]).sum())
+    return transitions >= 6
+
+
+def _infer_chart_mode(*, candidate: Candidate, image) -> str:
+    merged = _normalize_render_text(f"{candidate.title} {candidate.text}").lower()
+    if any(token in merged for token in BAR_HINT_KEYWORDS):
+        return "bar"
+    if _looks_like_bar_chart(image):
+        return "bar"
+    return "line"
+
+
+def _extract_rebuilt_bars(*, image) -> RebuiltBars | None:
+    try:
+        import numpy as np
+    except Exception:
+        return None
+    if image is None:
+        return None
+    arr = np.asarray(image)
+    if arr.ndim != 3 or arr.shape[2] < 3:
+        return None
+    if arr.dtype.kind in {"u", "i"}:
+        rgb = arr[:, :, :3].astype(float) / 255.0
+    else:
+        rgb = np.clip(arr[:, :, :3].astype(float), 0.0, 1.0)
+    h, w, _ = rgb.shape
+    if h < 220 or w < 320:
+        return None
+    crop = rgb[int(h * 0.20) : int(h * 0.90), int(w * 0.10) : int(w * 0.95), :]
+    ch, cw, _ = crop.shape
+    gray = crop.mean(axis=2)
+    dark = gray < 0.55
+    lower_start = int(ch * 0.55)
+    base_row = lower_start + int(np.argmax(dark[lower_start:, :].sum(axis=1)))
+    cols = dark.sum(axis=0)
+    col_threshold = max(6, int(ch * 0.12))
+    bar_cols = cols >= col_threshold
+
+    spans: list[tuple[int, int]] = []
+    start = -1
+    min_width = max(4, int(cw * 0.015))
+    for i, flag in enumerate(bar_cols.tolist()):
+        if flag and start < 0:
+            start = i
+        elif (not flag) and start >= 0:
+            if (i - start) >= min_width:
+                spans.append((start, i - 1))
+            start = -1
+    if start >= 0 and (len(bar_cols) - start) >= min_width:
+        spans.append((start, len(bar_cols) - 1))
+    if not (3 <= len(spans) <= 16):
+        return None
+
+    values: list[float] = []
+    for s, e in spans:
+        seg = dark[:, s : e + 1]
+        y_idx = np.where(seg.any(axis=1))[0]
+        if y_idx.size == 0:
+            values.append(0.0)
+            continue
+        top = int(y_idx.min())
+        height = max(0.0, float(base_row - top))
+        values.append(height)
+    max_v = max(values) if values else 0.0
+    if max_v <= 2.0:
+        return None
+    norm = [float((v / max_v) * 100.0) for v in values]
+    labels = [f"G{i}" for i in range(1, len(norm) + 1)]
+    return RebuiltBars(labels=labels, values=norm, color="#2F6ABF")
+
+
 def _render_chart_of_day_style(
     *,
     candidate: Candidate,
@@ -1195,8 +1313,8 @@ def _render_chart_of_day_style(
     plt.rcParams["font.family"] = COATUE_FONT_FAMILY
 
     fig = plt.figure(figsize=(15, 8.4), facecolor="#DCDDDF")
-    headline_text = _shorten_without_ellipsis(_normalize_render_text(style_draft.headline), max_chars=58)
-    fig.text(
+    headline_text = _shorten_without_ellipsis(_normalize_render_text(style_draft.headline), max_chars=52)
+    headline_obj = fig.text(
         0.05,
         0.935,
         headline_text,
@@ -1207,10 +1325,10 @@ def _render_chart_of_day_style(
         family=COATUE_FONT_FAMILY,
         weight="medium",
     )
-    fig.text(0.05, 0.902, generated_line, ha="left", va="center", fontsize=9.8, color="#4A4F59")
+    meta_obj = fig.text(0.05, 0.902, generated_line, ha="left", va="center", fontsize=9.8, color="#4A4F59")
     fig.add_artist(Line2D([0.05, 0.95], [0.886, 0.886], transform=fig.transFigure, color="#2F3745", linewidth=1.1))
 
-    chart_ax = fig.add_axes([0.05, 0.14, 0.90, 0.72], facecolor="#F4F5F6")
+    chart_ax = fig.add_axes([0.05, 0.22, 0.90, 0.64], facecolor="#F4F5F6")
     chart_ax.set_xticks([])
     chart_ax.set_yticks([])
     for spine in chart_ax.spines.values():
@@ -1218,18 +1336,36 @@ def _render_chart_of_day_style(
         spine.set_linewidth(1.2)
 
     image = _safe_image_from_url(candidate.image_url)
-    rebuilt = _extract_rebuilt_series(candidate=candidate, image=image)
-    if rebuilt:
+    mode = _infer_chart_mode(candidate=candidate, image=image)
+    rebuilt_bars = _extract_rebuilt_bars(image=image) if mode == "bar" else None
+    rebuilt = _extract_rebuilt_series(candidate=candidate, image=image) if rebuilt_bars is None else []
+    if rebuilt_bars is not None:
+        try:
+            import numpy as np
+        except Exception:
+            np = None
+        if np is None:
+            chart_ax.text(0.5, 0.5, "Chart reconstruction unavailable", ha="center", va="center", fontsize=16, color="#6B7280", transform=chart_ax.transAxes)
+        else:
+            xs = np.arange(len(rebuilt_bars.values))
+            chart_ax.bar(xs, rebuilt_bars.values, color=rebuilt_bars.color, alpha=0.88, width=0.72, edgecolor="#214E93", linewidth=0.4)
+            chart_ax.set_xlim(-0.6, max(0.6, float(len(xs) - 0.4)))
+            chart_ax.set_ylim(0.0, max(100.0, max(rebuilt_bars.values) * 1.15))
+            chart_ax.grid(axis="y", color="#D9DEE7", linewidth=0.8, alpha=0.9)
+            chart_ax.tick_params(axis="both", labelsize=9, colors="#4A4F59")
+            chart_ax.set_xticks(xs)
+            chart_ax.set_xticklabels(rebuilt_bars.labels)
+            chart_ax.set_yticks([0, 20, 40, 60, 80, 100])
+            chart_ax.set_ylabel("Index (normalized)", fontsize=10, color="#4A4F59", labelpad=8)
+    elif rebuilt:
         for series in rebuilt:
-            chart_ax.plot(series.x, series.y, color=series.color, linewidth=series.weight, alpha=0.98, label=series.label)
+            chart_ax.plot(series.x, series.y, color=series.color, linewidth=series.weight, alpha=0.98)
             chart_ax.scatter([series.x[-1]], [series.y[-1]], s=70, color=series.color, zorder=6)
         chart_ax.set_xlim(0.0, 100.0)
         chart_ax.set_ylim(0.0, 100.0)
         chart_ax.grid(axis="y", color="#D9DEE7", linewidth=0.8, alpha=0.85)
-        chart_ax.set_xlabel("Time (relative)", fontsize=10, color="#4A4F59", labelpad=10)
-        chart_ax.set_ylabel("Index (normalized)", fontsize=10, color="#4A4F59", labelpad=10)
+        chart_ax.set_ylabel("Index (normalized)", fontsize=10, color="#4A4F59", labelpad=8)
         chart_ax.tick_params(axis="both", labelsize=9, colors="#4A4F59")
-        chart_ax.legend(loc="upper left", frameon=False, fontsize=9, ncol=1)
         chart_ax.set_xticks([0, 25, 50, 75, 100])
         chart_ax.set_xticklabels(["Start", "Q1", "Q2", "Q3", "Now"])
         chart_ax.set_yticks([0, 20, 40, 60, 80, 100])
@@ -1240,23 +1376,34 @@ def _render_chart_of_day_style(
         chart_ax.text(0.5, 0.5, "Chart image unavailable", ha="center", va="center", fontsize=16, color="#6B7280", transform=chart_ax.transAxes)
         chart_ax.add_patch(Rectangle((0.05, 0.1), 0.9, 0.8, fill=False, linewidth=1.2, linestyle=(0, (4, 3)), edgecolor="#9CA3AF", transform=chart_ax.transAxes))
 
-    chart_ax.text(
-        0.012,
-        0.985,
-        _normalize_render_text(candidate.author),
-        ha="left",
-        va="top",
-        fontsize=10.5,
-        color="#2A7FBE",
-        family=COATUE_FONT_FAMILY,
-        weight="bold",
-        transform=chart_ax.transAxes,
-        bbox={"boxstyle": "round,pad=0.18", "facecolor": "#EEF4FB", "edgecolor": "#D0E1F3"},
-    )
+    takeaway_text = _shorten_without_ellipsis(_normalize_render_text(style_draft.takeaway), max_chars=110)
+    takeaway_lines = "\n".join(textwrap.wrap(f"Takeaway: {takeaway_text}", width=110)[:2])
+    takeaway_obj = fig.text(0.05, 0.118, takeaway_lines, fontsize=10.6, color="#1F2430", family=COATUE_FONT_FAMILY, weight="bold", va="top")
+    source_obj = fig.text(0.05, 0.045, f"Source: {candidate.url}", fontsize=9, color="#4B5563", family=COATUE_FONT_FAMILY)
 
-    fig.text(0.05, 0.082, f"Takeaway: {_normalize_render_text(style_draft.takeaway)}", fontsize=11, color="#1F2430", family=COATUE_FONT_FAMILY, weight="bold")
-    fig.text(0.05, 0.045, f"Source: {candidate.url}", fontsize=9, color="#4B5563", family=COATUE_FONT_FAMILY)
-    fig.text(0.95, 0.045, f"Score {candidate.score:.1f}", fontsize=9, color="#4B5563", ha="right", family=COATUE_FONT_FAMILY)
+    # Prevent overlapping labels by shrinking header/plot region if needed.
+    for _ in range(4):
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        fig_bbox = fig.bbox
+        if headline_obj.get_window_extent(renderer=renderer).x1 > fig_bbox.x0 + (fig_bbox.width * 0.95):
+            headline_text = _shorten_without_ellipsis(headline_text, max_chars=max(26, len(headline_text) - 6))
+            headline_obj.set_text(headline_text)
+            headline_obj.set_fontsize(max(21, float(headline_obj.get_fontsize()) - 1))
+            continue
+        chart_bb = chart_ax.get_tightbbox(renderer=renderer)
+        take_bb = takeaway_obj.get_window_extent(renderer=renderer)
+        src_bb = source_obj.get_window_extent(renderer=renderer)
+        if take_bb.y1 > chart_bb.y0 - 4:
+            pos = chart_ax.get_position()
+            delta = min(0.02, max(0.008, (take_bb.y1 - chart_bb.y0 + 6) / fig_bbox.height))
+            new_height = max(0.50, pos.height - delta)
+            chart_ax.set_position([pos.x0, pos.y0 + delta, pos.width, new_height])
+            continue
+        if src_bb.y1 > take_bb.y0 - 4:
+            source_obj.set_y(max(0.025, source_obj.get_position()[1] - 0.01))
+            continue
+        break
 
     fig.savefig(out_path, dpi=180, bbox_inches="tight")
     plt.close(fig)

@@ -9,7 +9,9 @@ from coatue_claw.x_chart_daily import (
     Candidate,
     XChartStore,
     _build_x_title,
+    _extract_rebuilt_bars,
     _extract_rebuilt_series,
+    _infer_chart_mode,
     _is_us_relevant_post,
     _normalize_render_text,
     _parse_windows,
@@ -309,3 +311,41 @@ def test_extract_rebuilt_series_from_synthetic_line_chart() -> None:
     series = _extract_rebuilt_series(candidate=candidate, image=image)
     assert len(series) >= 1
     assert all(len(s.x) == len(s.y) for s in series)
+
+
+def test_infer_chart_mode_prefers_bar_when_text_says_bar_chart() -> None:
+    candidate = Candidate(
+        candidate_key="x:bar",
+        source_type="x",
+        source_id="fiscal_AI",
+        author="@fiscal_AI",
+        title="@fiscal_AI: New bar chart on US enrollment by cohort",
+        text="Bar chart shows US enrollment by cohort.",
+        url="https://x.com/fiscal_AI/status/bar",
+        image_url="https://example.com/bar.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=120,
+        source_priority=1.6,
+        score=90.0,
+    )
+    assert _infer_chart_mode(candidate=candidate, image=None) == "bar"
+
+
+def test_extract_rebuilt_bars_from_synthetic_bars() -> None:
+    try:
+        import numpy as np
+    except Exception:
+        return
+    image = np.ones((420, 720, 3), dtype=float)
+    x0, x1 = 120, 640
+    y0, y1 = 90, 360
+    image[y0:y1, x0 : x0 + 2, :] = 0.0
+    image[y1 - 2 : y1, x0:x1, :] = 0.0
+    bars = [(150, 12), (230, 45), (310, 30), (390, 70), (470, 55), (550, 35)]
+    for center, height in bars:
+        left, right = max(x0 + 5, center - 12), min(x1 - 5, center + 12)
+        top = max(y0 + 8, y1 - height * 3)
+        image[top:y1, left:right, :] = [0.2, 0.44, 0.86]
+    rebuilt = _extract_rebuilt_bars(image=image)
+    assert rebuilt is not None
+    assert len(rebuilt.values) >= 3
