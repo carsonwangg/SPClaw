@@ -203,6 +203,10 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - attached full memo as `.md` file to preserve complete report
   - stripped long `[Source: ...]` tails from summary bullets for readability while preserving full citations in the attachment
   - tests added for readable summary + attachment contract (`tests/test_email_gateway.py`)
+  - deployed on Mac mini via `0173404` and validated:
+    - `tests/test_email_gateway.py` => `4 passed` on runtime host
+    - direct runtime check confirms `has_source_tail=False` in diligence summary body
+    - email 24/7 service restored and running (`make openclaw-24x7-status`)
 
 ## Next Step to Validate in Slack
 Send in `#charting`:
