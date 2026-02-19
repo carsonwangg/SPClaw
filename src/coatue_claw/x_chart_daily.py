@@ -13,6 +13,7 @@ import re
 import sqlite3
 import textwrap
 from typing import Any
+import unicodedata
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -50,7 +51,7 @@ THEME_KEYWORDS = (
     "ai",
     "semiconductor",
     "software",
-    "saaS",
+    "saas",
     "consumer",
     "macro",
     "cloud",
@@ -89,6 +90,101 @@ CHART_SIGNAL_KEYWORDS = (
     "consensus",
 )
 
+US_STRONG_SIGNAL_KEYWORDS = (
+    "s&p",
+    "spx",
+    "nasdaq",
+    "nyse",
+    "dow jones",
+    "russell 2000",
+    "fomc",
+    "federal reserve",
+    "fed funds",
+    "treasury",
+    "u.s. treasury",
+    "10y",
+    "2y",
+    "nonfarm payrolls",
+    "jobless claims",
+    "cpi",
+    "pce",
+    "core inflation",
+    "u.s. consumer",
+    "u.s. earnings",
+    "saaS",
+    "software multiple",
+    "ai capex",
+)
+
+US_WEAK_SIGNAL_KEYWORDS = (
+    "u.s.",
+    "united states",
+    "american",
+    "wall street",
+)
+
+FOREX_NON_US_KEYWORDS = (
+    "forex",
+    "fx",
+    "eur/usd",
+    "usd/jpy",
+    "gbp/usd",
+    "aud/usd",
+    "cad/usd",
+    "usd/chf",
+    "us dollar index",
+    "turkish lira",
+    "lira",
+    "yuan",
+    "renminbi",
+    "rupee",
+    "peso",
+    "real",
+    "rand",
+)
+
+NON_US_GEOGRAPHY_KEYWORDS = (
+    "europe",
+    "eurozone",
+    "uk ",
+    "united kingdom",
+    "china",
+    "japan",
+    "india",
+    "brazil",
+    "turkey",
+    "germany",
+    "france",
+    "canada",
+    "mexico",
+    "emerging markets",
+)
+
+TREND_SIGNAL_KEYWORDS = (
+    "up",
+    "down",
+    "higher",
+    "lower",
+    "record high",
+    "record low",
+    "all-time high",
+    "all-time low",
+    "accelerating",
+    "slowing",
+    "rebound",
+    "decline",
+)
+
+SLIDE_JARGON_KEYWORDS = (
+    "bull case",
+    "bear case",
+    "peer comparison",
+    "valuation framework",
+    "investment recommendation",
+    "operating leverage",
+    "contribution margin",
+)
+
 
 class XChartError(RuntimeError):
     pass
@@ -107,6 +203,16 @@ class Candidate:
     created_at: str | None
     engagement: int
     source_priority: float
+    score: float
+
+
+@dataclass(frozen=True)
+class StyleDraft:
+    headline: str
+    takeaway: str
+    why_now: str
+    iteration: int
+    checks: dict[str, bool]
     score: float
 
 
@@ -215,6 +321,68 @@ def _canonical_handle(handle: str) -> str:
     out = handle.strip().lstrip("@")
     out = re.sub(r"[^A-Za-z0-9_]+", "", out)
     return out
+
+
+def _normalize_render_text(text: str) -> str:
+    cleaned = re.sub(r"https?://\S+", "", text or "")
+    cleaned = re.sub(r"[\U00010000-\U0010ffff]", "", cleaned)
+    cleaned = cleaned.replace("\u2019", "'").replace("\u2018", "'").replace("\u201c", '"').replace("\u201d", '"')
+    cleaned = cleaned.replace("\u2013", "-").replace("\u2014", "-")
+    cleaned = unicodedata.normalize("NFKD", cleaned)
+    cleaned = cleaned.encode("ascii", "ignore").decode("ascii")
+    cleaned = cleaned.replace("\ufffd", "")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
+def _extract_first_sentence(text: str) -> str:
+    normalized = _normalize_render_text(text)
+    if not normalized:
+        return ""
+    parts = re.split(r"(?<=[.!?])\s+", normalized)
+    if not parts:
+        return normalized
+    first = parts[0].strip()
+    return first or normalized
+
+
+def _is_us_relevant_post(text: str) -> bool:
+    lower = _normalize_render_text(text).lower()
+    strong = any(token in lower for token in US_STRONG_SIGNAL_KEYWORDS)
+    weak = any(token in lower for token in US_WEAK_SIGNAL_KEYWORDS)
+    if re.search(r"\bus\b", lower):
+        weak = True
+    forex = any(token in lower for token in FOREX_NON_US_KEYWORDS)
+    non_us_geo = any(token in lower for token in NON_US_GEOGRAPHY_KEYWORDS)
+    if re.search(r"\b[a-z]{3}/[a-z]{3}\b", lower):
+        forex = True
+
+    if forex and not strong:
+        return False
+    if non_us_geo and not (strong or weak):
+        return False
+    if strong:
+        return True
+    return weak and not forex
+
+
+def _truncate_words(text: str, *, max_words: int, max_chars: int) -> str:
+    words = [w for w in _normalize_render_text(text).split(" ") if w]
+    if not words:
+        return ""
+    clipped = " ".join(words[:max_words]).strip()
+    if len(clipped) > max_chars:
+        clipped = clipped[:max_chars].rstrip()
+    if len(words) > max_words:
+        return clipped.rstrip(".,;:") + "..."
+    return clipped
+
+
+def _contains_trend_signal(text: str) -> bool:
+    lower = _normalize_render_text(text).lower()
+    if re.search(r"\b\d+(\.\d+)?%|\b\d+(\.\d+)?x\b|\$\s?\d", lower):
+        return True
+    return any(token in lower for token in TREND_SIGNAL_KEYWORDS)
 
 
 class XChartStore:
@@ -517,9 +685,11 @@ def _parse_x_candidates(payload: dict[str, Any], *, priority_by_handle: dict[str
                 pass
         created_at = str(row.get("created_at")) if row.get("created_at") else None
         url = f"https://x.com/{handle}/status/{tweet_id}"
+        title = _build_x_title(handle=handle, text=text)
         if not _is_chart_like_post(text, handle=handle):
             continue
-        title = _build_x_title(handle=handle, text=text)
+        if not _is_us_relevant_post(f"{title} {text}"):
+            continue
         priority = float(priority_by_handle.get(handle.lower(), 0.45))
         score = _score_candidate(
             title=title,
@@ -576,10 +746,10 @@ def _is_chart_like_post(text: str, *, handle: str) -> bool:
 
 
 def _build_x_title(*, handle: str, text: str) -> str:
-    snippet = re.sub(r"\s+", " ", text).strip()
+    snippet = _normalize_render_text(text)
     if len(snippet) > 95:
-        snippet = snippet[:94].rstrip() + "…"
-    return f"@{handle}: {snippet}"
+        snippet = snippet[:94].rstrip() + "..."
+    return f"@{handle}: {snippet}".strip()
 
 
 def _keyword_score(text: str) -> float:
@@ -695,6 +865,8 @@ def _fetch_visualcapitalist_candidates(*, max_items: int = 20) -> list[Candidate
         text = re.sub(r"\s+", " ", text).strip()
         if not title or not link:
             continue
+        if not _is_us_relevant_post(f"{title} {text}"):
+            continue
         image_url: str | None = None
         media_content = item.find("media:content", ns)
         if media_content is not None:
@@ -762,13 +934,70 @@ def _pick_winner(*, store: XChartStore, candidates: list[Candidate]) -> Candidat
 
 
 def _build_takeaways(candidate: Candidate) -> list[str]:
-    text = re.sub(r"\s+", " ", candidate.text).strip()
-    excerpt = text[:220].rstrip() + ("…" if len(text) > 220 else "")
+    text = _normalize_render_text(candidate.text)
+    title = _normalize_render_text(candidate.title)
+    excerpt = _truncate_words(text or title, max_words=24, max_chars=170)
+    if not excerpt:
+        excerpt = "Fresh US-focused chart signal from a prioritized source."
+    tone_line = "Keep the takeaway simple and explicit for fast read in a feed."
     return [
-        "Observation: high-signal chart candidate from prioritized sources.",
-        "Why it matters: ties to core investing themes (AI, semis, software, consumer, macro).",
-        f"Investor lens: {excerpt}" if excerpt else "Investor lens: chart image and linked post provide the primary evidence.",
+        excerpt,
+        "US relevance check passed and trend is explicit.",
+        tone_line,
     ]
+
+
+def _build_style_draft(candidate: Candidate, *, iteration: int) -> StyleDraft:
+    title_text = _normalize_render_text(candidate.title)
+    body_text = _normalize_render_text(candidate.text)
+    first_sentence = _extract_first_sentence(body_text or title_text)
+
+    if iteration == 1:
+        headline = _truncate_words(first_sentence or title_text, max_words=14, max_chars=88)
+        takeaway = _truncate_words(body_text or title_text, max_words=22, max_chars=150)
+        why_now = "High-signal US chart that can be understood in one glance."
+    elif iteration == 2:
+        headline = _truncate_words(title_text.replace(candidate.author, ""), max_words=12, max_chars=72)
+        takeaway = _truncate_words(first_sentence or body_text, max_words=16, max_chars=120)
+        why_now = "Simple chart + explicit US trend + clear directional signal."
+    else:
+        anchor = _truncate_words(first_sentence or title_text, max_words=10, max_chars=64)
+        headline = anchor or "US Trend Snapshot"
+        takeaway = _truncate_words(body_text or title_text, max_words=14, max_chars=95)
+        why_now = "Designed for a quick feed read, not a full investment slide."
+
+    combined = " ".join([headline, takeaway, why_now]).strip()
+    checks = {
+        "us_relevant": _is_us_relevant_post(f"{candidate.title} {candidate.text}"),
+        "headline_short": bool(headline) and len(headline) <= 88,
+        "takeaway_short": bool(takeaway) and len(takeaway) <= 150,
+        "trend_explicit": _contains_trend_signal(f"{candidate.title} {candidate.text}"),
+        "plain_language": not any(term in combined.lower() for term in SLIDE_JARGON_KEYWORDS),
+        "clean_characters": "\ufffd" not in combined and "??" not in combined and "  " not in combined,
+    }
+    score = float(sum(1.0 for passed in checks.values() if passed))
+    return StyleDraft(
+        headline=headline or "US Trend Snapshot",
+        takeaway=takeaway or "New US-facing data point with clear directional movement.",
+        why_now=why_now,
+        iteration=iteration,
+        checks=checks,
+        score=score,
+    )
+
+
+def _select_style_draft(candidate: Candidate, *, max_iterations: int = 3) -> StyleDraft:
+    best = _build_style_draft(candidate, iteration=1)
+    target_score = 5.0
+    if best.score >= target_score and best.checks.get("us_relevant", False):
+        return best
+    for iteration in range(2, max_iterations + 1):
+        draft = _build_style_draft(candidate, iteration=iteration)
+        if draft.score > best.score:
+            best = draft
+        if draft.score >= target_score and draft.checks.get("us_relevant", False):
+            return draft
+    return best
 
 
 def _safe_image_from_url(url: str | None):
@@ -803,7 +1032,7 @@ def _render_chart_of_day_style(
     candidate: Candidate,
     slot_key: str,
     windows_text: str,
-    takeaways: list[str],
+    style_draft: StyleDraft,
 ) -> Path:
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
@@ -818,41 +1047,62 @@ def _render_chart_of_day_style(
     generated_line = generated_local.strftime("Generated %b %-d, %Y at %-I:%M %p %Z")
     plt.rcParams["font.family"] = COATUE_FONT_FAMILY
 
-    fig = plt.figure(figsize=(14, 8.6), facecolor="#E9EAED")
-    fig.text(0.5, 0.95, "Coatue Chart of the Day", ha="center", va="center", fontsize=33, color="#1D2B4F", weight="bold")
-    fig.text(0.5, 0.915, f"{generated_line} | Slot {windows_text}", ha="center", va="center", fontsize=11, color="#4A4F59")
-    fig.add_artist(Line2D([0.05, 0.95], [0.89, 0.89], transform=fig.transFigure, color="#2A7FBE", linewidth=2.3))
+    fig = plt.figure(figsize=(14, 8), facecolor="#F2F4F8")
+    fig.text(0.5, 0.955, "Coatue Chart of the Day", ha="center", va="center", fontsize=32, color="#1D2B4F", weight="bold")
+    fig.text(0.5, 0.92, f"{generated_line} | Slot {windows_text}", ha="center", va="center", fontsize=11, color="#4A4F59")
+    fig.add_artist(Line2D([0.04, 0.96], [0.892, 0.892], transform=fig.transFigure, color="#2A7FBE", linewidth=2.2))
 
-    left = fig.add_axes([0.05, 0.11, 0.31, 0.74], facecolor="#FAFAFA")
+    left = fig.add_axes([0.04, 0.15, 0.22, 0.70], facecolor="#EAF1F9")
     left.set_xticks([])
     left.set_yticks([])
     for spine in left.spines.values():
-        spine.set_color("#E3E3E3")
-        spine.set_linewidth(1.1)
+        spine.set_visible(False)
 
     date_line = generated_local.strftime("%m.%d.%Y")
-    left.text(0.06, 0.94, date_line, fontsize=11, color="#3F434C", family=COATUE_FONT_FAMILY, transform=left.transAxes)
-    left.text(0.06, 0.88, "Chart Scout Winner", fontsize=20, color="#111827", family=COATUE_FONT_FAMILY, transform=left.transAxes)
-    left.text(0.06, 0.83, candidate.author, fontsize=13, color="#2A7FBE", family=COATUE_FONT_FAMILY, transform=left.transAxes, weight="bold")
+    left.text(0.07, 0.94, date_line, fontsize=10.5, color="#3F434C", family=COATUE_FONT_FAMILY, transform=left.transAxes)
+    left.text(0.07, 0.89, "US Trend Winner", fontsize=19, color="#111827", family=COATUE_FONT_FAMILY, transform=left.transAxes, weight="bold")
+    left.text(0.07, 0.84, _normalize_render_text(candidate.author), fontsize=13, color="#2A7FBE", family=COATUE_FONT_FAMILY, transform=left.transAxes, weight="bold")
+    left.text(0.07, 0.76, "Trend", fontsize=12, color="#2A7FBE", family=COATUE_FONT_FAMILY, transform=left.transAxes, weight="bold")
+    left.text(
+        0.07,
+        0.71,
+        "\n".join(textwrap.wrap(_normalize_render_text(style_draft.headline), width=28)),
+        fontsize=11.3,
+        color="#1F2937",
+        family=COATUE_FONT_FAMILY,
+        transform=left.transAxes,
+        va="top",
+        weight="bold",
+    )
+    left.text(0.07, 0.50, "Takeaway", fontsize=12, color="#2A7FBE", family=COATUE_FONT_FAMILY, transform=left.transAxes, weight="bold")
+    left.text(
+        0.07,
+        0.45,
+        "\n".join(textwrap.wrap(_normalize_render_text(style_draft.takeaway), width=30)),
+        fontsize=10.6,
+        color="#1F2937",
+        family=COATUE_FONT_FAMILY,
+        transform=left.transAxes,
+        va="top",
+    )
+    left.text(0.07, 0.25, "Why now", fontsize=12, color="#2A7FBE", family=COATUE_FONT_FAMILY, transform=left.transAxes, weight="bold")
+    left.text(
+        0.07,
+        0.20,
+        "\n".join(textwrap.wrap(_normalize_render_text(style_draft.why_now), width=30)),
+        fontsize=10.2,
+        color="#1F2937",
+        family=COATUE_FONT_FAMILY,
+        transform=left.transAxes,
+        va="top",
+    )
 
-    wrapped_title = "\n".join(textwrap.wrap(candidate.title, width=38))[:560]
-    left.text(0.06, 0.77, wrapped_title, fontsize=11.5, color="#1F2937", family=COATUE_FONT_FAMILY, transform=left.transAxes, va="top")
-
-    left.text(0.06, 0.49, "Executive Summary", fontsize=14, color="#2A7FBE", family=COATUE_FONT_FAMILY, transform=left.transAxes, weight="bold")
-    y = 0.45
-    for idx, item in enumerate(takeaways[:3], start=1):
-        wrapped = "\n".join(textwrap.wrap(item, width=42))
-        left.text(0.06, y, f"{idx}) {wrapped}", fontsize=10.5, color="#222831", family=COATUE_FONT_FAMILY, transform=left.transAxes, va="top")
-        y -= 0.12
-
-    left.text(0.06, 0.07, "C:\\Takes style | Evidence-first | Not investment advice", fontsize=9, color="#5E6470", family=COATUE_FONT_FAMILY, transform=left.transAxes)
-
-    right = fig.add_axes([0.39, 0.30, 0.56, 0.55], facecolor="#F3F4F6")
+    right = fig.add_axes([0.28, 0.15, 0.68, 0.70], facecolor="#FFFFFF")
     right.set_xticks([])
     right.set_yticks([])
     for spine in right.spines.values():
-        spine.set_color("#D7DAE0")
-        spine.set_linewidth(1.1)
+        spine.set_color("#D4DAE5")
+        spine.set_linewidth(1.0)
 
     image = _safe_image_from_url(candidate.image_url)
     if image is not None:
@@ -860,40 +1110,10 @@ def _render_chart_of_day_style(
         right.set_aspect("auto")
     else:
         right.text(0.5, 0.5, "Chart image unavailable", ha="center", va="center", fontsize=16, color="#6B7280", transform=right.transAxes)
-        right.add_patch(Rectangle((0.05, 0.1), 0.9, 0.8, fill=False, linewidth=1.4, linestyle=(0, (4, 3)), edgecolor="#9CA3AF", transform=right.transAxes))
+        right.add_patch(Rectangle((0.05, 0.1), 0.9, 0.8, fill=False, linewidth=1.2, linestyle=(0, (4, 3)), edgecolor="#9CA3AF", transform=right.transAxes))
 
-    backdrop = fig.add_axes([0.39, 0.11, 0.56, 0.15], facecolor="#DDEAF5")
-    backdrop.set_xticks([])
-    backdrop.set_yticks([])
-    for spine in backdrop.spines.values():
-        spine.set_visible(False)
-    backdrop.add_patch(Rectangle((0.0, 0.0), 0.008, 1.0, transform=backdrop.transAxes, color="#2A7FBE", ec=None))
-
-    context_text = re.sub(r"\s+", " ", candidate.text).strip()
-    context_text = context_text[:360].rstrip() + ("…" if len(context_text) > 360 else "")
-    backdrop_lines = "\n".join(textwrap.wrap(context_text, width=92))
-    backdrop.text(
-        0.03,
-        0.80,
-        "Backdrop:",
-        fontsize=13,
-        color="#1F2937",
-        weight="bold",
-        family=COATUE_FONT_FAMILY,
-        transform=backdrop.transAxes,
-    )
-    backdrop.text(
-        0.03,
-        0.66,
-        backdrop_lines,
-        fontsize=10.5,
-        color="#1F2937",
-        family=COATUE_FONT_FAMILY,
-        transform=backdrop.transAxes,
-        va="top",
-    )
-
-    fig.text(0.05, 0.03, f"Source: {candidate.url}", fontsize=9, color="#4B5563", family=COATUE_FONT_FAMILY)
+    fig.text(0.04, 0.065, f"Trend: {_normalize_render_text(style_draft.headline)}", fontsize=10, color="#1F2937", family=COATUE_FONT_FAMILY, weight="bold")
+    fig.text(0.04, 0.035, f"Source: {candidate.url}", fontsize=9, color="#4B5563", family=COATUE_FONT_FAMILY)
     fig.text(0.95, 0.03, f"Score {candidate.score:.1f}", fontsize=9, color="#4B5563", ha="right", family=COATUE_FONT_FAMILY)
 
     fig.savefig(out_path, dpi=180, bbox_inches="tight")
@@ -901,30 +1121,42 @@ def _render_chart_of_day_style(
     return out_path
 
 
-def _post_winner_to_slack(*, candidate: Candidate, channel: str, slot_key: str, windows_text: str) -> dict[str, Any]:
+def _post_winner_to_slack(
+    *,
+    candidate: Candidate,
+    channel: str,
+    slot_key: str,
+    windows_text: str,
+    style_draft: StyleDraft | None = None,
+) -> dict[str, Any]:
     from slack_sdk import WebClient
     from slack_sdk.errors import SlackApiError
 
     tokens = _slack_tokens()
+    style_draft = style_draft or _select_style_draft(candidate)
     takeaways = _build_takeaways(candidate)
     styled_path = _render_chart_of_day_style(
         candidate=candidate,
         slot_key=slot_key,
         windows_text=windows_text,
-        takeaways=takeaways,
+        style_draft=style_draft,
     )
+    clean_author = _normalize_render_text(candidate.author)
+    clean_title = _normalize_render_text(candidate.title)
+    clean_takeaway = _normalize_render_text(takeaways[0])
+    style_pass = style_draft.score >= 5.0 and style_draft.checks.get("us_relevant", False)
     text_lines = [
-        "*Coatue Chart of the Day Candidate*",
+        "*Coatue Chart of the Day*",
         f"- Slot: `{slot_key}` ({windows_text})",
-        f"- Source: `{candidate.author}`",
+        f"- Source: `{clean_author}`",
         f"- Score: `{candidate.score:.1f}`",
+        f"- Style fit: `{'pass' if style_pass else 'iterate'} {int(style_draft.score)}/6`",
+        f"- Trend: {style_draft.headline}",
+        f"- Takeaway: {clean_takeaway}",
         f"- Link: {candidate.url}",
-        "",
-        "*Quick Takeaways*",
-        f"1. {takeaways[0]}",
-        f"2. {takeaways[1]}",
-        f"3. {takeaways[2]}",
     ]
+    if clean_title:
+        text_lines.insert(4, f"- Context: {clean_title}")
     blocks: list[dict[str, Any]] = [{"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(text_lines)}}]
     last_error: str | None = None
     for token in tokens:
@@ -953,6 +1185,11 @@ def _post_winner_to_slack(*, candidate: Candidate, channel: str, slot_key: str, 
                 "ts": response.get("ts"),
                 "channel": response.get("channel"),
                 "styled_artifact": str(styled_path),
+                "style_audit": {
+                    "iteration": style_draft.iteration,
+                    "score": style_draft.score,
+                    "checks": style_draft.checks,
+                },
             }
         except SlackApiError as exc:
             err = str(exc.response.get("error", "")) if exc.response is not None else str(exc)
@@ -1014,6 +1251,7 @@ def run_chart_scout_once(
             "slot_key": slot_key,
             "candidates_scanned": len(all_candidates),
         }
+    style_draft = _select_style_draft(winner)
 
     output_dir = _output_dir()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1030,9 +1268,17 @@ def run_chart_scout_once(
                 f"- score: `{winner.score:.2f}`",
                 f"- url: {winner.url}",
                 f"- image_url: {winner.image_url or 'n/a'}",
+                f"- style_iteration: `{style_draft.iteration}`",
+                f"- style_score: `{style_draft.score:.1f}/6`",
                 "",
                 "## Notes",
-                re.sub(r"\s+", " ", winner.text).strip(),
+                _normalize_render_text(winner.text),
+                "",
+                "## Style Audit",
+                f"- headline: {_normalize_render_text(style_draft.headline)}",
+                f"- takeaway: {_normalize_render_text(style_draft.takeaway)}",
+                f"- why_now: {_normalize_render_text(style_draft.why_now)}",
+                f"- checks: {json.dumps(style_draft.checks, sort_keys=True)}",
             ]
         ),
         encoding="utf-8",
@@ -1050,12 +1296,20 @@ def run_chart_scout_once(
                 "title": winner.title,
                 "url": winner.url,
                 "score": winner.score,
+                "style_score": style_draft.score,
+                "style_iteration": style_draft.iteration,
             },
             "artifact": str(out_path),
         }
 
     channel = (channel_override or "").strip() or _slack_channel()
-    post = _post_winner_to_slack(candidate=winner, channel=channel, slot_key=slot_key, windows_text=windows_text)
+    post = _post_winner_to_slack(
+        candidate=winner,
+        channel=channel,
+        slot_key=slot_key,
+        windows_text=windows_text,
+        style_draft=style_draft,
+    )
     store.record_post(slot_key=slot_key, channel=channel, candidate=winner)
     return {
         "ok": True,
@@ -1069,6 +1323,8 @@ def run_chart_scout_once(
             "title": winner.title,
             "url": winner.url,
             "score": winner.score,
+            "style_score": style_draft.score,
+            "style_iteration": style_draft.iteration,
         },
         "artifact": str(out_path),
     }

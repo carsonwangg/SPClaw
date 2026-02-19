@@ -157,6 +157,15 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
     - style cues align with C:\\Takes design language and valuation-chart skill guidance
   - quality gate:
     - candidate selection now enforces chart-like text/data signals to suppress non-chart image picks
+    - candidate selection now enforces US relevance and blocks non-US forex-only chart trends
+    - post copy/style now goes through iterative style-audit checks before final render/post
+    - output text is normalized to prevent unsupported glyph/missing-character artifacts
+  - presentation update:
+    - card layout shifted from dense slide-style summary blocks to feed-style quick read:
+      - one trend headline
+      - one explicit takeaway
+      - one short why-now line
+      - chart image as dominant visual
 - 24/7 runtime supervision is implemented:
   - launchd-managed services in `src/coatue_claw/launchd_runtime.py`
   - services: `com.coatueclaw.email-gateway` (always-on poller), `com.coatueclaw.memory-prune` (hourly prune)
@@ -186,7 +195,8 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
     - `COATUE_CLAW_X_CHART_WINDOWS=09:00,12:00,18:00`
     - `COATUE_CLAW_X_CHART_TIMEZONE=America/Los_Angeles`
 12. Validate three scheduled daily posts in Slack (9am/12pm/6pm PT) and tune source priority list after first day.
-13. Tune style/briefing density after observing 1-2 days of live scheduled posts.
+13. Pull latest on Mac mini, restart runtime, and verify `x chart now` picks a US-relevant chart with clean text rendering in Slack.
+14. Observe 1-2 days of live scheduled posts and tune US relevance/source priorities if false negatives appear.
 
 ## 2026-02-19 Update - Build Request Runtime Robustness
 - Added a near-term reliability guard for Slack `build:` execution:

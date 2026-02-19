@@ -358,6 +358,22 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - chart-quality filter update:
     - X candidates now must pass chart-like text/data signal checks before ranking
     - reduces false positives (e.g., headline photos without chart context)
+  - US scope + readability/style refinement (this session):
+    - added US relevance classifier gate for both X and Visual Capitalist candidates (blocks non-US FX-only trends such as Turkish lira posts)
+    - added render-safe normalization for outbound chart text (`_normalize_render_text`) to remove unsupported glyph/emoji artifacts
+    - simplified chart card format to a feed-style layout (single Trend + Takeaway + Why now), with chart image as dominant visual
+    - added iterative post-generation style audit (`StyleDraft`) with checks for:
+      - US relevance
+      - explicit trend signal
+      - concise headline/takeaway
+      - plain language (non slide-jargon)
+      - clean characters
+    - style audit metadata now persists in:
+      - markdown artifact (`style_iteration`, `style_score`, checks)
+      - Slack post payload (`style_audit`)
+  - local validation for this refinement:
+    - `PYTHONPATH=src pytest -q tests/test_x_chart_daily.py tests/test_launchd_runtime.py` => `15 passed`
+    - `PYTHONPATH=src pytest -q` => `81 passed`
 
 ## Next Step to Validate in Slack
 Send in `#charting`:

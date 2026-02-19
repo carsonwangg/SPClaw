@@ -3,7 +3,17 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from coatue_claw.x_chart_daily import Candidate, XChartStore, _parse_windows, _parse_x_candidates, _slack_tokens, run_chart_scout_once
+from coatue_claw.x_chart_daily import (
+    Candidate,
+    XChartStore,
+    _is_us_relevant_post,
+    _normalize_render_text,
+    _parse_windows,
+    _parse_x_candidates,
+    _select_style_draft,
+    _slack_tokens,
+    run_chart_scout_once,
+)
 
 
 def test_parse_windows_defaults_and_custom() -> None:
@@ -38,7 +48,7 @@ def test_run_chart_scout_dry_run(tmp_path: Path, monkeypatch) -> None:
                 source_id="fiscal_AI",
                 author="@fiscal_AI",
                 title="Fiscal AI trend chart",
-                text="AI software demand trend chart",
+                text="US AI software demand trend chart",
                 url="https://x.com/fiscal_AI/status/1",
                 image_url="https://example.com/chart.png",
                 created_at=datetime.now(UTC).isoformat(),
@@ -118,7 +128,7 @@ def test_parse_x_candidates_accepts_chart_signal_text() -> None:
             {
                 "id": "t2",
                 "author_id": "u2",
-                "text": "New chart: AI software revenue growth hit 42% YoY.",
+                "text": "New US chart: S&P software revenue growth hit 42% YoY.",
                 "created_at": "2026-02-19T00:00:00Z",
                 "public_metrics": {"like_count": 10, "retweet_count": 5, "reply_count": 2, "quote_count": 1},
                 "attachments": {"media_keys": ["m2"]},
@@ -132,3 +142,59 @@ def test_parse_x_candidates_accepts_chart_signal_text() -> None:
     parsed = _parse_x_candidates(payload, priority_by_handle={"fiscal_ai": 1.6})
     assert len(parsed) == 1
     assert parsed[0].source_id == "fiscal_AI"
+
+
+def test_parse_x_candidates_rejects_non_us_forex_posts() -> None:
+    payload = {
+        "data": [
+            {
+                "id": "t3",
+                "author_id": "u3",
+                "text": "Chart: Turkish Lira vs U.S. Dollar now down 97% since 2010.",
+                "created_at": "2026-02-19T00:00:00Z",
+                "public_metrics": {"like_count": 500, "retweet_count": 200, "reply_count": 90, "quote_count": 50},
+                "attachments": {"media_keys": ["m3"]},
+            }
+        ],
+        "includes": {
+            "users": [{"id": "u3", "username": "Barchart"}],
+            "media": [{"media_key": "m3", "type": "photo", "url": "https://example.com/forex.png"}],
+        },
+    }
+    parsed = _parse_x_candidates(payload, priority_by_handle={"barchart": 1.2})
+    assert parsed == []
+
+
+def test_us_relevance_classifier_prefers_us_topics() -> None:
+    assert _is_us_relevant_post("US CPI cools while S&P 500 makes a new high chart") is True
+    assert _is_us_relevant_post("EUR/USD forex trend update with no US equity angle") is False
+
+
+def test_render_text_normalization_removes_garbled_characters() -> None:
+    raw = "BREAKING 🚨 Turkey Lira falls 97% � https://x.com/example"
+    normalized = _normalize_render_text(raw)
+    assert "🚨" not in normalized
+    assert "�" not in normalized
+    assert "https://" not in normalized
+    assert "Turkey Lira falls 97%" in normalized
+
+
+def test_style_draft_prefers_simple_feed_like_copy() -> None:
+    candidate = Candidate(
+        candidate_key="x:99",
+        source_type="x",
+        source_id="fiscal_AI",
+        author="@fiscal_AI",
+        title="@fiscal_AI: US cloud software growth re-accelerates to 29% YoY.",
+        text="US cloud software growth re-accelerates to 29% YoY and valuations follow.",
+        url="https://x.com/fiscal_AI/status/99",
+        image_url="https://example.com/chart.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=700,
+        source_priority=1.6,
+        score=101.0,
+    )
+    draft = _select_style_draft(candidate)
+    assert draft.checks["us_relevant"] is True
+    assert draft.checks["trend_explicit"] is True
+    assert draft.score >= 5.0
