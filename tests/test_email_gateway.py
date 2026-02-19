@@ -43,6 +43,8 @@ def _write_file_bridge_config(path: Path, *, root: Path) -> None:
 def test_parse_email_command() -> None:
     assert parse_email_command("diligence SNOW", "").kind == "diligence"
     assert parse_email_command("dilligence MDB", "").arg == "MDB"
+    assert parse_email_command("Testing Dilligence", "Diligence SNOW please").arg == "SNOW"
+    assert parse_email_command("Quick request", "can you do diligence on $NOW for me").arg == "NOW"
     assert parse_email_command("", "memory status").kind == "memory_status"
     cmd = parse_email_command("", "memory query daughter's birthday")
     assert cmd.kind == "memory_query"

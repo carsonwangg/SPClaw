@@ -338,13 +338,49 @@ def _extract_attachments(msg: Message, *, max_attachment_mb: int) -> list[EmailA
 
 
 def parse_email_command(subject: str, body: str) -> EmailCommand:
-    text = "\n".join(line.strip() for line in [subject, body] if line and line.strip())
+    parts = [part.strip() for part in [body, subject] if part and part.strip()]
+    text = "\n".join(parts)
     lowered = text.lower()
-    if re.search(r"\bhelp\b", lowered):
-        return EmailCommand(kind="help")
-    m = re.search(r"\b(?:diligence|dilligence)\s+([a-zA-Z.$-]{1,12})\b", text, re.IGNORECASE)
-    if m:
-        return EmailCommand(kind="diligence", arg=m.group(1).upper().lstrip("$"))
+
+    # Extract a likely ticker near the diligence keyword and ignore common filler words.
+    ticker_stopwords = {
+        "diligence",
+        "dilligence",
+        "please",
+        "pls",
+        "help",
+        "for",
+        "on",
+        "about",
+        "the",
+        "a",
+        "an",
+        "me",
+        "us",
+    }
+
+    def _clean_token(raw: str) -> str:
+        token = raw.strip().strip(".,;:!?()[]{}<>\"'`").lstrip("$")
+        return token.upper()
+
+    def _extract_diligence_ticker(part: str) -> str | None:
+        for match in re.finditer(r"\b(?:diligence|dilligence)\b(?P<trailing>(?:\s+\S+){1,8})", part, re.IGNORECASE):
+            trailing = match.group("trailing") or ""
+            for raw in re.split(r"\s+", trailing.strip()):
+                token = _clean_token(raw)
+                if not token:
+                    continue
+                if token.lower() in ticker_stopwords:
+                    continue
+                if re.fullmatch(r"[A-Z][A-Z0-9.-]{0,11}", token):
+                    return token
+        return None
+
+    for part in parts:
+        ticker = _extract_diligence_ticker(part)
+        if ticker:
+            return EmailCommand(kind="diligence", arg=ticker)
+
     m = re.search(r"\bmemory\s+status\b", lowered)
     if m:
         return EmailCommand(kind="memory_status")
@@ -353,6 +389,8 @@ def parse_email_command(subject: str, body: str) -> EmailCommand:
         return EmailCommand(kind="memory_query", arg=m.group(1).strip())
     if re.search(r"\bfiles?\s+status\b", lowered):
         return EmailCommand(kind="files_status")
+    if re.search(r"\bhelp\b", lowered):
+        return EmailCommand(kind="help")
     return EmailCommand(kind="help")
 
 

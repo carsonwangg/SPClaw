@@ -109,6 +109,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `help`
   - email attachments auto-ingest into local + Drive category folders with audit DB:
     - `/opt/coatue-claw-data/db/email_gateway.sqlite`
+  - diligence parsing now uses context-aware ticker extraction (body-first, stopword filtering) so phrases like `Testing Dilligence` + `Diligence SNOW please` resolve to ticker `SNOW` instead of `DILIGENCE`
 - Added 24/7 runtime supervision for email + memory pruning:
   - module: `src/coatue_claw/launchd_runtime.py`
   - launchd services:

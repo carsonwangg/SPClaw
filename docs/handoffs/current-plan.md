@@ -82,6 +82,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Email channel integration is implemented (optional):
   - IMAP poll + SMTP reply runtime in `src/coatue_claw/email_gateway.py`
   - email commands: diligence, memory status/query, files status, help
+  - context-aware diligence email parsing now prioritizes body intent and filters filler tokens so ticker extraction is robust in natural phrasing
   - email attachments auto-ingest to knowledge folders with audit DB (`/opt/coatue-claw-data/db/email_gateway.sqlite`)
   - operations via `make openclaw-email-{status,run-once,serve}`
 - 24/7 runtime supervision is implemented:
