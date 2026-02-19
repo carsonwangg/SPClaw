@@ -169,6 +169,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
     - Slack post packaging now sends chart file in the initial channel message (not in a thread)
     - Chart output now attempts source-chart reconstruction (line extraction + redraw) so final output is a rebuilt Coatue chart, not a screenshot frame
     - renderer now supports bar-mode reconstruction when bar cues are detected in text/image (bar chart output instead of line output)
+    - guardrail: bar-cue posts no longer degrade into fake line reconstructions; they rebuild as bars or fall back to source image
     - chart image now omits source-handle overlay and score corner marker
     - pre-save layout checks enforce no overlapping header/chart/footer text
     - Headline/takeaway formatter now enforces no-ellipsis titles (`...` removed and phrasing shortened)

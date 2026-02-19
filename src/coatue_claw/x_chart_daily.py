@@ -1211,21 +1211,40 @@ def _looks_like_bar_chart(image) -> bool:
     h, w, _ = rgb.shape
     if h < 200 or w < 280:
         return False
-    crop = rgb[int(h * 0.20) : int(h * 0.90), int(w * 0.10) : int(w * 0.95), :]
+    crop = rgb[int(h * 0.18) : int(h * 0.92), int(w * 0.08) : int(w * 0.96), :]
     ch, cw, _ = crop.shape
-    gray = crop.mean(axis=2)
-    dark = gray < 0.55
-    col_density = dark.sum(axis=0).astype(float) / max(1.0, float(ch))
-    strong_cols = col_density > 0.22
-    if int(strong_cols.sum()) < max(6, int(cw * 0.06)):
+    hsv = None
+    try:
+        from matplotlib.colors import rgb_to_hsv
+
+        hsv = rgb_to_hsv(crop)
+    except Exception:
+        hsv = None
+    if hsv is None:
+        gray = crop.mean(axis=2)
+        dark = gray < 0.55
+        col_density = dark.sum(axis=0).astype(float) / max(1.0, float(ch))
+        strong_cols = col_density > 0.22
+        transitions = int((strong_cols[1:] != strong_cols[:-1]).sum())
+        return int(strong_cols.sum()) >= max(6, int(cw * 0.06)) and transitions >= 6
+
+    sat = hsv[:, :, 1]
+    val = hsv[:, :, 2]
+    colorful = (sat > 0.45) & (val > 0.20)
+    col_density = colorful.sum(axis=0).astype(float) / max(1.0, float(ch))
+    strong_cols = col_density > 0.08
+    if int(strong_cols.sum()) < max(10, int(cw * 0.07)):
         return False
     transitions = int((strong_cols[1:] != strong_cols[:-1]).sum())
-    return transitions >= 6
+    return transitions >= 8
 
 
 def _infer_chart_mode(*, candidate: Candidate, image) -> str:
     merged = _normalize_render_text(f"{candidate.title} {candidate.text}").lower()
     if any(token in merged for token in BAR_HINT_KEYWORDS):
+        return "bar"
+    bars = _extract_rebuilt_bars(image=image)
+    if bars is not None and len(bars.values) >= 4:
         return "bar"
     if _looks_like_bar_chart(image):
         return "bar"
@@ -1249,19 +1268,40 @@ def _extract_rebuilt_bars(*, image) -> RebuiltBars | None:
     h, w, _ = rgb.shape
     if h < 220 or w < 320:
         return None
-    crop = rgb[int(h * 0.20) : int(h * 0.90), int(w * 0.10) : int(w * 0.95), :]
+    crop = rgb[int(h * 0.16) : int(h * 0.93), int(w * 0.07) : int(w * 0.97), :]
     ch, cw, _ = crop.shape
-    gray = crop.mean(axis=2)
-    dark = gray < 0.55
-    lower_start = int(ch * 0.55)
-    base_row = lower_start + int(np.argmax(dark[lower_start:, :].sum(axis=1)))
-    cols = dark.sum(axis=0)
-    col_threshold = max(6, int(ch * 0.12))
+    try:
+        from matplotlib.colors import rgb_to_hsv
+
+        hsv = rgb_to_hsv(crop)
+    except Exception:
+        hsv = None
+    if hsv is None:
+        return None
+
+    sat = hsv[:, :, 1]
+    val = hsv[:, :, 2]
+    hue = hsv[:, :, 0]
+    colorful = (sat > 0.45) & (val > 0.18)
+
+    # Prefer dominant colored hue (works for Bloomberg-style orange bars).
+    if int(colorful.sum()) < max(250, int(ch * cw * 0.008)):
+        return None
+    hist, edges = np.histogram(hue[colorful], bins=30, range=(0.0, 1.0))
+    top_bin = int(np.argmax(hist))
+    lo = float(edges[max(0, top_bin - 1)])
+    hi = float(edges[min(len(edges) - 1, top_bin + 2)])
+    bar_mask = colorful & (hue >= lo) & (hue < hi)
+    if int(bar_mask.sum()) < max(180, int(ch * cw * 0.005)):
+        bar_mask = colorful
+
+    cols = bar_mask.sum(axis=0)
+    col_threshold = max(6, int(ch * 0.06))
     bar_cols = cols >= col_threshold
 
     spans: list[tuple[int, int]] = []
     start = -1
-    min_width = max(4, int(cw * 0.015))
+    min_width = max(3, int(cw * 0.010))
     for i, flag in enumerate(bar_cols.tolist()):
         if flag and start < 0:
             start = i
@@ -1271,19 +1311,33 @@ def _extract_rebuilt_bars(*, image) -> RebuiltBars | None:
             start = -1
     if start >= 0 and (len(bar_cols) - start) >= min_width:
         spans.append((start, len(bar_cols) - 1))
-    if not (3 <= len(spans) <= 16):
+    if not (3 <= len(spans) <= 24):
         return None
 
-    values: list[float] = []
+    bottoms: list[float] = []
+    tops: list[float] = []
     for s, e in spans:
-        seg = dark[:, s : e + 1]
+        seg = bar_mask[:, s : e + 1]
         y_idx = np.where(seg.any(axis=1))[0]
         if y_idx.size == 0:
-            values.append(0.0)
             continue
-        top = int(y_idx.min())
-        height = max(0.0, float(base_row - top))
-        values.append(height)
+        tops.append(float(y_idx.min()))
+        bottoms.append(float(y_idx.max()))
+    if len(tops) < 3:
+        return None
+    base_row = float(np.percentile(np.asarray(bottoms, dtype=float), 85))
+    values: list[float] = []
+    for top in tops:
+        values.append(max(0.0, base_row - top))
+
+    # Merge near-adjacent spans to avoid splitting one thick bar into many.
+    if len(values) > 16:
+        merged: list[float] = []
+        step = max(1, int(round(len(values) / 12)))
+        for i in range(0, len(values), step):
+            merged.append(float(np.max(values[i : i + step])))
+        values = merged
+
     max_v = max(values) if values else 0.0
     if max_v <= 2.0:
         return None
@@ -1338,7 +1392,7 @@ def _render_chart_of_day_style(
     image = _safe_image_from_url(candidate.image_url)
     mode = _infer_chart_mode(candidate=candidate, image=image)
     rebuilt_bars = _extract_rebuilt_bars(image=image) if mode == "bar" else None
-    rebuilt = _extract_rebuilt_series(candidate=candidate, image=image) if rebuilt_bars is None else []
+    rebuilt = _extract_rebuilt_series(candidate=candidate, image=image) if (mode != "bar" and rebuilt_bars is None) else []
     if rebuilt_bars is not None:
         try:
             import numpy as np

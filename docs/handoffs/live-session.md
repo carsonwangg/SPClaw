@@ -378,6 +378,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - when reconstruction succeeds, output is graph-first with normalized axes and redrawn series; original image embed is fallback-only
     - bar-mode support added:
       - if the post references bar/histogram language, or bar-like structure is detected in source chart image, renderer outputs rebuilt bar chart instead of line chart
+      - if bar mode is selected but bar reconstruction confidence is insufficient, renderer now falls back to source image (never fake line output for bar-cue posts)
     - chart headlines are auto-shortened with no `...`; long titles are rephrased to concise header text
     - title/takeaway builders and Slack summary text now avoid ellipsis output
     - removed source-handle callout and score badge from chart image output
