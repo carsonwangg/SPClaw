@@ -8,12 +8,15 @@ import types
 from coatue_claw.x_chart_daily import (
     Candidate,
     XChartStore,
+    _build_x_title,
+    _extract_rebuilt_series,
     _is_us_relevant_post,
     _normalize_render_text,
     _parse_windows,
     _parse_x_candidates,
     _post_winner_to_slack,
     _select_style_draft,
+    _shorten_without_ellipsis,
     _slack_tokens,
     run_chart_scout_once,
 )
@@ -253,3 +256,56 @@ def test_post_winner_uploads_file_in_initial_message(monkeypatch, tmp_path: Path
     assert upload_calls[0]["file"] == str(styled)
     assert "initial_comment" in upload_calls[0]
     assert "thread_ts" not in upload_calls[0]
+
+
+def test_shorten_without_ellipsis_removes_three_dots() -> None:
+    text = "Non-asset owners are being left behind: US consumer sentiment among non-stockholders keeps sliding"
+    shortened = _shorten_without_ellipsis(text, max_chars=58)
+    assert "..." not in shortened
+    assert len(shortened) <= 58
+
+
+def test_build_x_title_has_no_ellipsis() -> None:
+    title = _build_x_title(handle="fiscal_AI", text="This is a very long sentence " * 12)
+    assert "..." not in title
+
+
+def test_extract_rebuilt_series_from_synthetic_line_chart() -> None:
+    try:
+        import numpy as np
+    except Exception:
+        return
+
+    image = np.ones((420, 720, 3), dtype=float)
+    x_start, x_end = 90, 680
+    y_top, y_bottom = 80, 360
+    image[y_top:y_bottom, x_start : x_start + 2, :] = 0.0
+    image[y_bottom - 2 : y_bottom, x_start:x_end, :] = 0.0
+
+    width = x_end - x_start
+    for i in range(width):
+        x = x_start + i
+        y1 = int(300 - (i * 0.25))
+        y2 = int(260 - (i * 0.18))
+        y1 = max(y_top + 5, min(y_bottom - 5, y1))
+        y2 = max(y_top + 5, min(y_bottom - 5, y2))
+        image[max(0, y1 - 1) : y1 + 1, max(0, x - 1) : x + 1, :] = [0.18, 0.42, 0.92]
+        image[max(0, y2 - 1) : y2 + 1, max(0, x - 1) : x + 1, :] = [0.30, 0.70, 0.52]
+
+    candidate = Candidate(
+        candidate_key="x:synthetic",
+        source_type="x",
+        source_id="fiscal_AI",
+        author="@fiscal_AI",
+        title="@fiscal_AI: US synthetic series",
+        text="US chart synthetic trend",
+        url="https://x.com/fiscal_AI/status/synthetic",
+        image_url="https://example.com/synthetic.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=100,
+        source_priority=1.6,
+        score=95.0,
+    )
+    series = _extract_rebuilt_series(candidate=candidate, image=image)
+    assert len(series) >= 1
+    assert all(len(s.x) == len(s.y) for s in series)

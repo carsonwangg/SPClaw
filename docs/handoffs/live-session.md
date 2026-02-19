@@ -373,9 +373,14 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
       - markdown artifact (`style_iteration`, `style_score`, checks)
       - Slack post payload (`style_audit`)
     - Slack delivery now uploads the styled graph as the initial message attachment (`files_upload_v2` with `initial_comment`) instead of posting image in a thread reply
+  - chart reconstruction upgrade (this session):
+    - chart pipeline now attempts to reconstruct line-series directly from source chart images (color/dark-line extraction + normalization) and re-plots the chart in Coatue style rather than screenshot framing by default
+    - when reconstruction succeeds, output is graph-first with normalized axes and redrawn series; original image embed is fallback-only
+    - chart headlines are auto-shortened with no `...`; long titles are rephrased to concise header text
+    - title/takeaway builders and Slack summary text now avoid ellipsis output
   - local validation for this refinement:
-    - `PYTHONPATH=src pytest -q tests/test_x_chart_daily.py tests/test_launchd_runtime.py` => `15 passed`
-    - `PYTHONPATH=src pytest -q` => `81 passed`
+    - `PYTHONPATH=src pytest -q tests/test_x_chart_daily.py tests/test_launchd_runtime.py` => `19 passed`
+    - `PYTHONPATH=src pytest -q` => `85 passed`
 
 ## Next Step to Validate in Slack
 Send in `#charting`:

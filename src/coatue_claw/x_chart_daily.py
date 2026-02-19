@@ -216,6 +216,15 @@ class StyleDraft:
     score: float
 
 
+@dataclass(frozen=True)
+class RebuiltSeries:
+    label: str
+    x: list[float]
+    y: list[float]
+    color: str
+    weight: float
+
+
 def _data_root() -> Path:
     return Path(os.environ.get("COATUE_CLAW_DATA_ROOT", "/opt/coatue-claw-data"))
 
@@ -335,6 +344,24 @@ def _normalize_render_text(text: str) -> str:
     return cleaned
 
 
+def _shorten_without_ellipsis(text: str, *, max_chars: int) -> str:
+    cleaned = _normalize_render_text(text).replace("...", " ").strip(". ")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if len(cleaned) <= max_chars:
+        return cleaned
+    words = cleaned.split(" ")
+    out: list[str] = []
+    for word in words:
+        candidate = ((" ".join(out) + " " + word).strip() if out else word)
+        if len(candidate) <= max_chars:
+            out.append(word)
+            continue
+        break
+    if out:
+        return " ".join(out).strip(". ")
+    return cleaned[:max_chars].rstrip(". ")
+
+
 def _extract_first_sentence(text: str) -> str:
     normalized = _normalize_render_text(text)
     if not normalized:
@@ -370,16 +397,10 @@ def _truncate_words(text: str, *, max_words: int, max_chars: int) -> str:
     words = [w for w in _normalize_render_text(text).split(" ") if w]
     if not words:
         return ""
-    full = " ".join(words).strip()
     clipped = " ".join(words[:max_words]).strip()
     if len(clipped) > max_chars:
-        clipped = clipped[:max_chars].rstrip()
-    truncated = len(words) > max_words or len(full) > len(clipped)
-    if truncated:
-        if len(clipped) > max(0, max_chars - 3):
-            clipped = clipped[: max(0, max_chars - 3)].rstrip()
-        return clipped.rstrip(".,;:") + "..."
-    return clipped
+        clipped = _shorten_without_ellipsis(clipped, max_chars=max_chars)
+    return clipped.strip(". ")
 
 
 def _contains_trend_signal(text: str) -> bool:
@@ -750,9 +771,7 @@ def _is_chart_like_post(text: str, *, handle: str) -> bool:
 
 
 def _build_x_title(*, handle: str, text: str) -> str:
-    snippet = _normalize_render_text(text)
-    if len(snippet) > 95:
-        snippet = snippet[:94].rstrip() + "..."
+    snippet = _shorten_without_ellipsis(_normalize_render_text(text), max_chars=95)
     return f"@{handle}: {snippet}".strip()
 
 
@@ -984,7 +1003,7 @@ def _build_style_draft(candidate: Candidate, *, iteration: int) -> StyleDraft:
     }
     score = float(sum(1.0 for passed in checks.values() if passed))
     return StyleDraft(
-        headline=headline or "US Trend Snapshot",
+        headline=_shorten_without_ellipsis(headline or "US Trend Snapshot", max_chars=58),
         takeaway=takeaway or "New US-facing data point with clear directional movement.",
         why_now=why_now,
         iteration=iteration,
@@ -1034,6 +1053,127 @@ def _safe_image_from_url(url: str | None):
         return None
 
 
+def _infer_series_labels(*, candidate: Candidate, count: int) -> list[str]:
+    merged = f"{candidate.title} {candidate.text}".lower()
+    if count >= 2 and ("stockholder" in merged or "asset owner" in merged):
+        return ["Asset owners", "Non-asset owners"][:count]
+    if count >= 2 and ("bull" in merged and "bear" in merged):
+        return ["Bull trend", "Bear trend"][:count]
+    return [f"Series {idx}" for idx in range(1, count + 1)]
+
+
+def _extract_rebuilt_series(*, candidate: Candidate, image) -> list[RebuiltSeries]:
+    try:
+        import numpy as np
+        from matplotlib.colors import rgb_to_hsv
+    except Exception:
+        return []
+
+    if image is None:
+        return []
+    arr = np.asarray(image)
+    if arr.ndim != 3 or arr.shape[2] < 3:
+        return []
+    if arr.dtype.kind in {"u", "i"}:
+        rgb = arr[:, :, :3].astype(float) / 255.0
+    else:
+        rgb = np.clip(arr[:, :, :3].astype(float), 0.0, 1.0)
+    h, w, _ = rgb.shape
+    if h < 200 or w < 300:
+        return []
+
+    y0, y1 = int(h * 0.18), int(h * 0.90)
+    x0, x1 = int(w * 0.08), int(w * 0.96)
+    if y1 - y0 < 80 or x1 - x0 < 120:
+        return []
+    crop = rgb[y0:y1, x0:x1, :]
+    ch, cw, _ = crop.shape
+
+    inner_y0, inner_y1 = int(ch * 0.06), int(ch * 0.94)
+    inner_x0, inner_x1 = int(cw * 0.04), int(cw * 0.98)
+    work = crop[inner_y0:inner_y1, inner_x0:inner_x1, :]
+    wh, ww, _ = work.shape
+    if wh < 40 or ww < 80:
+        return []
+
+    hsv = rgb_to_hsv(work)
+    sat = hsv[:, :, 1]
+    val = hsv[:, :, 2]
+    hue = hsv[:, :, 0]
+
+    color_mask = (sat > 0.25) & (val > 0.12) & (val < 0.95)
+    dark_mask = (sat < 0.25) & (val > 0.05) & (val < 0.40)
+    color_pixels = int(color_mask.sum())
+    if color_pixels < 250:
+        return []
+
+    hist, edges = np.histogram(hue[color_mask], bins=24, range=(0.0, 1.0))
+    top_bins = np.argsort(hist)[::-1][:4]
+    masks: list[tuple[np.ndarray, str, float]] = []
+    palette = ("#2F6ABF", "#5AA88A", "#D16F4B", "#7C4D9D")
+    for idx, b in enumerate(top_bins):
+        if int(hist[b]) < 120:
+            continue
+        lo, hi = float(edges[b]), float(edges[b + 1])
+        mask = color_mask & (hue >= lo) & (hue < hi)
+        if mask.sum() < 100:
+            continue
+        masks.append((mask, palette[idx % len(palette)], 2.8 if idx == 0 else 2.4))
+    if dark_mask.sum() > 180:
+        masks.append((dark_mask, "#232A35", 2.1))
+
+    def _series_from_mask(mask: np.ndarray) -> list[float]:
+        ys = np.full((ww,), np.nan, dtype=float)
+        for xi in range(ww):
+            y_idx = np.where(mask[:, xi])[0]
+            if y_idx.size >= 2:
+                ys[xi] = float(np.median(y_idx))
+        valid = np.where(~np.isnan(ys))[0]
+        if valid.size < max(18, int(ww * 0.15)):
+            return []
+        all_idx = np.arange(ww, dtype=float)
+        interp = np.interp(all_idx, valid.astype(float), ys[valid])
+        kernel = np.ones((5,), dtype=float) / 5.0
+        smooth = np.convolve(interp, kernel, mode="same")
+        return smooth.tolist()
+
+    raw_series: list[tuple[list[float], str, float]] = []
+    for mask, color, weight in masks:
+        series = _series_from_mask(mask)
+        if series:
+            raw_series.append((series, color, weight))
+    if not raw_series:
+        return []
+
+    try:
+        import numpy as np
+
+        stacked = np.asarray([s for s, _, _ in raw_series], dtype=float)
+    except Exception:
+        return []
+    y_min = float(np.nanmin(stacked))
+    y_max = float(np.nanmax(stacked))
+    spread = max(1e-6, y_max - y_min)
+    labels = _infer_series_labels(candidate=candidate, count=len(raw_series))
+    out: list[RebuiltSeries] = []
+    for idx, (series, color, weight) in enumerate(raw_series):
+        arr_y = np.asarray(series, dtype=float)
+        norm = (1.0 - ((arr_y - y_min) / spread)) * 100.0
+        norm = np.clip(norm, 0.0, 100.0)
+        x_vals = (np.arange(arr_y.size, dtype=float) / max(1.0, float(arr_y.size - 1))) * 100.0
+        out.append(
+            RebuiltSeries(
+                label=labels[idx] if idx < len(labels) else f"Series {idx+1}",
+                x=[float(v) for v in x_vals.tolist()],
+                y=[float(v) for v in norm.tolist()],
+                color=color,
+                weight=weight,
+            )
+        )
+    out.sort(key=lambda s: s.weight, reverse=True)
+    return out[:2]
+
+
 def _render_chart_of_day_style(
     *,
     candidate: Candidate,
@@ -1055,10 +1195,11 @@ def _render_chart_of_day_style(
     plt.rcParams["font.family"] = COATUE_FONT_FAMILY
 
     fig = plt.figure(figsize=(15, 8.4), facecolor="#DCDDDF")
+    headline_text = _shorten_without_ellipsis(_normalize_render_text(style_draft.headline), max_chars=58)
     fig.text(
         0.05,
         0.935,
-        _normalize_render_text(style_draft.headline),
+        headline_text,
         ha="left",
         va="center",
         fontsize=27,
@@ -1077,7 +1218,22 @@ def _render_chart_of_day_style(
         spine.set_linewidth(1.2)
 
     image = _safe_image_from_url(candidate.image_url)
-    if image is not None:
+    rebuilt = _extract_rebuilt_series(candidate=candidate, image=image)
+    if rebuilt:
+        for series in rebuilt:
+            chart_ax.plot(series.x, series.y, color=series.color, linewidth=series.weight, alpha=0.98, label=series.label)
+            chart_ax.scatter([series.x[-1]], [series.y[-1]], s=70, color=series.color, zorder=6)
+        chart_ax.set_xlim(0.0, 100.0)
+        chart_ax.set_ylim(0.0, 100.0)
+        chart_ax.grid(axis="y", color="#D9DEE7", linewidth=0.8, alpha=0.85)
+        chart_ax.set_xlabel("Time (relative)", fontsize=10, color="#4A4F59", labelpad=10)
+        chart_ax.set_ylabel("Index (normalized)", fontsize=10, color="#4A4F59", labelpad=10)
+        chart_ax.tick_params(axis="both", labelsize=9, colors="#4A4F59")
+        chart_ax.legend(loc="upper left", frameon=False, fontsize=9, ncol=1)
+        chart_ax.set_xticks([0, 25, 50, 75, 100])
+        chart_ax.set_xticklabels(["Start", "Q1", "Q2", "Q3", "Now"])
+        chart_ax.set_yticks([0, 20, 40, 60, 80, 100])
+    elif image is not None:
         chart_ax.imshow(image)
         chart_ax.set_aspect("auto")
     else:

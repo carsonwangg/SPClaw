@@ -167,6 +167,8 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
       - chart/image carries the core story
       - minimal bottom footer (takeaway + source)
     - Slack post packaging now sends chart file in the initial channel message (not in a thread)
+    - Chart output now attempts source-chart reconstruction (line extraction + redraw) so final output is a rebuilt Coatue chart, not a screenshot frame
+    - Headline/takeaway formatter now enforces no-ellipsis titles (`...` removed and phrasing shortened)
 - 24/7 runtime supervision is implemented:
   - launchd-managed services in `src/coatue_claw/launchd_runtime.py`
   - services: `com.coatueclaw.email-gateway` (always-on poller), `com.coatueclaw.memory-prune` (hourly prune)
@@ -196,8 +198,8 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
     - `COATUE_CLAW_X_CHART_WINDOWS=09:00,12:00,18:00`
     - `COATUE_CLAW_X_CHART_TIMEZONE=America/Los_Angeles`
 12. Validate three scheduled daily posts in Slack (9am/12pm/6pm PT) and tune source priority list after first day.
-13. Pull latest on Mac mini, restart runtime, and verify `x chart now` picks a US-relevant chart with clean text rendering in Slack.
-14. Observe 1-2 days of live scheduled posts and tune US relevance/source priorities if false negatives appear.
+13. Pull latest on Mac mini, restart runtime, and verify `x chart now` posts a rebuilt graph-first chart (not source screenshot framing) with no-ellipsis title.
+14. Observe 1-2 days of live scheduled posts and tune reconstruction thresholds/source priorities if rebuild fallback rate is high.
 
 ## 2026-02-19 Update - Build Request Runtime Robustness
 - Added a near-term reliability guard for Slack `build:` execution:
