@@ -503,8 +503,26 @@ def _extract_title(lines: list[str], *, fallback: str) -> str:
     return fallback
 
 
-def _render_memo_pdf(*, path: Path, title: str) -> bytes:
-    # Use matplotlib's PDF backend (already a core dependency) to avoid extra packages.
+def _clean_consumer_line(text: str, *, max_len: int = 220) -> str:
+    cleaned = re.sub(r"\s*\[Source:.*$", "", text, flags=re.IGNORECASE).strip()
+    cleaned = cleaned.replace("`", "")
+    cleaned = cleaned.replace("->", "to")
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    # Remove local filesystem leakage from consumer-facing output.
+    cleaned = re.sub(r"/opt/[^\s)]+", "", cleaned)
+    cleaned = cleaned.strip(" -")
+    if len(cleaned) > max_len:
+        cleaned = cleaned[: max_len - 3].rstrip() + "..."
+    return cleaned
+
+
+def _render_memo_pdf(
+    *,
+    title: str,
+    ticker: str,
+    sections: list[tuple[str, list[str]]],
+) -> bytes:
+    # Use matplotlib's PDF backend (already a core dependency) for a clean, sectioned brief.
     import matplotlib
 
     matplotlib.use("Agg")
@@ -513,24 +531,11 @@ def _render_memo_pdf(*, path: Path, title: str) -> bytes:
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_pdf import PdfPages
 
-    lines = path.read_text(encoding="utf-8").splitlines()
-    page_width, page_height = 8.27, 11.69  # A4 inches
+    page_width, page_height = 8.5, 11.0  # US Letter inches
     left = 0.08
-    top = 0.95
-    bottom = 0.06
-    chars_per_line = 104
-
-    def line_style(raw_line: str) -> tuple[float, float, str]:
-        line = raw_line.strip()
-        if line.startswith("# "):
-            return (14.0, 0.030, line[2:].strip())
-        if line.startswith("## "):
-            return (12.0, 0.024, line[3:].strip())
-        if line.startswith("- "):
-            return (10.0, 0.020, f"• {line[2:].strip()}")
-        if not line:
-            return (10.0, 0.012, "")
-        return (10.0, 0.020, line)
+    top = 0.93
+    bottom = 0.08
+    chars_per_line = 96
 
     def wrapped(line: str, *, indent_chars: int = 0) -> list[str]:
         if not line:
@@ -549,26 +554,61 @@ def _render_memo_pdf(*, path: Path, title: str) -> bytes:
 
     buf = io.BytesIO()
     with PdfPages(buf) as pdf:
+        page_num = 0
         fig, ax, y = new_page()
-        ax.text(left, y, title, transform=ax.transAxes, fontsize=16, fontweight="bold", va="top", ha="left")
-        y -= 0.04
-        ax.text(left, y, f"Generated UTC: {_now_utc_iso()[:19]}", transform=ax.transAxes, fontsize=9, va="top", ha="left")
-        y -= 0.03
+        page_num += 1
 
-        for raw in lines:
-            font_size, row_h, clean = line_style(raw)
-            indent_chars = 2 if clean.startswith("• ") else 0
-            for idx, part in enumerate(wrapped(clean, indent_chars=indent_chars)):
-                draw = part if idx == 0 else ("  " + part if clean.startswith("• ") else part)
-                if y < bottom:
-                    pdf.savefig(fig, bbox_inches="tight")
-                    plt.close(fig)
-                    fig, ax, y = new_page()
-                ax.text(left, y, pdf_safe(draw), transform=ax.transAxes, fontsize=font_size, va="top", ha="left")
-                y -= row_h
+        def save_current_page() -> None:
+            nonlocal fig, ax
+            ax.text(left, 0.03, f"Page {page_num}", transform=ax.transAxes, fontsize=9, color="#6B7280", va="bottom", ha="left")
+            ax.text(
+                0.92,
+                0.03,
+                "Coatue Claw | Diligence Brief",
+                transform=ax.transAxes,
+                fontsize=9,
+                color="#6B7280",
+                va="bottom",
+                ha="right",
+            )
+            pdf.savefig(fig, bbox_inches="tight")
+            plt.close(fig)
 
-        pdf.savefig(fig, bbox_inches="tight")
-        plt.close(fig)
+        def start_new_page() -> None:
+            nonlocal fig, ax, y, page_num
+            save_current_page()
+            fig, ax, y = new_page()
+            page_num += 1
+            ax.text(left, y, f"Diligence Brief: {ticker}", transform=ax.transAxes, fontsize=11.5, fontweight="bold", color="#111827", va="top", ha="left")
+            y -= 0.03
+
+        def ensure_space(required: float) -> None:
+            nonlocal y
+            if y - required < bottom:
+                start_new_page()
+
+        ax.text(left, y, title, transform=ax.transAxes, fontsize=17, fontweight="bold", color="#0F172A", va="top", ha="left")
+        y -= 0.038
+        ax.text(left, y, f"Ticker: {ticker} | Generated UTC: {_now_utc_iso()[:19]}", transform=ax.transAxes, fontsize=9.5, color="#475569", va="top", ha="left")
+        y -= 0.032
+
+        for section_title, items in sections:
+            if not items:
+                continue
+            ensure_space(0.05)
+            ax.text(left, y, section_title, transform=ax.transAxes, fontsize=12.5, fontweight="bold", color="#1E3A8A", va="top", ha="left")
+            y -= 0.028
+            for item in items:
+                chunks = wrapped(item, indent_chars=2)
+                ensure_space(0.022 * (len(chunks) + 0.5))
+                for idx, chunk in enumerate(chunks):
+                    prefix = "• " if idx == 0 else "  "
+                    ax.text(left + 0.005, y, pdf_safe(prefix + chunk), transform=ax.transAxes, fontsize=10.5, color="#111827", va="top", ha="left")
+                    y -= 0.021
+                y -= 0.005
+            y -= 0.01
+
+        save_current_page()
 
     return buf.getvalue()
 
@@ -577,18 +617,18 @@ def _format_diligence_reply(*, ticker: str, path: Path) -> EmailReply:
     lines = path.read_text(encoding="utf-8").splitlines()
     title = _extract_title(lines, fallback=f"Neutral Investment Memo: {ticker}")
     key_takeaways = _extract_section_bullets(lines, "## 1. Key Takeaways", limit=5)
-    risks = _extract_section_bullets(lines, "## 6. Key Risks", limit=3)
+    business = _extract_section_bullets(lines, "## 2. Business Overview", limit=6)
+    financials = _extract_section_bullets(lines, "## 3. Financials & Funding", limit=6)
+    strengths = _extract_section_bullets(lines, "## 5. Company Strengths", limit=5)
+    risks = _extract_section_bullets(lines, "## 6. Key Risks", limit=5)
+    questions = _extract_section_bullets(lines, "## 7. Open Diligence Questions", limit=4)
 
-    def _clean_summary_line(text: str) -> str:
-        # Keep the email body readable; full citation details remain in the attached memo.
-        cleaned = re.sub(r"\s*\[Source:.*$", "", text, flags=re.IGNORECASE).strip()
-        cleaned = cleaned.replace("`", "")
-        if len(cleaned) > 200:
-            cleaned = cleaned[:197].rstrip() + "..."
-        return cleaned
-
-    key_takeaways_clean = [_clean_summary_line(item) for item in key_takeaways]
-    risks_clean = [_clean_summary_line(item) for item in risks]
+    key_takeaways_clean = [_clean_consumer_line(item) for item in key_takeaways if _clean_consumer_line(item)]
+    risks_clean = [_clean_consumer_line(item) for item in risks if _clean_consumer_line(item)]
+    business_clean = [_clean_consumer_line(item) for item in business if _clean_consumer_line(item)]
+    financials_clean = [_clean_consumer_line(item) for item in financials if _clean_consumer_line(item)]
+    strengths_clean = [_clean_consumer_line(item) for item in strengths if _clean_consumer_line(item)]
+    questions_clean = [_clean_consumer_line(item) for item in questions if _clean_consumer_line(item)]
 
     text_lines = [
         f"Diligence report is ready for {ticker}.",
@@ -596,12 +636,12 @@ def _format_diligence_reply(*, ticker: str, path: Path) -> EmailReply:
         "",
         "Quick Takeaways:",
     ]
-    if key_takeaways:
+    if key_takeaways_clean:
         text_lines.extend(f"- {item}" for item in key_takeaways_clean)
     else:
         text_lines.append("- Key takeaway extraction unavailable; see attached report.")
 
-    if risks:
+    if risks_clean:
         text_lines.extend(["", "Top Risks:"])
         text_lines.extend(f"- {item}" for item in risks_clean)
 
@@ -613,7 +653,7 @@ def _format_diligence_reply(*, ticker: str, path: Path) -> EmailReply:
         "<li>Key takeaway extraction unavailable; see attached report.</li>"
     )
     risks_html = ""
-    if risks:
+    if risks_clean:
         risks_html = (
             "<h3>Top Risks</h3><ul>"
             + "".join(f"<li>{html_lib.escape(item)}</li>" for item in risks_clean)
@@ -628,7 +668,15 @@ def _format_diligence_reply(*, ticker: str, path: Path) -> EmailReply:
         f"<p><strong>Attachment:</strong> {html_lib.escape(pdf_name)}</p>"
     )
 
-    pdf_bytes = _render_memo_pdf(path=path, title=title)
+    sections: list[tuple[str, list[str]]] = [
+        ("Key Takeaways", key_takeaways_clean),
+        ("Business Overview", business_clean),
+        ("Financial Snapshot", financials_clean),
+        ("Company Strengths", strengths_clean),
+        ("Key Risks", risks_clean),
+        ("Open Questions", questions_clean),
+    ]
+    pdf_bytes = _render_memo_pdf(title=title, ticker=ticker, sections=sections)
     attachment = OutboundAttachment(
         filename=pdf_name,
         content_type="application/pdf",

@@ -25,6 +25,7 @@ For diligence replies:
 - Email body returns a clean executive summary (quick takeaways + top risks), with citation tails removed for readability.
 - Full memo is attached as a readable `.pdf` file for consumer-facing delivery.
 - Local filesystem paths are not included in the user-facing email body.
+- PDF attachment is formatted as a clean diligence brief (section headers + wrapped bullets) rather than a raw markdown text dump.
 
 ## Required Environment Variables (Mac mini `.env.prod`)
 - `COATUE_CLAW_EMAIL_ENABLED=true`
