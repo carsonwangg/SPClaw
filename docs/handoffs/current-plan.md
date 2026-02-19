@@ -44,6 +44,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - added `run-post-url` command to `coatue_claw.x_chart_daily` CLI
   - command routes to `run_chart_for_post_url(...)` (the strict rebuild-only pipeline)
   - this avoids freeform screenshot-style replies for tweet URL chart requests
+  - runtime guardrail mirrored into `~/.openclaw/workspace/AGENTS.md` on Mac mini so gateway sessions follow the deterministic command path
   - test added: `test_cli_run_post_url_command`
   - validation: `PYTHONPATH=src pytest -q` => `100 passed`
 - X chart output now better matches requested behavior:
