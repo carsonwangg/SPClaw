@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from coatue_claw.x_chart_daily import Candidate, XChartStore, _parse_windows, _slack_token, run_chart_scout_once
+from coatue_claw.x_chart_daily import Candidate, XChartStore, _parse_windows, _slack_tokens, run_chart_scout_once
 
 
 def test_parse_windows_defaults_and_custom() -> None:
@@ -75,4 +75,17 @@ def test_slack_token_falls_back_to_openclaw_config(tmp_path: Path, monkeypatch) 
         '{"channels":{"slack":{"botToken":"xoxb-fallback-token"}}}',
         encoding="utf-8",
     )
-    assert _slack_token() == "xoxb-fallback-token"
+    assert _slack_tokens() == ["xoxb-fallback-token"]
+
+
+def test_slack_tokens_include_env_then_config(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-env-token")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    cfg_dir = tmp_path / ".openclaw"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    cfg = cfg_dir / "openclaw.json"
+    cfg.write_text(
+        '{"channels":{"slack":{"botToken":"xoxb-config-token"}}}',
+        encoding="utf-8",
+    )
+    assert _slack_tokens() == ["xoxb-env-token", "xoxb-config-token"]

@@ -328,6 +328,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - robustness patch:
     - X source scanning now handles invalid/renamed usernames gracefully (skips invalid handles instead of failing the entire run)
     - Slack post token resolution now falls back to `~/.openclaw/openclaw.json` (`channels.slack.botToken`) when `SLACK_BOT_TOKEN` env is missing/inactive
+    - Slack posting retries with fallback token when env token is rejected (`account_inactive`, `invalid_auth`, `token_revoked`)
 
 ## Next Step to Validate in Slack
 Send in `#charting`:

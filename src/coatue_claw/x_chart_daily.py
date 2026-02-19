@@ -115,15 +115,16 @@ def _resolve_bearer_token() -> str:
     raise XChartError("X bearer token missing. Set COATUE_CLAW_X_BEARER_TOKEN in .env.prod.")
 
 
-def _slack_token() -> str:
-    token = os.environ.get("SLACK_BOT_TOKEN", "").strip()
-    if token:
-        return token
+def _slack_tokens() -> list[str]:
+    tokens: list[str] = []
+    env_token = os.environ.get("SLACK_BOT_TOKEN", "").strip()
+    if env_token:
+        tokens.append(env_token)
     config_path = Path.home() / ".openclaw/openclaw.json"
     if config_path.exists():
         try:
             payload = json.loads(config_path.read_text(encoding="utf-8"))
-            token = str(
+            cfg_token = str(
                 (
                     payload.get("channels", {})
                     .get("slack", {})
@@ -131,10 +132,19 @@ def _slack_token() -> str:
                 )
             ).strip()
         except Exception:
-            token = ""
-        if token:
-            return token
-    raise XChartError("Slack bot token missing (env SLACK_BOT_TOKEN or ~/.openclaw/openclaw.json channels.slack.botToken).")
+            cfg_token = ""
+        if cfg_token:
+            tokens.append(cfg_token)
+    unique: list[str] = []
+    seen: set[str] = set()
+    for token in tokens:
+        if token in seen:
+            continue
+        seen.add(token)
+        unique.append(token)
+    if not unique:
+        raise XChartError("Slack bot token missing (env SLACK_BOT_TOKEN or ~/.openclaw/openclaw.json channels.slack.botToken).")
+    return unique
 
 
 def _slack_channel() -> str:
@@ -706,9 +716,9 @@ def _build_takeaways(candidate: Candidate) -> list[str]:
 
 def _post_winner_to_slack(*, candidate: Candidate, channel: str, slot_key: str, windows_text: str) -> dict[str, Any]:
     from slack_sdk import WebClient
+    from slack_sdk.errors import SlackApiError
 
-    token = _slack_token()
-    client = WebClient(token=token)
+    tokens = _slack_tokens()
     takeaways = _build_takeaways(candidate)
     text_lines = [
         "*Coatue Chart Scout Winner*",
@@ -733,14 +743,26 @@ def _post_winner_to_slack(*, candidate: Candidate, channel: str, slot_key: str, 
                 "alt_text": candidate.title or "Chart candidate image",
             }
         )
-    response = client.chat_postMessage(
-        channel=channel,
-        text="\n".join(text_lines),
-        blocks=blocks,
-        unfurl_links=False,
-        unfurl_media=False,
-    )
-    return {"ok": bool(response.get("ok")), "ts": response.get("ts"), "channel": response.get("channel")}
+    last_error: str | None = None
+    for token in tokens:
+        client = WebClient(token=token)
+        try:
+            response = client.chat_postMessage(
+                channel=channel,
+                text="\n".join(text_lines),
+                blocks=blocks,
+                unfurl_links=False,
+                unfurl_media=False,
+            )
+            return {"ok": bool(response.get("ok")), "ts": response.get("ts"), "channel": response.get("channel")}
+        except SlackApiError as exc:
+            err = str(exc.response.get("error", "")) if exc.response is not None else str(exc)
+            last_error = err or str(exc)
+            if err in {"account_inactive", "invalid_auth", "token_revoked"}:
+                logger.warning("x-chart slack token rejected (%s), trying next token if available", err)
+                continue
+            raise
+    raise XChartError(f"Slack post failed for all available tokens: {last_error or 'unknown_error'}")
 
 
 def run_chart_scout_once(
