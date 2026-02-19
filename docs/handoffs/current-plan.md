@@ -90,6 +90,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - launchctl domain fallback (`gui/<uid>` then `user/<uid>`) for reliable control over SSH and local sessions
   - operations via `make openclaw-24x7-{enable,status,disable}`
   - scheduler status target now reports real launchd state (`make openclaw-schedulers-status`)
+  - deployed and validated on Mac mini (`a49f887`): both launchd services are loaded/running
 - Git shipping protocol is now explicit: every Codex change ships to `origin` with handoff updates
 
 ## Immediate Next Actions
@@ -103,7 +104,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 4. Confirm Google Drive desktop client is syncing `/Users/spclaw/Documents/Google Drive Local` to Spencer-shared Drive
 5. Validate category-based file flow with Spencer (`01_DROP_HERE_Incoming/<Category>` -> local incoming mirror -> `02_READ_ONLY_Latest_AUTO/<Category>`)
 6. Validate Slack file upload auto-ingest (`Slack upload` -> categorized `incoming/<Category>` + DB record in `file_ingest.sqlite`)
-7. Enable launchd runtime supervision on Mac mini (`make openclaw-24x7-enable`) and verify status
+7. Validate launchd service persistence after next Mac mini reboot (`make openclaw-24x7-status`)
 8. Validate daily backfill flow (`claw memory extract-daily --dry-run --days 14`)
 9. Validate new diligence memo output in Slack (`diligence TICKER`) and confirm section completeness/citations + local database-first precheck behavior
 10. Configure email env vars in `/opt/coatue-claw/.env.prod` and validate `make openclaw-email-status` + `make openclaw-email-run-once`

@@ -174,6 +174,17 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - Slack file ingest tests added/validated: classification, routing, dedupe, and SQLite write path.
 - Diligence tests extended/validated for local-report precheck behavior before external research.
 - Email gateway tests added/validated: command parsing, disabled-mode safety, and attachment ingest routing.
+- 24/7 runtime service tests added/validated:
+  - local: `PYTHONPATH=src pytest -q tests/test_launchd_runtime.py` => `4 passed`
+  - Mac mini: `/opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_launchd_runtime.py tests/test_email_gateway.py` => `7 passed`
+- Mac mini runtime validation (2026-02-19):
+  - pulled `a49f887` in `/opt/coatue-claw`
+  - `make openclaw-24x7-enable` succeeded for:
+    - `com.coatueclaw.email-gateway`
+    - `com.coatueclaw.memory-prune`
+  - `make openclaw-24x7-status` reports both services `loaded=true` and `state=running`
+  - `make openclaw-slack-status` probe returns `ok=true`
+  - `make openclaw-email-status` confirms email channel enabled with expected allowlist senders
 
 ## Next Step to Validate in Slack
 Send in `#charting`:
@@ -216,9 +227,9 @@ Then confirm bot returns:
    - `@Coatue Claw memory status`
    - `@Coatue Claw memory checkpoint`
 8. Configure `SLACK_PIPELINE_ADMINS` and optional `COATUE_CLAW_SLACK_BUILD_COMMAND` in runtime env for production permissions/runner control.
-9. Enable 24/7 services on Mac mini and validate:
-   - `make openclaw-24x7-enable`
-   - `make openclaw-24x7-status`
+9. Validate 24/7 persistence after next Mac mini reboot:
+   - run `make openclaw-24x7-status`
+   - confirm both services auto-restart as `loaded=true` and `state=running`
 10. Confirm Spencer has Drive access to `/Users/spclaw/Documents/Google Drive Local` and can drag/drop by category under `01_DROP_HERE_Incoming/*`.
 11. Validate end-to-end category workflow with Spencer:
     - Spencer drops a file into `01_DROP_HERE_Incoming/<Category>`
