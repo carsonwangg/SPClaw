@@ -372,6 +372,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - style audit metadata now persists in:
       - markdown artifact (`style_iteration`, `style_score`, checks)
       - Slack post payload (`style_audit`)
+    - Slack delivery now uploads the styled graph as the initial message attachment (`files_upload_v2` with `initial_comment`) instead of posting image in a thread reply
   - local validation for this refinement:
     - `PYTHONPATH=src pytest -q tests/test_x_chart_daily.py tests/test_launchd_runtime.py` => `15 passed`
     - `PYTHONPATH=src pytest -q` => `81 passed`

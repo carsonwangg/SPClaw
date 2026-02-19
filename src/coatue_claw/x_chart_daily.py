@@ -1140,33 +1140,25 @@ def _post_winner_to_slack(
         f"- Takeaway: {clean_takeaway}",
         f"- Link: {candidate.url}",
     ]
-    blocks: list[dict[str, Any]] = [{"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(text_lines)}}]
     last_error: str | None = None
     for token in tokens:
         client = WebClient(token=token)
         try:
-            response = client.chat_postMessage(
+            response = client.files_upload_v2(
                 channel=channel,
-                text="\n".join(text_lines),
-                blocks=blocks,
-                unfurl_links=False,
-                unfurl_media=False,
+                file=str(styled_path),
+                title="Coatue Chart of the Day",
+                initial_comment="\n".join(text_lines),
             )
-            ts = str(response.get("ts") or "")
-            if ts:
-                try:
-                    client.files_upload_v2(
-                        channel=channel,
-                        thread_ts=ts,
-                        file=str(styled_path),
-                        title="Coatue Chart of the Day",
-                    )
-                except Exception:
-                    logger.exception("Failed to upload styled chart artifact to Slack thread")
+            file_obj = response.get("file") if isinstance(response, dict) else None
+            file_id = ""
+            if isinstance(file_obj, dict):
+                file_id = str(file_obj.get("id") or "")
             return {
                 "ok": bool(response.get("ok")),
-                "ts": response.get("ts"),
-                "channel": response.get("channel"),
+                "ts": None,
+                "channel": channel,
+                "file_id": file_id,
                 "styled_artifact": str(styled_path),
                 "style_audit": {
                     "iteration": style_draft.iteration,

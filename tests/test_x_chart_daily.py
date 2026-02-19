@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+import sys
+import types
 
 from coatue_claw.x_chart_daily import (
     Candidate,
@@ -10,6 +12,7 @@ from coatue_claw.x_chart_daily import (
     _normalize_render_text,
     _parse_windows,
     _parse_x_candidates,
+    _post_winner_to_slack,
     _select_style_draft,
     _slack_tokens,
     run_chart_scout_once,
@@ -201,3 +204,52 @@ def test_style_draft_prefers_simple_feed_like_copy() -> None:
     assert len(draft.headline) <= 72
     assert len(draft.takeaway) <= 96
     assert draft.score >= 6.0
+
+
+def test_post_winner_uploads_file_in_initial_message(monkeypatch, tmp_path: Path) -> None:
+    candidate = Candidate(
+        candidate_key="x:88",
+        source_type="x",
+        source_id="fiscal_AI",
+        author="@fiscal_AI",
+        title="@fiscal_AI: US software growth re-accelerates to 29% YoY.",
+        text="US software growth re-accelerates to 29% YoY while enterprise spending remains resilient.",
+        url="https://x.com/fiscal_AI/status/88",
+        image_url="https://example.com/chart.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=450,
+        source_priority=1.6,
+        score=98.0,
+    )
+    styled = tmp_path / "styled.png"
+    styled.write_bytes(b"fake")
+
+    upload_calls: list[dict[str, object]] = []
+
+    class FakeWebClient:
+        def __init__(self, token: str) -> None:
+            self.token = token
+
+        def files_upload_v2(self, **kwargs):
+            upload_calls.append(kwargs)
+            return {"ok": True, "file": {"id": "F123"}}
+
+    class FakeSlackApiError(Exception):
+        def __init__(self, error: str) -> None:
+            self.response = {"error": error}
+            super().__init__(error)
+
+    monkeypatch.setitem(sys.modules, "slack_sdk", types.SimpleNamespace(WebClient=FakeWebClient))
+    monkeypatch.setitem(sys.modules, "slack_sdk.errors", types.SimpleNamespace(SlackApiError=FakeSlackApiError))
+    monkeypatch.setattr("coatue_claw.x_chart_daily._slack_tokens", lambda: ["xoxb-test"])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._render_chart_of_day_style", lambda **kwargs: styled)
+
+    result = _post_winner_to_slack(candidate=candidate, channel="C123", slot_key="manual-1", windows_text="09:00,12:00,18:00")
+    assert result["ok"] is True
+    assert result["channel"] == "C123"
+    assert result["file_id"] == "F123"
+    assert len(upload_calls) == 1
+    assert upload_calls[0]["channel"] == "C123"
+    assert upload_calls[0]["file"] == str(styled)
+    assert "initial_comment" in upload_calls[0]
+    assert "thread_ts" not in upload_calls[0]

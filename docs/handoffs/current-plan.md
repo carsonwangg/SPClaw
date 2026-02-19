@@ -166,6 +166,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
       - concise headline at top
       - chart/image carries the core story
       - minimal bottom footer (takeaway + source)
+    - Slack post packaging now sends chart file in the initial channel message (not in a thread)
 - 24/7 runtime supervision is implemented:
   - launchd-managed services in `src/coatue_claw/launchd_runtime.py`
   - services: `com.coatueclaw.email-gateway` (always-on poller), `com.coatueclaw.memory-prune` (hourly prune)
