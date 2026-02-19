@@ -100,8 +100,12 @@ def write_service_plists() -> dict[str, str]:
     return out
 
 
-def _launchctl_domain() -> str:
-    return f"gui/{os.getuid()}"
+def _launchctl_domains() -> list[str]:
+    override = os.environ.get("COATUE_CLAW_LAUNCHCTL_DOMAIN", "").strip()
+    if override:
+        return [override]
+    uid = os.getuid()
+    return [f"gui/{uid}", f"user/{uid}"]
 
 
 def _run(cmd: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -112,11 +116,19 @@ def _run(cmd: list[str], *, check: bool = True) -> subprocess.CompletedProcess[s
 
 
 def _bootout(label: str) -> None:
-    _run(["launchctl", "bootout", f"{_launchctl_domain()}/{label}"], check=False)
+    for domain in _launchctl_domains():
+        _run(["launchctl", "bootout", f"{domain}/{label}"], check=False)
 
 
-def _bootstrap(path: str) -> None:
-    _run(["launchctl", "bootstrap", _launchctl_domain(), path], check=True)
+def _bootstrap(path: str) -> str:
+    errors: list[str] = []
+    for domain in _launchctl_domains():
+        proc = _run(["launchctl", "bootstrap", domain, path], check=False)
+        if proc.returncode == 0:
+            return domain
+        err = proc.stderr.strip() or proc.stdout.strip() or f"exit={proc.returncode}"
+        errors.append(f"{domain}: {err}")
+    raise RuntimeError("bootstrap failed across launchctl domains: " + " | ".join(errors))
 
 
 def enable_services(*, services: list[str]) -> dict[str, Any]:
@@ -125,8 +137,8 @@ def enable_services(*, services: list[str]) -> dict[str, Any]:
     for label in services:
         path = plists[label]
         _bootout(label)
-        _bootstrap(path)
-        changed.append({"label": label, "plist": path, "action": "enabled"})
+        domain = _bootstrap(path)
+        changed.append({"label": label, "plist": path, "domain": domain, "action": "enabled"})
     return {"ok": True, "services": changed}
 
 
@@ -142,16 +154,26 @@ def disable_services(*, services: list[str], remove_plists: bool = False) -> dic
 
 
 def service_status(label: str) -> dict[str, Any]:
-    proc = _run(["launchctl", "print", f"{_launchctl_domain()}/{label}"], check=False)
     path = _plist_path(label)
     info: dict[str, Any] = {
         "label": label,
         "plist": str(path),
         "plist_exists": path.exists(),
-        "loaded": proc.returncode == 0,
+        "loaded": False,
     }
-    if proc.returncode != 0:
-        info["error"] = proc.stderr.strip() or proc.stdout.strip() or "not_loaded"
+    errors: list[str] = []
+    proc: subprocess.CompletedProcess[str] | None = None
+    for candidate in _launchctl_domains():
+        check = _run(["launchctl", "print", f"{candidate}/{label}"], check=False)
+        if check.returncode == 0:
+            proc = check
+            info["loaded"] = True
+            info["domain"] = candidate
+            break
+        err = check.stderr.strip() or check.stdout.strip() or f"exit={check.returncode}"
+        errors.append(f"{candidate}: {err}")
+    if proc is None:
+        info["error"] = " | ".join(errors) if errors else "not_loaded"
         return info
 
     text = proc.stdout

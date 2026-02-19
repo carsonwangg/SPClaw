@@ -87,6 +87,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - 24/7 runtime supervision is implemented:
   - launchd-managed services in `src/coatue_claw/launchd_runtime.py`
   - services: `com.coatueclaw.email-gateway` (always-on poller), `com.coatueclaw.memory-prune` (hourly prune)
+  - launchctl domain fallback (`gui/<uid>` then `user/<uid>`) for reliable control over SSH and local sessions
   - operations via `make openclaw-24x7-{enable,status,disable}`
   - scheduler status target now reports real launchd state (`make openclaw-schedulers-status`)
 - Git shipping protocol is now explicit: every Codex change ships to `origin` with handoff updates

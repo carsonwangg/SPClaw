@@ -114,6 +114,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - launchd services:
     - `com.coatueclaw.email-gateway` (always-on `email_gateway serve` with KeepAlive)
     - `com.coatueclaw.memory-prune` (hourly `claw memory prune` via StartInterval)
+  - launchctl domain fallback support for remote SSH operations (`gui/<uid>` then `user/<uid>`)
   - Make targets:
     - `openclaw-24x7-enable`
     - `openclaw-24x7-status`

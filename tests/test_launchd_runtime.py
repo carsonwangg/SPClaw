@@ -56,3 +56,14 @@ def test_resolve_services() -> None:
     ]
     assert launchd_runtime._resolve_services("email") == [launchd_runtime.EMAIL_LABEL]
     assert launchd_runtime._resolve_services("memory") == [launchd_runtime.MEMORY_PRUNE_LABEL]
+
+
+def test_launchctl_domains(monkeypatch) -> None:
+    monkeypatch.delenv("COATUE_CLAW_LAUNCHCTL_DOMAIN", raising=False)
+    domains = launchd_runtime._launchctl_domains()
+    assert len(domains) == 2
+    assert domains[0].startswith("gui/")
+    assert domains[1].startswith("user/")
+
+    monkeypatch.setenv("COATUE_CLAW_LAUNCHCTL_DOMAIN", "user/501")
+    assert launchd_runtime._launchctl_domains() == ["user/501"]
