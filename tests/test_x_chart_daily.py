@@ -9,6 +9,7 @@ from coatue_claw.x_chart_daily import (
     Candidate,
     RebuiltBars,
     XChartStore,
+    XChartError,
     _build_x_title,
     _fallback_bar_labels,
     _extract_rebuilt_bars_via_vision,
@@ -219,6 +220,7 @@ def test_style_draft_prefers_simple_feed_like_copy() -> None:
 
 
 def test_post_winner_uploads_file_in_initial_message(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_REQUIRE_REBUILD", "0")
     candidate = Candidate(
         candidate_key="x:88",
         source_type="x",
@@ -571,6 +573,30 @@ def test_run_chart_for_post_url_uses_vxtwitter_fallback(monkeypatch, tmp_path: P
     assert result["posted"] is True
     assert captured["candidate_url"] == "https://x.com/oguzerkan/status/2024447368137994460"
     assert captured["source_id"] == "oguzerkan"
+
+
+def test_post_winner_rejects_when_rebuild_required_but_unavailable(monkeypatch) -> None:
+    candidate = Candidate(
+        candidate_key="x:no-rebuild",
+        source_type="x",
+        source_id="fiscal_AI",
+        author="@fiscal_AI",
+        title="US trend chart",
+        text="US trend chart",
+        url="https://x.com/fiscal_AI/status/no-rebuild",
+        image_url="https://example.com/no-image.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=10,
+        source_priority=1.0,
+        score=50.0,
+    )
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_REQUIRE_REBUILD", "1")
+    monkeypatch.setattr("coatue_claw.x_chart_daily._slack_tokens", lambda: ["xoxb-test"])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._has_reconstructable_chart_data", lambda c: False)
+    import pytest
+
+    with pytest.raises(XChartError):
+        _post_winner_to_slack(candidate=candidate, channel="C123", slot_key="manual-2", windows_text="09:00,12:00,18:00")
 
 
 def test_style_draft_generates_narrative_title_and_small_label_for_etf_flow() -> None:

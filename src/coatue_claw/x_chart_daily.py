@@ -726,6 +726,11 @@ def _llm_title_enabled() -> bool:
     return raw not in {"0", "false", "off", "no"}
 
 
+def _require_reconstruction() -> bool:
+    raw = (os.environ.get("COATUE_CLAW_X_CHART_REQUIRE_REBUILD", "1") or "1").strip().lower()
+    return raw not in {"0", "false", "off", "no"}
+
+
 def _synthesize_style_via_llm(candidate: Candidate) -> dict[str, str] | None:
     if not _llm_title_enabled():
         return None
@@ -1542,6 +1547,18 @@ def _select_style_draft(candidate: Candidate, *, max_iterations: int = 3) -> Sty
     return best
 
 
+def _has_reconstructable_chart_data(candidate: Candidate) -> bool:
+    image = _safe_image_from_url(candidate.image_url)
+    vision_bars = _extract_rebuilt_bars_via_vision(candidate=candidate)
+    if vision_bars is not None:
+        return True
+    cv_bars = _extract_rebuilt_bars(image=image, candidate=candidate, allow_vision=False)
+    if cv_bars is not None:
+        return True
+    rebuilt = _extract_rebuilt_series(candidate=candidate, image=image)
+    return bool(rebuilt)
+
+
 def _fetch_image_bytes(url: str | None) -> tuple[bytes | None, str]:
     if not url:
         return None, "image/png"
@@ -2043,11 +2060,13 @@ def _post_winner_to_slack(
     windows_text: str,
     style_draft: StyleDraft | None = None,
 ) -> dict[str, Any]:
+    tokens = _slack_tokens()
+    style_draft = style_draft or _select_style_draft(candidate)
+    if _require_reconstruction() and (not _has_reconstructable_chart_data(candidate)):
+        raise XChartError("Skipped post because chart reconstruction was not reliable for this source image.")
     from slack_sdk import WebClient
     from slack_sdk.errors import SlackApiError
 
-    tokens = _slack_tokens()
-    style_draft = style_draft or _select_style_draft(candidate)
     takeaways = _build_takeaways(candidate)
     styled_path = _render_chart_of_day_style(
         candidate=candidate,
