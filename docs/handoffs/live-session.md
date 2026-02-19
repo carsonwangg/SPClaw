@@ -251,6 +251,27 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `tests/test_email_gateway.py` => `4 passed` on runtime host
     - direct runtime check confirms `has_source_tail=False` in diligence summary body
     - email 24/7 service restored and running (`make openclaw-24x7-status`)
+- X digest feature (this session):
+  - implemented official X API digest path (no browser scraping dependency):
+    - new digest engine: `src/coatue_claw/x_digest.py`
+    - new Slack intent parser: `src/coatue_claw/slack_x_intent.py`
+    - Slack commands wired:
+      - `x digest <query> [last Nh] [limit N]`
+      - `x status`
+    - CLI command wired:
+      - `claw x-digest "QUERY" --hours 24 --limit 50`
+    - artifact contract:
+      - writes markdown digest to `/opt/coatue-claw-data/artifacts/x-digest` (override via `COATUE_CLAW_X_DIGEST_DIR`)
+    - env contract:
+      - `COATUE_CLAW_X_BEARER_TOKEN` (required; runtime only, never in git)
+      - optional `COATUE_CLAW_X_API_BASE`
+  - tests added:
+    - `tests/test_slack_x_intent.py`
+    - `tests/test_x_digest.py`
+  - local validation:
+    - `PYTHONPATH=src pytest -q` => `69 passed`
+  - operator note:
+    - token was provided in chat; rotate/regenerate it in X Developer portal and set the new token in runtime `.env.prod` only
 
 ## Next Step to Validate in Slack
 Send in `#charting`:
@@ -310,5 +331,5 @@ Then confirm bot returns:
     - `make openclaw-email-status`
     - `make openclaw-email-run-once`
     - send test email `diligence SNOW` and confirm reply
-14. Wire first scheduled jobs (weekly idea scan + X digest).
+14. Wire first scheduled jobs (weekly idea scan + scheduled execution of the new X digest command).
 15. If response fails, capture first failing line with `openclaw channels logs --channel slack --lines 300`.

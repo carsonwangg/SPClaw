@@ -99,6 +99,20 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - Mac mini validation confirms `Testing Dilligence` + `Diligence SNOW please` resolves to ticker `SNOW`
   - Mac mini validation confirms summary citation tails are removed in email body while full-citation memo remains attached
   - Mac mini validation confirms diligence attachment is now readable PDF (`application/pdf`) and local paths are removed from user-facing email output
+- X digest (official API path) is implemented for on-demand use:
+  - Slack commands:
+    - `x digest <query> [last Nh] [limit N]`
+    - `x status`
+  - CLI command:
+    - `claw x-digest "QUERY" --hours 24 --limit 50`
+  - digest artifact output:
+    - `/opt/coatue-claw-data/artifacts/x-digest` (override with `COATUE_CLAW_X_DIGEST_DIR`)
+  - runtime env contract:
+    - `COATUE_CLAW_X_BEARER_TOKEN` required
+    - `COATUE_CLAW_X_API_BASE` optional (default `https://api.x.com`)
+  - tests:
+    - `tests/test_slack_x_intent.py`
+    - `tests/test_x_digest.py`
 - 24/7 runtime supervision is implemented:
   - launchd-managed services in `src/coatue_claw/launchd_runtime.py`
   - services: `com.coatueclaw.email-gateway` (always-on poller), `com.coatueclaw.memory-prune` (hourly prune)
@@ -123,4 +137,4 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 8. Validate daily backfill flow (`claw memory extract-daily --dry-run --days 14`)
 9. Validate new diligence memo output in Slack (`diligence TICKER`) and confirm section completeness/citations + local database-first precheck behavior
 10. Configure email env vars in `/opt/coatue-claw/.env.prod` and validate `make openclaw-email-status` + `make openclaw-email-run-once`
-11. Wire first scheduled jobs (weekly idea scan + X digest)
+11. Wire scheduled jobs for weekly idea scan and recurring X digest runs (on top of the new on-demand X digest command)

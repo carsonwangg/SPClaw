@@ -10,6 +10,7 @@ from coatue_claw.chart_metrics import DEFAULT_X_METRIC, DEFAULT_Y_METRIC, METRIC
 from coatue_claw.diligence_report import build_neutral_investment_memo
 from coatue_claw.memory_runtime import MemoryRuntime
 from coatue_claw.valuation_chart import run_valuation_chart
+from coatue_claw.x_digest import build_x_digest
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +102,11 @@ def main():
     mc = memory_sub.add_parser("checkpoint")
     mc.add_argument("--scope", default=None)
 
+    x = sub.add_parser("x-digest")
+    x.add_argument("query", help="Topic, ticker, handle, or boolean query")
+    x.add_argument("--hours", type=int, default=24, help="Lookback window in hours (1-168)")
+    x.add_argument("--limit", type=int, default=50, help="X API max results (10-100)")
+
     args = parser.parse_args()
 
     if args.cmd == "diligence":
@@ -136,6 +142,17 @@ def main():
         print(f"csv: {result.csv_path}")
         print(f"json: {result.json_path}")
         print(f"raw: {result.raw_path}")
+        return
+
+    if args.cmd == "x-digest":
+        result = build_x_digest(args.query, hours=args.hours, max_results=args.limit)
+        print(f"query: {result.query}")
+        print(f"window_hours: {result.hours}")
+        print(f"posts_analyzed: {result.post_count}")
+        if result.top_post_url:
+            print(f"top_post: {result.top_post_url}")
+        print(f"generated_at_utc: {result.generated_at_utc}")
+        print(f"report: {result.output_path}")
 
 
 if __name__ == "__main__":

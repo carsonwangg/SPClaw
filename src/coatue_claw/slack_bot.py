@@ -44,6 +44,7 @@ from coatue_claw.slack_pipeline import (
 )
 from coatue_claw.slack_pipeline_intent import parse_pipeline_intent
 from coatue_claw.slack_routing import should_default_route_message
+from coatue_claw.slack_x_intent import parse_x_digest_intent
 from coatue_claw.universe_store import (
     add_to_universe,
     find_relevant_universe_name,
@@ -55,6 +56,7 @@ from coatue_claw.universe_store import (
     universe_path,
 )
 from coatue_claw.valuation_chart import _format_readable_date, run_valuation_chart
+from coatue_claw.x_digest import XDigestError, build_x_digest, format_x_digest_summary
 
 load_dotenv("/opt/coatue-claw/.env.prod")
 
@@ -198,6 +200,7 @@ def _format_chart_usage() -> str:
     return (
         "Usage:\n"
         "- `diligence TICKER`\n"
+        "- `x digest <topic|ticker|handle> [last 24h] [limit 50]`\n"
         "- `graph ev ltm growth SNOW,MDB,DDOG`\n"
         "- natural language: `plot EV/Revenue multiples vs revenue growth for SNOW,MDB,DDOG`\n"
         "- create universe: `create universe defense with PLTR,LMT,RTX,NOC,GD,LDOS`\n"
@@ -610,6 +613,82 @@ def _handle_pipeline_command(*, text: str, user_id: str | None, thread_ts: str, 
     return False
 
 
+def _handle_x_digest_command(*, text: str, channel: str | None, thread_ts: str, say) -> bool:
+    intent = parse_x_digest_intent(text)
+    if intent is None:
+        return False
+
+    if intent.kind == "help":
+        say(
+            text=(
+                "X digest commands:\n"
+                "- `x digest SNOW`\n"
+                "- `x digest @snowflakedb last 48h`\n"
+                "- `x digest (snowflake OR databricks) ai data cloud last 24h limit 80`\n"
+                "- `x status`"
+            ),
+            thread_ts=thread_ts,
+        )
+        return True
+
+    if intent.kind == "status":
+        configured = any(
+            bool(os.environ.get(key, "").strip())
+            for key in ("COATUE_CLAW_X_BEARER_TOKEN", "X_BEARER_TOKEN", "COATUE_CLAW_TWITTER_BEARER_TOKEN")
+        )
+        say(
+            text=(
+                "X digest status:\n"
+                f"- bearer_token_configured: `{configured}`\n"
+                f"- api_base: `{os.environ.get('COATUE_CLAW_X_API_BASE', 'https://api.x.com')}`\n"
+                f"- digest_dir: `{os.environ.get('COATUE_CLAW_X_DIGEST_DIR', '/opt/coatue-claw-data/artifacts/x-digest')}`"
+            ),
+            thread_ts=thread_ts,
+        )
+        return True
+
+    assert intent.kind == "digest"
+    query = intent.query or ""
+    say(
+        text=f"Running X digest for `{query}` (last `{intent.hours}h`, limit `{intent.limit}`)...",
+        thread_ts=thread_ts,
+    )
+    try:
+        result = build_x_digest(query, hours=intent.hours, max_results=intent.limit)
+    except XDigestError as exc:
+        say(text=f"X digest failed: {exc}", thread_ts=thread_ts)
+        return True
+    except Exception:
+        logger.exception("Unexpected failure generating X digest for query=%r", query)
+        say(text="X digest failed unexpectedly. Check bot logs for details.", thread_ts=thread_ts)
+        return True
+
+    _post_thread_message(
+        say=say,
+        channel=channel,
+        thread_ts=thread_ts,
+        text=format_x_digest_summary(result),
+    )
+
+    if channel:
+        try:
+            app.client.files_upload_v2(
+                channel=channel,
+                thread_ts=thread_ts,
+                file=str(result.output_path),
+                title=f"x-digest-{result.query}",
+            )
+        except Exception:
+            logger.exception("Failed to upload X digest artifact to Slack")
+            _post_thread_message(
+                say=say,
+                channel=channel,
+                thread_ts=thread_ts,
+                text=f"Digest saved locally: `{result.output_path}`",
+            )
+    return True
+
+
 def _format_chart_summary(result) -> str:
     lines = []
     lines.append("*Valuation chart generated*")
@@ -960,6 +1039,9 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
         return
 
     if _handle_pipeline_command(text=text, user_id=user_id, thread_ts=thread_ts, say=say):
+        return
+
+    if _handle_x_digest_command(text=text, channel=channel, thread_ts=thread_ts, say=say):
         return
 
     try:

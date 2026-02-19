@@ -29,10 +29,11 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
 - On-demand:
   - `claw valuation-chart ...`
   - `claw diligence ...`
+  - `claw x-digest "QUERY" --hours 24 --limit 50`
   - `claw memory status|query|prune|extract-daily|checkpoint`
 - Scheduled (planned but not yet wired in this repo):
   - Weekly idea scan
-  - X digest generation
+  - X digest scheduling
 - Scheduled (wired):
   - Hourly memory prune via `launchd` (`com.coatueclaw.memory-prune`)
 
@@ -154,6 +155,8 @@ Slack deploy pipeline controls:
 4. `@Coatue Claw show pipeline status`
 5. `@Coatue Claw show deploy history`
 6. `@Coatue Claw build: <request>` (runs Codex CLI by default if installed, otherwise requires custom runner)
+7. `@Coatue Claw x digest SNOW last 24h limit 80`
+8. `@Coatue Claw x status`
 
 Pipeline environment controls:
 - `SLACK_PIPELINE_ADMINS`: optional comma-separated Slack user IDs allowed to run pipeline commands
@@ -169,6 +172,11 @@ Memory environment controls:
 File ingest environment controls:
 - `COATUE_CLAW_FILE_INGEST_DB_PATH`: optional override for Slack file ingest SQLite path
 - `COATUE_CLAW_SLACK_FILE_MAX_MB`: optional max Slack file size in MB for auto-ingest (default `50`)
+
+X digest environment controls:
+- `COATUE_CLAW_X_BEARER_TOKEN`: required for X API requests
+- `COATUE_CLAW_X_API_BASE`: optional API base URL override (default `https://api.x.com`)
+- `COATUE_CLAW_X_DIGEST_DIR`: optional digest markdown output dir (default `/opt/coatue-claw-data/artifacts/x-digest`)
 
 Email integration environment controls:
 - `COATUE_CLAW_EMAIL_ENABLED`: set `true` to enable email processing
