@@ -580,6 +580,115 @@ def _labels_are_monotonic_years(labels: list[str]) -> bool:
     return all(years[i] < years[i + 1] for i in range(len(years) - 1))
 
 
+def _extract_employee_robot_latest_millions(text: str) -> tuple[float | None, float | None]:
+    lower = _normalize_render_text(text).lower()
+    emp_m = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*million\s+employees", lower)
+    rob_m = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*million\s+robots", lower)
+    emp = float(emp_m.group(1)) if emp_m else None
+    rob = float(rob_m.group(1)) if rob_m else None
+    return emp, rob
+
+
+def _extract_employees_robots_bars_cv(*, rgb, candidate: Candidate) -> RebuiltBars | None:
+    try:
+        import numpy as np
+        from matplotlib.colors import rgb_to_hsv
+    except Exception:
+        return None
+
+    h, w, _ = rgb.shape
+    crop = rgb[int(h * 0.16) : int(h * 0.93), int(w * 0.07) : int(w * 0.97), :]
+    ch, cw, _ = crop.shape
+    if ch < 200 or cw < 260:
+        return None
+    analysis = crop[int(ch * 0.18) :, :, :]
+    ah, aw, _ = analysis.shape
+    hsv = rgb_to_hsv(np.clip(analysis, 0.0, 1.0))
+    hue = hsv[:, :, 0]
+    sat = hsv[:, :, 1]
+    val = hsv[:, :, 2]
+
+    # ARK-style bars are predominantly blue/purple with similar hue and different brightness.
+    base = (sat > 0.15) & (hue >= 0.57) & (hue <= 0.80)
+    dark_mask = base & (val < 0.56)
+    light_mask = base & (val >= 0.56)
+
+    def _series(mask):
+        cols = mask.sum(axis=0)
+        col_threshold = max(4, int(ah * 0.030))
+        flags = cols >= col_threshold
+        spans: list[tuple[int, int]] = []
+        start = -1
+        min_width = max(2, int(aw * 0.006))
+        for i, flag in enumerate(flags.tolist()):
+            if flag and start < 0:
+                start = i
+            elif (not flag) and start >= 0:
+                if (i - start) >= min_width:
+                    spans.append((start, i - 1))
+                start = -1
+        if start >= 0 and (len(flags) - start) >= min_width:
+            spans.append((start, len(flags) - 1))
+        centers: list[float] = []
+        heights: list[float] = []
+        bottoms: list[float] = []
+        for s, e in spans:
+            seg = mask[:, s : e + 1]
+            y_idx = np.where(seg.any(axis=1))[0]
+            if y_idx.size == 0:
+                continue
+            top = float(y_idx.min())
+            bottom = float(y_idx.max())
+            centers.append(float((s + e) / 2.0))
+            heights.append(max(0.0, bottom - top))
+            bottoms.append(bottom)
+        return centers, heights, bottoms
+
+    dark_x, dark_h, dark_b = _series(dark_mask)
+    light_x, light_h, light_b = _series(light_mask)
+    if len(dark_h) < 8 or len(light_h) < 8:
+        return None
+
+    # Keep the best-aligned segment count between the two series.
+    n = min(len(dark_h), len(light_h))
+    if n < 8:
+        return None
+    dark_vals = dark_h[-n:]
+    light_vals = light_h[-n:]
+
+    # Convert relative heights to "thousands" using latest values from post text.
+    latest_emp_m, latest_rob_m = _extract_employee_robot_latest_millions(f"{candidate.title} {candidate.text}")
+    if latest_emp_m is None or latest_rob_m is None:
+        return None
+    if dark_vals[-1] <= 0.0 or light_vals[-1] <= 0.0:
+        return None
+    emp_scale = (latest_emp_m * 1000.0) / float(dark_vals[-1])
+    rob_scale = (latest_rob_m * 1000.0) / float(light_vals[-1])
+    scale = float((emp_scale + rob_scale) / 2.0)
+    if scale <= 0.0:
+        return None
+
+    emp_values = [round(float(v) * scale, 1) for v in dark_vals]
+    rob_values = [round(float(v) * scale, 1) for v in light_vals]
+    labels = _fallback_bar_labels(candidate=candidate, count=n)
+    bars = RebuiltBars(
+        labels=labels,
+        values=emp_values,
+        color="#1F2452",
+        y_label="Number (thousands)",
+        normalized=False,
+        source="cv",
+        confidence=0.64,
+        primary_label="Employees",
+        secondary_values=rob_values,
+        secondary_color="#6D63E7",
+        secondary_label="Robots",
+    )
+    if _bar_data_quality_errors(candidate=candidate, bars=bars):
+        return None
+    return bars
+
+
 def _normalize_grouped_bar_metadata(*, candidate: Candidate | None, bars: RebuiltBars) -> RebuiltBars:
     if candidate is None or (not _is_employees_robots_chart(candidate)):
         return bars
@@ -1971,6 +2080,10 @@ def _extract_rebuilt_bars(*, image, candidate: Candidate | None = None, allow_vi
         rgb = arr[:, :, :3].astype(float) / 255.0
     else:
         rgb = np.clip(arr[:, :, :3].astype(float), 0.0, 1.0)
+    if candidate is not None and _is_employees_robots_chart(candidate):
+        grouped = _extract_employees_robots_bars_cv(rgb=rgb, candidate=candidate)
+        if grouped is not None:
+            return grouped
     h, w, _ = rgb.shape
     if h < 220 or w < 320:
         return None

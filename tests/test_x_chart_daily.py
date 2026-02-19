@@ -556,6 +556,42 @@ def test_extract_rebuilt_bars_via_vision_requires_grouped_for_employees_robots(m
     assert rebuilt is None
 
 
+def test_extract_rebuilt_bars_prefers_grouped_cv_for_employee_robot_chart(monkeypatch) -> None:
+    import numpy as np
+
+    candidate = Candidate(
+        candidate_key="x:robots-cv",
+        source_type="x",
+        source_id="oguzerkan",
+        author="@oguzerkan",
+        title="$AMZN has 1.5 million employees and deployed 1 million robots.",
+        text="$AMZN has 1.5 million employees and deployed 1 million robots.",
+        url="https://x.com/oguzerkan/status/1",
+        image_url="https://example.com/chart.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=400,
+        source_priority=1.0,
+        score=80.0,
+    )
+    grouped = RebuiltBars(
+        labels=["2022", "2023", "2024", "2025"],
+        values=[1608.0, 1541.0, 1525.0, 1556.0],
+        color="#1F2452",
+        y_label="Number (thousands)",
+        normalized=False,
+        source="cv",
+        confidence=0.64,
+        primary_label="Employees",
+        secondary_values=[520.0, 750.0, 750.0, 1000.0],
+        secondary_color="#6D63E7",
+        secondary_label="Robots",
+    )
+    monkeypatch.setattr("coatue_claw.x_chart_daily._extract_employees_robots_bars_cv", lambda **kwargs: grouped)
+    image = np.zeros((600, 1000, 3), dtype=float)
+    rebuilt = _extract_rebuilt_bars(image=image, candidate=candidate, allow_vision=False)
+    assert rebuilt is grouped
+
+
 def test_run_chart_for_post_url_posts_specific_tweet(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")

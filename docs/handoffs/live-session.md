@@ -14,9 +14,12 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - labels: `Employees` + `Robots`
     - colors: navy + purple
     - y-axis unit fallback: `Number (thousands)`
+  - added CV fallback for employee/robot charts when vision extraction is unavailable:
+    - detects dark/purple bar pairs
+    - scales to unit values using latest employee/robot figures from post text
   - style-copy QA enforced pre-render (headline/chart label/takeaway constraints)
   - employee/robot takeaway copy now emits a complete short sentence (avoids clipped line endings)
-  - validation: `PYTHONPATH=src pytest -q` => `102 passed`
+  - validation: `PYTHONPATH=src pytest -q` => `103 passed`
 - OpenClaw gateway handoff hardening shipped (`main`):
   - added deterministic CLI entrypoint for tweet URL chart requests:
     - `/opt/coatue-claw/.venv/bin/python -m coatue_claw.x_chart_daily run-post-url <x-url> [--channel <id>]`
