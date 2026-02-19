@@ -43,6 +43,9 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - AGENTS and initial scaffold are complete
 - Basic CLI + Slack bot skeleton are implemented
 - Bot mention delivery is working with open Slack access policy
+- Slack default routing is now enabled:
+  - plain messages are treated as OpenClaw requests by default
+  - messages with explicit `@user` mentions are not default-routed
 - Natural-language chart requests now route into valuation charting with configurable axes
 - CSV-backed universe management is implemented for Slack-driven create/edit/reuse flows
 - Missing-ticker chart prompts now ask for source choice (`online` discovery vs saved universe CSV)

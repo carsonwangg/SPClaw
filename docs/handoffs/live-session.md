@@ -212,6 +212,12 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
       - attachment filename ends with `.pdf`
       - attachment content type `application/pdf`
       - attachment payload starts with `%PDF`
+- Slack default routing upgrade (this session):
+  - added routing helper module: `src/coatue_claw/slack_routing.py`
+  - plain Slack messages now run through OpenClaw request handling by default
+  - explicit `@user` mentions are excluded from default routing
+  - `app_mention` flow remains supported and now shares common request handler logic with default-routed messages
+  - tests: `tests/test_slack_routing.py`
   - deployed on Mac mini via `0173404` and validated:
     - `tests/test_email_gateway.py` => `4 passed` on runtime host
     - direct runtime check confirms `has_source_tail=False` in diligence summary body

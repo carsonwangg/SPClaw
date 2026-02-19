@@ -43,6 +43,7 @@ from coatue_claw.slack_pipeline import (
     undo_last_deploy,
 )
 from coatue_claw.slack_pipeline_intent import parse_pipeline_intent
+from coatue_claw.slack_routing import should_default_route_message
 from coatue_claw.universe_store import (
     add_to_universe,
     find_relevant_universe_name,
@@ -198,13 +199,14 @@ def _format_chart_usage() -> str:
         "Usage:\n"
         "- `diligence TICKER`\n"
         "- `graph ev ltm growth SNOW,MDB,DDOG`\n"
-        "- natural language: `@Coatue Claw plot EV/Revenue multiples vs revenue growth for SNOW,MDB,DDOG`\n"
-        "- create universe: `@Coatue Claw create universe defense with PLTR,LMT,RTX,NOC,GD,LDOS`\n"
-        "- list universes: `@Coatue Claw list universes`\n"
-        "- settings: `@Coatue Claw show my settings` or `@Coatue Claw going forward look for 12 peers`\n"
-        "- pipeline: `@Coatue Claw deploy latest` or `@Coatue Claw undo last deploy`\n"
-        "- memory: `@Coatue Claw memory status` or `@Coatue Claw what is my daughter's birthday?`\n"
+        "- natural language: `plot EV/Revenue multiples vs revenue growth for SNOW,MDB,DDOG`\n"
+        "- create universe: `create universe defense with PLTR,LMT,RTX,NOC,GD,LDOS`\n"
+        "- list universes: `list universes`\n"
+        "- settings: `show my settings` or `going forward look for 12 peers`\n"
+        "- pipeline: `deploy latest` or `undo last deploy`\n"
+        "- memory: `memory status` or `what is my daughter's birthday?`\n"
         "- file ingest: upload a file in Slack and I'll auto-sort it into the knowledge folders\n"
+        "- routing: messages default to OpenClaw unless you @ another user\n"
         "- default: YoY Revenue Growth is y-axis unless you specify axes"
     )
 
@@ -867,14 +869,23 @@ def handle_message(event, say):
         return
     if event.get("bot_id"):
         return
-    if not _extract_event_files(event):
+    text = event.get("text") or ""
+    if should_default_route_message(text):
+        _handle_slack_request_event(
+            event=event,
+            say=say,
+            source_event="slack-message-default",
+            memory_source="slack-message-default",
+        )
         return
-    _handle_file_ingest_event(
-        event=event,
-        source_event="slack-message",
-        thread_ts=event.get("thread_ts") or event.get("ts"),
-        say=say,
-    )
+    # Not default-routed (typically because another user was @mentioned), but still ingest files.
+    if _extract_event_files(event):
+        _handle_file_ingest_event(
+            event=event,
+            source_event="slack-message",
+            thread_ts=event.get("thread_ts") or event.get("ts"),
+            say=say,
+        )
 
 
 @app.event("file_shared")
@@ -904,21 +915,23 @@ def handle_file_shared(event, say):
     )
 
 
-@app.event("app_mention")
-def handle_mention(event, say):
+def _handle_slack_request_event(*, event, say, source_event: str, memory_source: str) -> None:
     text = event.get("text") or ""
     channel = event.get("channel")
     user_id = event.get("user")
     event_ts = event.get("ts")
     thread_ts = event.get("thread_ts") or event.get("ts")
-    logger.info("app_mention received channel=%s ts=%s text=%r", event.get("channel"), event.get("ts"), text)
+    logger.info("%s received channel=%s ts=%s text=%r", source_event, event.get("channel"), event.get("ts"), text)
 
     _handle_file_ingest_event(
         event=event,
-        source_event="slack-app-mention",
+        source_event=source_event,
         thread_ts=thread_ts,
         say=say,
     )
+
+    if not text.strip():
+        return
 
     if _handle_memory_command(
         text=text,
@@ -937,7 +950,7 @@ def handle_mention(event, say):
                 channel=channel,
                 user_id=user_id,
                 text=text,
-                source="slack-app-mention",
+                source=memory_source,
                 source_ts_utc=event_ts,
             )
         except Exception:
@@ -1155,6 +1168,16 @@ def handle_mention(event, say):
     say(
         text=f"Diligence packet created for *{ticker}*: `{out}`",
         thread_ts=thread_ts,
+    )
+
+
+@app.event("app_mention")
+def handle_mention(event, say):
+    _handle_slack_request_event(
+        event=event,
+        say=say,
+        source_event="slack-app-mention",
+        memory_source="slack-app-mention",
     )
 
 
