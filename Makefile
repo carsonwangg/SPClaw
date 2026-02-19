@@ -1,4 +1,4 @@
-.PHONY: openclaw-status openclaw-restart openclaw-logs openclaw-dev openclaw-bot-status openclaw-bot-logs openclaw-schedulers-status openclaw-slack-status openclaw-slack-logs openclaw-slack-probe openclaw-slack-audit openclaw-memory-status openclaw-memory-prune openclaw-memory-extract-daily openclaw-files-init openclaw-files-status openclaw-files-index openclaw-files-sync-pull openclaw-files-sync-push openclaw-files-sync openclaw-email-status openclaw-email-run-once openclaw-email-serve openclaw-24x7-enable openclaw-24x7-status openclaw-24x7-disable valuation-chart
+.PHONY: openclaw-status openclaw-restart openclaw-logs openclaw-dev openclaw-bot-status openclaw-bot-logs openclaw-schedulers-status openclaw-slack-status openclaw-slack-logs openclaw-slack-probe openclaw-slack-audit openclaw-memory-status openclaw-memory-prune openclaw-memory-extract-daily openclaw-files-init openclaw-files-status openclaw-files-index openclaw-files-sync-pull openclaw-files-sync-push openclaw-files-sync openclaw-email-status openclaw-email-run-once openclaw-email-serve openclaw-x-chart-status openclaw-x-chart-run-once openclaw-x-chart-sources openclaw-x-chart-add-source openclaw-24x7-enable openclaw-24x7-status openclaw-24x7-disable valuation-chart
 
 export PATH := /opt/homebrew/bin:$(PATH)
 OPENCLAW ?= $(shell command -v openclaw 2>/dev/null || echo /opt/homebrew/bin/openclaw)
@@ -72,6 +72,18 @@ openclaw-email-run-once:
 
 openclaw-email-serve:
 	/opt/coatue-claw/.venv/bin/python -m coatue_claw.email_gateway serve
+
+openclaw-x-chart-status:
+	/opt/coatue-claw/.venv/bin/python -m coatue_claw.x_chart_daily status
+
+openclaw-x-chart-run-once:
+	/opt/coatue-claw/.venv/bin/python -m coatue_claw.x_chart_daily run-once --manual
+
+openclaw-x-chart-sources:
+	/opt/coatue-claw/.venv/bin/python -m coatue_claw.x_chart_daily list-sources --limit $(or $(LIMIT),50)
+
+openclaw-x-chart-add-source:
+	/opt/coatue-claw/.venv/bin/python -m coatue_claw.x_chart_daily add-source $(HANDLE) --priority $(or $(PRIORITY),1.0)
 
 openclaw-24x7-enable:
 	/opt/coatue-claw/.venv/bin/python -m coatue_claw.launchd_runtime enable

@@ -10,6 +10,10 @@ from coatue_claw.chart_metrics import DEFAULT_X_METRIC, DEFAULT_Y_METRIC, METRIC
 from coatue_claw.diligence_report import build_neutral_investment_memo
 from coatue_claw.memory_runtime import MemoryRuntime
 from coatue_claw.valuation_chart import run_valuation_chart
+from coatue_claw.x_chart_daily import add_source as add_x_chart_source
+from coatue_claw.x_chart_daily import list_sources as list_x_chart_sources
+from coatue_claw.x_chart_daily import run_chart_scout_once
+from coatue_claw.x_chart_daily import status as x_chart_status
 from coatue_claw.x_digest import build_x_digest
 
 logger = logging.getLogger(__name__)
@@ -107,6 +111,22 @@ def main():
     x.add_argument("--hours", type=int, default=24, help="Lookback window in hours (1-168)")
     x.add_argument("--limit", type=int, default=50, help="X API max results (10-100)")
 
+    xc = sub.add_parser("x-chart")
+    xc_sub = xc.add_subparsers(dest="x_chart_cmd", required=True)
+
+    xcr = xc_sub.add_parser("run-once")
+    xcr.add_argument("--manual", action="store_true")
+    xcr.add_argument("--dry-run", action="store_true")
+
+    xc_sub.add_parser("status")
+
+    xcl = xc_sub.add_parser("list-sources")
+    xcl.add_argument("--limit", type=int, default=50)
+
+    xca = xc_sub.add_parser("add-source")
+    xca.add_argument("handle")
+    xca.add_argument("--priority", type=float, default=1.0)
+
     args = parser.parse_args()
 
     if args.cmd == "diligence":
@@ -153,6 +173,20 @@ def main():
             print(f"top_post: {result.top_post_url}")
         print(f"generated_at_utc: {result.generated_at_utc}")
         print(f"report: {result.output_path}")
+        return
+
+    if args.cmd == "x-chart":
+        if args.x_chart_cmd == "run-once":
+            print(json.dumps(run_chart_scout_once(manual=bool(args.manual), dry_run=bool(args.dry_run)), indent=2, sort_keys=True))
+            return
+        if args.x_chart_cmd == "status":
+            print(json.dumps(x_chart_status(), indent=2, sort_keys=True))
+            return
+        if args.x_chart_cmd == "list-sources":
+            print(json.dumps(list_x_chart_sources(limit=max(1, min(500, int(args.limit)))), indent=2, sort_keys=True))
+            return
+        if args.x_chart_cmd == "add-source":
+            print(json.dumps(add_x_chart_source(args.handle, priority=float(args.priority)), indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":

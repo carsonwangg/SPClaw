@@ -15,6 +15,7 @@ load_dotenv("/opt/coatue-claw/.env.prod")
 
 EMAIL_LABEL = "com.coatueclaw.email-gateway"
 MEMORY_PRUNE_LABEL = "com.coatueclaw.memory-prune"
+X_CHART_LABEL = "com.coatueclaw.x-chart-daily"
 
 
 def _repo_root() -> Path:
@@ -43,6 +44,23 @@ def _runtime_env() -> dict[str, str]:
         "PYTHONPATH": str(repo / "src"),
         "COATUE_CLAW_REPO_ROOT": str(repo),
     }
+
+
+def _x_chart_windows() -> list[dict[str, int]]:
+    raw = (os.environ.get("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00") or "").strip()
+    out: list[dict[str, int]] = []
+    for part in raw.split(","):
+        p = part.strip()
+        m = re.fullmatch(r"(\d{1,2}):(\d{2})", p)
+        if not m:
+            continue
+        hour = int(m.group(1))
+        minute = int(m.group(2))
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            out.append({"Hour": hour, "Minute": minute})
+    if not out:
+        out = [{"Hour": 9, "Minute": 0}, {"Hour": 12, "Minute": 0}, {"Hour": 18, "Minute": 0}]
+    return out
 
 
 def _service_specs() -> dict[str, dict[str, Any]]:
@@ -78,9 +96,22 @@ def _service_specs() -> dict[str, dict[str, Any]]:
         "EnvironmentVariables": _runtime_env(),
     }
 
+    x_chart = {
+        "Label": X_CHART_LABEL,
+        "ProgramArguments": [python_bin, "-m", "coatue_claw.x_chart_daily", "run-once"],
+        "WorkingDirectory": str(repo),
+        "RunAtLoad": False,
+        "StartCalendarInterval": _x_chart_windows(),
+        "ProcessType": "Background",
+        "StandardOutPath": str(logs_dir / "x-chart-daily.stdout.log"),
+        "StandardErrorPath": str(logs_dir / "x-chart-daily.stderr.log"),
+        "EnvironmentVariables": _runtime_env(),
+    }
+
     return {
         EMAIL_LABEL: poller,
         MEMORY_PRUNE_LABEL: prune,
+        X_CHART_LABEL: x_chart,
     }
 
 
@@ -199,11 +230,13 @@ def status(*, services: list[str]) -> dict[str, Any]:
 def _resolve_services(raw: str) -> list[str]:
     value = raw.strip().lower()
     if value in {"all", "24x7", "default"}:
-        return [EMAIL_LABEL, MEMORY_PRUNE_LABEL]
+        return [EMAIL_LABEL, MEMORY_PRUNE_LABEL, X_CHART_LABEL]
     if value == "email":
         return [EMAIL_LABEL]
     if value in {"memory", "memory-prune", "prune"}:
         return [MEMORY_PRUNE_LABEL]
+    if value in {"x", "xchart", "chart", "x-chart"}:
+        return [X_CHART_LABEL]
     raise ValueError(f"unknown service selector: {raw}")
 
 
@@ -213,7 +246,7 @@ def main() -> None:
 
     for name in ("enable", "disable", "status"):
         cmd = sub.add_parser(name)
-        cmd.add_argument("--service", default="all", choices=["all", "email", "memory"])  # simplified UX
+        cmd.add_argument("--service", default="all", choices=["all", "email", "memory", "xchart"])  # simplified UX
         if name == "disable":
             cmd.add_argument("--remove-plists", action="store_true")
 

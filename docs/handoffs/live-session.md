@@ -291,6 +291,40 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `make openclaw-slack-status` => probe `ok=true`
   - expected behavior after fix:
     - plain channel messages (e.g., `x status`) are routed to OpenClaw without requiring `@Coatue Claw`
+- X chart scout daily winner feature (this session):
+  - implemented automated chart scouting + posting engine:
+    - module: `src/coatue_claw/x_chart_daily.py`
+    - persists source trust/ranking + post history in SQLite:
+      - `/opt/coatue-claw-data/db/x_chart_daily.sqlite`
+    - writes per-slot markdown artifacts:
+      - `/opt/coatue-claw-data/artifacts/x-chart-daily/*.md`
+  - source strategy:
+    - seeded prioritized source list with `@fiscal_AI` and additional high-signal accounts
+    - auto-discovers and promotes new X sources based on engagement
+    - ingests supplemental candidates from Visual Capitalist feed (`https://www.visualcapitalist.com/feed/`)
+  - scheduling:
+    - added launchd service `com.coatueclaw.x-chart-daily`
+    - default windows: `09:00,12:00,18:00` with configurable timezone (default `America/Los_Angeles`)
+  - Slack controls added:
+    - `x chart now`
+    - `x chart status`
+    - `x chart sources`
+    - `x chart add @handle priority 1.2`
+  - CLI controls added:
+    - `claw x-chart run-once --manual`
+    - `claw x-chart status`
+    - `claw x-chart list-sources`
+    - `claw x-chart add-source HANDLE --priority 1.2`
+  - Makefile controls added:
+    - `make openclaw-x-chart-status`
+    - `make openclaw-x-chart-run-once`
+    - `make openclaw-x-chart-sources`
+    - `make openclaw-x-chart-add-source HANDLE=fiscal_AI PRIORITY=1.6`
+  - tests added/updated:
+    - `tests/test_x_chart_daily.py`
+    - `tests/test_launchd_runtime.py`
+  - local validation:
+    - `PYTHONPATH=src pytest -q` => `72 passed`
 
 ## Next Step to Validate in Slack
 Send in `#charting`:
@@ -350,5 +384,15 @@ Then confirm bot returns:
     - `make openclaw-email-status`
     - `make openclaw-email-run-once`
     - send test email `diligence SNOW` and confirm reply
-14. Wire first scheduled jobs (weekly idea scan + scheduled execution of the new X digest command).
+14. On Mac mini, set chart scout env in `/opt/coatue-claw/.env.prod`:
+    - `COATUE_CLAW_X_CHART_SLACK_CHANNEL=<channel-id>`
+    - `COATUE_CLAW_X_CHART_TIMEZONE=America/Los_Angeles`
+    - `COATUE_CLAW_X_CHART_WINDOWS=09:00,12:00,18:00`
+15. Run:
+    - `make openclaw-24x7-enable`
+    - `make openclaw-24x7-status` (confirm `com.coatueclaw.x-chart-daily` loaded)
+16. Dry-run source quality and posting:
+    - `make openclaw-x-chart-sources`
+    - `make openclaw-x-chart-run-once`
+17. Next phase: format posted winners into Coatue “Chart of the Day” visual style template.
 15. If response fails, capture first failing line with `openclaw channels logs --channel slack --lines 300`.

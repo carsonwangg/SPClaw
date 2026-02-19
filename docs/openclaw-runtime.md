@@ -30,12 +30,14 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
   - `claw valuation-chart ...`
   - `claw diligence ...`
   - `claw x-digest "QUERY" --hours 24 --limit 50`
+  - `claw x-chart run-once --manual`
+  - `claw x-chart status|list-sources|add-source`
   - `claw memory status|query|prune|extract-daily|checkpoint`
 - Scheduled (planned but not yet wired in this repo):
   - Weekly idea scan
-  - X digest scheduling
 - Scheduled (wired):
   - Hourly memory prune via `launchd` (`com.coatueclaw.memory-prune`)
+  - Chart scout posting via `launchd` (`com.coatueclaw.x-chart-daily`) at local times from `COATUE_CLAW_X_CHART_WINDOWS` (default `09:00,12:00,18:00`)
 
 Diligence output contract:
 - `claw diligence TICKER` generates a neutral, evidence-first 8-section investment memo with source/timestamp attribution.
@@ -92,6 +94,9 @@ Memory output contract:
   - `make openclaw-email-status`
   - `make openclaw-email-run-once`
   - `make openclaw-email-serve`
+  - `make openclaw-x-chart-status`
+  - `make openclaw-x-chart-run-once`
+  - `make openclaw-x-chart-sources`
 
 24/7 runtime bootstrap on Mac mini:
 1. `cd /opt/coatue-claw`
@@ -157,6 +162,9 @@ Slack deploy pipeline controls:
 6. `@Coatue Claw build: <request>` (runs Codex CLI by default if installed, otherwise requires custom runner)
 7. `@Coatue Claw x digest SNOW last 24h limit 80`
 8. `@Coatue Claw x status`
+9. `x chart now`
+10. `x chart sources`
+11. `x chart add @fiscal_AI priority 1.6`
 
 Pipeline environment controls:
 - `SLACK_PIPELINE_ADMINS`: optional comma-separated Slack user IDs allowed to run pipeline commands
@@ -177,6 +185,16 @@ X digest environment controls:
 - `COATUE_CLAW_X_BEARER_TOKEN`: required for X API requests
 - `COATUE_CLAW_X_API_BASE`: optional API base URL override (default `https://api.x.com`)
 - `COATUE_CLAW_X_DIGEST_DIR`: optional digest markdown output dir (default `/opt/coatue-claw-data/artifacts/x-digest`)
+
+X chart scout environment controls:
+- `COATUE_CLAW_X_CHART_SLACK_CHANNEL`: required Slack channel id for scheduled posting
+- `COATUE_CLAW_X_CHART_TIMEZONE`: posting timezone (default `America/Los_Angeles`)
+- `COATUE_CLAW_X_CHART_WINDOWS`: comma-separated daily times (default `09:00,12:00,18:00`)
+- `COATUE_CLAW_X_CHART_SOURCE_LIMIT`: number of tracked source handles to scan each run (default `25`)
+- `COATUE_CLAW_X_CHART_DISCOVERY_MIN_ENGAGEMENT`: minimum engagement for auto-discovered source promotion (default `120`)
+- `COATUE_CLAW_X_CHART_DB_PATH`: optional SQLite store path (default `/opt/coatue-claw-data/db/x_chart_daily.sqlite`)
+- `COATUE_CLAW_X_CHART_DIR`: optional markdown artifact output dir (default `/opt/coatue-claw-data/artifacts/x-chart-daily`)
+- `COATUE_CLAW_VISUALCAPITALIST_FEED_URL`: optional feed override (default `https://www.visualcapitalist.com/feed/`)
 
 Email integration environment controls:
 - `COATUE_CLAW_EMAIL_ENABLED`: set `true` to enable email processing

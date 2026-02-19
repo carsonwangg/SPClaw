@@ -56,6 +56,10 @@ from coatue_claw.universe_store import (
     universe_path,
 )
 from coatue_claw.valuation_chart import _format_readable_date, run_valuation_chart
+from coatue_claw.x_chart_daily import XChartError, add_source as add_x_chart_source
+from coatue_claw.x_chart_daily import list_sources as list_x_chart_sources
+from coatue_claw.x_chart_daily import run_chart_scout_once
+from coatue_claw.x_chart_daily import status as x_chart_status
 from coatue_claw.x_digest import XDigestError, build_x_digest, format_x_digest_summary
 
 load_dotenv("/opt/coatue-claw/.env.prod")
@@ -201,6 +205,8 @@ def _format_chart_usage() -> str:
         "Usage:\n"
         "- `diligence TICKER`\n"
         "- `x digest <topic|ticker|handle> [last 24h] [limit 50]`\n"
+        "- `x chart now` (run chart-scout winner now)\n"
+        "- `x chart sources` / `x chart add @handle priority 1.2`\n"
         "- `graph ev ltm growth SNOW,MDB,DDOG`\n"
         "- natural language: `plot EV/Revenue multiples vs revenue growth for SNOW,MDB,DDOG`\n"
         "- create universe: `create universe defense with PLTR,LMT,RTX,NOC,GD,LDOS`\n"
@@ -689,6 +695,112 @@ def _handle_x_digest_command(*, text: str, channel: str | None, thread_ts: str, 
     return True
 
 
+def _handle_x_chart_command(*, text: str, channel: str | None, thread_ts: str, say) -> bool:
+    stripped = _strip_slack_mentions(text).strip()
+    lower = stripped.lower()
+    if not re.search(r"\bx\s+chart\b", lower):
+        return False
+
+    if re.search(r"\bx\s+chart\s+help\b", lower):
+        say(
+            text=(
+                "X chart scout commands:\n"
+                "- `x chart now`\n"
+                "- `x chart status`\n"
+                "- `x chart sources`\n"
+                "- `x chart add @fiscal_AI priority 1.6`"
+            ),
+            thread_ts=thread_ts,
+        )
+        return True
+
+    if re.search(r"\bx\s+chart\s+status\b", lower):
+        try:
+            s = x_chart_status()
+        except Exception as exc:
+            say(text=f"X chart status failed: {exc}", thread_ts=thread_ts)
+            return True
+        recent = s.get("recent_posts") or []
+        lines = [
+            "X chart scout status:",
+            f"- timezone: `{s.get('timezone')}`",
+            f"- windows: `{s.get('windows')}`",
+            f"- slack_channel: `{s.get('slack_channel')}`",
+            f"- sources_count: `{s.get('sources_count')}`",
+            f"- recent_posts: `{len(recent)}`",
+        ]
+        if recent:
+            latest = recent[0]
+            lines.append(f"- latest: `{latest.get('slot_key')}` {latest.get('url')}")
+        say(text="\n".join(lines), thread_ts=thread_ts)
+        return True
+
+    if re.search(r"\bx\s+chart\s+sources\b", lower):
+        try:
+            payload = list_x_chart_sources(limit=30)
+        except Exception as exc:
+            say(text=f"Failed to list X chart sources: {exc}", thread_ts=thread_ts)
+            return True
+        sources = payload.get("sources") or []
+        if not sources:
+            say(text="No X chart sources configured.", thread_ts=thread_ts)
+            return True
+        lines = ["Top X chart sources:"]
+        for item in sources[:15]:
+            lines.append(
+                f"- `@{item.get('handle')}` priority `{float(item.get('priority') or 0):.2f}` trust `{float(item.get('trust_score') or 0):.2f}`"
+            )
+        say(text="\n".join(lines), thread_ts=thread_ts)
+        return True
+
+    add_match = re.search(r"\bx\s+chart\s+add\s+@?([A-Za-z0-9_]+)(?:\s+priority\s+([0-9]*\.?[0-9]+))?", stripped, re.IGNORECASE)
+    if add_match:
+        handle = add_match.group(1)
+        priority = float(add_match.group(2) or "1.0")
+        try:
+            result = add_x_chart_source(handle, priority=priority)
+        except XChartError as exc:
+            say(text=f"Could not add source: {exc}", thread_ts=thread_ts)
+            return True
+        say(
+            text=f"Added X chart source `@{result['handle']}` with priority `{result['priority']:.2f}`.",
+            thread_ts=thread_ts,
+        )
+        return True
+
+    if re.search(r"\bx\s+chart\s+(now|run)\b", lower):
+        try:
+            result = run_chart_scout_once(manual=True, dry_run=False, channel_override=channel)
+        except XChartError as exc:
+            say(text=f"X chart run failed: {exc}", thread_ts=thread_ts)
+            return True
+        except Exception:
+            logger.exception("Unexpected x-chart failure")
+            say(text="X chart run failed unexpectedly. Check logs.", thread_ts=thread_ts)
+            return True
+
+        if result.get("posted"):
+            winner = result.get("winner") or {}
+            say(
+                text=(
+                    "Posted chart scout winner.\n"
+                    f"- slot: `{result.get('slot_key')}`\n"
+                    f"- source: `{winner.get('source')}`\n"
+                    f"- url: {winner.get('url')}"
+                ),
+                thread_ts=thread_ts,
+            )
+            return True
+        say(
+            text=f"X chart run completed with no post (`{result.get('reason', 'unknown')}`).",
+            thread_ts=thread_ts,
+        )
+        return True
+
+    say(text="Try `x chart help` for available commands.", thread_ts=thread_ts)
+    return True
+
+
 def _format_chart_summary(result) -> str:
     lines = []
     lines.append("*Valuation chart generated*")
@@ -1039,6 +1151,9 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
         return
 
     if _handle_pipeline_command(text=text, user_id=user_id, thread_ts=thread_ts, say=say):
+        return
+
+    if _handle_x_chart_command(text=text, channel=channel, thread_ts=thread_ts, say=say):
         return
 
     if _handle_x_digest_command(text=text, channel=channel, thread_ts=thread_ts, say=say):

@@ -121,6 +121,29 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
     - bearer token configured in `.env.prod`
     - Slack probe healthy after restart (`make openclaw-slack-status` => `ok=true`)
     - live digest smoke test succeeded and wrote artifact to `/opt/coatue-claw-data/artifacts/x-digest/`
+- X chart scout is now implemented for daily winner posting:
+  - prioritized source list seeded with `@fiscal_AI` and other high-signal accounts
+  - auto-discovery/promotion of new sources based on engagement
+  - supplemental ingestion from Visual Capitalist feed (`https://www.visualcapitalist.com/feed/`)
+  - Slack commands:
+    - `x chart now`
+    - `x chart status`
+    - `x chart sources`
+    - `x chart add @handle priority 1.2`
+  - CLI commands:
+    - `claw x-chart run-once --manual`
+    - `claw x-chart status`
+    - `claw x-chart list-sources`
+    - `claw x-chart add-source HANDLE --priority 1.2`
+  - scheduled runtime service:
+    - `com.coatueclaw.x-chart-daily` via launchd
+    - windows default to `09:00,12:00,18:00` (timezone default `America/Los_Angeles`)
+  - artifacts and state:
+    - sqlite store: `/opt/coatue-claw-data/db/x_chart_daily.sqlite`
+    - markdown artifacts: `/opt/coatue-claw-data/artifacts/x-chart-daily`
+  - tests:
+    - `tests/test_x_chart_daily.py`
+    - `tests/test_launchd_runtime.py` (updated for new service)
 - 24/7 runtime supervision is implemented:
   - launchd-managed services in `src/coatue_claw/launchd_runtime.py`
   - services: `com.coatueclaw.email-gateway` (always-on poller), `com.coatueclaw.memory-prune` (hourly prune)
@@ -145,4 +168,9 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 8. Validate daily backfill flow (`claw memory extract-daily --dry-run --days 14`)
 9. Validate new diligence memo output in Slack (`diligence TICKER`) and confirm section completeness/citations + local database-first precheck behavior
 10. Configure email env vars in `/opt/coatue-claw/.env.prod` and validate `make openclaw-email-status` + `make openclaw-email-run-once`
-11. Wire scheduled jobs for weekly idea scan and recurring X digest runs (on top of the new on-demand X digest command)
+11. Deploy and enable `com.coatueclaw.x-chart-daily` on Mac mini with:
+    - `COATUE_CLAW_X_CHART_SLACK_CHANNEL`
+    - `COATUE_CLAW_X_CHART_WINDOWS=09:00,12:00,18:00`
+    - `COATUE_CLAW_X_CHART_TIMEZONE=America/Los_Angeles`
+12. Validate three scheduled daily posts in Slack (9am/12pm/6pm PT) and tune source priority list after first day.
+13. Build next-phase formatting layer to render winners in Coatue “Chart of the Day” visual style before posting.

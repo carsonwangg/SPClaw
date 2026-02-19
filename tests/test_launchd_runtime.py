@@ -28,6 +28,11 @@ def test_service_specs_build_expected_commands(tmp_path: Path, monkeypatch) -> N
     assert prune["StartInterval"] == 1800
     assert prune["RunAtLoad"] is True
 
+    x_chart = specs[launchd_runtime.X_CHART_LABEL]
+    assert x_chart["ProgramArguments"] == ["/tmp/python", "-m", "coatue_claw.x_chart_daily", "run-once"]
+    assert x_chart["RunAtLoad"] is False
+    assert x_chart["StartCalendarInterval"] == [{"Hour": 9, "Minute": 0}, {"Hour": 12, "Minute": 0}, {"Hour": 18, "Minute": 0}]
+
 
 def test_write_service_plists(tmp_path: Path, monkeypatch) -> None:
     repo = tmp_path / "repo"
@@ -40,7 +45,7 @@ def test_write_service_plists(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("COATUE_CLAW_LAUNCHAGENTS_DIR", str(launch_agents))
 
     written = launchd_runtime.write_service_plists()
-    assert set(written.keys()) == {launchd_runtime.EMAIL_LABEL, launchd_runtime.MEMORY_PRUNE_LABEL}
+    assert set(written.keys()) == {launchd_runtime.EMAIL_LABEL, launchd_runtime.MEMORY_PRUNE_LABEL, launchd_runtime.X_CHART_LABEL}
     for label, plist_path in written.items():
         path = Path(plist_path)
         assert path.exists()
@@ -53,9 +58,11 @@ def test_resolve_services() -> None:
     assert launchd_runtime._resolve_services("all") == [
         launchd_runtime.EMAIL_LABEL,
         launchd_runtime.MEMORY_PRUNE_LABEL,
+        launchd_runtime.X_CHART_LABEL,
     ]
     assert launchd_runtime._resolve_services("email") == [launchd_runtime.EMAIL_LABEL]
     assert launchd_runtime._resolve_services("memory") == [launchd_runtime.MEMORY_PRUNE_LABEL]
+    assert launchd_runtime._resolve_services("xchart") == [launchd_runtime.X_CHART_LABEL]
 
 
 def test_launchctl_domains(monkeypatch) -> None:
