@@ -51,11 +51,13 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
     - reconstructs two series from chart colors (dark employees + purple robots)
     - calibrates to absolute unit values using latest employee/robot figures in post text
   - style copy QA added pre-render (headline/chart-label/takeaway length + no ellipsis)
+  - y-axis ticks are now always generated for non-normalized bar charts (unit-readable values with numeric labels)
+  - pre-post guardrail now fails if reconstructed bar charts are missing y-axis tick labels
   - employee/robot takeaway now uses a short complete sentence to avoid clipped wording
   - new tests:
     - vision extraction rejects single-series payloads for employee/robot charts
     - renderer rejects employee/robot charts without both series
-  - validation: `PYTHONPATH=src pytest -q` => `103 passed`
+  - validation: `PYTHONPATH=src pytest -q` => `105 passed`
 - X URL chart requests now have a deterministic CLI entrypoint for OpenClaw gateway routing:
   - added `run-post-url` command to `coatue_claw.x_chart_daily` CLI
   - command routes to `run_chart_for_post_url(...)` (the strict rebuild-only pipeline)

@@ -767,6 +767,50 @@ def _style_copy_quality_errors(style_draft: StyleDraft) -> list[str]:
     return errors
 
 
+def _nice_tick_step(value: float) -> float:
+    if not math.isfinite(value) or value <= 0:
+        return 1.0
+    base = 10.0 ** math.floor(math.log10(value))
+    for mult in (1.0, 2.0, 2.5, 5.0, 10.0):
+        step = base * mult
+        if value <= step:
+            return step
+    return base * 10.0
+
+
+def _compute_y_ticks(*, y_min: float, y_max: float, normalized: bool) -> list[float]:
+    if normalized:
+        return [0.0, 20.0, 40.0, 60.0, 80.0, 100.0]
+    low = float(min(y_min, y_max))
+    high = float(max(y_min, y_max))
+    span = max(1.0, high - low)
+    rough = span / 5.0
+    step = _nice_tick_step(rough)
+    start = math.floor(low / step) * step
+    end = math.ceil(high / step) * step
+    ticks: list[float] = []
+    v = start
+    guard = 0
+    while v <= end + (step * 0.25) and guard < 32:
+        ticks.append(round(float(v), 6))
+        v += step
+        guard += 1
+    if len(ticks) < 3:
+        mid = (low + high) / 2.0
+        ticks = [round(low, 6), round(mid, 6), round(high, 6)]
+    return ticks
+
+
+def _format_numeric_tick(value: float) -> str:
+    if abs(value - round(value)) < 1e-6:
+        return f"{int(round(value)):,}"
+    if abs(value) >= 100.0:
+        return f"{value:,.0f}"
+    if abs(value) >= 10.0:
+        return f"{value:,.1f}"
+    return f"{value:,.2f}"
+
+
 def _vision_enabled() -> bool:
     raw = (os.environ.get("COATUE_CLAW_X_CHART_VISION_ENABLED", "1") or "1").strip().lower()
     return raw not in {"0", "false", "off", "no"}
@@ -2218,6 +2262,7 @@ def _render_chart_of_day_style(
 ) -> Path:
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
+    from matplotlib.ticker import FuncFormatter
     from coatue_claw.valuation_chart import COATUE_FONT_FAMILY
 
     output_dir = _output_dir()
@@ -2322,6 +2367,13 @@ def _render_chart_of_day_style(
                 chart_ax.set_ylim(0.0, max(100.0, y_max * 1.15))
             else:
                 chart_ax.set_ylim(0.0, y_max + (0.18 * y_span))
+            y_lo, y_hi = chart_ax.get_ylim()
+            y_ticks = _compute_y_ticks(y_min=float(y_lo), y_max=float(y_hi), normalized=bool(rebuilt_bars.normalized))
+            chart_ax.set_yticks(y_ticks)
+            if rebuilt_bars.normalized:
+                chart_ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _p: _format_numeric_tick(v)))
+            else:
+                chart_ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _p: _format_numeric_tick(v)))
             chart_ax.grid(axis="y", color="#D9DEE7", linewidth=0.8, alpha=0.9)
             chart_ax.tick_params(axis="both", labelsize=9, colors="#4A4F59")
             xlabels = rebuilt_bars.labels if len(rebuilt_bars.labels) == len(rebuilt_bars.values) else []
@@ -2334,8 +2386,6 @@ def _render_chart_of_day_style(
             else:
                 chart_ax.set_xticks(xs)
                 chart_ax.set_xticklabels([f"P{i+1}" for i in range(len(rebuilt_bars.values))], fontsize=9)
-            if rebuilt_bars.normalized:
-                chart_ax.set_yticks([0, 20, 40, 60, 80, 100])
             chart_ax.set_ylabel(rebuilt_bars.y_label, fontsize=10, color="#4A4F59", labelpad=8)
     elif rebuilt:
         for series in rebuilt:
@@ -2352,12 +2402,16 @@ def _render_chart_of_day_style(
     else:
         raise XChartError("Chart reconstruction unavailable; screenshot fallback disabled.")
 
-    # Readability guardrail: reconstructed bar charts must include usable x-axis labels.
+    # Readability guardrail: reconstructed bar charts must include usable x-axis and y-axis labels.
     if rebuilt_bars is not None:
         tick_text = [t.get_text().strip() for t in chart_ax.get_xticklabels()]
         non_empty = [t for t in tick_text if t]
         if len(non_empty) < min(4, len(rebuilt_bars.values)):
             raise XChartError("Rebuilt bar chart missing x-axis labels; screenshot fallback disabled.")
+        y_tick_text = [t.get_text().strip() for t in chart_ax.get_yticklabels()]
+        y_non_empty = [t for t in y_tick_text if t]
+        if len(y_non_empty) < 3:
+            raise XChartError("Rebuilt bar chart missing y-axis tick labels; screenshot fallback disabled.")
 
     takeaway_text = _shorten_without_ellipsis(_normalize_render_text(style_draft.takeaway), max_chars=68)
     takeaway_lines = "\n".join(textwrap.wrap(f"Takeaway: {takeaway_text}", width=90)[:1])

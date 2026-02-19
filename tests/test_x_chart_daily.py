@@ -12,6 +12,7 @@ from coatue_claw.x_chart_daily import (
     XChartStore,
     XChartError,
     _build_x_title,
+    _compute_y_ticks,
     _fallback_bar_labels,
     _extract_rebuilt_bars_via_vision,
     _extract_rebuilt_bars,
@@ -305,6 +306,13 @@ def test_shorten_without_ellipsis_removes_three_dots() -> None:
     shortened = _shorten_without_ellipsis(text, max_chars=58)
     assert "..." not in shortened
     assert len(shortened) <= 58
+
+
+def test_compute_y_ticks_non_normalized_has_multiple_ticks() -> None:
+    ticks = _compute_y_ticks(y_min=0.0, y_max=1700.0, normalized=False)
+    assert len(ticks) >= 4
+    assert ticks[0] <= 0.0
+    assert ticks[-1] >= 1700.0
 
 
 def test_build_x_title_has_no_ellipsis() -> None:
@@ -797,6 +805,54 @@ def test_render_chart_rejects_single_series_for_employees_robots(monkeypatch, tm
         _render_chart_of_day_style(
             candidate=candidate,
             slot_key="manual-robots-single",
+            windows_text="09:00,12:00,18:00",
+            style_draft=style,
+        )
+
+
+def test_render_chart_rejects_missing_y_axis_tick_labels(monkeypatch, tmp_path: Path) -> None:
+    import numpy as np
+    import pytest
+
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    candidate = Candidate(
+        candidate_key="x:robots-no-yticks",
+        source_type="x",
+        source_id="oguzerkan",
+        author="@oguzerkan",
+        title="$AMZN has 1.5 million employees and deployed 1 million robots.",
+        text="$AMZN has 1.5 million employees and deployed 1 million robots.",
+        url="https://x.com/oguzerkan/status/2024447368137994460",
+        image_url="https://example.com/chart.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=10,
+        source_priority=1.0,
+        score=50.0,
+    )
+    style = _select_style_draft(candidate)
+    monkeypatch.setattr("coatue_claw.x_chart_daily._safe_image_from_url", lambda _url: np.zeros((500, 900, 3), dtype=float))
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._extract_rebuilt_bars_via_vision",
+        lambda **kwargs: RebuiltBars(
+            labels=["2016", "2017", "2018", "2019", "2020", "2021", "2022", "2023", "2024", "2025"],
+            values=[117.0, 154.0, 341.0, 648.0, 798.0, 1298.0, 1608.0, 1541.0, 1525.0, 1556.0],
+            color="#1F2452",
+            y_label="Number (thousands)",
+            normalized=False,
+            source="vision",
+            confidence=0.9,
+            primary_label="Employees",
+            secondary_values=[15.0, 30.0, 100.0, 200.0, 265.0, 350.0, 520.0, 750.0, 750.0, 1000.0],
+            secondary_color="#6D63E7",
+            secondary_label="Robots",
+        ),
+    )
+    monkeypatch.setattr("coatue_claw.x_chart_daily._compute_y_ticks", lambda **kwargs: [])
+
+    with pytest.raises(XChartError):
+        _render_chart_of_day_style(
+            candidate=candidate,
+            slot_key="manual-robots-no-yticks",
             windows_text="09:00,12:00,18:00",
             style_draft=style,
         )
