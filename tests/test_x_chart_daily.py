@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from coatue_claw.x_chart_daily import Candidate, XChartStore, _parse_windows, run_chart_scout_once
+from coatue_claw.x_chart_daily import Candidate, XChartStore, _parse_windows, _slack_token, run_chart_scout_once
 
 
 def test_parse_windows_defaults_and_custom() -> None:
@@ -63,3 +63,16 @@ def test_run_chart_scout_dry_run(tmp_path: Path, monkeypatch) -> None:
     assert result["ok"] is True
     assert result["reason"] == "dry_run"
     assert result["winner"]["source"] == "x:fiscal_AI"
+
+
+def test_slack_token_falls_back_to_openclaw_config(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    cfg_dir = tmp_path / ".openclaw"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    cfg = cfg_dir / "openclaw.json"
+    cfg.write_text(
+        '{"channels":{"slack":{"botToken":"xoxb-fallback-token"}}}',
+        encoding="utf-8",
+    )
+    assert _slack_token() == "xoxb-fallback-token"

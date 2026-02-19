@@ -327,6 +327,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `PYTHONPATH=src pytest -q` => `72 passed`
   - robustness patch:
     - X source scanning now handles invalid/renamed usernames gracefully (skips invalid handles instead of failing the entire run)
+    - Slack post token resolution now falls back to `~/.openclaw/openclaw.json` (`channels.slack.botToken`) when `SLACK_BOT_TOKEN` env is missing/inactive
 
 ## Next Step to Validate in Slack
 Send in `#charting`:

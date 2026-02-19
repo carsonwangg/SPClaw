@@ -117,9 +117,24 @@ def _resolve_bearer_token() -> str:
 
 def _slack_token() -> str:
     token = os.environ.get("SLACK_BOT_TOKEN", "").strip()
-    if not token:
-        raise XChartError("SLACK_BOT_TOKEN missing; cannot post chart winner to Slack.")
-    return token
+    if token:
+        return token
+    config_path = Path.home() / ".openclaw/openclaw.json"
+    if config_path.exists():
+        try:
+            payload = json.loads(config_path.read_text(encoding="utf-8"))
+            token = str(
+                (
+                    payload.get("channels", {})
+                    .get("slack", {})
+                    .get("botToken", "")
+                )
+            ).strip()
+        except Exception:
+            token = ""
+        if token:
+            return token
+    raise XChartError("Slack bot token missing (env SLACK_BOT_TOKEN or ~/.openclaw/openclaw.json channels.slack.botToken).")
 
 
 def _slack_channel() -> str:
