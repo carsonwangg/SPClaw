@@ -178,11 +178,13 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - local: `PYTHONPATH=src pytest -q tests/test_launchd_runtime.py` => `4 passed`
   - Mac mini: `/opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_launchd_runtime.py tests/test_email_gateway.py` => `7 passed`
 - Mac mini runtime validation (2026-02-19):
-  - pulled `a49f887` in `/opt/coatue-claw`
+  - pulled `a49f887` then `95fb26d` in `/opt/coatue-claw`
   - `make openclaw-24x7-enable` succeeded for:
     - `com.coatueclaw.email-gateway`
     - `com.coatueclaw.memory-prune`
-  - `make openclaw-24x7-status` reports both services `loaded=true` and `state=running`
+  - `make openclaw-24x7-status` reports:
+    - email service: `loaded=true`, `state=running`
+    - memory prune service: `loaded=true`, `last_exit_code=0` (idle between scheduled runs is expected)
   - `make openclaw-slack-status` probe returns `ok=true`
   - `make openclaw-email-status` confirms email channel enabled with expected allowlist senders
 

@@ -90,7 +90,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - launchctl domain fallback (`gui/<uid>` then `user/<uid>`) for reliable control over SSH and local sessions
   - operations via `make openclaw-24x7-{enable,status,disable}`
   - scheduler status target now reports real launchd state (`make openclaw-schedulers-status`)
-  - deployed and validated on Mac mini (`a49f887`): both launchd services are loaded/running
+  - deployed and validated on Mac mini (`a49f887` + `95fb26d`): email poller is running; memory-prune service is loaded with clean `last_exit_code=0` between hourly runs
 - Git shipping protocol is now explicit: every Codex change ships to `origin` with handoff updates
 
 ## Immediate Next Actions
