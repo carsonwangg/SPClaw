@@ -83,7 +83,8 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - IMAP poll + SMTP reply runtime in `src/coatue_claw/email_gateway.py`
   - email commands: diligence, memory status/query, files status, help
   - context-aware diligence email parsing now prioritizes body intent and filters filler tokens so ticker extraction is robust in natural phrasing
-  - diligence email response format is now reader-friendly (executive summary in body + full memo attached as `.md`, with summary citation tails removed for readability)
+  - diligence email response format is now consumer-friendly (executive summary in body + full memo attached as readable `.pdf`, with summary citation tails removed for readability)
+  - local filesystem paths are removed from user-facing diligence email output
   - email attachments auto-ingest to knowledge folders with audit DB (`/opt/coatue-claw-data/db/email_gateway.sqlite`)
   - operations via `make openclaw-email-{status,run-once,serve}`
   - Mac mini validation confirms `Testing Dilligence` + `Diligence SNOW please` resolves to ticker `SNOW`

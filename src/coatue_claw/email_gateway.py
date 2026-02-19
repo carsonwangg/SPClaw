@@ -17,6 +17,7 @@ import re
 import smtplib
 import sqlite3
 import ssl
+import textwrap
 import time
 from typing import Any
 
@@ -502,6 +503,72 @@ def _extract_title(lines: list[str], *, fallback: str) -> str:
     return fallback
 
 
+def _render_memo_pdf(*, path: Path, title: str) -> bytes:
+    # Use matplotlib's PDF backend (already a core dependency) to avoid extra packages.
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import io
+
+    import matplotlib.pyplot as plt
+    from matplotlib.backends.backend_pdf import PdfPages
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    page_width, page_height = 8.27, 11.69  # A4 inches
+    left = 0.08
+    top = 0.95
+    bottom = 0.06
+    chars_per_line = 104
+
+    def line_style(raw_line: str) -> tuple[float, float, str]:
+        line = raw_line.strip()
+        if line.startswith("# "):
+            return (14.0, 0.030, line[2:].strip())
+        if line.startswith("## "):
+            return (12.0, 0.024, line[3:].strip())
+        if line.startswith("- "):
+            return (10.0, 0.020, f"• {line[2:].strip()}")
+        if not line:
+            return (10.0, 0.012, "")
+        return (10.0, 0.020, line)
+
+    def wrapped(line: str, *, indent_chars: int = 0) -> list[str]:
+        if not line:
+            return [""]
+        width = max(30, chars_per_line - indent_chars)
+        return textwrap.wrap(line, width=width, break_long_words=False, break_on_hyphens=False) or [line]
+
+    def new_page() -> tuple[Any, Any, float]:
+        fig, ax = plt.subplots(figsize=(page_width, page_height))
+        ax.axis("off")
+        return fig, ax, top
+
+    buf = io.BytesIO()
+    with PdfPages(buf) as pdf:
+        fig, ax, y = new_page()
+        ax.text(left, y, title, transform=ax.transAxes, fontsize=16, fontweight="bold", va="top", ha="left")
+        y -= 0.04
+        ax.text(left, y, f"Generated UTC: {_now_utc_iso()[:19]}", transform=ax.transAxes, fontsize=9, va="top", ha="left")
+        y -= 0.03
+
+        for raw in lines:
+            font_size, row_h, clean = line_style(raw)
+            indent_chars = 2 if clean.startswith("• ") else 0
+            for idx, part in enumerate(wrapped(clean, indent_chars=indent_chars)):
+                draw = part if idx == 0 else ("  " + part if clean.startswith("• ") else part)
+                if y < bottom:
+                    pdf.savefig(fig, bbox_inches="tight")
+                    plt.close(fig)
+                    fig, ax, y = new_page()
+                ax.text(left, y, draw, transform=ax.transAxes, fontsize=font_size, va="top", ha="left")
+                y -= row_h
+
+        pdf.savefig(fig, bbox_inches="tight")
+        plt.close(fig)
+
+    return buf.getvalue()
+
+
 def _format_diligence_reply(*, ticker: str, path: Path) -> EmailReply:
     lines = path.read_text(encoding="utf-8").splitlines()
     title = _extract_title(lines, fallback=f"Neutral Investment Memo: {ticker}")
@@ -534,13 +601,8 @@ def _format_diligence_reply(*, ticker: str, path: Path) -> EmailReply:
         text_lines.extend(["", "Top Risks:"])
         text_lines.extend(f"- {item}" for item in risks_clean)
 
-    text_lines.extend(
-        [
-            "",
-            f"Attachment: {path.name}",
-            f"Local path: {path}",
-        ]
-    )
+    pdf_name = f"{path.stem}.pdf"
+    text_lines.extend(["", f"Attachment: {pdf_name}"])
     body_text = "\n".join(text_lines)
 
     items_html = "".join(f"<li>{html_lib.escape(item)}</li>" for item in key_takeaways_clean) or (
@@ -559,14 +621,14 @@ def _format_diligence_reply(*, ticker: str, path: Path) -> EmailReply:
         "<h3>Quick Takeaways</h3>"
         f"<ul>{items_html}</ul>"
         f"{risks_html}"
-        f"<p><strong>Attachment:</strong> {html_lib.escape(path.name)}</p>"
-        f"<p><strong>Local path:</strong> <code>{html_lib.escape(str(path))}</code></p>"
+        f"<p><strong>Attachment:</strong> {html_lib.escape(pdf_name)}</p>"
     )
 
+    pdf_bytes = _render_memo_pdf(path=path, title=title)
     attachment = OutboundAttachment(
-        filename=path.name,
-        content_type="text/markdown",
-        payload=path.read_bytes(),
+        filename=pdf_name,
+        content_type="application/pdf",
+        payload=pdf_bytes,
     )
     return EmailReply(
         body_text=body_text,

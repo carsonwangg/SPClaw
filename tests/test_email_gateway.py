@@ -78,11 +78,14 @@ def test_diligence_email_reply_is_readable_and_attached(tmp_path: Path, monkeypa
     assert "Quick Takeaways:" in reply.body_text
     assert "Revenue grew 29.2% year over year." in reply.body_text
     assert "[Source:" not in reply.body_text
+    assert "Local path:" not in reply.body_text
     assert reply.body_html is not None
     assert "<ul>" in (reply.body_html or "")
+    assert "Local path:" not in (reply.body_html or "")
     assert len(reply.attachments) == 1
-    assert reply.attachments[0].filename == "SNOW-20260219.md"
-    assert reply.attachments[0].content_type == "text/markdown"
+    assert reply.attachments[0].filename == "SNOW-20260219.pdf"
+    assert reply.attachments[0].content_type == "application/pdf"
+    assert reply.attachments[0].payload.startswith(b"%PDF")
 
 
 def test_run_once_disabled(tmp_path: Path, monkeypatch) -> None:

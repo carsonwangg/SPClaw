@@ -200,7 +200,8 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - Email diligence response formatting upgrade (commit pending in this session):
   - replaced raw markdown preview dump with readable executive summary body
   - added HTML email alternative for cleaner rendering in Gmail
-  - attached full memo as `.md` file to preserve complete report
+  - attached full memo as readable `.pdf` for consumer-facing delivery
+  - removed local filesystem path lines from user-facing email output
   - stripped long `[Source: ...]` tails from summary bullets for readability while preserving full citations in the attachment
   - tests added for readable summary + attachment contract (`tests/test_email_gateway.py`)
   - deployed on Mac mini via `0173404` and validated:
