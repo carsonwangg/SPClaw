@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import coatue_claw.slack_pipeline as slack_pipeline
 from coatue_claw.slack_pipeline import PipelineResult, PipelineStep, deploy_history, format_pipeline_result
 
 
@@ -39,3 +40,27 @@ def test_format_pipeline_result():
     assert "Deploy completed." in text
     assert "git pull --ff-only origin main" in text
     assert "boom" in text
+
+
+def test_run_build_request_prompt_includes_rg_fallback(monkeypatch):
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], *, cwd: Path):
+        calls.append(cmd)
+        if cmd[:3] == ["/bin/zsh", "-lc", "command -v codex"]:
+            return PipelineStep(label="zsh", command="command -v codex", returncode=0, stdout="/usr/local/bin/codex", stderr="")
+        if cmd and cmd[0] == "codex":
+            return PipelineStep(label="codex", command=" ".join(cmd), returncode=0, stdout="ok", stderr="")
+        return PipelineStep(label=cmd[0], command=" ".join(cmd), returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(slack_pipeline, "_run", fake_run)
+    monkeypatch.setattr(slack_pipeline, "_write_pipeline_checkpoint", lambda **_: None)
+    monkeypatch.setenv("COATUE_CLAW_REPO_PATH", "/tmp/repo")
+
+    result = slack_pipeline.run_build_request(request="refine chart filtering", actor="U123")
+
+    assert result.action == "build_request"
+    codex_calls = [cmd for cmd in calls if cmd and cmd[0] == "codex"]
+    assert codex_calls
+    prompt = codex_calls[0][-1]
+    assert "If `rg` is unavailable on the runtime host, use `grep -R`" in prompt

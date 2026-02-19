@@ -442,3 +442,7 @@ Then confirm bot returns:
 1. On Mac mini runtime host, install ripgrep for best performance: `brew install ripgrep`.
 2. Pull latest `main`, restart runtime, and retry the same Slack behavior-refine request.
 3. If still failing, capture `make openclaw-slack-logs` output and confirm `PATH` seen by the runtime process includes `/opt/homebrew/bin`.
+
+### 2026-02-19 Ship Status
+- rg fallback prompt patch is ready to ship on `main` in this session.
+- Next operator action after pull: `make openclaw-restart` then re-run Slack refine request.

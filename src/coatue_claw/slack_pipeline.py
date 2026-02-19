@@ -320,6 +320,7 @@ def run_build_request(*, request: str, actor: str) -> PipelineResult:
     prompt = (
         "Read /opt/coatue-claw/AGENTS.md and /opt/coatue-claw/docs/handoffs/live-session.md, then continue from there. "
         "Use /opt/coatue-claw as the active repo. Ship every change to git with handoff updates. "
+        "If `rg` is unavailable on the runtime host, use `grep -R` (or install ripgrep) instead of failing. "
         f"User request: {request}. Requested by Slack user {actor}."
     )
     step = _run(["codex", "exec", "--cwd", str(repo), prompt], cwd=repo)

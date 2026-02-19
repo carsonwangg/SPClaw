@@ -194,3 +194,6 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Added test coverage:
   - `tests/test_slack_pipeline.py::test_run_build_request_prompt_includes_rg_fallback`.
 - Operational recommendation remains to install ripgrep on runtime host for speed and consistency.
+
+## 2026-02-19 Ship Status
+- Shipping prompt fallback + test to `main` to prevent Slack build-request failures when `rg` is missing.
