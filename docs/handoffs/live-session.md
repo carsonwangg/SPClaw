@@ -4,6 +4,16 @@
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Current Status (2026-02-19)
+- X Chart readability + reconstruction fidelity update shipped (`main`):
+  - takeaway line is now much shorter by default (feed-safe and chart-safe) to prevent clipping in Slack/file preview
+  - renderer screenshot fallback is now hard-disabled (independent of env flag)
+  - bar reconstruction now supports grouped/two-series bar structures (for example employees vs robots) and renders native Coatue-style bars with legend
+  - vision extractor schema now accepts multi-series bar outputs (`series`) in addition to single-series (`values`)
+  - reconstruction gate logic now mirrors rendering mode:
+    - bar-mode requires bar reconstruction
+    - line-mode requires line reconstruction
+  - regression test added to guarantee no screenshot fallback path
+  - validation: `PYTHONPATH=src pytest -q` => `99 passed`
 - X Chart semantic-title + true-rebuild enforcement shipped (`main`):
   - style copy generation improved for title/subheading fidelity:
     - optional LLM title synthesis (`gpt-4o-mini`) now generates:

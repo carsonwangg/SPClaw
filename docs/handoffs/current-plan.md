@@ -40,6 +40,14 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- X chart output now better matches requested behavior:
+  - shortened takeaway strings across style draft + Slack summary + chart footer to avoid visual truncation
+  - screenshot fallback disabled in renderer (hard-off), so posted charts must be reconstructed
+  - grouped/two-series bar reconstruction added for tweet charts with paired bars
+  - vision extraction parser now supports multi-series JSON (`series`) and maps to native grouped-bar rendering
+  - reconstructability gate updated to respect inferred chart mode (bar vs line) for consistency
+  - added regression test to prevent screenshot fallback even when env fallback is disabled
+  - validation: `PYTHONPATH=src pytest -q` => `99 passed`
 - X chart URL workflow now enforces true reconstruction over screenshot fallback:
   - `run_chart_for_post_url` validates extracted numeric series before post
   - if extraction is not reliable, it fails cleanly and asks for another post instead of posting a screenshot chart

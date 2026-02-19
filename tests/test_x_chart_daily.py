@@ -22,6 +22,7 @@ from coatue_claw.x_chart_daily import (
     _parse_windows,
     _parse_x_candidates,
     _post_winner_to_slack,
+    _render_chart_of_day_style,
     _select_style_draft,
     _shorten_without_ellipsis,
     _slack_tokens,
@@ -215,7 +216,7 @@ def test_style_draft_prefers_simple_feed_like_copy() -> None:
     assert "breaking" not in draft.headline.lower()
     assert draft.chart_label
     assert len(draft.headline) <= 72
-    assert len(draft.takeaway) <= 96
+    assert len(draft.takeaway) <= 68
     assert draft.score >= 6.0
 
 
@@ -438,7 +439,10 @@ def test_extract_rebuilt_bars_via_vision_parses_json(monkeypatch) -> None:
             payload = {
                 "chart_type": "bar",
                 "x_labels": ["2023", "2024", "2025", "2026"],
-                "values": [44, 55, 126, 245],
+                "series": [
+                    {"name": "Employees", "values": [1260, 1541, 1525, 1556]},
+                    {"name": "Robots", "values": [500, 750, 750, 1000]},
+                ],
                 "y_label": "US$ Billions",
                 "normalized": False,
                 "confidence": 0.88,
@@ -463,7 +467,9 @@ def test_extract_rebuilt_bars_via_vision_parses_json(monkeypatch) -> None:
     assert rebuilt is not None
     assert rebuilt.source == "vision"
     assert rebuilt.labels[-1] == "2026"
-    assert rebuilt.values[-1] == 245
+    assert rebuilt.values[-1] == 1556
+    assert rebuilt.secondary_values is not None
+    assert rebuilt.secondary_values[-1] == 1000
     assert rebuilt.normalized is False
 
 
@@ -597,6 +603,42 @@ def test_post_winner_rejects_when_rebuild_required_but_unavailable(monkeypatch) 
 
     with pytest.raises(XChartError):
         _post_winner_to_slack(candidate=candidate, channel="C123", slot_key="manual-2", windows_text="09:00,12:00,18:00")
+
+
+def test_render_chart_rejects_screenshot_fallback_even_if_env_disabled(monkeypatch, tmp_path: Path) -> None:
+    import numpy as np
+    import pytest
+
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_REQUIRE_REBUILD", "0")
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+
+    candidate = Candidate(
+        candidate_key="x:no-fallback",
+        source_type="x",
+        source_id="fiscal_AI",
+        author="@fiscal_AI",
+        title="US trend chart",
+        text="US trend chart",
+        url="https://x.com/fiscal_AI/status/no-fallback",
+        image_url="https://example.com/chart.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=10,
+        source_priority=1.0,
+        score=50.0,
+    )
+    style = _select_style_draft(candidate)
+    monkeypatch.setattr("coatue_claw.x_chart_daily._safe_image_from_url", lambda _url: np.zeros((120, 200, 3), dtype=float))
+    monkeypatch.setattr("coatue_claw.x_chart_daily._extract_rebuilt_bars_via_vision", lambda **kwargs: None)
+    monkeypatch.setattr("coatue_claw.x_chart_daily._infer_chart_mode", lambda **kwargs: "line")
+    monkeypatch.setattr("coatue_claw.x_chart_daily._extract_rebuilt_series", lambda **kwargs: [])
+
+    with pytest.raises(XChartError):
+        _render_chart_of_day_style(
+            candidate=candidate,
+            slot_key="manual-no-fallback",
+            windows_text="09:00,12:00,18:00",
+            style_draft=style,
+        )
 
 
 def test_style_draft_generates_narrative_title_and_small_label_for_etf_flow() -> None:

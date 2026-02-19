@@ -268,6 +268,10 @@ class RebuiltBars:
     normalized: bool
     source: str
     confidence: float
+    primary_label: str | None = None
+    secondary_values: list[float] | None = None
+    secondary_color: str | None = None
+    secondary_label: str | None = None
 
 
 def _data_root() -> Path:
@@ -578,17 +582,20 @@ def _extract_rebuilt_bars_via_vision(*, candidate: Candidate) -> RebuiltBars | N
         client = OpenAI(api_key=api_key)
         model = os.environ.get("COATUE_CLAW_X_CHART_VISION_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
         prompt = (
-            "Extract the primary bar-chart data from this image.\n"
+            "Extract bar-chart data from this image.\n"
             "Return strict JSON only with keys:\n"
             "{"
             "\"chart_type\":\"bar\","
             "\"x_labels\":[\"...\"],"
             "\"values\":[number],"
+            "\"series\":[{\"name\":\"...\",\"values\":[number]}],"
             "\"y_label\":\"...\","
             "\"normalized\":true|false,"
             "\"confidence\":0.0-1.0"
             "}.\n"
             "Rules: Use bars left-to-right. Include negatives if present. "
+            "If there are grouped bars with multiple series, provide `series` with 2 entries and aligned values. "
+            "If there is only one series, use `values` and omit `series`. "
             "If exact units are visible, set y_label accordingly (e.g., 'US$ Billions'). "
             "If units are unclear, use 'Index (normalized)' and normalized=true."
         )
@@ -618,17 +625,49 @@ def _extract_rebuilt_bars_via_vision(*, candidate: Candidate) -> RebuiltBars | N
         return None
 
     labels_raw = payload.get("x_labels") if isinstance(payload, dict) else None
+    series_raw = payload.get("series") if isinstance(payload, dict) else None
     values_raw = payload.get("values") if isinstance(payload, dict) else None
-    if not isinstance(values_raw, list):
-        return None
+
     values: list[float] = []
-    for item in values_raw:
-        try:
-            values.append(float(item))
-        except Exception:
-            continue
-    if not (4 <= len(values) <= 16):
-        return None
+    secondary_values: list[float] | None = None
+    primary_label: str | None = None
+    secondary_label: str | None = None
+    if isinstance(series_raw, list) and len(series_raw) >= 2:
+        series_values: list[tuple[str | None, list[float]]] = []
+        for entry in series_raw[:2]:
+            if not isinstance(entry, dict):
+                continue
+            name = str(entry.get("name") or "").strip() or None
+            raw_vals = entry.get("values")
+            if not isinstance(raw_vals, list):
+                continue
+            parsed: list[float] = []
+            for item in raw_vals:
+                try:
+                    parsed.append(float(item))
+                except Exception:
+                    continue
+            if parsed:
+                series_values.append((name, parsed))
+        if len(series_values) >= 2:
+            a_name, a_vals = series_values[0]
+            b_name, b_vals = series_values[1]
+            n = min(len(a_vals), len(b_vals))
+            if 4 <= n <= 20:
+                values = a_vals[:n]
+                secondary_values = b_vals[:n]
+                primary_label = a_name
+                secondary_label = b_name
+    if not values:
+        if not isinstance(values_raw, list):
+            return None
+        for item in values_raw:
+            try:
+                values.append(float(item))
+            except Exception:
+                continue
+        if not (4 <= len(values) <= 20):
+            return None
 
     labels: list[str] = []
     if isinstance(labels_raw, list):
@@ -640,10 +679,17 @@ def _extract_rebuilt_bars_via_vision(*, candidate: Candidate) -> RebuiltBars | N
         n = min(len(labels), len(values))
         labels = labels[:n]
         values = values[:n]
+        if secondary_values is not None:
+            secondary_values = secondary_values[:n]
     if not labels:
         labels = _fallback_bar_labels(candidate=candidate, count=len(values))
     if len(labels) not in {0, len(values)}:
         labels = []
+    if secondary_values is not None and len(secondary_values) != len(values):
+        n = min(len(values), len(secondary_values))
+        values = values[:n]
+        secondary_values = secondary_values[:n]
+        labels = labels[:n] if labels else _fallback_bar_labels(candidate=candidate, count=n)
 
     y_label = _shorten_without_ellipsis(str(payload.get("y_label") or "Value"), max_chars=22)
     if not y_label:
@@ -664,6 +710,10 @@ def _extract_rebuilt_bars_via_vision(*, candidate: Candidate) -> RebuiltBars | N
         normalized=normalized,
         source="vision",
         confidence=confidence,
+        primary_label=primary_label,
+        secondary_values=secondary_values,
+        secondary_color="#5AA88A" if secondary_values is not None else None,
+        secondary_label=secondary_label,
     )
 
 
@@ -750,7 +800,7 @@ def _synthesize_style_via_llm(candidate: Candidate) -> dict[str, str] | None:
         "Rules:\n"
         "- headline: <=56 chars, narrative/thematic takeaway.\n"
         "- chart_label: <=62 chars, technical description of what chart shows.\n"
-        "- takeaway: <=96 chars, plain language.\n"
+        "- takeaway: <=68 chars, plain language.\n"
         "- No @handles. No 'BREAKING'. No ellipsis. No emojis.\n"
         "- Avoid generic labels like 'Chart Context'.\n"
         f"Post title: {title}\n"
@@ -779,7 +829,7 @@ def _synthesize_style_via_llm(candidate: Candidate) -> dict[str, str] | None:
 
     headline = _shorten_without_ellipsis(str(payload.get("headline") or ""), max_chars=56)
     chart_label = _shorten_without_ellipsis(str(payload.get("chart_label") or ""), max_chars=62)
-    takeaway = _shorten_without_ellipsis(str(payload.get("takeaway") or ""), max_chars=96)
+    takeaway = _shorten_without_ellipsis(str(payload.get("takeaway") or ""), max_chars=68)
     if not headline or not chart_label or not takeaway:
         return None
     if "@" in headline or "@" in chart_label or "@" in takeaway:
@@ -1468,7 +1518,7 @@ def _pick_winner(*, store: XChartStore, candidates: list[Candidate]) -> Candidat
 def _build_takeaways(candidate: Candidate) -> list[str]:
     text = _strip_news_prefix(candidate.text)
     title = _normalize_render_text(candidate.title)
-    excerpt = _truncate_words(text or title, max_words=13, max_chars=96)
+    excerpt = _truncate_words(text or title, max_words=9, max_chars=68)
     if not excerpt:
         excerpt = "Fresh US-focused chart signal from a prioritized source."
     tone_line = "Keep the takeaway simple and explicit for fast read in a feed."
@@ -1495,27 +1545,27 @@ def _build_style_draft(candidate: Candidate, *, iteration: int) -> StyleDraft:
     if iteration == 1 and llm_style:
         headline = _shorten_without_ellipsis(llm_style["headline"], max_chars=56)
         chart_label = _shorten_without_ellipsis(llm_style["chart_label"], max_chars=62)
-        takeaway = _shorten_without_ellipsis(llm_style["takeaway"], max_chars=96)
+        takeaway = _shorten_without_ellipsis(llm_style["takeaway"], max_chars=68)
         why_now = "Narrative + technical label generated for feed readability."
     elif iteration == 1:
         headline = _shorten_without_ellipsis(narrative, max_chars=56)
-        takeaway = _truncate_words(body_text or title_core or title_text, max_words=13, max_chars=96)
+        takeaway = _truncate_words(body_text or title_core or title_text, max_words=9, max_chars=68)
         why_now = "Clear US trend; chart carries the story."
     elif iteration == 2:
         headline = _shorten_without_ellipsis(_synthesize_narrative_title(subject=subject, verb="", sentence=title_core or first_core or title_text), max_chars=52)
-        takeaway = _truncate_words(first_core or body_text, max_words=11, max_chars=84)
+        takeaway = _truncate_words(first_core or body_text, max_words=8, max_chars=62)
         why_now = "Fast read in a feed."
     else:
         anchor = _shorten_without_ellipsis(subject or first_core or title_core or title_text, max_chars=42)
         headline = anchor or "US Trend Snapshot"
-        takeaway = _truncate_words(body_text or title_core or title_text, max_words=9, max_chars=74)
+        takeaway = _truncate_words(body_text or title_core or title_text, max_words=7, max_chars=56)
         why_now = "Simple trend read."
 
     combined = " ".join([headline, takeaway, why_now]).strip()
     checks = {
         "us_relevant": _is_us_relevant_post(f"{candidate.title} {candidate.text}"),
         "headline_short": bool(headline) and len(headline) <= 72,
-        "takeaway_short": bool(takeaway) and len(takeaway) <= 96,
+        "takeaway_short": bool(takeaway) and len(takeaway) <= 68,
         "trend_explicit": _contains_trend_signal(f"{candidate.title} {candidate.text}"),
         "plain_language": not any(term in combined.lower() for term in SLIDE_JARGON_KEYWORDS),
         "clean_characters": "\ufffd" not in combined and "??" not in combined and "  " not in combined,
@@ -1549,12 +1599,13 @@ def _select_style_draft(candidate: Candidate, *, max_iterations: int = 3) -> Sty
 
 def _has_reconstructable_chart_data(candidate: Candidate) -> bool:
     image = _safe_image_from_url(candidate.image_url)
-    vision_bars = _extract_rebuilt_bars_via_vision(candidate=candidate)
-    if vision_bars is not None:
-        return True
-    cv_bars = _extract_rebuilt_bars(image=image, candidate=candidate, allow_vision=False)
-    if cv_bars is not None:
-        return True
+    mode = _infer_chart_mode(candidate=candidate, image=image)
+    if mode == "bar":
+        vision_bars = _extract_rebuilt_bars_via_vision(candidate=candidate)
+        if vision_bars is not None:
+            return True
+        cv_bars = _extract_rebuilt_bars(image=image, candidate=candidate, allow_vision=False)
+        return cv_bars is not None
     rebuilt = _extract_rebuilt_series(candidate=candidate, image=image)
     return bool(rebuilt)
 
@@ -1840,7 +1891,7 @@ def _extract_rebuilt_bars(*, image, candidate: Candidate | None = None, allow_vi
             start = -1
     if start >= 0 and (len(bar_cols) - start) >= min_width:
         spans.append((start, len(bar_cols) - 1))
-    if not (4 <= len(spans) <= 14):
+    if not (4 <= len(spans) <= 40):
         return None
 
     bottoms: list[float] = []
@@ -1855,18 +1906,41 @@ def _extract_rebuilt_bars(*, image, candidate: Candidate | None = None, allow_vi
     if len(tops) < 3:
         return None
     base_row = float(np.percentile(np.asarray(bottoms, dtype=float), 85))
-    values: list[float] = []
+    values_raw: list[float] = []
     for top in tops:
-        values.append(max(0.0, base_row - top))
+        values_raw.append(max(0.0, base_row - top))
 
-    max_v = max(values) if values else 0.0
+    if len(values_raw) < 4:
+        return None
+    primary_values = values_raw
+    secondary_values: list[float] | None = None
+    # Grouped bars often appear as alternating pairs (for example employees vs robots).
+    if len(values_raw) >= 16 and (len(values_raw) % 2 == 0):
+        left = values_raw[0::2]
+        right = values_raw[1::2]
+        if len(left) >= 4 and len(right) == len(left):
+            if sum(left) >= sum(right):
+                primary_values = left
+                secondary_values = right
+            else:
+                primary_values = right
+                secondary_values = left
+
+    max_v = max(primary_values + (secondary_values or [])) if primary_values else 0.0
     if max_v <= 2.0:
         return None
-    norm = [float((v / max_v) * 100.0) for v in values]
+    norm = [float((v / max_v) * 100.0) for v in primary_values]
+    norm_secondary = [float((v / max_v) * 100.0) for v in secondary_values] if secondary_values else None
     labels = _fallback_bar_labels(candidate=candidate, count=len(norm))
     spread = max(norm) - min(norm)
     if spread < 8.0:
         return None
+    primary_label = None
+    secondary_label = None
+    merged = _normalize_render_text(f"{candidate.title if candidate else ''} {candidate.text if candidate else ''}").lower()
+    if "employees" in merged and "robots" in merged and secondary_values is not None:
+        primary_label = "Employees"
+        secondary_label = "Robots"
     return RebuiltBars(
         labels=labels,
         values=norm,
@@ -1875,6 +1949,10 @@ def _extract_rebuilt_bars(*, image, candidate: Candidate | None = None, allow_vi
         normalized=True,
         source="cv",
         confidence=0.62,
+        primary_label=primary_label,
+        secondary_values=norm_secondary,
+        secondary_color="#5AA88A" if norm_secondary is not None else None,
+        secondary_label=secondary_label,
     )
 
 
@@ -1887,7 +1965,6 @@ def _render_chart_of_day_style(
 ) -> Path:
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
-    from matplotlib.patches import Rectangle
     from coatue_claw.valuation_chart import COATUE_FONT_FAMILY
 
     output_dir = _output_dir()
@@ -1944,13 +2021,38 @@ def _render_chart_of_day_style(
         except Exception:
             np = None
         if np is None:
-            chart_ax.text(0.5, 0.5, "Chart reconstruction unavailable", ha="center", va="center", fontsize=16, color="#6B7280", transform=chart_ax.transAxes)
+            raise XChartError("Chart reconstruction unavailable (numpy missing).")
         else:
             xs = np.arange(len(rebuilt_bars.values))
-            chart_ax.bar(xs, rebuilt_bars.values, color=rebuilt_bars.color, alpha=0.88, width=0.72, edgecolor="#214E93", linewidth=0.4)
+            if rebuilt_bars.secondary_values and len(rebuilt_bars.secondary_values) == len(rebuilt_bars.values):
+                width = 0.38
+                chart_ax.bar(
+                    xs - (width / 2),
+                    rebuilt_bars.values,
+                    color=rebuilt_bars.color,
+                    alpha=0.9,
+                    width=width,
+                    edgecolor="#214E93",
+                    linewidth=0.4,
+                    label=(rebuilt_bars.primary_label or "Series A"),
+                )
+                chart_ax.bar(
+                    xs + (width / 2),
+                    rebuilt_bars.secondary_values,
+                    color=(rebuilt_bars.secondary_color or "#5AA88A"),
+                    alpha=0.9,
+                    width=width,
+                    edgecolor="#2E6B54",
+                    linewidth=0.4,
+                    label=(rebuilt_bars.secondary_label or "Series B"),
+                )
+                chart_ax.legend(loc="upper left", fontsize=8, frameon=False)
+            else:
+                chart_ax.bar(xs, rebuilt_bars.values, color=rebuilt_bars.color, alpha=0.88, width=0.72, edgecolor="#214E93", linewidth=0.4)
             chart_ax.set_xlim(-0.6, max(0.6, float(len(xs) - 0.4)))
-            y_min = float(min(rebuilt_bars.values))
-            y_max = float(max(rebuilt_bars.values))
+            all_vals = list(rebuilt_bars.values) + (list(rebuilt_bars.secondary_values) if rebuilt_bars.secondary_values else [])
+            y_min = float(min(all_vals))
+            y_max = float(max(all_vals))
             y_span = max(1.0, y_max - y_min)
             if y_min < 0:
                 chart_ax.set_ylim(y_min - (0.15 * y_span), y_max + (0.18 * y_span))
@@ -1985,32 +2087,18 @@ def _render_chart_of_day_style(
         chart_ax.set_xticks([0, 25, 50, 75, 100])
         chart_ax.set_xticklabels(["Start", "Q1", "Q2", "Q3", "Now"])
         chart_ax.set_yticks([0, 20, 40, 60, 80, 100])
-    elif image is not None:
-        chart_ax.imshow(image)
-        chart_ax.set_aspect("auto")
     else:
-        chart_ax.text(0.5, 0.5, "Chart image unavailable", ha="center", va="center", fontsize=16, color="#6B7280", transform=chart_ax.transAxes)
-        chart_ax.add_patch(Rectangle((0.05, 0.1), 0.9, 0.8, fill=False, linewidth=1.2, linestyle=(0, (4, 3)), edgecolor="#9CA3AF", transform=chart_ax.transAxes))
+        raise XChartError("Chart reconstruction unavailable; screenshot fallback disabled.")
 
-    # Readability guardrail: if x-axis labels are missing on reconstructed bar charts, fall back to source image.
+    # Readability guardrail: reconstructed bar charts must include usable x-axis labels.
     if rebuilt_bars is not None:
         tick_text = [t.get_text().strip() for t in chart_ax.get_xticklabels()]
         non_empty = [t for t in tick_text if t]
         if len(non_empty) < min(4, len(rebuilt_bars.values)):
-            chart_ax.clear()
-            chart_ax.set_xticks([])
-            chart_ax.set_yticks([])
-            for spine in chart_ax.spines.values():
-                spine.set_color("#E1E4EA")
-                spine.set_linewidth(1.2)
-            if image is not None:
-                chart_ax.imshow(image)
-                chart_ax.set_aspect("auto")
-            else:
-                chart_ax.text(0.5, 0.5, "Chart image unavailable", ha="center", va="center", fontsize=16, color="#6B7280", transform=chart_ax.transAxes)
+            raise XChartError("Rebuilt bar chart missing x-axis labels; screenshot fallback disabled.")
 
-    takeaway_text = _shorten_without_ellipsis(_normalize_render_text(style_draft.takeaway), max_chars=110)
-    takeaway_lines = "\n".join(textwrap.wrap(f"Takeaway: {takeaway_text}", width=110)[:2])
+    takeaway_text = _shorten_without_ellipsis(_normalize_render_text(style_draft.takeaway), max_chars=68)
+    takeaway_lines = "\n".join(textwrap.wrap(f"Takeaway: {takeaway_text}", width=90)[:1])
     takeaway_obj = fig.text(0.05, 0.118, takeaway_lines, fontsize=10.6, color="#1F2430", family=COATUE_FONT_FAMILY, weight="bold", va="top")
     source_obj = fig.text(0.05, 0.045, f"Source: {candidate.url}", fontsize=9, color="#4B5563", family=COATUE_FONT_FAMILY)
 
@@ -2075,7 +2163,7 @@ def _post_winner_to_slack(
         style_draft=style_draft,
     )
     clean_author = _normalize_render_text(candidate.author)
-    clean_takeaway = _normalize_render_text(takeaways[0])
+    clean_takeaway = _shorten_without_ellipsis(_normalize_render_text(takeaways[0]), max_chars=68)
     style_pass = style_draft.score >= 6.0 and style_draft.checks.get("us_relevant", False)
     text_lines = [
         "*Coatue Chart of the Day*",
