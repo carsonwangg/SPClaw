@@ -520,6 +520,7 @@ def _render_memo_pdf(
     *,
     title: str,
     ticker: str,
+    backdrop: str,
     sections: list[tuple[str, list[str]]],
 ) -> bytes:
     # Use matplotlib's PDF backend (already a core dependency) for a clean, sectioned brief.
@@ -530,12 +531,17 @@ def _render_memo_pdf(
 
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_pdf import PdfPages
+    from matplotlib.patches import FancyBboxPatch
 
     page_width, page_height = 8.5, 11.0  # US Letter inches
     left = 0.08
-    top = 0.93
-    bottom = 0.08
-    chars_per_line = 96
+    right = 0.92
+    top = 0.96
+    bottom = 0.07
+    chars_per_line = 92
+    blue = "#2B78B6"
+    dark = "#0F172A"
+    muted = "#64748B"
 
     def wrapped(line: str, *, indent_chars: int = 0) -> list[str]:
         if not line:
@@ -547,66 +553,108 @@ def _render_memo_pdf(
         # Matplotlib text treats $...$ as math text; escape literal dollars used in finance values.
         return text.replace("$", r"\$")
 
-    def new_page() -> tuple[Any, Any, float]:
+    def new_page() -> tuple[Any, Any]:
         fig, ax = plt.subplots(figsize=(page_width, page_height))
         ax.axis("off")
-        return fig, ax, top
+        return fig, ax
 
     buf = io.BytesIO()
     with PdfPages(buf) as pdf:
-        page_num = 0
-        fig, ax, y = new_page()
-        page_num += 1
+        page_num = 1
+        fig, ax = new_page()
+        y = top
+
+        def draw_header(*, first_page: bool) -> float:
+            if first_page:
+                ax.text(0.5, 0.95, pdf_safe(title), transform=ax.transAxes, fontsize=24, color=blue, fontweight="bold", va="top", ha="center")
+                ax.text(
+                    0.5,
+                    0.915,
+                    f"Generated {datetime.now(UTC).strftime('%B %d, %Y at %I:%M %p UTC')} | Coatue Claw",
+                    transform=ax.transAxes,
+                    fontsize=10.5,
+                    color=muted,
+                    va="top",
+                    ha="center",
+                )
+                ax.text(
+                    0.5,
+                    0.892,
+                    "Models: OpenClaw research stack (neutral memo mode)",
+                    transform=ax.transAxes,
+                    fontsize=9.8,
+                    color=muted,
+                    va="top",
+                    ha="center",
+                )
+                ax.plot([left, right], [0.868, 0.868], transform=ax.transAxes, color=blue, linewidth=2.2)
+                return 0.83
+            ax.text(left, 0.955, pdf_safe(title), transform=ax.transAxes, fontsize=12, color=blue, fontweight="bold", va="top", ha="left")
+            ax.plot([left, right], [0.94, 0.94], transform=ax.transAxes, color="#D6E6F2", linewidth=1.5)
+            return 0.91
 
         def save_current_page() -> None:
-            nonlocal fig, ax
-            ax.text(left, 0.03, f"Page {page_num}", transform=ax.transAxes, fontsize=9, color="#6B7280", va="bottom", ha="left")
-            ax.text(
-                0.92,
-                0.03,
-                "Coatue Claw | Diligence Brief",
-                transform=ax.transAxes,
-                fontsize=9,
-                color="#6B7280",
-                va="bottom",
-                ha="right",
-            )
+            ax.text(left, 0.03, "Coatue Claw Diligence Brief", transform=ax.transAxes, fontsize=8.8, color=muted, va="bottom", ha="left")
+            ax.text(right, 0.03, f"Page {page_num}", transform=ax.transAxes, fontsize=8.8, color=muted, va="bottom", ha="right")
             pdf.savefig(fig, bbox_inches="tight")
             plt.close(fig)
 
         def start_new_page() -> None:
             nonlocal fig, ax, y, page_num
             save_current_page()
-            fig, ax, y = new_page()
             page_num += 1
-            ax.text(left, y, f"Diligence Brief: {ticker}", transform=ax.transAxes, fontsize=11.5, fontweight="bold", color="#111827", va="top", ha="left")
-            y -= 0.03
+            fig, ax = new_page()
+            y = draw_header(first_page=False)
 
         def ensure_space(required: float) -> None:
             nonlocal y
             if y - required < bottom:
                 start_new_page()
 
-        ax.text(left, y, title, transform=ax.transAxes, fontsize=17, fontweight="bold", color="#0F172A", va="top", ha="left")
-        y -= 0.038
-        ax.text(left, y, f"Ticker: {ticker} | Generated UTC: {_now_utc_iso()[:19]}", transform=ax.transAxes, fontsize=9.5, color="#475569", va="top", ha="left")
-        y -= 0.032
+        y = draw_header(first_page=True)
+
+        # Backdrop callout
+        callout_lines = wrapped(backdrop, indent_chars=0)
+        callout_h = 0.03 + (0.023 * len(callout_lines)) + 0.03
+        ensure_space(callout_h + 0.025)
+        box_bottom = y - callout_h
+        box = FancyBboxPatch(
+            (left, box_bottom),
+            right - left,
+            callout_h,
+            boxstyle="round,pad=0.004,rounding_size=0.01",
+            transform=ax.transAxes,
+            facecolor="#EAF4FB",
+            edgecolor="#8EC5E8",
+            linewidth=1.2,
+        )
+        ax.add_patch(box)
+        ax.text(left + 0.018, y - 0.022, "Backdrop", transform=ax.transAxes, fontsize=11.5, fontweight="bold", color=dark, va="top", ha="left")
+        ly = y - 0.048
+        for line in callout_lines:
+            ax.text(left + 0.018, ly, pdf_safe(line), transform=ax.transAxes, fontsize=10.7, color=dark, va="top", ha="left")
+            ly -= 0.023
+        y = box_bottom - 0.03
+
+        ensure_space(0.05)
+        ax.text(left, y, "Executive Summary", transform=ax.transAxes, fontsize=14.8, fontweight="bold", color=blue, va="top", ha="left")
+        y -= 0.042
 
         for section_title, items in sections:
             if not items:
                 continue
             ensure_space(0.05)
-            ax.text(left, y, section_title, transform=ax.transAxes, fontsize=12.5, fontweight="bold", color="#1E3A8A", va="top", ha="left")
-            y -= 0.028
+            ax.text(left, y, section_title, transform=ax.transAxes, fontsize=12.3, fontweight="bold", color=dark, va="top", ha="left")
+            y -= 0.03
             for item in items:
                 chunks = wrapped(item, indent_chars=2)
                 ensure_space(0.022 * (len(chunks) + 0.5))
                 for idx, chunk in enumerate(chunks):
                     prefix = "• " if idx == 0 else "  "
-                    ax.text(left + 0.005, y, pdf_safe(prefix + chunk), transform=ax.transAxes, fontsize=10.5, color="#111827", va="top", ha="left")
+                    ax.text(left + 0.006, y, pdf_safe(prefix + chunk), transform=ax.transAxes, fontsize=10.6, color=dark, va="top", ha="left")
                     y -= 0.021
-                y -= 0.005
-            y -= 0.01
+                y -= 0.006
+            y -= 0.012
 
         save_current_page()
 
@@ -615,7 +663,7 @@ def _render_memo_pdf(
 
 def _format_diligence_reply(*, ticker: str, path: Path) -> EmailReply:
     lines = path.read_text(encoding="utf-8").splitlines()
-    title = _extract_title(lines, fallback=f"Neutral Investment Memo: {ticker}")
+    title = f"{ticker} Diligence Report"
     key_takeaways = _extract_section_bullets(lines, "## 1. Key Takeaways", limit=5)
     business = _extract_section_bullets(lines, "## 2. Business Overview", limit=6)
     financials = _extract_section_bullets(lines, "## 3. Financials & Funding", limit=6)
@@ -676,7 +724,19 @@ def _format_diligence_reply(*, ticker: str, path: Path) -> EmailReply:
         ("Key Risks", risks_clean),
         ("Open Questions", questions_clean),
     ]
-    pdf_bytes = _render_memo_pdf(title=title, ticker=ticker, sections=sections)
+
+    backdrop_candidates = (
+        key_takeaways_clean[:2]
+        + business_clean[:1]
+        + financials_clean[:1]
+        + risks_clean[:1]
+    )
+    backdrop = " ".join(backdrop_candidates).strip()
+    if not backdrop:
+        backdrop = f"This brief summarizes the latest diligence on {ticker}, including business context, financial profile, strengths, risks, and open questions."
+    backdrop = _clean_consumer_line(backdrop, max_len=700)
+
+    pdf_bytes = _render_memo_pdf(title=title, ticker=ticker, backdrop=backdrop, sections=sections)
     attachment = OutboundAttachment(
         filename=pdf_name,
         content_type="application/pdf",

@@ -26,6 +26,7 @@ For diligence replies:
 - Full memo is attached as a readable `.pdf` file for consumer-facing delivery.
 - Local filesystem paths are not included in the user-facing email body.
 - PDF attachment is formatted as a clean diligence brief (section headers + wrapped bullets) rather than a raw markdown text dump.
+- PDF header/title is generic to the company/topic being diligenced (for example `SNOW Diligence Report`) and does not use external brand naming.
 
 ## Required Environment Variables (Mac mini `.env.prod`)
 - `COATUE_CLAW_EMAIL_ENABLED=true`
