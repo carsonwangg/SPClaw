@@ -218,6 +218,10 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - explicit `@user` mentions are excluded from default routing
   - `app_mention` flow remains supported and now shares common request handler logic with default-routed messages
   - tests: `tests/test_slack_routing.py`
+  - Mac mini deployment validation (`86bce9d`):
+    - `/opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_slack_routing.py` => `3 passed`
+    - `make openclaw-restart` + `make openclaw-slack-status` => Slack probe `ok=true`
+    - `make openclaw-24x7-status` => email/memory launchd services still healthy
   - deployed on Mac mini via `0173404` and validated:
     - `tests/test_email_gateway.py` => `4 passed` on runtime host
     - direct runtime check confirms `has_source_tail=False` in diligence summary body
