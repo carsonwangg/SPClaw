@@ -329,6 +329,19 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - X source scanning now handles invalid/renamed usernames gracefully (skips invalid handles instead of failing the entire run)
     - Slack post token resolution now falls back to `~/.openclaw/openclaw.json` (`channels.slack.botToken`) when `SLACK_BOT_TOKEN` env is missing/inactive
     - Slack posting retries with fallback token when env token is rejected (`account_inactive`, `invalid_auth`, `token_revoked`)
+  - Mac mini deploy/verification:
+    - pulled `main` to `/opt/coatue-claw` at commit `c3f64d0`
+    - runtime env configured:
+      - `COATUE_CLAW_X_CHART_SLACK_CHANNEL=C0AFGMRFWP8`
+      - `COATUE_CLAW_X_CHART_TIMEZONE=America/Los_Angeles`
+      - `COATUE_CLAW_X_CHART_WINDOWS=09:00,12:00,18:00`
+    - launchd scheduler enabled and healthy:
+      - `make openclaw-24x7-enable`
+      - `make openclaw-24x7-status` shows `com.coatueclaw.x-chart-daily` loaded
+    - manual proof-of-life post succeeded:
+      - `make openclaw-x-chart-run-once` posted winner to `C0AFGMRFWP8`
+      - sample winner: `@Barchart` post `https://x.com/Barchart/status/2024274150118859021`
+      - artifact: `/opt/coatue-claw-data/artifacts/x-chart-daily/manual-20260218-224336-x.md`
 
 ## Next Step to Validate in Slack
 Send in `#charting`:

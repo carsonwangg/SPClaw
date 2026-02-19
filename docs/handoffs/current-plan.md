@@ -148,6 +148,10 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
     - invalid/renamed X handles are skipped without failing the full scout run
     - Slack posting can use `~/.openclaw/openclaw.json` token fallback if env token is unavailable
     - Slack posting automatically retries against fallback token when primary env token is rejected
+  - Mac mini runtime status:
+    - deployed and validated at commit `c3f64d0`
+    - scheduler service `com.coatueclaw.x-chart-daily` loaded via launchd
+    - proof-of-life manual run posted successfully to `#general` channel id `C0AFGMRFWP8`
 - 24/7 runtime supervision is implemented:
   - launchd-managed services in `src/coatue_claw/launchd_runtime.py`
   - services: `com.coatueclaw.email-gateway` (always-on poller), `com.coatueclaw.memory-prune` (hourly prune)
