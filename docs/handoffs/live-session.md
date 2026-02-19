@@ -355,6 +355,9 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
       - threaded `Coatue Chart of the Day` styled PNG upload
     - output artifact path:
       - `/opt/coatue-claw-data/artifacts/x-chart-daily/<slot>-styled.png`
+  - chart-quality filter update:
+    - X candidates now must pass chart-like text/data signal checks before ranking
+    - reduces false positives (e.g., headline photos without chart context)
 
 ## Next Step to Validate in Slack
 Send in `#charting`:
@@ -426,3 +429,16 @@ Then confirm bot returns:
     - `make openclaw-x-chart-run-once`
 17. Tune style details after first day of live posts (font sizing, backdrop length, and summary density).
 15. If response fails, capture first failing line with `openclaw channels logs --channel slack --lines 300`.
+
+## 2026-02-19 - Slack Build Runner rg Fallback
+- Issue observed: Slack `build:`/behavior-refine flow failed inside `codex exec` when generated command used `rg` on hosts without ripgrep (`zsh: command not found: rg`).
+- Code update: `src/coatue_claw/slack_pipeline.py`
+  - Added explicit build-runner prompt guidance: if `rg` is unavailable, use `grep -R` (or install ripgrep) instead of failing.
+- Tests:
+  - Added `test_run_build_request_prompt_includes_rg_fallback` in `tests/test_slack_pipeline.py`.
+  - Validation run: `PYTHONPATH=src pytest -q tests/test_slack_pipeline.py` (pass).
+
+### Immediate Next Steps
+1. On Mac mini runtime host, install ripgrep for best performance: `brew install ripgrep`.
+2. Pull latest `main`, restart runtime, and retry the same Slack behavior-refine request.
+3. If still failing, capture `make openclaw-slack-logs` output and confirm `PATH` seen by the runtime process includes `/opt/homebrew/bin`.

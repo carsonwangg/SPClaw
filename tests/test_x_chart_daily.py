@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from coatue_claw.x_chart_daily import Candidate, XChartStore, _parse_windows, _slack_tokens, run_chart_scout_once
+from coatue_claw.x_chart_daily import Candidate, XChartStore, _parse_windows, _parse_x_candidates, _slack_tokens, run_chart_scout_once
 
 
 def test_parse_windows_defaults_and_custom() -> None:
@@ -89,3 +89,46 @@ def test_slack_tokens_include_env_then_config(tmp_path: Path, monkeypatch) -> No
         encoding="utf-8",
     )
     assert _slack_tokens() == ["xoxb-env-token", "xoxb-config-token"]
+
+
+def test_parse_x_candidates_filters_non_chart_text() -> None:
+    payload = {
+        "data": [
+            {
+                "id": "t1",
+                "author_id": "u1",
+                "text": "BREAKING: leadership change expected soon.",
+                "created_at": "2026-02-19T00:00:00Z",
+                "public_metrics": {"like_count": 100, "retweet_count": 50, "reply_count": 20, "quote_count": 10},
+                "attachments": {"media_keys": ["m1"]},
+            }
+        ],
+        "includes": {
+            "users": [{"id": "u1", "username": "KobeissiLetter"}],
+            "media": [{"media_key": "m1", "type": "photo", "url": "https://example.com/image.png"}],
+        },
+    }
+    parsed = _parse_x_candidates(payload, priority_by_handle={"kobeissiletter": 1.3})
+    assert parsed == []
+
+
+def test_parse_x_candidates_accepts_chart_signal_text() -> None:
+    payload = {
+        "data": [
+            {
+                "id": "t2",
+                "author_id": "u2",
+                "text": "New chart: AI software revenue growth hit 42% YoY.",
+                "created_at": "2026-02-19T00:00:00Z",
+                "public_metrics": {"like_count": 10, "retweet_count": 5, "reply_count": 2, "quote_count": 1},
+                "attachments": {"media_keys": ["m2"]},
+            }
+        ],
+        "includes": {
+            "users": [{"id": "u2", "username": "fiscal_AI"}],
+            "media": [{"media_key": "m2", "type": "photo", "url": "https://example.com/chart.png"}],
+        },
+    }
+    parsed = _parse_x_candidates(payload, priority_by_handle={"fiscal_ai": 1.6})
+    assert len(parsed) == 1
+    assert parsed[0].source_id == "fiscal_AI"

@@ -155,6 +155,8 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - presentation layer:
     - winners are now rendered into a Coatue-style “Chart of the Day” visual card before Slack upload
     - style cues align with C:\\Takes design language and valuation-chart skill guidance
+  - quality gate:
+    - candidate selection now enforces chart-like text/data signals to suppress non-chart image picks
 - 24/7 runtime supervision is implemented:
   - launchd-managed services in `src/coatue_claw/launchd_runtime.py`
   - services: `com.coatueclaw.email-gateway` (always-on poller), `com.coatueclaw.memory-prune` (hourly prune)
@@ -185,3 +187,10 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
     - `COATUE_CLAW_X_CHART_TIMEZONE=America/Los_Angeles`
 12. Validate three scheduled daily posts in Slack (9am/12pm/6pm PT) and tune source priority list after first day.
 13. Tune style/briefing density after observing 1-2 days of live scheduled posts.
+
+## 2026-02-19 Update - Build Request Runtime Robustness
+- Added a near-term reliability guard for Slack `build:` execution:
+  - `codex exec` prompt now instructs fallback to `grep -R` when `rg` is missing.
+- Added test coverage:
+  - `tests/test_slack_pipeline.py::test_run_build_request_prompt_includes_rg_fallback`.
+- Operational recommendation remains to install ripgrep on runtime host for speed and consistency.

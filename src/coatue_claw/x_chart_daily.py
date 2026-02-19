@@ -62,6 +62,33 @@ THEME_KEYWORDS = (
     "supply",
 )
 
+CHART_SIGNAL_KEYWORDS = (
+    "chart",
+    "graph",
+    "data",
+    "trend",
+    "yoy",
+    "qoq",
+    "cagr",
+    "growth",
+    "revenue",
+    "margin",
+    "valuation",
+    "multiple",
+    "ev",
+    "ebitda",
+    "sales",
+    "earnings",
+    "gdp",
+    "inflation",
+    "unemployment",
+    "index",
+    "forecast",
+    "capex",
+    "guidance",
+    "consensus",
+)
+
 
 class XChartError(RuntimeError):
     pass
@@ -490,6 +517,8 @@ def _parse_x_candidates(payload: dict[str, Any], *, priority_by_handle: dict[str
                 pass
         created_at = str(row.get("created_at")) if row.get("created_at") else None
         url = f"https://x.com/{handle}/status/{tweet_id}"
+        if not _is_chart_like_post(text, handle=handle):
+            continue
         title = _build_x_title(handle=handle, text=text)
         priority = float(priority_by_handle.get(handle.lower(), 0.45))
         score = _score_candidate(
@@ -518,6 +547,32 @@ def _parse_x_candidates(payload: dict[str, Any], *, priority_by_handle: dict[str
         )
     out.sort(key=lambda c: c.score, reverse=True)
     return out
+
+
+def _is_chart_like_post(text: str, *, handle: str) -> bool:
+    lower = (text or "").lower()
+    signal = 0
+    for token in CHART_SIGNAL_KEYWORDS:
+        if token in lower:
+            signal += 1
+    for token in THEME_KEYWORDS:
+        if token.lower() in lower:
+            signal += 1
+    if re.search(r"\b\d+(\.\d+)?%|\b\d+(\.\d+)?x\b|\$\s?\d", lower):
+        signal += 1
+    if re.search(r"\b\d{1,3}(?:,\d{3})+\b", lower):
+        signal += 1
+
+    high_trust_handles = {
+        "fiscal_ai",
+        "cloudedjudgment",
+        "charliebilello",
+        "ourworldindata",
+        "bespokeinvest",
+    }
+    if handle.lower() in high_trust_handles and signal >= 1:
+        return True
+    return signal >= 2
 
 
 def _build_x_title(*, handle: str, text: str) -> str:
