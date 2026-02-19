@@ -23,6 +23,7 @@ from coatue_claw.x_chart_daily import (
     _normalize_render_text,
     _parse_windows,
     _parse_x_candidates,
+    _post_publish_checklist,
     _post_winner_to_slack,
     _render_chart_of_day_style,
     _select_style_draft,
@@ -299,6 +300,7 @@ def test_post_winner_uploads_file_in_initial_message(monkeypatch, tmp_path: Path
     assert upload_calls[0]["file"] == str(styled)
     assert "initial_comment" in upload_calls[0]
     assert "thread_ts" not in upload_calls[0]
+    assert "post_publish_review" in result
 
 
 def test_shorten_without_ellipsis_removes_three_dots() -> None:
@@ -313,6 +315,50 @@ def test_compute_y_ticks_non_normalized_has_multiple_ticks() -> None:
     assert len(ticks) >= 4
     assert ticks[0] <= 0.0
     assert ticks[-1] >= 1700.0
+
+
+def test_post_publish_checklist_passes_for_clean_rebuilt_chart(tmp_path: Path) -> None:
+    candidate = Candidate(
+        candidate_key="x:checklist",
+        source_type="x",
+        source_id="fiscal_AI",
+        author="@fiscal_AI",
+        title="US software growth re-accelerates",
+        text="US software growth re-accelerates to 29% YoY.",
+        url="https://x.com/fiscal_AI/status/checklist",
+        image_url="https://example.com/chart.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=200,
+        source_priority=1.6,
+        score=90.0,
+    )
+    draft = _select_style_draft(candidate)
+    styled = tmp_path / "styled.png"
+    styled.write_bytes(b"x" * 30000)
+    review = _post_publish_checklist(
+        candidate=candidate,
+        style_draft=draft,
+        styled_path=styled,
+        render_qa={
+            "reconstruction_mode": "bar",
+            "x_axis_labels_present": True,
+            "y_axis_labels_present": True,
+            "grouped_two_series": False,
+        },
+    )
+    assert review["passed"] is True
+    assert review["failed"] == []
+
+
+def test_review_feedback_penalizes_failing_source(tmp_path: Path, monkeypatch) -> None:
+    db = tmp_path / "x_chart.sqlite"
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(db))
+    store = XChartStore()
+    store.upsert_source("badsource", priority=1.0, manual=True)
+    before = {row["handle"]: float(row["priority"]) for row in store.list_sources(limit=200)}
+    store.apply_review_feedback(source_id="badsource", passed=False, failed_checks=["x_axis_labels_present", "y_axis_labels_present"])
+    after = {row["handle"]: float(row["priority"]) for row in store.list_sources(limit=200)}
+    assert after["badsource"] < before["badsource"]
 
 
 def test_build_x_title_has_no_ellipsis() -> None:

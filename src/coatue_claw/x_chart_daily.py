@@ -767,6 +767,46 @@ def _style_copy_quality_errors(style_draft: StyleDraft) -> list[str]:
     return errors
 
 
+def _post_publish_checklist(
+    *,
+    candidate: Candidate,
+    style_draft: StyleDraft,
+    styled_path: Path,
+    render_qa: dict[str, Any],
+) -> dict[str, Any]:
+    headline = _normalize_render_text(style_draft.headline)
+    chart_label = _normalize_render_text(style_draft.chart_label)
+    takeaway = _normalize_render_text(style_draft.takeaway)
+    reconstruction_mode = str(render_qa.get("reconstruction_mode") or "").strip().lower()
+    grouped_required = _is_employees_robots_chart(candidate)
+    file_size = styled_path.stat().st_size if styled_path.exists() else 0
+    checks = {
+        "us_relevant": bool(style_draft.checks.get("us_relevant", False)),
+        "trend_explicit": bool(style_draft.checks.get("trend_explicit", False)),
+        "plain_language": bool(style_draft.checks.get("plain_language", False)),
+        "no_ellipsis": ("..." not in headline and "..." not in chart_label and "..." not in takeaway),
+        "headline_len_ok": (0 < len(headline) <= 58),
+        "chart_label_len_ok": (0 < len(chart_label) <= 62),
+        "takeaway_len_ok": (0 < len(takeaway) <= 68),
+        "reconstruction_mode_ok": reconstruction_mode in {"bar", "line"},
+        "x_axis_labels_present": bool(render_qa.get("x_axis_labels_present", False)),
+        "y_axis_labels_present": bool(render_qa.get("y_axis_labels_present", False)),
+        "grouped_series_valid": (not grouped_required) or bool(render_qa.get("grouped_two_series", False)),
+        "artifact_nonempty": file_size >= 25_000,
+    }
+    failed = [name for name, passed in checks.items() if not passed]
+    return {
+        "passed": len(failed) == 0,
+        "failed": failed,
+        "checks": checks,
+        "style_score": float(style_draft.score),
+        "style_iteration": int(style_draft.iteration),
+        "render_qa": render_qa,
+        "artifact_path": str(styled_path),
+        "artifact_size_bytes": int(file_size),
+    }
+
+
 def _nice_tick_step(value: float) -> float:
     if not math.isfinite(value) or value <= 0:
         return 1.0
@@ -1209,6 +1249,27 @@ class XChartStore:
                 );
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS post_reviews (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    slot_key TEXT NOT NULL,
+                    reviewed_at_utc TEXT NOT NULL,
+                    candidate_key TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    channel TEXT NOT NULL,
+                    passed INTEGER NOT NULL,
+                    failed_checks_json TEXT NOT NULL,
+                    checks_json TEXT NOT NULL,
+                    artifact_path TEXT NOT NULL,
+                    artifact_size_bytes INTEGER NOT NULL,
+                    style_score REAL NOT NULL,
+                    style_iteration INTEGER NOT NULL
+                );
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_post_reviews_recent ON post_reviews(reviewed_at_utc DESC);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_post_reviews_source ON post_reviews(source_id, reviewed_at_utc DESC);")
 
     def _seed_default_sources(self) -> None:
         now = datetime.now(UTC).isoformat()
@@ -1360,6 +1421,100 @@ class XChartStore:
                 (limit,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def record_post_review(
+        self,
+        *,
+        slot_key: str,
+        channel: str,
+        candidate: Candidate,
+        review: dict[str, Any],
+    ) -> None:
+        now = datetime.now(UTC).isoformat()
+        failed = review.get("failed") if isinstance(review.get("failed"), list) else []
+        checks = review.get("checks") if isinstance(review.get("checks"), dict) else {}
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO post_reviews (
+                    slot_key, reviewed_at_utc, candidate_key, source_id, channel, passed,
+                    failed_checks_json, checks_json, artifact_path, artifact_size_bytes, style_score, style_iteration
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    slot_key,
+                    now,
+                    candidate.candidate_key,
+                    _canonical_handle(candidate.source_id),
+                    channel,
+                    1 if bool(review.get("passed")) else 0,
+                    json.dumps(failed, sort_keys=True),
+                    json.dumps(checks, sort_keys=True),
+                    str(review.get("artifact_path") or ""),
+                    int(review.get("artifact_size_bytes") or 0),
+                    float(review.get("style_score") or 0.0),
+                    int(review.get("style_iteration") or 0),
+                ),
+            )
+
+    def apply_review_feedback(self, *, source_id: str, passed: bool, failed_checks: list[str]) -> None:
+        handle = _canonical_handle(source_id)
+        if not handle:
+            return
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT priority, trust_score, manual FROM sources WHERE handle = ? LIMIT 1",
+                (handle,),
+            ).fetchone()
+            if row is None:
+                return
+            priority = float(row["priority"] or 0.5)
+            trust = float(row["trust_score"] or 0.0)
+            if passed:
+                new_priority = min(2.5, priority + 0.01)
+                new_trust = min(12.0, trust + 0.05)
+            else:
+                penalty = min(0.35, 0.05 * max(1, len(failed_checks)))
+                new_priority = max(0.20, priority - penalty)
+                new_trust = max(-3.0, trust - (0.12 * max(1, len(failed_checks))))
+            conn.execute(
+                "UPDATE sources SET priority = ?, trust_score = ? WHERE handle = ?",
+                (new_priority, new_trust, handle),
+            )
+
+    def recent_review_summary(self, *, limit: int = 20) -> dict[str, Any]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT passed, failed_checks_json
+                FROM post_reviews
+                ORDER BY reviewed_at_utc DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        fail_counts: dict[str, int] = {}
+        passed = 0
+        for row in rows:
+            if int(row["passed"] or 0) == 1:
+                passed += 1
+            failed_json = str(row["failed_checks_json"] or "[]")
+            try:
+                failed = json.loads(failed_json)
+            except Exception:
+                failed = []
+            if isinstance(failed, list):
+                for item in failed:
+                    key = str(item).strip()
+                    if not key:
+                        continue
+                    fail_counts[key] = int(fail_counts.get(key, 0)) + 1
+        return {
+            "reviews": len(rows),
+            "pass_count": passed,
+            "fail_count": max(0, len(rows) - passed),
+            "top_fail_checks": sorted(fail_counts.items(), key=lambda kv: kv[1], reverse=True)[:5],
+        }
 
 
 def _http_json(*, url: str, headers: dict[str, str], params: dict[str, str]) -> dict[str, Any]:
@@ -2259,6 +2414,7 @@ def _render_chart_of_day_style(
     slot_key: str,
     windows_text: str,
     style_draft: StyleDraft,
+    qa_sink: dict[str, Any] | None = None,
 ) -> Path:
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
@@ -2323,6 +2479,8 @@ def _render_chart_of_day_style(
             raise XChartError(f"Chart QA failed: {bar_errors[0]}")
     rebuilt = _extract_rebuilt_series(candidate=candidate, image=image) if (mode != "bar" and rebuilt_bars is None) else []
     if rebuilt_bars is not None:
+        if qa_sink is not None:
+            qa_sink["reconstruction_mode"] = "bar"
         try:
             import numpy as np
         except Exception:
@@ -2354,8 +2512,12 @@ def _render_chart_of_day_style(
                     label=(rebuilt_bars.secondary_label or "Series B"),
                 )
                 chart_ax.legend(loc="upper left", fontsize=8, frameon=False)
+                if qa_sink is not None:
+                    qa_sink["grouped_two_series"] = True
             else:
                 chart_ax.bar(xs, rebuilt_bars.values, color=rebuilt_bars.color, alpha=0.88, width=0.72, edgecolor="#214E93", linewidth=0.4)
+                if qa_sink is not None:
+                    qa_sink["grouped_two_series"] = False
             chart_ax.set_xlim(-0.6, max(0.6, float(len(xs) - 0.4)))
             all_vals = list(rebuilt_bars.values) + (list(rebuilt_bars.secondary_values) if rebuilt_bars.secondary_values else [])
             y_min = float(min(all_vals))
@@ -2388,6 +2550,9 @@ def _render_chart_of_day_style(
                 chart_ax.set_xticklabels([f"P{i+1}" for i in range(len(rebuilt_bars.values))], fontsize=9)
             chart_ax.set_ylabel(rebuilt_bars.y_label, fontsize=10, color="#4A4F59", labelpad=8)
     elif rebuilt:
+        if qa_sink is not None:
+            qa_sink["reconstruction_mode"] = "line"
+            qa_sink["grouped_two_series"] = False
         for series in rebuilt:
             chart_ax.plot(series.x, series.y, color=series.color, linewidth=series.weight, alpha=0.98)
             chart_ax.scatter([series.x[-1]], [series.y[-1]], s=70, color=series.color, zorder=6)
@@ -2406,12 +2571,22 @@ def _render_chart_of_day_style(
     if rebuilt_bars is not None:
         tick_text = [t.get_text().strip() for t in chart_ax.get_xticklabels()]
         non_empty = [t for t in tick_text if t]
+        if qa_sink is not None:
+            qa_sink["x_axis_labels_present"] = len(non_empty) >= min(4, len(rebuilt_bars.values))
         if len(non_empty) < min(4, len(rebuilt_bars.values)):
             raise XChartError("Rebuilt bar chart missing x-axis labels; screenshot fallback disabled.")
         y_tick_text = [t.get_text().strip() for t in chart_ax.get_yticklabels()]
         y_non_empty = [t for t in y_tick_text if t]
+        if qa_sink is not None:
+            qa_sink["y_axis_labels_present"] = len(y_non_empty) >= 3
         if len(y_non_empty) < 3:
             raise XChartError("Rebuilt bar chart missing y-axis tick labels; screenshot fallback disabled.")
+    else:
+        x_non_empty = [t.get_text().strip() for t in chart_ax.get_xticklabels() if t.get_text().strip()]
+        y_non_empty = [t.get_text().strip() for t in chart_ax.get_yticklabels() if t.get_text().strip()]
+        if qa_sink is not None:
+            qa_sink["x_axis_labels_present"] = len(x_non_empty) >= 4
+            qa_sink["y_axis_labels_present"] = len(y_non_empty) >= 3
 
     takeaway_text = _shorten_without_ellipsis(_normalize_render_text(style_draft.takeaway), max_chars=68)
     takeaway_lines = "\n".join(textwrap.wrap(f"Takeaway: {takeaway_text}", width=90)[:1])
@@ -2463,6 +2638,7 @@ def _post_winner_to_slack(
     slot_key: str,
     windows_text: str,
     style_draft: StyleDraft | None = None,
+    store: XChartStore | None = None,
 ) -> dict[str, Any]:
     tokens = _slack_tokens()
     style_draft = style_draft or _select_style_draft(candidate)
@@ -2472,11 +2648,19 @@ def _post_winner_to_slack(
     from slack_sdk.errors import SlackApiError
 
     takeaways = _build_takeaways(candidate)
+    render_qa: dict[str, Any] = {}
     styled_path = _render_chart_of_day_style(
         candidate=candidate,
         slot_key=slot_key,
         windows_text=windows_text,
         style_draft=style_draft,
+        qa_sink=render_qa,
+    )
+    review = _post_publish_checklist(
+        candidate=candidate,
+        style_draft=style_draft,
+        styled_path=styled_path,
+        render_qa=render_qa,
     )
     clean_author = _normalize_render_text(candidate.author)
     clean_takeaway = _shorten_without_ellipsis(_normalize_render_text(takeaways[0]), max_chars=68)
@@ -2502,6 +2686,13 @@ def _post_winner_to_slack(
                 title="Coatue Chart of the Day",
                 initial_comment="\n".join(text_lines),
             )
+            if store is not None:
+                store.record_post_review(slot_key=slot_key, channel=channel, candidate=candidate, review=review)
+                store.apply_review_feedback(
+                    source_id=candidate.source_id,
+                    passed=bool(review.get("passed")),
+                    failed_checks=[str(x) for x in (review.get("failed") or [])],
+                )
             file_obj = response.get("file") if isinstance(response, dict) else None
             file_id = ""
             if isinstance(file_obj, dict):
@@ -2517,6 +2708,7 @@ def _post_winner_to_slack(
                     "score": style_draft.score,
                     "checks": style_draft.checks,
                 },
+                "post_publish_review": review,
             }
         except SlackApiError as exc:
             err = str(exc.response.get("error", "")) if exc.response is not None else str(exc)
@@ -2637,6 +2829,7 @@ def run_chart_scout_once(
         slot_key=slot_key,
         windows_text=windows_text,
         style_draft=style_draft,
+        store=store,
     )
     store.record_post(slot_key=slot_key, channel=channel, candidate=winner)
     return {
@@ -2710,6 +2903,7 @@ def run_chart_for_post_url(
         slot_key=slot_key,
         windows_text=windows_text,
         style_draft=style_draft,
+        store=store,
     )
     store.record_post(slot_key=slot_key, channel=channel, candidate=winner)
     return {
@@ -2740,6 +2934,7 @@ def status() -> dict[str, Any]:
         "slack_channel": os.environ.get("COATUE_CLAW_X_CHART_SLACK_CHANNEL", ""),
         "sources_count": len(store.list_sources(limit=1000)),
         "recent_posts": store.latest_posts(limit=5),
+        "review_summary": store.recent_review_summary(limit=20),
     }
 
 

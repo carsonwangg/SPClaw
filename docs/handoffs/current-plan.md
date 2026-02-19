@@ -40,6 +40,12 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- X Chart posting target moved to `#charting`:
+  - runtime env uses `COATUE_CLAW_X_CHART_SLACK_CHANNEL=#charting` (instead of `#general`)
+- X Chart post-publish self-review loop shipped:
+  - every posted chart now writes checklist audit to SQLite table `post_reviews` in `/opt/coatue-claw-data/db/x_chart_daily.sqlite`
+  - checklist includes US relevance, copy constraints, axis-label presence, grouped-series validity (when required), and artifact integrity
+  - automatic self-learning feedback updates source `priority/trust_score` after each post (low-quality outputs are downranked for future picks)
 - Drive + file-ingest taxonomy simplification shipped:
   - Drive root renamed/configured to `/Users/spclaw/Documents/SPClaw Database`
   - category taxonomy reduced to three folders: `Universes`, `Companies`, `Industries`
@@ -234,7 +240,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - Mac mini runtime status:
     - deployed and validated at commit `c3f64d0`
     - scheduler service `com.coatueclaw.x-chart-daily` loaded via launchd
-    - proof-of-life manual run posted successfully to `#general` channel id `C0AFGMRFWP8`
+    - proof-of-life manual run posted successfully to `#charting`
   - presentation layer:
     - winners are now rendered into a Coatue-style “Chart of the Day” visual card before Slack upload
     - style cues align with C:\\Takes design language and valuation-chart skill guidance

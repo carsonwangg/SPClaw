@@ -4,6 +4,11 @@
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Current Status (2026-02-19)
+- X Chart destination channel updated to `#charting` for scheduled/manual chart posts.
+- X Chart post-publish checklist loop shipped:
+  - each Slack-posted chart is now reviewed against a persisted checklist (`post_reviews` in `x_chart_daily.sqlite`)
+  - checklist coverage includes copy limits, US relevance, axis labels, grouped-series validity, and artifact-size integrity
+  - learning feedback now downranks sources when checklist failures occur
 - Drive/share taxonomy simplification prepared for deployment:
   - Drive root path changed to `/Users/spclaw/Documents/SPClaw Database`
   - category taxonomy simplified to `Universes`, `Companies`, `Industries`
@@ -421,14 +426,14 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - Mac mini deploy/verification:
     - pulled `main` to `/opt/coatue-claw` at commit `c3f64d0`
     - runtime env configured:
-      - `COATUE_CLAW_X_CHART_SLACK_CHANNEL=C0AFGMRFWP8`
+      - `COATUE_CLAW_X_CHART_SLACK_CHANNEL=#charting`
       - `COATUE_CLAW_X_CHART_TIMEZONE=America/Los_Angeles`
       - `COATUE_CLAW_X_CHART_WINDOWS=09:00,12:00,18:00`
     - launchd scheduler enabled and healthy:
       - `make openclaw-24x7-enable`
       - `make openclaw-24x7-status` shows `com.coatueclaw.x-chart-daily` loaded
     - manual proof-of-life post succeeded:
-      - `make openclaw-x-chart-run-once` posted winner to `C0AFGMRFWP8`
+      - `make openclaw-x-chart-run-once` posted winner to `#charting`
       - sample winner: `@Barchart` post `https://x.com/Barchart/status/2024274150118859021`
       - artifact: `/opt/coatue-claw-data/artifacts/x-chart-daily/manual-20260218-224336-x.md`
   - Chart-of-the-day style formatter (this session):

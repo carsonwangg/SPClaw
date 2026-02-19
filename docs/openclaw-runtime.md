@@ -191,7 +191,7 @@ X digest environment controls:
 - `COATUE_CLAW_X_DIGEST_DIR`: optional digest markdown output dir (default `/opt/coatue-claw-data/artifacts/x-digest`)
 
 X chart scout environment controls:
-- `COATUE_CLAW_X_CHART_SLACK_CHANNEL`: required Slack channel id for scheduled posting
+- `COATUE_CLAW_X_CHART_SLACK_CHANNEL`: required Slack destination (channel id like `C...` or channel name like `#charting`)
 - `COATUE_CLAW_X_CHART_TIMEZONE`: posting timezone (default `America/Los_Angeles`)
 - `COATUE_CLAW_X_CHART_WINDOWS`: comma-separated daily times (default `09:00,12:00,18:00`)
 - `COATUE_CLAW_X_CHART_SOURCE_LIMIT`: number of tracked source handles to scan each run (default `25`)
@@ -216,6 +216,7 @@ Email integration environment controls:
 3. `lastInboundAt` updates after a real Slack mention.
 4. `lastOutboundAt` updates after a bot reply.
 5. Chart requests return as-of timestamps, provider used/fallback reason, and expected artifact uploads.
+6. Each posted Chart of the Day includes a post-publish checklist review persisted in `x_chart_daily.sqlite` (`post_reviews` table).
 
 ## Incident Triage
 1. Restart runtime: `make openclaw-restart`.
