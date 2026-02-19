@@ -538,6 +538,10 @@ def _render_memo_pdf(*, path: Path, title: str) -> bytes:
         width = max(30, chars_per_line - indent_chars)
         return textwrap.wrap(line, width=width, break_long_words=False, break_on_hyphens=False) or [line]
 
+    def pdf_safe(text: str) -> str:
+        # Matplotlib text treats $...$ as math text; escape literal dollars used in finance values.
+        return text.replace("$", r"\$")
+
     def new_page() -> tuple[Any, Any, float]:
         fig, ax = plt.subplots(figsize=(page_width, page_height))
         ax.axis("off")
@@ -560,7 +564,7 @@ def _render_memo_pdf(*, path: Path, title: str) -> bytes:
                     pdf.savefig(fig, bbox_inches="tight")
                     plt.close(fig)
                     fig, ax, y = new_page()
-                ax.text(left, y, draw, transform=ax.transAxes, fontsize=font_size, va="top", ha="left")
+                ax.text(left, y, pdf_safe(draw), transform=ax.transAxes, fontsize=font_size, va="top", ha="left")
                 y -= row_h
 
         pdf.savefig(fig, bbox_inches="tight")

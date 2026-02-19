@@ -203,6 +203,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - attached full memo as readable `.pdf` for consumer-facing delivery
   - removed local filesystem path lines from user-facing email output
   - stripped long `[Source: ...]` tails from summary bullets for readability while preserving full citations in the attachment
+  - escaped literal `$` values during PDF rendering to avoid matplotlib mathtext parse failures on financial figures
   - tests added for readable summary + attachment contract (`tests/test_email_gateway.py`)
   - deployed on Mac mini via `0173404` and validated:
     - `tests/test_email_gateway.py` => `4 passed` on runtime host

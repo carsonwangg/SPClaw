@@ -63,6 +63,7 @@ def test_diligence_email_reply_is_readable_and_attached(tmp_path: Path, monkeypa
                 "",
                 "## 1. Key Takeaways",
                 "- Revenue grew 29.2% year over year. [Source: Test dataset]",
+                "- Balance sheet has $3.35B cash and $2.69B debt.",
                 "- Net revenue retention remains above 120%.",
                 "",
                 "## 6. Key Risks",
