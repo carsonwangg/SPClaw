@@ -41,7 +41,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 
 ## Current Status
 - X Chart posting target moved to `#charting`:
-  - runtime env uses `COATUE_CLAW_X_CHART_SLACK_CHANNEL=#charting` (instead of `#general`)
+  - runtime env uses `COATUE_CLAW_X_CHART_SLACK_CHANNEL=C0AFXM2MWAV` (`#charting`) instead of `#general`
 - X Chart post-publish self-review loop shipped:
   - every posted chart now writes checklist audit to SQLite table `post_reviews` in `/opt/coatue-claw-data/db/x_chart_daily.sqlite`
   - checklist includes US relevance, copy constraints, axis-label presence, grouped-series validity (when required), and artifact integrity

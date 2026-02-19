@@ -5,10 +5,12 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Current Status (2026-02-19)
 - X Chart destination channel updated to `#charting` for scheduled/manual chart posts.
+  - Mac mini runtime env set: `COATUE_CLAW_X_CHART_SLACK_CHANNEL=C0AFXM2MWAV` (`#charting`)
 - X Chart post-publish checklist loop shipped:
   - each Slack-posted chart is now reviewed against a persisted checklist (`post_reviews` in `x_chart_daily.sqlite`)
   - checklist coverage includes copy limits, US relevance, axis labels, grouped-series validity, and artifact-size integrity
   - learning feedback now downranks sources when checklist failures occur
+  - Mac mini validation: `make openclaw-x-chart-run-once` posted to `C0AFXM2MWAV` and recorded review pass (`review_summary.pass_count=1`)
 - Drive/share taxonomy simplification prepared for deployment:
   - Drive root path changed to `/Users/spclaw/Documents/SPClaw Database`
   - category taxonomy simplified to `Universes`, `Companies`, `Industries`
