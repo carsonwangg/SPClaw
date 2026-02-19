@@ -205,4 +205,7 @@ Email integration environment controls:
 - Do not run parallel Slack Socket Mode consumers with the same app token.
 - Keep OpenClaw Slack channel as the primary production delivery path.
 - Slack default routing is enabled: plain channel messages are treated as OpenClaw requests unless they include an explicit `@user` mention.
+- OpenClaw transport must also allow no-mention routing:
+  - in `~/.openclaw/openclaw.json`, set `channels.slack.requireMention=false`
+  - for channel overrides, set `channels.slack.channels.<channel_id>.requireMention=false`
 - If `lastInboundAt` remains `null`, verify Slack event subscriptions and workspace installation.

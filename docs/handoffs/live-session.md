@@ -280,6 +280,17 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - verified live X API path using runtime env:
       - `build_x_digest("snowflake", hours=24, max_results=10)` succeeded
       - output written to `/opt/coatue-claw-data/artifacts/x-digest/snowflake-20260219-061237.md`
+- Slack no-mention routing hotfix on Mac mini:
+  - root cause from runtime logs:
+    - `slack-auto-reply ... reason=\"no-mention\" skipping channel message`
+  - config fix applied in `~/.openclaw/openclaw.json`:
+    - `channels.slack.requireMention=false`
+    - `channels.slack.channels.C0AFGMRFWP8.requireMention=false`
+  - restarted runtime and verified Slack probe health:
+    - `make openclaw-restart`
+    - `make openclaw-slack-status` => probe `ok=true`
+  - expected behavior after fix:
+    - plain channel messages (e.g., `x status`) are routed to OpenClaw without requiring `@Coatue Claw`
 
 ## Next Step to Validate in Slack
 Send in `#charting`:

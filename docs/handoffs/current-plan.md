@@ -47,6 +47,9 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - plain messages are treated as OpenClaw requests by default
   - messages with explicit `@user` mentions are not default-routed
   - deployed/validated on Mac mini (`86bce9d`): Slack probe healthy after restart
+  - runtime transport config on Mac mini now explicitly disables mention gating:
+    - `~/.openclaw/openclaw.json` -> `channels.slack.requireMention=false`
+    - channel override for `#general` (`C0AFGMRFWP8`) also set to `requireMention=false`
 - Natural-language chart requests now route into valuation charting with configurable axes
 - CSV-backed universe management is implemented for Slack-driven create/edit/reuse flows
 - Missing-ticker chart prompts now ask for source choice (`online` discovery vs saved universe CSV)
