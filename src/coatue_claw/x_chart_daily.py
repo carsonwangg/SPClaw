@@ -22,6 +22,11 @@ from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
+try:
+    from openai import OpenAI
+except Exception:  # pragma: no cover - optional dependency
+    OpenAI = None  # type: ignore[assignment]
+
 
 load_dotenv("/opt/coatue-claw/.env.prod")
 
@@ -249,6 +254,10 @@ class RebuiltBars:
     labels: list[str]
     values: list[float]
     color: str
+    y_label: str
+    normalized: bool
+    source: str
+    confidence: float
 
 
 def _data_root() -> Path:
@@ -451,6 +460,154 @@ def _infer_units_snippet(sentence: str) -> str:
     if "index" in lower:
         return "Index"
     return ""
+
+
+def _extract_years_from_text(text: str) -> list[int]:
+    years: list[int] = []
+    for m in re.finditer(r"\b(19\d{2}|20\d{2})\b", text):
+        try:
+            value = int(m.group(1))
+        except Exception:
+            continue
+        if 1900 <= value <= 2100:
+            years.append(value)
+    dedup: list[int] = []
+    seen: set[int] = set()
+    for y in years:
+        if y in seen:
+            continue
+        seen.add(y)
+        dedup.append(y)
+    return dedup
+
+
+def _infer_bar_labels_from_text(*, candidate: Candidate | None, count: int) -> list[str]:
+    if count <= 0:
+        return []
+    if candidate is None:
+        return []
+    merged = _normalize_render_text(f"{candidate.title} {candidate.text}")
+    years = sorted(_extract_years_from_text(merged))
+    if len(years) >= 2:
+        min_y, max_y = years[0], years[-1]
+        span = max_y - min_y + 1
+        if span == count:
+            return [str(y) for y in range(min_y, max_y + 1)]
+        if span > count and count >= 4:
+            start = max_y - count + 1
+            if start >= 1900:
+                return [str(y) for y in range(start, max_y + 1)]
+    return []
+
+
+def _vision_enabled() -> bool:
+    raw = (os.environ.get("COATUE_CLAW_X_CHART_VISION_ENABLED", "1") or "1").strip().lower()
+    return raw not in {"0", "false", "off", "no"}
+
+
+def _extract_rebuilt_bars_via_vision(*, candidate: Candidate) -> RebuiltBars | None:
+    if not _vision_enabled():
+        return None
+    if OpenAI is None:
+        return None
+    image_url = (candidate.image_url or "").strip()
+    if not image_url:
+        return None
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        return None
+
+    try:
+        client = OpenAI(api_key=api_key)
+        model = os.environ.get("COATUE_CLAW_X_CHART_VISION_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+        prompt = (
+            "Extract the primary bar-chart data from this image.\n"
+            "Return strict JSON only with keys:\n"
+            "{"
+            "\"chart_type\":\"bar\","
+            "\"x_labels\":[\"...\"],"
+            "\"values\":[number],"
+            "\"y_label\":\"...\","
+            "\"normalized\":true|false,"
+            "\"confidence\":0.0-1.0"
+            "}.\n"
+            "Rules: Use bars left-to-right. Include negatives if present. "
+            "If exact units are visible, set y_label accordingly (e.g., 'US$ Billions'). "
+            "If units are unclear, use 'Index (normalized)' and normalized=true."
+        )
+        response = client.chat.completions.create(
+            model=model,
+            temperature=0,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": "You are a precise chart-data extraction assistant."},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": image_url}},
+                    ],
+                },
+            ],
+        )
+        raw = ""
+        if response.choices and response.choices[0].message:
+            raw = str(response.choices[0].message.content or "").strip()
+        if not raw:
+            return None
+        payload = json.loads(raw)
+    except Exception as exc:
+        logger.debug("Vision extraction failed: %s", exc)
+        return None
+
+    labels_raw = payload.get("x_labels") if isinstance(payload, dict) else None
+    values_raw = payload.get("values") if isinstance(payload, dict) else None
+    if not isinstance(values_raw, list):
+        return None
+    values: list[float] = []
+    for item in values_raw:
+        try:
+            values.append(float(item))
+        except Exception:
+            continue
+    if not (4 <= len(values) <= 16):
+        return None
+
+    labels: list[str] = []
+    if isinstance(labels_raw, list):
+        for item in labels_raw:
+            label = _shorten_without_ellipsis(str(item), max_chars=12)
+            if label:
+                labels.append(label)
+    if labels and len(labels) != len(values):
+        n = min(len(labels), len(values))
+        labels = labels[:n]
+        values = values[:n]
+    if not labels:
+        labels = _infer_bar_labels_from_text(candidate=candidate, count=len(values))
+    if len(labels) not in {0, len(values)}:
+        labels = []
+
+    y_label = _shorten_without_ellipsis(str(payload.get("y_label") or "Value"), max_chars=22)
+    if not y_label:
+        y_label = "Value"
+    normalized = bool(payload.get("normalized")) if isinstance(payload, dict) else False
+    try:
+        confidence = float(payload.get("confidence", 0.0))
+    except Exception:
+        confidence = 0.0
+    confidence = max(0.0, min(1.0, confidence))
+    if confidence < 0.58:
+        return None
+    return RebuiltBars(
+        labels=labels,
+        values=values,
+        color="#2F6ABF",
+        y_label=y_label,
+        normalized=normalized,
+        source="vision",
+        confidence=confidence,
+    )
 
 
 def _synthesize_chart_label(*, subject: str, sentence: str, mode_hint: str) -> str:
@@ -1346,7 +1503,7 @@ def _infer_chart_mode(*, candidate: Candidate, image) -> str:
     merged = _normalize_render_text(f"{candidate.title} {candidate.text}").lower()
     if any(token in merged for token in BAR_HINT_KEYWORDS):
         return "bar"
-    bars = _extract_rebuilt_bars(image=image)
+    bars = _extract_rebuilt_bars(image=image, candidate=candidate, allow_vision=False)
     if bars is not None and len(bars.values) >= 4:
         return "bar"
     if _looks_like_bar_chart(image):
@@ -1354,7 +1511,11 @@ def _infer_chart_mode(*, candidate: Candidate, image) -> str:
     return "line"
 
 
-def _extract_rebuilt_bars(*, image) -> RebuiltBars | None:
+def _extract_rebuilt_bars(*, image, candidate: Candidate | None = None, allow_vision: bool = True) -> RebuiltBars | None:
+    if allow_vision and candidate is not None:
+        vision = _extract_rebuilt_bars_via_vision(candidate=candidate)
+        if vision is not None:
+            return vision
     try:
         import numpy as np
     except Exception:
@@ -1414,7 +1575,7 @@ def _extract_rebuilt_bars(*, image) -> RebuiltBars | None:
             start = -1
     if start >= 0 and (len(bar_cols) - start) >= min_width:
         spans.append((start, len(bar_cols) - 1))
-    if not (3 <= len(spans) <= 24):
+    if not (4 <= len(spans) <= 14):
         return None
 
     bottoms: list[float] = []
@@ -1433,20 +1594,23 @@ def _extract_rebuilt_bars(*, image) -> RebuiltBars | None:
     for top in tops:
         values.append(max(0.0, base_row - top))
 
-    # Merge near-adjacent spans to avoid splitting one thick bar into many.
-    if len(values) > 16:
-        merged: list[float] = []
-        step = max(1, int(round(len(values) / 12)))
-        for i in range(0, len(values), step):
-            merged.append(float(np.max(values[i : i + step])))
-        values = merged
-
     max_v = max(values) if values else 0.0
     if max_v <= 2.0:
         return None
     norm = [float((v / max_v) * 100.0) for v in values]
-    labels = [f"G{i}" for i in range(1, len(norm) + 1)]
-    return RebuiltBars(labels=labels, values=norm, color="#2F6ABF")
+    labels = _infer_bar_labels_from_text(candidate=candidate, count=len(norm))
+    spread = max(norm) - min(norm)
+    if spread < 8.0:
+        return None
+    return RebuiltBars(
+        labels=labels,
+        values=norm,
+        color="#2F6ABF",
+        y_label="Index (normalized)",
+        normalized=True,
+        source="cv",
+        confidence=0.62,
+    )
 
 
 def _render_chart_of_day_style(
@@ -1505,7 +1669,7 @@ def _render_chart_of_day_style(
 
     image = _safe_image_from_url(candidate.image_url)
     mode = _infer_chart_mode(candidate=candidate, image=image)
-    rebuilt_bars = _extract_rebuilt_bars(image=image) if mode == "bar" else None
+    rebuilt_bars = _extract_rebuilt_bars(image=image, candidate=candidate, allow_vision=True) if mode == "bar" else None
     rebuilt = _extract_rebuilt_series(candidate=candidate, image=image) if (mode != "bar" and rebuilt_bars is None) else []
     if rebuilt_bars is not None:
         try:
@@ -1518,13 +1682,25 @@ def _render_chart_of_day_style(
             xs = np.arange(len(rebuilt_bars.values))
             chart_ax.bar(xs, rebuilt_bars.values, color=rebuilt_bars.color, alpha=0.88, width=0.72, edgecolor="#214E93", linewidth=0.4)
             chart_ax.set_xlim(-0.6, max(0.6, float(len(xs) - 0.4)))
-            chart_ax.set_ylim(0.0, max(100.0, max(rebuilt_bars.values) * 1.15))
+            y_min = float(min(rebuilt_bars.values))
+            y_max = float(max(rebuilt_bars.values))
+            y_span = max(1.0, y_max - y_min)
+            if y_min < 0:
+                chart_ax.set_ylim(y_min - (0.15 * y_span), y_max + (0.18 * y_span))
+            elif rebuilt_bars.normalized:
+                chart_ax.set_ylim(0.0, max(100.0, y_max * 1.15))
+            else:
+                chart_ax.set_ylim(0.0, y_max + (0.18 * y_span))
             chart_ax.grid(axis="y", color="#D9DEE7", linewidth=0.8, alpha=0.9)
             chart_ax.tick_params(axis="both", labelsize=9, colors="#4A4F59")
-            chart_ax.set_xticks(xs)
-            chart_ax.set_xticklabels(rebuilt_bars.labels)
-            chart_ax.set_yticks([0, 20, 40, 60, 80, 100])
-            chart_ax.set_ylabel("Index (normalized)", fontsize=10, color="#4A4F59", labelpad=8)
+            if rebuilt_bars.labels and len(rebuilt_bars.labels) == len(rebuilt_bars.values):
+                chart_ax.set_xticks(xs)
+                chart_ax.set_xticklabels(rebuilt_bars.labels, rotation=0, fontsize=9)
+            else:
+                chart_ax.set_xticks([])
+            if rebuilt_bars.normalized:
+                chart_ax.set_yticks([0, 20, 40, 60, 80, 100])
+            chart_ax.set_ylabel(rebuilt_bars.y_label, fontsize=10, color="#4A4F59", labelpad=8)
     elif rebuilt:
         for series in rebuilt:
             chart_ax.plot(series.x, series.y, color=series.color, linewidth=series.weight, alpha=0.98)

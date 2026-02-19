@@ -9,8 +9,10 @@ from coatue_claw.x_chart_daily import (
     Candidate,
     XChartStore,
     _build_x_title,
+    _extract_rebuilt_bars_via_vision,
     _extract_rebuilt_bars,
     _extract_rebuilt_series,
+    _infer_bar_labels_from_text,
     _infer_chart_mode,
     _is_us_relevant_post,
     _normalize_render_text,
@@ -351,6 +353,90 @@ def test_extract_rebuilt_bars_from_synthetic_bars() -> None:
     rebuilt = _extract_rebuilt_bars(image=image)
     assert rebuilt is not None
     assert len(rebuilt.values) >= 3
+    assert rebuilt.labels == []
+
+
+def test_infer_bar_labels_from_text_uses_year_range() -> None:
+    candidate = Candidate(
+        candidate_key="x:years",
+        source_type="x",
+        source_id="KobeissiLetter",
+        author="@KobeissiLetter",
+        title="US ETF flows in first six weeks of year historically (2013-2026)",
+        text="US ETF inflows surged in first six weeks of 2026. Versus 2025 and 2024.",
+        url="https://x.com/KobeissiLetter/status/years",
+        image_url="https://example.com/years.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=100,
+        source_priority=1.2,
+        score=90.0,
+    )
+    labels = _infer_bar_labels_from_text(candidate=candidate, count=14)
+    assert labels[0] == "2013"
+    assert labels[-1] == "2026"
+    assert len(labels) == 14
+
+
+def test_extract_rebuilt_bars_via_vision_parses_json(monkeypatch) -> None:
+    candidate = Candidate(
+        candidate_key="x:vision",
+        source_type="x",
+        source_id="fiscal_AI",
+        author="@fiscal_AI",
+        title="US ETF inflows",
+        text="US ETF inflows in first six weeks of 2026",
+        url="https://x.com/fiscal_AI/status/vision",
+        image_url="https://example.com/vision.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=100,
+        source_priority=1.6,
+        score=90.0,
+    )
+
+    class FakeMessage:
+        def __init__(self, content: str) -> None:
+            self.content = content
+
+    class FakeChoice:
+        def __init__(self, content: str) -> None:
+            self.message = FakeMessage(content)
+
+    class FakeResponse:
+        def __init__(self, content: str) -> None:
+            self.choices = [FakeChoice(content)]
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            assert kwargs["response_format"]["type"] == "json_object"
+            payload = {
+                "chart_type": "bar",
+                "x_labels": ["2023", "2024", "2025", "2026"],
+                "values": [44, 55, 126, 245],
+                "y_label": "US$ Billions",
+                "normalized": False,
+                "confidence": 0.88,
+            }
+            import json
+
+            return FakeResponse(json.dumps(payload))
+
+    class FakeChat:
+        def __init__(self) -> None:
+            self.completions = FakeCompletions()
+
+    class FakeOpenAI:
+        def __init__(self, api_key: str) -> None:
+            self.api_key = api_key
+            self.chat = FakeChat()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr("coatue_claw.x_chart_daily.OpenAI", FakeOpenAI)
+    rebuilt = _extract_rebuilt_bars_via_vision(candidate=candidate)
+    assert rebuilt is not None
+    assert rebuilt.source == "vision"
+    assert rebuilt.labels[-1] == "2026"
+    assert rebuilt.values[-1] == 245
+    assert rebuilt.normalized is False
 
 
 def test_style_draft_generates_narrative_title_and_small_label_for_etf_flow() -> None:

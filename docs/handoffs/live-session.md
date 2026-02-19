@@ -4,6 +4,15 @@
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Current Status (2026-02-19)
+- X Chart-of-the-Day title and bar reconstruction pass shipped (`main`):
+  - title framing now explicitly follows Coatue pattern:
+    - big narrative headline (theme/takeaway)
+    - small chart label (what the graph shows)
+  - bar reconstruction no longer emits placeholder-style `G1..G10` labels
+  - stricter reconstruction gates now reject low-quality bar parses instead of rendering misleading synthetic bars
+  - optional OpenAI vision extraction added for bar charts (`OPENAI_API_KEY` + `COATUE_CLAW_X_CHART_VISION_ENABLED=1`) to recover real bar labels/values when possible
+  - renderer now supports non-normalized bar values (including negatives) and dynamic y-axis labels when vision extraction returns concrete units
+  - test suite updated and green (`PYTHONPATH=src pytest -q` => `90 passed`)
 - Repo is synced on `main` and used as the cross-device source of truth.
 - Slack channel/user policy is open in OpenClaw (`groupPolicy=open`, `dmPolicy=open`, `allowFrom=["*"]`).
 - Natural-language chart intent parsing is implemented:

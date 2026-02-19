@@ -40,6 +40,15 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- X Chart-of-the-Day refinement shipped for Coatue-style framing and safer chart rebuilds:
+  - synthesized two-level titles:
+    - big narrative headline from tweet/chart takeaway
+    - small chart label describing chart content/units/timeframe
+  - removed generic placeholder bar labels (`G1..G10`)
+  - tightened bar rebuild quality gates so low-confidence parses fail closed instead of posting misleading reconstructed bars
+  - added optional OpenAI vision bar extraction path (env-gated) to pull concrete labels/values from source chart images
+  - bar renderer now handles non-normalized values and negative bars when extracted
+  - validation: `PYTHONPATH=src pytest -q` => `90 passed`
 - AGENTS and initial scaffold are complete
 - Basic CLI + Slack bot skeleton are implemented
 - Bot mention delivery is working with open Slack access policy
@@ -208,6 +217,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 12. Validate three scheduled daily posts in Slack (9am/12pm/6pm PT) and tune source priority list after first day.
 13. Pull latest on Mac mini, restart runtime, and verify `x chart now` posts a rebuilt graph-first chart (not source screenshot framing) with no-ellipsis title.
 14. Observe 1-2 days of live scheduled posts and tune reconstruction thresholds/source priorities if rebuild fallback rate is high.
+15. On Mac mini, verify `OPENAI_API_KEY` is set in `/opt/coatue-claw/.env.prod` so vision-assisted bar extraction is active for X chart rebuild quality.
 
 ## 2026-02-19 Update - Build Request Runtime Robustness
 - Added a near-term reliability guard for Slack `build:` execution:
