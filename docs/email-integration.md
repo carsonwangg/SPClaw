@@ -22,7 +22,7 @@ Allow Spencer to interact with Coatue Claw via email using the same core workflo
 - `help`
 
 For diligence replies:
-- Email body now returns a readable executive summary (quick takeaways + top risks).
+- Email body now returns a readable executive summary (quick takeaways + top risks), with citation tails removed for readability.
 - Full memo is attached as a `.md` file so the complete report is preserved without inline wall-of-text formatting.
 
 ## Required Environment Variables (Mac mini `.env.prod`)

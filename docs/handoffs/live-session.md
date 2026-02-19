@@ -201,6 +201,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - replaced raw markdown preview dump with readable executive summary body
   - added HTML email alternative for cleaner rendering in Gmail
   - attached full memo as `.md` file to preserve complete report
+  - stripped long `[Source: ...]` tails from summary bullets for readability while preserving full citations in the attachment
   - tests added for readable summary + attachment contract (`tests/test_email_gateway.py`)
 
 ## Next Step to Validate in Slack

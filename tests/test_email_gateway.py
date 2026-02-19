@@ -62,11 +62,11 @@ def test_diligence_email_reply_is_readable_and_attached(tmp_path: Path, monkeypa
                 "# Neutral Investment Memo: Snowflake Inc. (SNOW)",
                 "",
                 "## 1. Key Takeaways",
-                "- Revenue grew 29.2% year over year.",
+                "- Revenue grew 29.2% year over year. [Source: Test dataset]",
                 "- Net revenue retention remains above 120%.",
                 "",
                 "## 6. Key Risks",
-                "- Consumption slowdown may pressure near-term growth.",
+                "- Consumption slowdown may pressure near-term growth. [Source: Test dataset]",
             ]
         ),
         encoding="utf-8",
@@ -77,6 +77,7 @@ def test_diligence_email_reply_is_readable_and_attached(tmp_path: Path, monkeypa
 
     assert "Quick Takeaways:" in reply.body_text
     assert "Revenue grew 29.2% year over year." in reply.body_text
+    assert "[Source:" not in reply.body_text
     assert reply.body_html is not None
     assert "<ul>" in (reply.body_html or "")
     assert len(reply.attachments) == 1

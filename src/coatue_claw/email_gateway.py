@@ -508,6 +508,17 @@ def _format_diligence_reply(*, ticker: str, path: Path) -> EmailReply:
     key_takeaways = _extract_section_bullets(lines, "## 1. Key Takeaways", limit=5)
     risks = _extract_section_bullets(lines, "## 6. Key Risks", limit=3)
 
+    def _clean_summary_line(text: str) -> str:
+        # Keep the email body readable; full citation details remain in the attached memo.
+        cleaned = re.sub(r"\s*\[Source:.*$", "", text, flags=re.IGNORECASE).strip()
+        cleaned = cleaned.replace("`", "")
+        if len(cleaned) > 200:
+            cleaned = cleaned[:197].rstrip() + "..."
+        return cleaned
+
+    key_takeaways_clean = [_clean_summary_line(item) for item in key_takeaways]
+    risks_clean = [_clean_summary_line(item) for item in risks]
+
     text_lines = [
         f"Diligence report is ready for {ticker}.",
         f"Title: {title}",
@@ -515,13 +526,13 @@ def _format_diligence_reply(*, ticker: str, path: Path) -> EmailReply:
         "Quick Takeaways:",
     ]
     if key_takeaways:
-        text_lines.extend(f"- {item}" for item in key_takeaways)
+        text_lines.extend(f"- {item}" for item in key_takeaways_clean)
     else:
         text_lines.append("- Key takeaway extraction unavailable; see attached report.")
 
     if risks:
         text_lines.extend(["", "Top Risks:"])
-        text_lines.extend(f"- {item}" for item in risks)
+        text_lines.extend(f"- {item}" for item in risks_clean)
 
     text_lines.extend(
         [
@@ -532,14 +543,14 @@ def _format_diligence_reply(*, ticker: str, path: Path) -> EmailReply:
     )
     body_text = "\n".join(text_lines)
 
-    items_html = "".join(f"<li>{html_lib.escape(item)}</li>" for item in key_takeaways) or (
+    items_html = "".join(f"<li>{html_lib.escape(item)}</li>" for item in key_takeaways_clean) or (
         "<li>Key takeaway extraction unavailable; see attached report.</li>"
     )
     risks_html = ""
     if risks:
         risks_html = (
             "<h3>Top Risks</h3><ul>"
-            + "".join(f"<li>{html_lib.escape(item)}</li>" for item in risks)
+            + "".join(f"<li>{html_lib.escape(item)}</li>" for item in risks_clean)
             + "</ul>"
         )
     body_html = (
