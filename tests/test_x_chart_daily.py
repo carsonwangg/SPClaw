@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 import sys
 import types
@@ -26,6 +27,7 @@ from coatue_claw.x_chart_daily import (
     _select_style_draft,
     _shorten_without_ellipsis,
     _slack_tokens,
+    main,
     run_chart_for_post_url,
     run_chart_scout_once,
 )
@@ -88,6 +90,34 @@ def test_run_chart_scout_dry_run(tmp_path: Path, monkeypatch) -> None:
     assert result["ok"] is True
     assert result["reason"] == "dry_run"
     assert result["winner"]["source"] == "x:fiscal_AI"
+
+
+def test_cli_run_post_url_command(monkeypatch, capsys) -> None:
+    called: dict[str, object] = {}
+
+    def _fake_run(*, post_url: str, channel_override: str | None = None) -> dict[str, object]:
+        called["post_url"] = post_url
+        called["channel_override"] = channel_override
+        return {"ok": True, "posted": True, "winner": {"url": post_url}, "channel": channel_override or "default"}
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily.run_chart_for_post_url", _fake_run)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "coatue-claw-x-chart-daily",
+            "run-post-url",
+            "https://x.com/oguzerkan/status/2024447368137994460",
+            "--channel",
+            "C123",
+        ],
+    )
+    main()
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+    assert payload["ok"] is True
+    assert called["post_url"] == "https://x.com/oguzerkan/status/2024447368137994460"
+    assert called["channel_override"] == "C123"
 
 
 def test_slack_token_falls_back_to_openclaw_config(tmp_path: Path, monkeypatch) -> None:

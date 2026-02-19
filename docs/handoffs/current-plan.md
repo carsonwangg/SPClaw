@@ -40,6 +40,12 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- X URL chart requests now have a deterministic CLI entrypoint for OpenClaw gateway routing:
+  - added `run-post-url` command to `coatue_claw.x_chart_daily` CLI
+  - command routes to `run_chart_for_post_url(...)` (the strict rebuild-only pipeline)
+  - this avoids freeform screenshot-style replies for tweet URL chart requests
+  - test added: `test_cli_run_post_url_command`
+  - validation: `PYTHONPATH=src pytest -q` => `100 passed`
 - X chart output now better matches requested behavior:
   - shortened takeaway strings across style draft + Slack summary + chart footer to avoid visual truncation
   - screenshot fallback disabled in renderer (hard-off), so posted charts must be reconstructed

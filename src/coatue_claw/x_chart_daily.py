@@ -2458,6 +2458,10 @@ def main() -> None:
     add.add_argument("handle")
     add.add_argument("--priority", type=float, default=1.0)
 
+    rpu = sub.add_parser("run-post-url")
+    rpu.add_argument("post_url")
+    rpu.add_argument("--channel", default="", help="Override Slack channel id for posting")
+
     args = parser.parse_args()
     if args.cmd == "run-once":
         result = run_chart_scout_once(manual=bool(args.manual), dry_run=bool(args.dry_run))
@@ -2465,6 +2469,11 @@ def main() -> None:
         result = status()
     elif args.cmd == "list-sources":
         result = list_sources(limit=max(1, min(500, int(args.limit))))
+    elif args.cmd == "run-post-url":
+        result = run_chart_for_post_url(
+            post_url=str(args.post_url).strip(),
+            channel_override=(str(args.channel).strip() or None),
+        )
     else:
         result = add_source(args.handle, priority=float(args.priority))
     print(json.dumps(result, indent=2, sort_keys=True))

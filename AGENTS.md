@@ -82,3 +82,9 @@ Detailed runbook for humans and Codex:
 - Every ship must include handoff continuity updates:
   - `docs/handoffs/live-session.md`: current status + immediate next steps
   - `docs/handoffs/current-plan.md`: plan/status changes when scope or priority changes
+
+## Slack X-URL Chart Rule
+- For Slack requests that include an X/Twitter status URL and ask for chart-of-the-day output, use the deterministic CLI path:
+  - `/opt/coatue-claw/.venv/bin/python -m coatue_claw.x_chart_daily run-post-url "<x-url>" [--channel "<channel-id>"]`
+- Do not post tweet screenshots as final chart artifacts.
+- Treat reconstruction failures as hard errors and return the explicit error to Slack.

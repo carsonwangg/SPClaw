@@ -4,6 +4,12 @@
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Current Status (2026-02-19)
+- OpenClaw gateway handoff hardening shipped (`main`):
+  - added deterministic CLI entrypoint for tweet URL chart requests:
+    - `/opt/coatue-claw/.venv/bin/python -m coatue_claw.x_chart_daily run-post-url <x-url> [--channel <id>]`
+  - this allows gateway-side natural-language Slack handling to call the strict rebuild-only chart path instead of ad hoc screenshot replies
+  - test added: `test_cli_run_post_url_command`
+  - validation: `PYTHONPATH=src pytest -q` => `100 passed`
 - X Chart readability + reconstruction fidelity update shipped (`main`):
   - takeaway line is now much shorter by default (feed-safe and chart-safe) to prevent clipping in Slack/file preview
   - renderer screenshot fallback is now hard-disabled (independent of env flag)
