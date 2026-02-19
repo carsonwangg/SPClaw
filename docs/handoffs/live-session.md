@@ -4,6 +4,19 @@
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Current Status (2026-02-19)
+- Grouped-bar QA + rendering correctness update shipped (`main`):
+  - employee/robot tweet charts now require two reconstructed bar series before posting
+  - rejected cases:
+    - single-series grouped output
+    - normalized/index-only grouped output
+    - non-year / placeholder x-axis labels for grouped employee/robot charts
+  - grouped bar semantics normalized before render:
+    - labels: `Employees` + `Robots`
+    - colors: navy + purple
+    - y-axis unit fallback: `Number (thousands)`
+  - style-copy QA enforced pre-render (headline/chart label/takeaway constraints)
+  - employee/robot takeaway copy now emits a complete short sentence (avoids clipped line endings)
+  - validation: `PYTHONPATH=src pytest -q` => `102 passed`
 - OpenClaw gateway handoff hardening shipped (`main`):
   - added deterministic CLI entrypoint for tweet URL chart requests:
     - `/opt/coatue-claw/.venv/bin/python -m coatue_claw.x_chart_daily run-post-url <x-url> [--channel <id>]`

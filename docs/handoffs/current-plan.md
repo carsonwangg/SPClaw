@@ -40,6 +40,18 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- X chart QA hardening for grouped bar charts (employees vs robots) shipped:
+  - two-series requirement enforced for employee/robot charts (single-series outputs now fail closed)
+  - grouped charts must use unit values (not normalized index), monotonic year x-axis labels, and non-placeholder labels
+  - grouped series metadata normalized before rendering:
+    - `Employees` (dark navy) + `Robots` (purple)
+    - y-axis defaults to `Number (thousands)` when source units are unclear
+  - style copy QA added pre-render (headline/chart-label/takeaway length + no ellipsis)
+  - employee/robot takeaway now uses a short complete sentence to avoid clipped wording
+  - new tests:
+    - vision extraction rejects single-series payloads for employee/robot charts
+    - renderer rejects employee/robot charts without both series
+  - validation: `PYTHONPATH=src pytest -q` => `102 passed`
 - X URL chart requests now have a deterministic CLI entrypoint for OpenClaw gateway routing:
   - added `run-post-url` command to `coatue_claw.x_chart_daily` CLI
   - command routes to `run_chart_for_post_url(...)` (the strict rebuild-only pipeline)

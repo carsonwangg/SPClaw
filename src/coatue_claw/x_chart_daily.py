@@ -555,6 +555,102 @@ def _fallback_bar_labels(*, candidate: Candidate | None, count: int) -> list[str
     return [f"P{i+1}" for i in range(count)]
 
 
+def _is_employees_robots_chart(candidate: Candidate | None) -> bool:
+    if candidate is None:
+        return False
+    merged = _normalize_render_text(f"{candidate.title} {candidate.text}").lower()
+    return ("employees" in merged) and ("robots" in merged)
+
+
+def _labels_are_placeholder(labels: list[str]) -> bool:
+    if not labels:
+        return True
+    return all(bool(re.fullmatch(r"p\d+", str(label).strip().lower())) for label in labels)
+
+
+def _labels_are_monotonic_years(labels: list[str]) -> bool:
+    years: list[int] = []
+    for label in labels:
+        text = str(label).strip()
+        if not re.fullmatch(r"\d{4}", text):
+            return False
+        years.append(int(text))
+    if len(years) < 4:
+        return False
+    return all(years[i] < years[i + 1] for i in range(len(years) - 1))
+
+
+def _normalize_grouped_bar_metadata(*, candidate: Candidate | None, bars: RebuiltBars) -> RebuiltBars:
+    if candidate is None or (not _is_employees_robots_chart(candidate)):
+        return bars
+    if not bars.secondary_values or len(bars.secondary_values) != len(bars.values):
+        return bars
+
+    p_label = (bars.primary_label or "").strip().lower()
+    s_label = (bars.secondary_label or "").strip().lower()
+    primary_sum = float(sum(bars.values))
+    secondary_sum = float(sum(bars.secondary_values))
+    should_swap = False
+    if ("robot" in p_label and "employee" in s_label) or ("employee" in s_label and "employee" not in p_label):
+        should_swap = True
+    elif ("robot" not in s_label and "employee" not in p_label) and (primary_sum < secondary_sum):
+        should_swap = True
+
+    if should_swap:
+        bars.values, bars.secondary_values = list(bars.secondary_values), list(bars.values)
+        bars.primary_label, bars.secondary_label = bars.secondary_label, bars.primary_label
+
+    bars.primary_label = "Employees"
+    bars.secondary_label = "Robots"
+    bars.color = "#1F2452"
+    bars.secondary_color = "#6D63E7"
+    y_lower = (bars.y_label or "").strip().lower()
+    if (not y_lower) or ("index" in y_lower) or (y_lower == "value"):
+        bars.y_label = "Number (thousands)"
+    return bars
+
+
+def _bar_data_quality_errors(*, candidate: Candidate | None, bars: RebuiltBars | None) -> list[str]:
+    if bars is None:
+        return ["missing rebuilt bars"]
+    errors: list[str] = []
+    n = len(bars.values)
+    if n < 4:
+        errors.append("insufficient bar count")
+    if len(bars.labels) != n:
+        errors.append("x-axis labels do not match bar count")
+    if _labels_are_placeholder(bars.labels):
+        errors.append("placeholder x-axis labels")
+    if not (bars.y_label or "").strip():
+        errors.append("missing y-axis label")
+    if _is_employees_robots_chart(candidate):
+        if not bars.secondary_values or len(bars.secondary_values) != n:
+            errors.append("grouped chart requires two aligned series")
+        if bars.normalized:
+            errors.append("grouped chart must not use normalized values")
+        if max(bars.values or [0.0]) < 200.0 or max(bars.secondary_values or [0.0]) < 100.0:
+            errors.append("grouped chart values are too small for employee/robot units")
+        y_lower = (bars.y_label or "").lower()
+        if "index" in y_lower:
+            errors.append("grouped chart y-axis label must be unit-based")
+        if bars.labels and (not _labels_are_monotonic_years(bars.labels)):
+            errors.append("grouped chart requires monotonic year x-axis labels")
+    return errors
+
+
+def _style_copy_quality_errors(style_draft: StyleDraft) -> list[str]:
+    errors: list[str] = []
+    if "..." in style_draft.headline or "..." in style_draft.chart_label or "..." in style_draft.takeaway:
+        errors.append("style copy contains ellipsis")
+    if len(_normalize_render_text(style_draft.headline)) > 58:
+        errors.append("headline too long")
+    if len(_normalize_render_text(style_draft.chart_label)) > 62:
+        errors.append("chart label too long")
+    if len(_normalize_render_text(style_draft.takeaway)) > 68:
+        errors.append("takeaway too long")
+    return errors
+
+
 def _vision_enabled() -> bool:
     raw = (os.environ.get("COATUE_CLAW_X_CHART_VISION_ENABLED", "1") or "1").strip().lower()
     return raw not in {"0", "false", "off", "no"}
@@ -581,6 +677,7 @@ def _extract_rebuilt_bars_via_vision(*, candidate: Candidate) -> RebuiltBars | N
     try:
         client = OpenAI(api_key=api_key)
         model = os.environ.get("COATUE_CLAW_X_CHART_VISION_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+        force_grouped = _is_employees_robots_chart(candidate)
         prompt = (
             "Extract bar-chart data from this image.\n"
             "Return strict JSON only with keys:\n"
@@ -599,6 +696,11 @@ def _extract_rebuilt_bars_via_vision(*, candidate: Candidate) -> RebuiltBars | N
             "If exact units are visible, set y_label accordingly (e.g., 'US$ Billions'). "
             "If units are unclear, use 'Index (normalized)' and normalized=true."
         )
+        if force_grouped:
+            prompt += (
+                " This chart is expected to have two series (Employees and Robots). "
+                "You MUST return `series` with exactly two aligned value arrays and omit `values`."
+            )
         response = client.chat.completions.create(
             model=model,
             temperature=0,
@@ -658,6 +760,8 @@ def _extract_rebuilt_bars_via_vision(*, candidate: Candidate) -> RebuiltBars | N
                 secondary_values = b_vals[:n]
                 primary_label = a_name
                 secondary_label = b_name
+    if force_grouped and (secondary_values is None):
+        return None
     if not values:
         if not isinstance(values_raw, list):
             return None
@@ -702,7 +806,7 @@ def _extract_rebuilt_bars_via_vision(*, candidate: Candidate) -> RebuiltBars | N
     confidence = max(0.0, min(1.0, confidence))
     if confidence < 0.58:
         return None
-    return RebuiltBars(
+    bars = RebuiltBars(
         labels=labels,
         values=values,
         color="#2F6ABF",
@@ -715,6 +819,10 @@ def _extract_rebuilt_bars_via_vision(*, candidate: Candidate) -> RebuiltBars | N
         secondary_color="#5AA88A" if secondary_values is not None else None,
         secondary_label=secondary_label,
     )
+    bars = _normalize_grouped_bar_metadata(candidate=candidate, bars=bars)
+    if _bar_data_quality_errors(candidate=candidate, bars=bars):
+        return None
+    return bars
 
 
 def _synthesize_chart_label(*, subject: str, sentence: str, mode_hint: str) -> str:
@@ -769,6 +877,20 @@ def _synthesize_narrative_title(*, subject: str, verb: str, sentence: str) -> st
     if "record" in sentence.lower() or v_lower in NEUTRAL_MOVE_VERBS:
         return _shorten_without_ellipsis(f"{subject_core} are at an extreme", max_chars=56)
     return _shorten_without_ellipsis(_strip_news_prefix(sentence), max_chars=56)
+
+
+def _employees_robots_takeaway(sentence: str) -> str:
+    s = _normalize_render_text(sentence)
+    lower = s.lower()
+    emp_m = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*million\s+employees", lower)
+    rob_m = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*million\s+robots", lower)
+    if emp_m and rob_m:
+        emp = emp_m.group(1)
+        rob = rob_m.group(1)
+        return _shorten_without_ellipsis(f"Amazon has {emp}M employees and {rob}M robots deployed.", max_chars=68)
+    if "ratio" in lower and "declined" in lower:
+        return _shorten_without_ellipsis("Amazon's human-to-robot ratio is tightening quickly.", max_chars=68)
+    return _shorten_without_ellipsis("Amazon is scaling robots faster than employee growth.", max_chars=68)
 
 
 def _llm_title_enabled() -> bool:
@@ -1518,7 +1640,10 @@ def _pick_winner(*, store: XChartStore, candidates: list[Candidate]) -> Candidat
 def _build_takeaways(candidate: Candidate) -> list[str]:
     text = _strip_news_prefix(candidate.text)
     title = _normalize_render_text(candidate.title)
-    excerpt = _truncate_words(text or title, max_words=9, max_chars=68)
+    if _is_employees_robots_chart(candidate):
+        excerpt = _employees_robots_takeaway(text or title)
+    else:
+        excerpt = _truncate_words(text or title, max_words=9, max_chars=68)
     if not excerpt:
         excerpt = "Fresh US-focused chart signal from a prioritized source."
     tone_line = "Keep the takeaway simple and explicit for fast read in a feed."
@@ -1539,17 +1664,18 @@ def _build_style_draft(candidate: Candidate, *, iteration: int) -> StyleDraft:
     subject, verb = _extract_subject_and_verb(first_core or title_core or title_text)
     chart_label = _synthesize_chart_label(subject=subject, sentence=first_core or title_core or title_text, mode_hint=mode_hint)
     narrative = _synthesize_narrative_title(subject=subject, verb=verb, sentence=first_core or title_core or title_text)
+    is_employee_robot = _is_employees_robots_chart(candidate)
 
     llm_style = _synthesize_style_via_llm(candidate) if iteration == 1 else None
 
     if iteration == 1 and llm_style:
         headline = _shorten_without_ellipsis(llm_style["headline"], max_chars=56)
         chart_label = _shorten_without_ellipsis(llm_style["chart_label"], max_chars=62)
-        takeaway = _shorten_without_ellipsis(llm_style["takeaway"], max_chars=68)
+        takeaway = _employees_robots_takeaway(first_core or body_text or title_text) if is_employee_robot else _shorten_without_ellipsis(llm_style["takeaway"], max_chars=68)
         why_now = "Narrative + technical label generated for feed readability."
     elif iteration == 1:
         headline = _shorten_without_ellipsis(narrative, max_chars=56)
-        takeaway = _truncate_words(body_text or title_core or title_text, max_words=9, max_chars=68)
+        takeaway = _employees_robots_takeaway(first_core or body_text or title_text) if is_employee_robot else _truncate_words(body_text or title_core or title_text, max_words=9, max_chars=68)
         why_now = "Clear US trend; chart carries the story."
     elif iteration == 2:
         headline = _shorten_without_ellipsis(_synthesize_narrative_title(subject=subject, verb="", sentence=title_core or first_core or title_text), max_chars=52)
@@ -1602,10 +1728,10 @@ def _has_reconstructable_chart_data(candidate: Candidate) -> bool:
     mode = _infer_chart_mode(candidate=candidate, image=image)
     if mode == "bar":
         vision_bars = _extract_rebuilt_bars_via_vision(candidate=candidate)
-        if vision_bars is not None:
+        if vision_bars is not None and (not _bar_data_quality_errors(candidate=candidate, bars=vision_bars)):
             return True
         cv_bars = _extract_rebuilt_bars(image=image, candidate=candidate, allow_vision=False)
-        return cv_bars is not None
+        return cv_bars is not None and (not _bar_data_quality_errors(candidate=candidate, bars=cv_bars))
     rebuilt = _extract_rebuilt_series(candidate=candidate, image=image)
     return bool(rebuilt)
 
@@ -1914,6 +2040,7 @@ def _extract_rebuilt_bars(*, image, candidate: Candidate | None = None, allow_vi
         return None
     primary_values = values_raw
     secondary_values: list[float] | None = None
+    require_grouped = _is_employees_robots_chart(candidate)
     # Grouped bars often appear as alternating pairs (for example employees vs robots).
     if len(values_raw) >= 16 and (len(values_raw) % 2 == 0):
         left = values_raw[0::2]
@@ -1925,6 +2052,8 @@ def _extract_rebuilt_bars(*, image, candidate: Candidate | None = None, allow_vi
             else:
                 primary_values = right
                 secondary_values = left
+    if require_grouped and (secondary_values is None):
+        return None
 
     max_v = max(primary_values + (secondary_values or [])) if primary_values else 0.0
     if max_v <= 2.0:
@@ -1941,7 +2070,7 @@ def _extract_rebuilt_bars(*, image, candidate: Candidate | None = None, allow_vi
     if "employees" in merged and "robots" in merged and secondary_values is not None:
         primary_label = "Employees"
         secondary_label = "Robots"
-    return RebuiltBars(
+    bars = RebuiltBars(
         labels=labels,
         values=norm,
         color="#2F6ABF",
@@ -1954,6 +2083,10 @@ def _extract_rebuilt_bars(*, image, candidate: Candidate | None = None, allow_vi
         secondary_color="#5AA88A" if norm_secondary is not None else None,
         secondary_label=secondary_label,
     )
+    bars = _normalize_grouped_bar_metadata(candidate=candidate, bars=bars)
+    if _bar_data_quality_errors(candidate=candidate, bars=bars):
+        return None
+    return bars
 
 
 def _render_chart_of_day_style(
@@ -1970,6 +2103,10 @@ def _render_chart_of_day_style(
     output_dir = _output_dir()
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / f"{slot_key}-styled.png"
+
+    copy_errors = _style_copy_quality_errors(style_draft)
+    if copy_errors:
+        raise XChartError(f"Chart copy QA failed: {copy_errors[0]}")
 
     plt.rcParams["font.family"] = COATUE_FONT_FAMILY
 
@@ -2014,6 +2151,11 @@ def _render_chart_of_day_style(
     else:
         mode = _infer_chart_mode(candidate=candidate, image=image)
         rebuilt_bars = _extract_rebuilt_bars(image=image, candidate=candidate, allow_vision=False) if mode == "bar" else None
+    if rebuilt_bars is not None:
+        rebuilt_bars = _normalize_grouped_bar_metadata(candidate=candidate, bars=rebuilt_bars)
+        bar_errors = _bar_data_quality_errors(candidate=candidate, bars=rebuilt_bars)
+        if bar_errors:
+            raise XChartError(f"Chart QA failed: {bar_errors[0]}")
     rebuilt = _extract_rebuilt_series(candidate=candidate, image=image) if (mode != "bar" and rebuilt_bars is None) else []
     if rebuilt_bars is not None:
         try:

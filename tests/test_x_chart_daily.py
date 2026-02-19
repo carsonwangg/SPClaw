@@ -503,6 +503,59 @@ def test_extract_rebuilt_bars_via_vision_parses_json(monkeypatch) -> None:
     assert rebuilt.normalized is False
 
 
+def test_extract_rebuilt_bars_via_vision_requires_grouped_for_employees_robots(monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_VISION_ENABLED", "1")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    class _FakeChoice:
+        def __init__(self, content: str) -> None:
+            self.message = types.SimpleNamespace(content=content)
+
+    class _FakeResponse:
+        def __init__(self, content: str) -> None:
+            self.choices = [_FakeChoice(content)]
+
+    class _FakeCompletions:
+        @staticmethod
+        def create(**kwargs):  # noqa: ANN003
+            payload = {
+                "chart_type": "bar",
+                "x_labels": ["2022", "2023", "2024", "2025"],
+                "values": [520, 750, 750, 1000],
+                "y_label": "Number in Thousands",
+                "normalized": False,
+                "confidence": 0.9,
+            }
+            return _FakeResponse(json.dumps(payload))
+
+    class _FakeChat:
+        completions = _FakeCompletions()
+
+    class _FakeOpenAI:
+        def __init__(self, api_key: str) -> None:
+            self.chat = _FakeChat()
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily.OpenAI", _FakeOpenAI)
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_image_bytes", lambda _url: (b"png", "image/png"))
+
+    candidate = Candidate(
+        candidate_key="x:robots-single",
+        source_type="x",
+        source_id="oguzerkan",
+        author="@oguzerkan",
+        title="$AMZN employees and robots",
+        text="$AMZN has 1.5 million employees and deployed 1 million robots.",
+        url="https://x.com/oguzerkan/status/1",
+        image_url="https://example.com/chart.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=400,
+        source_priority=1.0,
+        score=80.0,
+    )
+    rebuilt = _extract_rebuilt_bars_via_vision(candidate=candidate)
+    assert rebuilt is None
+
+
 def test_run_chart_for_post_url_posts_specific_tweet(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
@@ -671,6 +724,48 @@ def test_render_chart_rejects_screenshot_fallback_even_if_env_disabled(monkeypat
         )
 
 
+def test_render_chart_rejects_single_series_for_employees_robots(monkeypatch, tmp_path: Path) -> None:
+    import numpy as np
+    import pytest
+
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    candidate = Candidate(
+        candidate_key="x:robots-single-series",
+        source_type="x",
+        source_id="oguzerkan",
+        author="@oguzerkan",
+        title="$AMZN has 1.5 million employees and deployed 1 million robots.",
+        text="$AMZN has 1.5 million employees and deployed 1 million robots.",
+        url="https://x.com/oguzerkan/status/2024447368137994460",
+        image_url="https://example.com/chart.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=10,
+        source_priority=1.0,
+        score=50.0,
+    )
+    style = _select_style_draft(candidate)
+    monkeypatch.setattr("coatue_claw.x_chart_daily._safe_image_from_url", lambda _url: np.zeros((500, 900, 3), dtype=float))
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._extract_rebuilt_bars_via_vision",
+        lambda **kwargs: RebuiltBars(
+            labels=["2022", "2023", "2024", "2025"],
+            values=[520.0, 750.0, 750.0, 1000.0],
+            color="#2F6ABF",
+            y_label="Number (thousands)",
+            normalized=False,
+            source="vision",
+            confidence=0.9,
+        ),
+    )
+    with pytest.raises(XChartError):
+        _render_chart_of_day_style(
+            candidate=candidate,
+            slot_key="manual-robots-single",
+            windows_text="09:00,12:00,18:00",
+            style_draft=style,
+        )
+
+
 def test_style_draft_generates_narrative_title_and_small_label_for_etf_flow() -> None:
     candidate = Candidate(
         candidate_key="x:etf",
@@ -713,4 +808,5 @@ def test_style_draft_employees_vs_robots_titles_are_narrative() -> None:
     draft = _select_style_draft(candidate)
     assert "robots" in draft.headline.lower() or "automation" in draft.headline.lower()
     assert "employees vs robots" in draft.chart_label.lower()
+    assert "robots deployed" in draft.takeaway.lower()
     assert "..." not in draft.headline
