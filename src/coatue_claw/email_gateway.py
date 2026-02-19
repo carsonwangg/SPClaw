@@ -6,6 +6,7 @@ from email import policy
 from email.message import EmailMessage, Message
 from email.parser import BytesParser
 from email.utils import make_msgid, parseaddr
+import html as html_lib
 import hashlib
 import imaplib
 import json
@@ -77,6 +78,20 @@ class EmailAttachment:
 class EmailCommand:
     kind: str
     arg: str | None = None
+
+
+@dataclass(frozen=True)
+class OutboundAttachment:
+    filename: str
+    content_type: str
+    payload: bytes
+
+
+@dataclass(frozen=True)
+class EmailReply:
+    body_text: str
+    body_html: str | None = None
+    attachments: tuple[OutboundAttachment, ...] = ()
 
 
 class EmailGatewayStore:
@@ -458,36 +473,123 @@ def _format_help() -> str:
     )
 
 
-def _handle_command(command: EmailCommand) -> str:
+def _extract_section_bullets(lines: list[str], heading: str, *, limit: int) -> list[str]:
+    in_section = False
+    out: list[str] = []
+    heading_prefix = heading.strip().lower()
+    for raw in lines:
+        line = raw.strip()
+        if line.lower().startswith("## "):
+            if line.lower().startswith(heading_prefix):
+                in_section = True
+                continue
+            if in_section:
+                break
+        if not in_section:
+            continue
+        if line.startswith("- "):
+            out.append(line[2:].strip())
+            if len(out) >= limit:
+                break
+    return out
+
+
+def _extract_title(lines: list[str], *, fallback: str) -> str:
+    for raw in lines:
+        line = raw.strip()
+        if line.startswith("# "):
+            return line[2:].strip()
+    return fallback
+
+
+def _format_diligence_reply(*, ticker: str, path: Path) -> EmailReply:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    title = _extract_title(lines, fallback=f"Neutral Investment Memo: {ticker}")
+    key_takeaways = _extract_section_bullets(lines, "## 1. Key Takeaways", limit=5)
+    risks = _extract_section_bullets(lines, "## 6. Key Risks", limit=3)
+
+    text_lines = [
+        f"Diligence report is ready for {ticker}.",
+        f"Title: {title}",
+        "",
+        "Quick Takeaways:",
+    ]
+    if key_takeaways:
+        text_lines.extend(f"- {item}" for item in key_takeaways)
+    else:
+        text_lines.append("- Key takeaway extraction unavailable; see attached report.")
+
+    if risks:
+        text_lines.extend(["", "Top Risks:"])
+        text_lines.extend(f"- {item}" for item in risks)
+
+    text_lines.extend(
+        [
+            "",
+            f"Attachment: {path.name}",
+            f"Local path: {path}",
+        ]
+    )
+    body_text = "\n".join(text_lines)
+
+    items_html = "".join(f"<li>{html_lib.escape(item)}</li>" for item in key_takeaways) or (
+        "<li>Key takeaway extraction unavailable; see attached report.</li>"
+    )
+    risks_html = ""
+    if risks:
+        risks_html = (
+            "<h3>Top Risks</h3><ul>"
+            + "".join(f"<li>{html_lib.escape(item)}</li>" for item in risks)
+            + "</ul>"
+        )
+    body_html = (
+        f"<h2>Diligence Report: {html_lib.escape(ticker)}</h2>"
+        f"<p><strong>{html_lib.escape(title)}</strong></p>"
+        "<h3>Quick Takeaways</h3>"
+        f"<ul>{items_html}</ul>"
+        f"{risks_html}"
+        f"<p><strong>Attachment:</strong> {html_lib.escape(path.name)}</p>"
+        f"<p><strong>Local path:</strong> <code>{html_lib.escape(str(path))}</code></p>"
+    )
+
+    attachment = OutboundAttachment(
+        filename=path.name,
+        content_type="text/markdown",
+        payload=path.read_bytes(),
+    )
+    return EmailReply(
+        body_text=body_text,
+        body_html=body_html,
+        attachments=(attachment,),
+    )
+
+
+def _handle_command(command: EmailCommand) -> EmailReply:
     if command.kind == "help":
-        return _format_help()
+        return EmailReply(body_text=_format_help())
     if command.kind == "diligence":
         assert command.arg
         path = run_diligence(command.arg)
-        memo_preview = path.read_text(encoding="utf-8").splitlines()[:40]
-        return (
-            f"Diligence memo generated for {command.arg}.\n"
-            f"Path: {path}\n\n"
-            "Preview:\n"
-            + "\n".join(memo_preview)
-        )
+        return _format_diligence_reply(ticker=command.arg, path=path)
     if command.kind == "memory_status":
         memory = MemoryRuntime()
         stats = memory.stats()
-        return (
+        return EmailReply(
+            body_text=(
             "Memory status:\n"
             + json.dumps(stats, indent=2, sort_keys=True)
+            )
         )
     if command.kind == "memory_query":
         assert command.arg
         memory = MemoryRuntime()
-        return memory.format_retrieval(command.arg, limit=6)
+        return EmailReply(body_text=memory.format_retrieval(command.arg, limit=6))
     if command.kind == "files_status":
         bridge = load_config()
         from coatue_claw.file_bridge import status as file_status
 
-        return "File bridge status:\n" + json.dumps(file_status(bridge), indent=2, sort_keys=True)
-    return _format_help()
+        return EmailReply(body_text="File bridge status:\n" + json.dumps(file_status(bridge), indent=2, sort_keys=True))
+    return EmailReply(body_text=_format_help())
 
 
 def _build_reply_email(
@@ -496,6 +598,8 @@ def _build_reply_email(
     to_address: str,
     subject: str,
     body: str,
+    body_html: str | None,
+    attachments: tuple[OutboundAttachment, ...],
     in_reply_to: str | None,
 ) -> EmailMessage:
     msg = EmailMessage()
@@ -507,15 +611,38 @@ def _build_reply_email(
         msg["In-Reply-To"] = in_reply_to
         msg["References"] = in_reply_to
     msg.set_content(body)
+    if body_html:
+        msg.add_alternative(body_html, subtype="html")
+    for attachment in attachments:
+        maintype, subtype = "application", "octet-stream"
+        if "/" in attachment.content_type:
+            maintype, subtype = attachment.content_type.split("/", 1)
+        msg.add_attachment(
+            attachment.payload,
+            maintype=maintype,
+            subtype=subtype,
+            filename=attachment.filename,
+        )
     return msg
 
 
-def _send_reply(cfg: EmailConfig, *, to_address: str, subject: str, body: str, in_reply_to: str | None) -> None:
+def _send_reply(
+    cfg: EmailConfig,
+    *,
+    to_address: str,
+    subject: str,
+    body: str,
+    body_html: str | None,
+    attachments: tuple[OutboundAttachment, ...],
+    in_reply_to: str | None,
+) -> None:
     msg = _build_reply_email(
         cfg=cfg,
         to_address=to_address,
         subject=subject,
         body=body,
+        body_html=body_html,
+        attachments=attachments,
         in_reply_to=in_reply_to,
     )
     context = ssl.create_default_context()
@@ -578,22 +705,34 @@ def _process_email_message(
 
     command = parse_email_command(subject, body)
     command_output = _handle_command(command)
-    ingest_block = ""
+    ingest_block_text = ""
+    ingest_block_html = ""
     if ingested:
         lines = ["", "", "Attachment ingest:"]
+        html_lines = ["<h3>Attachment Ingest</h3>", "<ul>"]
         for item in ingested[:10]:
             lines.append(
                 f"- {item['filename']} -> {item['category']} ({item['size_bytes']} bytes)"
             )
-        ingest_block = "\n".join(lines)
+            html_lines.append(
+                f"<li>{html_lib.escape(item['filename'])} → {html_lib.escape(item['category'])} ({int(item['size_bytes'])} bytes)</li>"
+            )
+        html_lines.append("</ul>")
+        ingest_block_text = "\n".join(lines)
+        ingest_block_html = "".join(html_lines)
 
-    reply_body = f"{command_output}{ingest_block}"
+    reply_body = f"{command_output.body_text}{ingest_block_text}"
+    reply_html = None
+    if command_output.body_html:
+        reply_html = f"{command_output.body_html}{ingest_block_html}"
     reply_subject = f"Re: {subject}" if subject else "Re: Coatue Claw"
     _send_reply(
         cfg,
         to_address=sender,
         subject=reply_subject,
         body=reply_body,
+        body_html=reply_html,
+        attachments=command_output.attachments,
         in_reply_to=message_id,
     )
 

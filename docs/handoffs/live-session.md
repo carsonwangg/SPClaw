@@ -197,6 +197,11 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - runtime health after deploy:
     - `make openclaw-24x7-status`: email service loaded/running; memory-prune loaded with clean `last_exit_code=0`
     - `make openclaw-slack-status`: probe `ok=true`
+- Email diligence response formatting upgrade (commit pending in this session):
+  - replaced raw markdown preview dump with readable executive summary body
+  - added HTML email alternative for cleaner rendering in Gmail
+  - attached full memo as `.md` file to preserve complete report
+  - tests added for readable summary + attachment contract (`tests/test_email_gateway.py`)
 
 ## Next Step to Validate in Slack
 Send in `#charting`:

@@ -5,8 +5,10 @@ from pathlib import Path
 
 from coatue_claw.email_gateway import (
     EmailAttachment,
+    EmailCommand,
     EmailGatewayStore,
     _ingest_email_attachments,
+    _handle_command,
     parse_email_command,
     run_once,
 )
@@ -50,6 +52,36 @@ def test_parse_email_command() -> None:
     assert cmd.kind == "memory_query"
     assert "birthday" in (cmd.arg or "")
     assert parse_email_command("random", "nonsense").kind == "help"
+
+
+def test_diligence_email_reply_is_readable_and_attached(tmp_path: Path, monkeypatch) -> None:
+    memo = tmp_path / "SNOW-20260219.md"
+    memo.write_text(
+        "\n".join(
+            [
+                "# Neutral Investment Memo: Snowflake Inc. (SNOW)",
+                "",
+                "## 1. Key Takeaways",
+                "- Revenue grew 29.2% year over year.",
+                "- Net revenue retention remains above 120%.",
+                "",
+                "## 6. Key Risks",
+                "- Consumption slowdown may pressure near-term growth.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr("coatue_claw.email_gateway.run_diligence", lambda ticker: memo)
+    reply = _handle_command(EmailCommand(kind="diligence", arg="SNOW"))
+
+    assert "Quick Takeaways:" in reply.body_text
+    assert "Revenue grew 29.2% year over year." in reply.body_text
+    assert reply.body_html is not None
+    assert "<ul>" in (reply.body_html or "")
+    assert len(reply.attachments) == 1
+    assert reply.attachments[0].filename == "SNOW-20260219.md"
+    assert reply.attachments[0].content_type == "text/markdown"
 
 
 def test_run_once_disabled(tmp_path: Path, monkeypatch) -> None:

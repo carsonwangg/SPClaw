@@ -21,6 +21,10 @@ Allow Spencer to interact with Coatue Claw via email using the same core workflo
 - `files status`
 - `help`
 
+For diligence replies:
+- Email body now returns a readable executive summary (quick takeaways + top risks).
+- Full memo is attached as a `.md` file so the complete report is preserved without inline wall-of-text formatting.
+
 ## Required Environment Variables (Mac mini `.env.prod`)
 - `COATUE_CLAW_EMAIL_ENABLED=true`
 - `COATUE_CLAW_EMAIL_IMAP_HOST=<imap host>`
