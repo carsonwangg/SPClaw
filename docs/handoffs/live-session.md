@@ -4,6 +4,20 @@
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Current Status (2026-02-19)
+- X Chart semantic-title + true-rebuild enforcement shipped (`main`):
+  - style copy generation improved for title/subheading fidelity:
+    - optional LLM title synthesis (`gpt-4o-mini`) now generates:
+      - narrative headline (big title)
+      - technical chart label (small subheading)
+      - concise takeaway
+    - fallback heuristic still applies if LLM synthesis is unavailable
+  - URL-specific chart requests now require numeric reconstruction before posting:
+    - `run_chart_for_post_url(...)` now pre-validates extracted bars/series
+    - if reconstruction fails, bot returns a clear failure instead of posting a screenshot-style fallback
+  - added fallback candidate source for URL requests when X API misses media:
+    - `api.vxtwitter.com` fallback fetch for text/media on specific post URLs
+  - renderer now attempts vision bar extraction first (before mode heuristics), improving reconstruction rate on tweet charts that lack explicit bar keywords
+  - validation: `PYTHONPATH=src pytest -q` => `96 passed`
 - Slack natural-language compound X-post handling shipped (`main`):
   - single message with X post URL can now do both:
     - add poster handle to X scout source list

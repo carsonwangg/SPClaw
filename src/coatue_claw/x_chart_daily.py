@@ -684,6 +684,69 @@ def _synthesize_narrative_title(*, subject: str, verb: str, sentence: str) -> st
     return _shorten_without_ellipsis(_strip_news_prefix(sentence), max_chars=56)
 
 
+def _llm_title_enabled() -> bool:
+    raw = (os.environ.get("COATUE_CLAW_X_CHART_LLM_TITLES_ENABLED", "1") or "1").strip().lower()
+    return raw not in {"0", "false", "off", "no"}
+
+
+def _synthesize_style_via_llm(candidate: Candidate) -> dict[str, str] | None:
+    if not _llm_title_enabled():
+        return None
+    if OpenAI is None:
+        return None
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        return None
+    text = _normalize_render_text(candidate.text)
+    title = _normalize_render_text(candidate.title)
+    if not (text or title):
+        return None
+    model = os.environ.get("COATUE_CLAW_X_CHART_TITLE_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+    prompt = (
+        "Create Coatue-style chart copy from this X post.\n"
+        "Return strict JSON with keys: headline, chart_label, takeaway.\n"
+        "Rules:\n"
+        "- headline: <=56 chars, narrative/thematic takeaway.\n"
+        "- chart_label: <=62 chars, technical description of what chart shows.\n"
+        "- takeaway: <=96 chars, plain language.\n"
+        "- No @handles. No 'BREAKING'. No ellipsis. No emojis.\n"
+        "- Avoid generic labels like 'Chart Context'.\n"
+        f"Post title: {title}\n"
+        f"Post text: {text}\n"
+    )
+    try:
+        client = OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model=model,
+            temperature=0.2,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": "You write concise institutional chart titles."},
+                {"role": "user", "content": prompt},
+            ],
+        )
+        raw = ""
+        if response.choices and response.choices[0].message:
+            raw = str(response.choices[0].message.content or "").strip()
+        if not raw:
+            return None
+        payload = json.loads(raw)
+    except Exception as exc:
+        logger.debug("LLM style synthesis failed: %s", exc)
+        return None
+
+    headline = _shorten_without_ellipsis(str(payload.get("headline") or ""), max_chars=56)
+    chart_label = _shorten_without_ellipsis(str(payload.get("chart_label") or ""), max_chars=62)
+    takeaway = _shorten_without_ellipsis(str(payload.get("takeaway") or ""), max_chars=96)
+    if not headline or not chart_label or not takeaway:
+        return None
+    if "@" in headline or "@" in chart_label or "@" in takeaway:
+        return None
+    if "..." in headline or "..." in chart_label or "..." in takeaway:
+        return None
+    return {"headline": headline, "chart_label": chart_label, "takeaway": takeaway}
+
+
 def _is_us_relevant_post(text: str) -> bool:
     lower = _normalize_render_text(text).lower()
     strong = any(token in lower for token in US_STRONG_SIGNAL_KEYWORDS)
@@ -1055,6 +1118,99 @@ def _parse_x_candidates(payload: dict[str, Any], *, priority_by_handle: dict[str
     return out
 
 
+def _parse_x_post_url(post_url: str) -> tuple[str, str] | None:
+    m = re.search(
+        r"https?://(?:www\.)?(?:x\.com|twitter\.com)/([A-Za-z0-9_]+)/status/(\d+)",
+        post_url.strip(),
+        re.IGNORECASE,
+    )
+    if not m:
+        return None
+    handle = _canonical_handle(m.group(1))
+    tweet_id = m.group(2)
+    if not handle or not tweet_id:
+        return None
+    return handle, tweet_id
+
+
+def _fetch_vxtwitter_post_candidate(*, handle: str, tweet_id: str) -> Candidate | None:
+    api_url = f"https://api.vxtwitter.com/{handle}/status/{tweet_id}"
+    req = Request(api_url, headers={"User-Agent": "coatue-claw/1.0", "Accept": "application/json"}, method="GET")
+    try:
+        with urlopen(req, timeout=25) as resp:
+            payload = json.loads((resp.read() or b"{}").decode("utf-8", errors="ignore"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+
+    media_urls = payload.get("mediaURLs")
+    image_url = None
+    if isinstance(media_urls, list):
+        for item in media_urls:
+            value = str(item or "").strip()
+            if value:
+                image_url = value
+                break
+    if not image_url:
+        media_extended = payload.get("media_extended")
+        if isinstance(media_extended, list):
+            for item in media_extended:
+                if not isinstance(item, dict):
+                    continue
+                value = str(item.get("url") or item.get("thumbnail_url") or "").strip()
+                if value:
+                    image_url = value
+                    break
+    if not image_url:
+        return None
+
+    text = _normalize_render_text(str(payload.get("text") or "").strip())
+    if not text:
+        return None
+    user_screen = _canonical_handle(str(payload.get("user_screen_name") or handle))
+    if not user_screen:
+        user_screen = handle
+    engagement = 0
+    for key in ("likes", "retweets", "replies", "qrt"):
+        try:
+            engagement += int(payload.get(key, 0) or 0)
+        except Exception:
+            continue
+    created_at = None
+    raw_date = str(payload.get("date") or "").strip()
+    if raw_date:
+        for fmt in ("%a %b %d %H:%M:%S %z %Y", "%Y-%m-%dT%H:%M:%SZ"):
+            try:
+                created_at = datetime.strptime(raw_date, fmt).astimezone(UTC).isoformat()
+                break
+            except Exception:
+                continue
+    priority = 1.0
+    score = _score_candidate(
+        source_priority=priority,
+        engagement=engagement,
+        created_at=created_at,
+        title=text,
+        text=text,
+        has_image=True,
+    )
+    return Candidate(
+        candidate_key=f"x:{tweet_id}",
+        source_type="x",
+        source_id=user_screen,
+        author=f"@{user_screen}",
+        title=text,
+        text=text,
+        url=f"https://x.com/{user_screen}/status/{tweet_id}",
+        image_url=image_url,
+        created_at=created_at,
+        engagement=engagement,
+        source_priority=priority,
+        score=score,
+    )
+
+
 def _is_chart_like_post(text: str, *, handle: str) -> bool:
     lower = (text or "").lower()
     signal = 0
@@ -1292,7 +1448,14 @@ def _build_style_draft(candidate: Candidate, *, iteration: int) -> StyleDraft:
     chart_label = _synthesize_chart_label(subject=subject, sentence=first_core or title_core or title_text, mode_hint=mode_hint)
     narrative = _synthesize_narrative_title(subject=subject, verb=verb, sentence=first_core or title_core or title_text)
 
-    if iteration == 1:
+    llm_style = _synthesize_style_via_llm(candidate) if iteration == 1 else None
+
+    if iteration == 1 and llm_style:
+        headline = _shorten_without_ellipsis(llm_style["headline"], max_chars=56)
+        chart_label = _shorten_without_ellipsis(llm_style["chart_label"], max_chars=62)
+        takeaway = _shorten_without_ellipsis(llm_style["takeaway"], max_chars=96)
+        why_now = "Narrative + technical label generated for feed readability."
+    elif iteration == 1:
         headline = _shorten_without_ellipsis(narrative, max_chars=56)
         takeaway = _truncate_words(body_text or title_core or title_text, max_words=13, max_chars=96)
         why_now = "Clear US trend; chart carries the story."
@@ -1713,8 +1876,13 @@ def _render_chart_of_day_style(
         spine.set_linewidth(1.2)
 
     image = _safe_image_from_url(candidate.image_url)
-    mode = _infer_chart_mode(candidate=candidate, image=image)
-    rebuilt_bars = _extract_rebuilt_bars(image=image, candidate=candidate, allow_vision=True) if mode == "bar" else None
+    vision_bars = _extract_rebuilt_bars_via_vision(candidate=candidate)
+    if vision_bars is not None:
+        mode = "bar"
+        rebuilt_bars = vision_bars
+    else:
+        mode = _infer_chart_mode(candidate=candidate, image=image)
+        rebuilt_bars = _extract_rebuilt_bars(image=image, candidate=candidate, allow_vision=False) if mode == "bar" else None
     rebuilt = _extract_rebuilt_series(candidate=candidate, image=image) if (mode != "bar" and rebuilt_bars is None) else []
     if rebuilt_bars is not None:
         try:
@@ -2035,17 +2203,10 @@ def run_chart_for_post_url(
     post_url: str,
     channel_override: str | None = None,
 ) -> dict[str, Any]:
-    m = re.search(
-        r"https?://(?:www\.)?(?:x\.com|twitter\.com)/([A-Za-z0-9_]+)/status/(\d+)",
-        post_url.strip(),
-        re.IGNORECASE,
-    )
-    if not m:
+    parsed = _parse_x_post_url(post_url)
+    if parsed is None:
         raise XChartError("Invalid X post URL. Expected format like https://x.com/<handle>/status/<id>.")
-    handle = _canonical_handle(m.group(1))
-    tweet_id = m.group(2)
-    if not handle or not tweet_id:
-        raise XChartError("Could not parse handle or tweet id from the provided URL.")
+    handle, tweet_id = parsed
 
     store = XChartStore()
     token = _resolve_bearer_token()
@@ -2066,7 +2227,17 @@ def run_chart_for_post_url(
         if candidates:
             winner = candidates[0]
         else:
-            raise XChartError("No chart candidate found in that X post (missing image or inaccessible tweet).")
+            winner = _fetch_vxtwitter_post_candidate(handle=handle, tweet_id=tweet_id)
+            if winner is None:
+                raise XChartError("No chart candidate found in that X post (missing image or inaccessible tweet).")
+
+    # URL-specific path must reconstruct numeric data; do not post screenshot fallback.
+    image = _safe_image_from_url(winner.image_url)
+    vision_bars = _extract_rebuilt_bars_via_vision(candidate=winner)
+    cv_bars = _extract_rebuilt_bars(image=image, candidate=winner, allow_vision=False) if vision_bars is None else None
+    rebuilt = _extract_rebuilt_series(candidate=winner, image=image) if (vision_bars is None and cv_bars is None) else []
+    if vision_bars is None and cv_bars is None and not rebuilt:
+        raise XChartError("I couldn't reliably extract numeric values from that chart yet. Try another post image.")
 
     style_draft = _select_style_draft(winner)
     channel = (channel_override or "").strip() or _slack_channel()

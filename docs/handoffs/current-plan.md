@@ -40,6 +40,22 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- X chart URL workflow now enforces true reconstruction over screenshot fallback:
+  - `run_chart_for_post_url` validates extracted numeric series before post
+  - if extraction is not reliable, it fails cleanly and asks for another post instead of posting a screenshot chart
+  - added `vxtwitter` fallback candidate fetch for URL-specific requests when X API payload lacks media
+  - renderer now tries vision bar extraction first to better rebuild bar charts from tweet images
+- X chart title/subheading quality improved:
+  - optional LLM style synthesis generates:
+    - narrative headline (theme)
+    - technical chart label (what graph shows)
+    - concise takeaway
+  - constrained formatting: no handles, no `BREAKING`, no ellipsis
+  - fallback heuristics remain if LLM path fails
+- tests added/updated:
+  - URL-run fallback coverage
+  - URL-run reconstruction gate coverage
+  - total suite validation: `PYTHONPATH=src pytest -q` => `96 passed`
 - Slack bot now supports combined natural-language X-post requests:
   - detects X post URL + “add to twitter/x source list” phrasing + “make chart” phrasing in one message
   - executes both actions in sequence:
