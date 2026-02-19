@@ -144,6 +144,8 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - tests:
     - `tests/test_x_chart_daily.py`
     - `tests/test_launchd_runtime.py` (updated for new service)
+  - resilience:
+    - invalid/renamed X handles are skipped without failing the full scout run
 - 24/7 runtime supervision is implemented:
   - launchd-managed services in `src/coatue_claw/launchd_runtime.py`
   - services: `com.coatueclaw.email-gateway` (always-on poller), `com.coatueclaw.memory-prune` (hourly prune)

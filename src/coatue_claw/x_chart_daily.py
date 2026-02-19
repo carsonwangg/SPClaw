@@ -550,11 +550,19 @@ def _fetch_x_candidates_from_sources(*, handles: list[str], token: str, hours: i
     priority_map = {_canonical_handle(h).lower(): p for h, p in DEFAULT_PRIORITY_SOURCES}
     all_handles = [_canonical_handle(h) for h in handles if _canonical_handle(h)]
     out: list[Candidate] = []
-    for group in _chunks(all_handles, 10):
-        ors = " OR ".join(f"from:{handle}" for handle in group)
-        query = f"({ors}) has:images -is:retweet -is:reply lang:en"
-        payload = _x_search_recent(query, hours=hours, max_results=80, token=token)
-        out.extend(_parse_x_candidates(payload, priority_by_handle=priority_map))
+    for handle in all_handles:
+        query = f"(from:{handle}) has:images -is:retweet -is:reply lang:en"
+        try:
+            payload = _x_search_recent(query, hours=hours, max_results=25, token=token)
+        except XChartError as exc:
+            msg = str(exc).lower()
+            if "invalid username value" in msg or "not a parsable user name" in msg:
+                logger.warning("Skipping invalid source handle for x-chart scout: @%s", handle)
+                continue
+            raise
+        parsed = _parse_x_candidates(payload, priority_by_handle=priority_map)
+        if parsed:
+            out.extend(parsed)
     return out
 
 

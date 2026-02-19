@@ -325,6 +325,8 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `tests/test_launchd_runtime.py`
   - local validation:
     - `PYTHONPATH=src pytest -q` => `72 passed`
+  - robustness patch:
+    - X source scanning now handles invalid/renamed usernames gracefully (skips invalid handles instead of failing the entire run)
 
 ## Next Step to Validate in Slack
 Send in `#charting`:
