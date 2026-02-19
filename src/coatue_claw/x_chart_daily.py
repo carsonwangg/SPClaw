@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+import io
 import json
 import logging
 import math
@@ -10,6 +11,7 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import textwrap
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -708,10 +710,140 @@ def _build_takeaways(candidate: Candidate) -> list[str]:
     text = re.sub(r"\s+", " ", candidate.text).strip()
     excerpt = text[:220].rstrip() + ("…" if len(text) > 220 else "")
     return [
-        "Signal: strong visual trend candidate from monitored sources.",
-        f"Why it matters: aligns with high-priority market themes (AI / semis / software / consumer / macro).",
-        f"Context: {excerpt}" if excerpt else "Context: chart image and linked post provide the primary evidence.",
+        "Observation: high-signal chart candidate from prioritized sources.",
+        "Why it matters: ties to core investing themes (AI, semis, software, consumer, macro).",
+        f"Investor lens: {excerpt}" if excerpt else "Investor lens: chart image and linked post provide the primary evidence.",
     ]
+
+
+def _safe_image_from_url(url: str | None):
+    if not url:
+        return None
+    req = Request(url, headers={"User-Agent": "coatue-claw/1.0"}, method="GET")
+    try:
+        with urlopen(req, timeout=30) as resp:
+            payload = resp.read()
+    except Exception:
+        return None
+
+    try:
+        import matplotlib.image as mpimg
+
+        return mpimg.imread(io.BytesIO(payload))
+    except Exception:
+        pass
+
+    try:
+        from PIL import Image
+        import numpy as np
+
+        image = Image.open(io.BytesIO(payload)).convert("RGB")
+        return np.asarray(image)
+    except Exception:
+        return None
+
+
+def _render_chart_of_day_style(
+    *,
+    candidate: Candidate,
+    slot_key: str,
+    windows_text: str,
+    takeaways: list[str],
+) -> Path:
+    import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
+    from matplotlib.patches import Rectangle
+    from coatue_claw.valuation_chart import COATUE_FONT_FAMILY
+
+    output_dir = _output_dir()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out_path = output_dir / f"{slot_key}-styled.png"
+
+    generated_local = datetime.now(_timezone())
+    generated_line = generated_local.strftime("Generated %b %-d, %Y at %-I:%M %p %Z")
+    plt.rcParams["font.family"] = COATUE_FONT_FAMILY
+
+    fig = plt.figure(figsize=(14, 8.6), facecolor="#E9EAED")
+    fig.text(0.5, 0.95, "Coatue Chart of the Day", ha="center", va="center", fontsize=33, color="#1D2B4F", weight="bold")
+    fig.text(0.5, 0.915, f"{generated_line} | Slot {windows_text}", ha="center", va="center", fontsize=11, color="#4A4F59")
+    fig.add_artist(Line2D([0.05, 0.95], [0.89, 0.89], transform=fig.transFigure, color="#2A7FBE", linewidth=2.3))
+
+    left = fig.add_axes([0.05, 0.11, 0.31, 0.74], facecolor="#FAFAFA")
+    left.set_xticks([])
+    left.set_yticks([])
+    for spine in left.spines.values():
+        spine.set_color("#E3E3E3")
+        spine.set_linewidth(1.1)
+
+    date_line = generated_local.strftime("%m.%d.%Y")
+    left.text(0.06, 0.94, date_line, fontsize=11, color="#3F434C", family=COATUE_FONT_FAMILY, transform=left.transAxes)
+    left.text(0.06, 0.88, "Chart Scout Winner", fontsize=20, color="#111827", family=COATUE_FONT_FAMILY, transform=left.transAxes)
+    left.text(0.06, 0.83, candidate.author, fontsize=13, color="#2A7FBE", family=COATUE_FONT_FAMILY, transform=left.transAxes, weight="bold")
+
+    wrapped_title = "\n".join(textwrap.wrap(candidate.title, width=38))[:560]
+    left.text(0.06, 0.77, wrapped_title, fontsize=11.5, color="#1F2937", family=COATUE_FONT_FAMILY, transform=left.transAxes, va="top")
+
+    left.text(0.06, 0.49, "Executive Summary", fontsize=14, color="#2A7FBE", family=COATUE_FONT_FAMILY, transform=left.transAxes, weight="bold")
+    y = 0.45
+    for idx, item in enumerate(takeaways[:3], start=1):
+        wrapped = "\n".join(textwrap.wrap(item, width=42))
+        left.text(0.06, y, f"{idx}) {wrapped}", fontsize=10.5, color="#222831", family=COATUE_FONT_FAMILY, transform=left.transAxes, va="top")
+        y -= 0.12
+
+    left.text(0.06, 0.07, "C:\\Takes style | Evidence-first | Not investment advice", fontsize=9, color="#5E6470", family=COATUE_FONT_FAMILY, transform=left.transAxes)
+
+    right = fig.add_axes([0.39, 0.30, 0.56, 0.55], facecolor="#F3F4F6")
+    right.set_xticks([])
+    right.set_yticks([])
+    for spine in right.spines.values():
+        spine.set_color("#D7DAE0")
+        spine.set_linewidth(1.1)
+
+    image = _safe_image_from_url(candidate.image_url)
+    if image is not None:
+        right.imshow(image)
+        right.set_aspect("auto")
+    else:
+        right.text(0.5, 0.5, "Chart image unavailable", ha="center", va="center", fontsize=16, color="#6B7280", transform=right.transAxes)
+        right.add_patch(Rectangle((0.05, 0.1), 0.9, 0.8, fill=False, linewidth=1.4, linestyle=(0, (4, 3)), edgecolor="#9CA3AF", transform=right.transAxes))
+
+    backdrop = fig.add_axes([0.39, 0.11, 0.56, 0.15], facecolor="#DDEAF5")
+    backdrop.set_xticks([])
+    backdrop.set_yticks([])
+    for spine in backdrop.spines.values():
+        spine.set_visible(False)
+    backdrop.add_patch(Rectangle((0.0, 0.0), 0.008, 1.0, transform=backdrop.transAxes, color="#2A7FBE", ec=None))
+
+    context_text = re.sub(r"\s+", " ", candidate.text).strip()
+    context_text = context_text[:360].rstrip() + ("…" if len(context_text) > 360 else "")
+    backdrop_lines = "\n".join(textwrap.wrap(context_text, width=92))
+    backdrop.text(
+        0.03,
+        0.80,
+        "Backdrop:",
+        fontsize=13,
+        color="#1F2937",
+        weight="bold",
+        family=COATUE_FONT_FAMILY,
+        transform=backdrop.transAxes,
+    )
+    backdrop.text(
+        0.03,
+        0.66,
+        backdrop_lines,
+        fontsize=10.5,
+        color="#1F2937",
+        family=COATUE_FONT_FAMILY,
+        transform=backdrop.transAxes,
+        va="top",
+    )
+
+    fig.text(0.05, 0.03, f"Source: {candidate.url}", fontsize=9, color="#4B5563", family=COATUE_FONT_FAMILY)
+    fig.text(0.95, 0.03, f"Score {candidate.score:.1f}", fontsize=9, color="#4B5563", ha="right", family=COATUE_FONT_FAMILY)
+
+    fig.savefig(out_path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+    return out_path
 
 
 def _post_winner_to_slack(*, candidate: Candidate, channel: str, slot_key: str, windows_text: str) -> dict[str, Any]:
@@ -720,8 +852,14 @@ def _post_winner_to_slack(*, candidate: Candidate, channel: str, slot_key: str, 
 
     tokens = _slack_tokens()
     takeaways = _build_takeaways(candidate)
+    styled_path = _render_chart_of_day_style(
+        candidate=candidate,
+        slot_key=slot_key,
+        windows_text=windows_text,
+        takeaways=takeaways,
+    )
     text_lines = [
-        "*Coatue Chart Scout Winner*",
+        "*Coatue Chart of the Day Candidate*",
         f"- Slot: `{slot_key}` ({windows_text})",
         f"- Source: `{candidate.author}`",
         f"- Score: `{candidate.score:.1f}`",
@@ -732,17 +870,7 @@ def _post_winner_to_slack(*, candidate: Candidate, channel: str, slot_key: str, 
         f"2. {takeaways[1]}",
         f"3. {takeaways[2]}",
     ]
-    blocks: list[dict[str, Any]] = [
-        {"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(text_lines)}},
-    ]
-    if candidate.image_url:
-        blocks.append(
-            {
-                "type": "image",
-                "image_url": candidate.image_url,
-                "alt_text": candidate.title or "Chart candidate image",
-            }
-        )
+    blocks: list[dict[str, Any]] = [{"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(text_lines)}}]
     last_error: str | None = None
     for token in tokens:
         client = WebClient(token=token)
@@ -754,7 +882,23 @@ def _post_winner_to_slack(*, candidate: Candidate, channel: str, slot_key: str, 
                 unfurl_links=False,
                 unfurl_media=False,
             )
-            return {"ok": bool(response.get("ok")), "ts": response.get("ts"), "channel": response.get("channel")}
+            ts = str(response.get("ts") or "")
+            if ts:
+                try:
+                    client.files_upload_v2(
+                        channel=channel,
+                        thread_ts=ts,
+                        file=str(styled_path),
+                        title="Coatue Chart of the Day",
+                    )
+                except Exception:
+                    logger.exception("Failed to upload styled chart artifact to Slack thread")
+            return {
+                "ok": bool(response.get("ok")),
+                "ts": response.get("ts"),
+                "channel": response.get("channel"),
+                "styled_artifact": str(styled_path),
+            }
         except SlackApiError as exc:
             err = str(exc.response.get("error", "")) if exc.response is not None else str(exc)
             last_error = err or str(exc)

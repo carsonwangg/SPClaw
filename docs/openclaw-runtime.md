@@ -38,6 +38,7 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
 - Scheduled (wired):
   - Hourly memory prune via `launchd` (`com.coatueclaw.memory-prune`)
   - Chart scout posting via `launchd` (`com.coatueclaw.x-chart-daily`) at local times from `COATUE_CLAW_X_CHART_WINDOWS` (default `09:00,12:00,18:00`)
+  - Chart scout posts include a rendered Coatue-style “Chart of the Day” image card (header, divider, summary rail, backdrop context, source footer)
 
 Diligence output contract:
 - `claw diligence TICKER` generates a neutral, evidence-first 8-section investment memo with source/timestamp attribution.
@@ -165,6 +166,7 @@ Slack deploy pipeline controls:
 9. `x chart now`
 10. `x chart sources`
 11. `x chart add @fiscal_AI priority 1.6`
+12. `x chart help`
 
 Pipeline environment controls:
 - `SLACK_PIPELINE_ADMINS`: optional comma-separated Slack user IDs allowed to run pipeline commands

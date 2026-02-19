@@ -342,6 +342,19 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
       - `make openclaw-x-chart-run-once` posted winner to `C0AFGMRFWP8`
       - sample winner: `@Barchart` post `https://x.com/Barchart/status/2024274150118859021`
       - artifact: `/opt/coatue-claw-data/artifacts/x-chart-daily/manual-20260218-224336-x.md`
+  - Chart-of-the-day style formatter (this session):
+    - integrated a new Coatue-style rendered image card into x-chart posting flow
+    - renderer uses design cues from Coatue `C:\\Takes` + valuation-chart skill style language:
+      - navy headline, metadata row, blue divider
+      - light gray canvas with bordered content rails
+      - executive summary bullets and backdrop context callout
+      - source footer + score marker
+      - Avenir/Avenir Next/Helvetica Neue fallback typography
+    - Slack delivery now posts:
+      - summary text message in channel
+      - threaded `Coatue Chart of the Day` styled PNG upload
+    - output artifact path:
+      - `/opt/coatue-claw-data/artifacts/x-chart-daily/<slot>-styled.png`
 
 ## Next Step to Validate in Slack
 Send in `#charting`:
@@ -411,5 +424,5 @@ Then confirm bot returns:
 16. Dry-run source quality and posting:
     - `make openclaw-x-chart-sources`
     - `make openclaw-x-chart-run-once`
-17. Next phase: format posted winners into Coatue “Chart of the Day” visual style template.
+17. Tune style details after first day of live posts (font sizing, backdrop length, and summary density).
 15. If response fails, capture first failing line with `openclaw channels logs --channel slack --lines 300`.

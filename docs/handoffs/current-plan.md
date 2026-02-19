@@ -152,6 +152,9 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
     - deployed and validated at commit `c3f64d0`
     - scheduler service `com.coatueclaw.x-chart-daily` loaded via launchd
     - proof-of-life manual run posted successfully to `#general` channel id `C0AFGMRFWP8`
+  - presentation layer:
+    - winners are now rendered into a Coatue-style “Chart of the Day” visual card before Slack upload
+    - style cues align with C:\\Takes design language and valuation-chart skill guidance
 - 24/7 runtime supervision is implemented:
   - launchd-managed services in `src/coatue_claw/launchd_runtime.py`
   - services: `com.coatueclaw.email-gateway` (always-on poller), `com.coatueclaw.memory-prune` (hourly prune)
@@ -181,4 +184,4 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
     - `COATUE_CLAW_X_CHART_WINDOWS=09:00,12:00,18:00`
     - `COATUE_CLAW_X_CHART_TIMEZONE=America/Los_Angeles`
 12. Validate three scheduled daily posts in Slack (9am/12pm/6pm PT) and tune source priority list after first day.
-13. Build next-phase formatting layer to render winners in Coatue “Chart of the Day” visual style before posting.
+13. Tune style/briefing density after observing 1-2 days of live scheduled posts.
