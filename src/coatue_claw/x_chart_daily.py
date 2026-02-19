@@ -2030,6 +2030,75 @@ def run_chart_scout_once(
     }
 
 
+def run_chart_for_post_url(
+    *,
+    post_url: str,
+    channel_override: str | None = None,
+) -> dict[str, Any]:
+    m = re.search(
+        r"https?://(?:www\.)?(?:x\.com|twitter\.com)/([A-Za-z0-9_]+)/status/(\d+)",
+        post_url.strip(),
+        re.IGNORECASE,
+    )
+    if not m:
+        raise XChartError("Invalid X post URL. Expected format like https://x.com/<handle>/status/<id>.")
+    handle = _canonical_handle(m.group(1))
+    tweet_id = m.group(2)
+    if not handle or not tweet_id:
+        raise XChartError("Could not parse handle or tweet id from the provided URL.")
+
+    store = XChartStore()
+    token = _resolve_bearer_token()
+    payload = _http_json(
+        url=f"{_x_api_base()}/2/tweets",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        params={
+            "ids": tweet_id,
+            "expansions": "author_id,attachments.media_keys",
+            "tweet.fields": "author_id,created_at,public_metrics,attachments,lang",
+            "user.fields": "name,username,verified",
+            "media.fields": "type,url,preview_image_url,width,height",
+        },
+    )
+    candidates = _parse_x_candidates(payload, priority_by_handle={handle.lower(): 1.0})
+    winner = next((c for c in candidates if c.candidate_key == f"x:{tweet_id}"), None)
+    if winner is None:
+        if candidates:
+            winner = candidates[0]
+        else:
+            raise XChartError("No chart candidate found in that X post (missing image or inaccessible tweet).")
+
+    style_draft = _select_style_draft(winner)
+    channel = (channel_override or "").strip() or _slack_channel()
+    now_local = datetime.now(UTC).astimezone(_timezone())
+    slot_key = f"manual-url-{now_local.strftime('%Y%m%d-%H%M%S')}"
+    windows_text = ",".join(f"{h:02d}:{m:02d}" for h, m in _parse_windows())
+    post = _post_winner_to_slack(
+        candidate=winner,
+        channel=channel,
+        slot_key=slot_key,
+        windows_text=windows_text,
+        style_draft=style_draft,
+    )
+    store.record_post(slot_key=slot_key, channel=channel, candidate=winner)
+    return {
+        "ok": True,
+        "posted": True,
+        "slot_key": slot_key,
+        "channel": channel,
+        "post": post,
+        "winner": {
+            "source": f"{winner.source_type}:{winner.source_id}",
+            "author": winner.author,
+            "title": winner.title,
+            "url": winner.url,
+            "score": winner.score,
+            "style_score": style_draft.score,
+            "style_iteration": style_draft.iteration,
+        },
+    }
+
+
 def status() -> dict[str, Any]:
     store = XChartStore()
     return {

@@ -4,6 +4,19 @@
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Current Status (2026-02-19)
+- Slack natural-language compound X-post handling shipped (`main`):
+  - single message with X post URL can now do both:
+    - add poster handle to X scout source list
+    - generate/post Coatue-style chart from that exact post URL
+  - this closes the gap where non-command phrasing fell through and triggered generic executor/browser-relay behavior
+  - examples now supported:
+    - `Please make a chart of the day from this post <x-url> and add this guy to our twitter list`
+    - `Output a coatue style chart from this post <x-url>`
+  - implemented in:
+    - `src/coatue_claw/slack_x_chart_intent.py`
+    - `src/coatue_claw/slack_bot.py` (compound handler wired before strict `x chart ...` parser)
+    - `src/coatue_claw/x_chart_daily.py` (`run_chart_for_post_url`)
+  - validation: `PYTHONPATH=src pytest -q` => `95 passed`
 - X Chart readability pass shipped (`main`):
   - removed generated timestamp line from top-left chart header (less clutter)
   - bar reconstructions now always render x-axis labels (no blank x-axis)

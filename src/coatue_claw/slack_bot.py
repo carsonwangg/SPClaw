@@ -44,6 +44,7 @@ from coatue_claw.slack_pipeline import (
 )
 from coatue_claw.slack_pipeline_intent import parse_pipeline_intent
 from coatue_claw.slack_routing import should_default_route_message
+from coatue_claw.slack_x_chart_intent import parse_x_chart_post_intent
 from coatue_claw.slack_x_intent import parse_x_digest_intent
 from coatue_claw.universe_store import (
     add_to_universe,
@@ -58,6 +59,7 @@ from coatue_claw.universe_store import (
 from coatue_claw.valuation_chart import _format_readable_date, run_valuation_chart
 from coatue_claw.x_chart_daily import XChartError, add_source as add_x_chart_source
 from coatue_claw.x_chart_daily import list_sources as list_x_chart_sources
+from coatue_claw.x_chart_daily import run_chart_for_post_url
 from coatue_claw.x_chart_daily import run_chart_scout_once
 from coatue_claw.x_chart_daily import status as x_chart_status
 from coatue_claw.x_digest import XDigestError, build_x_digest, format_x_digest_summary
@@ -801,6 +803,42 @@ def _handle_x_chart_command(*, text: str, channel: str | None, thread_ts: str, s
     return True
 
 
+def _handle_x_post_compound_command(*, text: str, channel: str | None, thread_ts: str, say) -> bool:
+    intent = parse_x_chart_post_intent(text)
+    if intent is None:
+        return False
+
+    lines: list[str] = ["Handled your X post request:"]
+
+    if intent.add_source:
+        priority = float(intent.priority or 1.0)
+        try:
+            add_result = add_x_chart_source(intent.handle, priority=priority)
+            lines.append(f"- Added `@{add_result['handle']}` to X scout sources (priority `{add_result['priority']:.2f}`).")
+        except XChartError as exc:
+            lines.append(f"- Source add failed for `@{intent.handle}`: `{exc}`")
+
+    if intent.run_chart:
+        try:
+            result = run_chart_for_post_url(post_url=intent.post_url, channel_override=channel)
+            winner = result.get("winner") or {}
+            lines.append(
+                "- Posted Coatue-style chart from linked post:\n"
+                f"  - source: `{winner.get('source')}`\n"
+                f"  - url: {winner.get('url')}"
+            )
+        except XChartError as exc:
+            lines.append(f"- Chart generation failed: `{exc}`")
+        except Exception:
+            logger.exception("Unexpected failure for compound X post command")
+            lines.append("- Chart generation failed unexpectedly. Check logs.")
+
+    if len(lines) == 1:
+        return False
+    say(text="\n".join(lines), thread_ts=thread_ts)
+    return True
+
+
 def _format_chart_summary(result) -> str:
     lines = []
     lines.append("*Valuation chart generated*")
@@ -1151,6 +1189,9 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
         return
 
     if _handle_pipeline_command(text=text, user_id=user_id, thread_ts=thread_ts, say=say):
+        return
+
+    if _handle_x_post_compound_command(text=text, channel=channel, thread_ts=thread_ts, say=say):
         return
 
     if _handle_x_chart_command(text=text, channel=channel, thread_ts=thread_ts, say=say):

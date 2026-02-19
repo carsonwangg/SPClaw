@@ -23,6 +23,7 @@ from coatue_claw.x_chart_daily import (
     _select_style_draft,
     _shorten_without_ellipsis,
     _slack_tokens,
+    run_chart_for_post_url,
     run_chart_scout_once,
 )
 
@@ -461,6 +462,48 @@ def test_extract_rebuilt_bars_via_vision_parses_json(monkeypatch) -> None:
     assert rebuilt.labels[-1] == "2026"
     assert rebuilt.values[-1] == 245
     assert rebuilt.normalized is False
+
+
+def test_run_chart_for_post_url_posts_specific_tweet(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
+    monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
+
+    payload = {
+        "data": [
+            {
+                "id": "2024543034734768600",
+                "author_id": "u1",
+                "text": "BREAKING: US ETF inflows surged +94% YoY in first six weeks of 2026.",
+                "created_at": "2026-02-19T00:00:00Z",
+                "public_metrics": {"like_count": 10, "retweet_count": 5, "reply_count": 2, "quote_count": 1},
+                "attachments": {"media_keys": ["m1"]},
+            }
+        ],
+        "includes": {
+            "users": [{"id": "u1", "username": "KobeissiLetter"}],
+            "media": [{"media_key": "m1", "type": "photo", "url": "https://example.com/chart.png"}],
+        },
+    }
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily._http_json", lambda **kwargs: payload)
+
+    captured: dict[str, object] = {}
+
+    def _fake_post(**kwargs):
+        captured["candidate_url"] = kwargs["candidate"].url
+        captured["channel"] = kwargs["channel"]
+        return {"ok": True, "channel": kwargs["channel"], "styled_artifact": str(tmp_path / "styled.png")}
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
+    result = run_chart_for_post_url(
+        post_url="https://x.com/KobeissiLetter/status/2024543034734768600",
+        channel_override="C123",
+    )
+    assert result["ok"] is True
+    assert result["posted"] is True
+    assert captured["candidate_url"] == "https://x.com/KobeissiLetter/status/2024543034734768600"
+    assert captured["channel"] == "C123"
 
 
 def test_style_draft_generates_narrative_title_and_small_label_for_etf_flow() -> None:

@@ -40,6 +40,18 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Slack bot now supports combined natural-language X-post requests:
+  - detects X post URL + “add to twitter/x source list” phrasing + “make chart” phrasing in one message
+  - executes both actions in sequence:
+    - `add_source(handle)`
+    - `run_chart_for_post_url(post_url)` with Coatue-style output
+  - prevents fallback to generic executor for this workflow
+  - new parser module: `src/coatue_claw/slack_x_chart_intent.py`
+  - new runner entrypoint: `run_chart_for_post_url` in `src/coatue_claw/x_chart_daily.py`
+  - tests added:
+    - `tests/test_slack_x_chart_intent.py`
+    - `tests/test_x_chart_daily.py::test_run_chart_for_post_url_posts_specific_tweet`
+  - validation: `PYTHONPATH=src pytest -q` => `95 passed`
 - X Chart readability hardening shipped:
   - removed top-left generated timestamp from card header
   - enforced x-axis labels on reconstructed bar charts
