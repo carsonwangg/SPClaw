@@ -188,6 +188,15 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - memory prune service: `loaded=true`, `last_exit_code=0` (idle between scheduled runs is expected)
   - `make openclaw-slack-status` probe returns `ok=true`
   - `make openclaw-email-status` confirms email channel enabled with expected allowlist senders
+- Email diligence parsing hardening validation (commit `19b2099`):
+  - local tests: `PYTHONPATH=src pytest -q tests/test_email_gateway.py` => `3 passed`
+  - Mac mini tests: `/opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_email_gateway.py` => `3 passed`
+  - Mac mini direct parser check:
+    - `parse_email_command('Testing Dilligence', 'Diligence SNOW please')`
+    - result: `EmailCommand(kind='diligence', arg='SNOW')`
+  - runtime health after deploy:
+    - `make openclaw-24x7-status`: email service loaded/running; memory-prune loaded with clean `last_exit_code=0`
+    - `make openclaw-slack-status`: probe `ok=true`
 
 ## Next Step to Validate in Slack
 Send in `#charting`:
