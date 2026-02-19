@@ -197,7 +197,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - runtime health after deploy:
     - `make openclaw-24x7-status`: email service loaded/running; memory-prune loaded with clean `last_exit_code=0`
     - `make openclaw-slack-status`: probe `ok=true`
-- Email diligence response formatting upgrade (commit pending in this session):
+- Email diligence response formatting upgrade (`c862c48` + `a58c0f8`):
   - replaced raw markdown preview dump with readable executive summary body
   - added HTML email alternative for cleaner rendering in Gmail
   - attached full memo as readable `.pdf` for consumer-facing delivery
@@ -205,6 +205,13 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - stripped long `[Source: ...]` tails from summary bullets for readability while preserving full citations in the attachment
   - escaped literal `$` values during PDF rendering to avoid matplotlib mathtext parse failures on financial figures
   - tests added for readable summary + attachment contract (`tests/test_email_gateway.py`)
+  - Mac mini validation:
+    - `/opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_email_gateway.py` => `4 passed`
+    - direct runtime check confirms:
+      - `has_local_path=False`
+      - attachment filename ends with `.pdf`
+      - attachment content type `application/pdf`
+      - attachment payload starts with `%PDF`
   - deployed on Mac mini via `0173404` and validated:
     - `tests/test_email_gateway.py` => `4 passed` on runtime host
     - direct runtime check confirms `has_source_tail=False` in diligence summary body

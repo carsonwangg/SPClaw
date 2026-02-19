@@ -90,6 +90,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - operations via `make openclaw-email-{status,run-once,serve}`
   - Mac mini validation confirms `Testing Dilligence` + `Diligence SNOW please` resolves to ticker `SNOW`
   - Mac mini validation confirms summary citation tails are removed in email body while full-citation memo remains attached
+  - Mac mini validation confirms diligence attachment is now readable PDF (`application/pdf`) and local paths are removed from user-facing email output
 - 24/7 runtime supervision is implemented:
   - launchd-managed services in `src/coatue_claw/launchd_runtime.py`
   - services: `com.coatueclaw.email-gateway` (always-on poller), `com.coatueclaw.memory-prune` (hourly prune)
