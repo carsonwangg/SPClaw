@@ -9,6 +9,7 @@ from coatue_claw.x_chart_daily import (
     Candidate,
     XChartStore,
     _build_x_title,
+    _fallback_bar_labels,
     _extract_rebuilt_bars_via_vision,
     _extract_rebuilt_bars,
     _extract_rebuilt_series,
@@ -353,7 +354,8 @@ def test_extract_rebuilt_bars_from_synthetic_bars() -> None:
     rebuilt = _extract_rebuilt_bars(image=image)
     assert rebuilt is not None
     assert len(rebuilt.values) >= 3
-    assert rebuilt.labels == []
+    assert len(rebuilt.labels) == len(rebuilt.values)
+    assert not any(label.startswith("G") for label in rebuilt.labels)
 
 
 def test_infer_bar_labels_from_text_uses_year_range() -> None:
@@ -375,6 +377,27 @@ def test_infer_bar_labels_from_text_uses_year_range() -> None:
     assert labels[0] == "2013"
     assert labels[-1] == "2026"
     assert len(labels) == 14
+
+
+def test_fallback_bar_labels_uses_created_at_year_when_no_explicit_year_range() -> None:
+    candidate = Candidate(
+        candidate_key="x:fallback-years",
+        source_type="x",
+        source_id="fiscal_AI",
+        author="@fiscal_AI",
+        title="US ETF inflows in first six weeks historically",
+        text="US ETF inflows surged to a new record.",
+        url="https://x.com/fiscal_AI/status/fallback-years",
+        image_url="https://example.com/fallback-years.png",
+        created_at="2026-02-19T00:00:00Z",
+        engagement=80,
+        source_priority=1.2,
+        score=88.0,
+    )
+    labels = _fallback_bar_labels(candidate=candidate, count=10)
+    assert labels[0] == "2017"
+    assert labels[-1] == "2026"
+    assert len(labels) == 10
 
 
 def test_extract_rebuilt_bars_via_vision_parses_json(monkeypatch) -> None:
@@ -431,6 +454,7 @@ def test_extract_rebuilt_bars_via_vision_parses_json(monkeypatch) -> None:
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr("coatue_claw.x_chart_daily.OpenAI", FakeOpenAI)
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_image_bytes", lambda url: (b"img-bytes", "image/png"))
     rebuilt = _extract_rebuilt_bars_via_vision(candidate=candidate)
     assert rebuilt is not None
     assert rebuilt.source == "vision"

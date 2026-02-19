@@ -4,6 +4,16 @@
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Current Status (2026-02-19)
+- X Chart readability pass shipped (`main`):
+  - removed generated timestamp line from top-left chart header (less clutter)
+  - bar reconstructions now always render x-axis labels (no blank x-axis)
+  - added fallback label strategy:
+    - use parsed years when available
+    - otherwise infer year range ending at post year
+    - finally fall back to `P1..Pn`
+  - added pre-save readability guardrail: if reconstructed bar chart has insufficient x-axis labels, renderer falls back to source image instead of posting an unreadable rebuild
+  - vision extractor now uses inline image bytes (data URL) to improve extraction reliability vs remote URL fetch edge cases
+  - validation: `PYTHONPATH=src pytest -q` => `91 passed`
 - X Chart-of-the-Day title and bar reconstruction pass shipped (`main`):
   - title framing now explicitly follows Coatue pattern:
     - big narrative headline (theme/takeaway)

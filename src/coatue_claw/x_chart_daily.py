@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import io
@@ -497,7 +498,36 @@ def _infer_bar_labels_from_text(*, candidate: Candidate | None, count: int) -> l
             start = max_y - count + 1
             if start >= 1900:
                 return [str(y) for y in range(start, max_y + 1)]
+    if len(years) == 1 and 4 <= count <= 20:
+        end_y = years[0]
+        start_y = end_y - count + 1
+        if start_y >= 1900:
+            return [str(y) for y in range(start_y, end_y + 1)]
     return []
+
+
+def _fallback_bar_labels(*, candidate: Candidate | None, count: int) -> list[str]:
+    labels = _infer_bar_labels_from_text(candidate=candidate, count=count)
+    if len(labels) == count:
+        return labels
+    year_hint: int | None = None
+    if candidate is not None:
+        merged = _normalize_render_text(f"{candidate.title} {candidate.text}")
+        years = sorted(_extract_years_from_text(merged))
+        if years:
+            year_hint = years[-1]
+        elif candidate.created_at:
+            try:
+                year_hint = datetime.fromisoformat(candidate.created_at.replace("Z", "+00:00")).year
+            except Exception:
+                year_hint = None
+    if year_hint is None:
+        year_hint = datetime.now(UTC).year
+    if 4 <= count <= 20:
+        start_y = year_hint - count + 1
+        if start_y >= 1900:
+            return [str(y) for y in range(start_y, year_hint + 1)]
+    return [f"P{i+1}" for i in range(count)]
 
 
 def _vision_enabled() -> bool:
@@ -516,6 +546,12 @@ def _extract_rebuilt_bars_via_vision(*, candidate: Candidate) -> RebuiltBars | N
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
         return None
+
+    payload, mime = _fetch_image_bytes(image_url)
+    if not payload:
+        return None
+    b64 = base64.b64encode(payload).decode("ascii")
+    image_data_url = f"data:{mime};base64,{b64}"
 
     try:
         client = OpenAI(api_key=api_key)
@@ -545,7 +581,7 @@ def _extract_rebuilt_bars_via_vision(*, candidate: Candidate) -> RebuiltBars | N
                     "role": "user",
                     "content": [
                         {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": image_url}},
+                        {"type": "image_url", "image_url": {"url": image_data_url}},
                     ],
                 },
             ],
@@ -584,7 +620,7 @@ def _extract_rebuilt_bars_via_vision(*, candidate: Candidate) -> RebuiltBars | N
         labels = labels[:n]
         values = values[:n]
     if not labels:
-        labels = _infer_bar_labels_from_text(candidate=candidate, count=len(values))
+        labels = _fallback_bar_labels(candidate=candidate, count=len(values))
     if len(labels) not in {0, len(values)}:
         labels = []
 
@@ -1306,14 +1342,26 @@ def _select_style_draft(candidate: Candidate, *, max_iterations: int = 3) -> Sty
     return best
 
 
+def _fetch_image_bytes(url: str | None) -> tuple[bytes | None, str]:
+    if not url:
+        return None, "image/png"
+    req = Request(url, headers={"User-Agent": "coatue-claw/1.0", "Accept": "image/*"}, method="GET")
+    try:
+        with urlopen(req, timeout=30) as resp:
+            payload = resp.read() or b""
+            ctype = str(resp.headers.get("Content-Type") or "image/png").split(";")[0].strip() or "image/png"
+    except Exception:
+        return None, "image/png"
+    if not payload:
+        return None, ctype
+    return payload, ctype
+
+
 def _safe_image_from_url(url: str | None):
     if not url:
         return None
-    req = Request(url, headers={"User-Agent": "coatue-claw/1.0"}, method="GET")
-    try:
-        with urlopen(req, timeout=30) as resp:
-            payload = resp.read()
-    except Exception:
+    payload, _ = _fetch_image_bytes(url)
+    if not payload:
         return None
 
     try:
@@ -1598,7 +1646,7 @@ def _extract_rebuilt_bars(*, image, candidate: Candidate | None = None, allow_vi
     if max_v <= 2.0:
         return None
     norm = [float((v / max_v) * 100.0) for v in values]
-    labels = _infer_bar_labels_from_text(candidate=candidate, count=len(norm))
+    labels = _fallback_bar_labels(candidate=candidate, count=len(norm))
     spread = max(norm) - min(norm)
     if spread < 8.0:
         return None
@@ -1629,8 +1677,6 @@ def _render_chart_of_day_style(
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / f"{slot_key}-styled.png"
 
-    generated_local = datetime.now(_timezone())
-    generated_line = generated_local.strftime("Generated %b %-d, %Y at %-I:%M %p %Z")
     plt.rcParams["font.family"] = COATUE_FONT_FAMILY
 
     fig = plt.figure(figsize=(15, 8.4), facecolor="#DCDDDF")
@@ -1646,12 +1692,11 @@ def _render_chart_of_day_style(
         family=COATUE_FONT_FAMILY,
         weight="medium",
     )
-    meta_obj = fig.text(0.05, 0.904, generated_line, ha="left", va="center", fontsize=9.8, color="#4A4F59")
-    fig.add_artist(Line2D([0.05, 0.95], [0.886, 0.886], transform=fig.transFigure, color="#2F3745", linewidth=1.1))
+    fig.add_artist(Line2D([0.05, 0.95], [0.892, 0.892], transform=fig.transFigure, color="#2F3745", linewidth=1.1))
     chart_label_text = _shorten_without_ellipsis(_normalize_render_text(style_draft.chart_label), max_chars=62)
     chart_label_obj = fig.text(
         0.05,
-        0.872,
+        0.876,
         chart_label_text,
         ha="left",
         va="center",
@@ -1693,11 +1738,16 @@ def _render_chart_of_day_style(
                 chart_ax.set_ylim(0.0, y_max + (0.18 * y_span))
             chart_ax.grid(axis="y", color="#D9DEE7", linewidth=0.8, alpha=0.9)
             chart_ax.tick_params(axis="both", labelsize=9, colors="#4A4F59")
-            if rebuilt_bars.labels and len(rebuilt_bars.labels) == len(rebuilt_bars.values):
+            xlabels = rebuilt_bars.labels if len(rebuilt_bars.labels) == len(rebuilt_bars.values) else []
+            if not xlabels:
+                xlabels = _fallback_bar_labels(candidate=candidate, count=len(rebuilt_bars.values))
+            if len(xlabels) == len(rebuilt_bars.values):
+                rotation = 0 if len(xlabels) <= 12 else 35
                 chart_ax.set_xticks(xs)
-                chart_ax.set_xticklabels(rebuilt_bars.labels, rotation=0, fontsize=9)
+                chart_ax.set_xticklabels(xlabels, rotation=rotation, ha=("center" if rotation == 0 else "right"), fontsize=9)
             else:
-                chart_ax.set_xticks([])
+                chart_ax.set_xticks(xs)
+                chart_ax.set_xticklabels([f"P{i+1}" for i in range(len(rebuilt_bars.values))], fontsize=9)
             if rebuilt_bars.normalized:
                 chart_ax.set_yticks([0, 20, 40, 60, 80, 100])
             chart_ax.set_ylabel(rebuilt_bars.y_label, fontsize=10, color="#4A4F59", labelpad=8)
@@ -1719,6 +1769,23 @@ def _render_chart_of_day_style(
     else:
         chart_ax.text(0.5, 0.5, "Chart image unavailable", ha="center", va="center", fontsize=16, color="#6B7280", transform=chart_ax.transAxes)
         chart_ax.add_patch(Rectangle((0.05, 0.1), 0.9, 0.8, fill=False, linewidth=1.2, linestyle=(0, (4, 3)), edgecolor="#9CA3AF", transform=chart_ax.transAxes))
+
+    # Readability guardrail: if x-axis labels are missing on reconstructed bar charts, fall back to source image.
+    if rebuilt_bars is not None:
+        tick_text = [t.get_text().strip() for t in chart_ax.get_xticklabels()]
+        non_empty = [t for t in tick_text if t]
+        if len(non_empty) < min(4, len(rebuilt_bars.values)):
+            chart_ax.clear()
+            chart_ax.set_xticks([])
+            chart_ax.set_yticks([])
+            for spine in chart_ax.spines.values():
+                spine.set_color("#E1E4EA")
+                spine.set_linewidth(1.2)
+            if image is not None:
+                chart_ax.imshow(image)
+                chart_ax.set_aspect("auto")
+            else:
+                chart_ax.text(0.5, 0.5, "Chart image unavailable", ha="center", va="center", fontsize=16, color="#6B7280", transform=chart_ax.transAxes)
 
     takeaway_text = _shorten_without_ellipsis(_normalize_render_text(style_draft.takeaway), max_chars=110)
     takeaway_lines = "\n".join(textwrap.wrap(f"Takeaway: {takeaway_text}", width=110)[:2])

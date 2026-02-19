@@ -40,6 +40,13 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- X Chart readability hardening shipped:
+  - removed top-left generated timestamp from card header
+  - enforced x-axis labels on reconstructed bar charts
+  - fallback labeling now prefers real/inferred years before generic placeholders
+  - added readability fail-safe: if reconstructed bar chart lacks sufficient labels, auto-fallback to source image to avoid unreadable output
+  - vision extraction now sends inline image bytes (data URL) for higher reliability
+  - validation: `PYTHONPATH=src pytest -q` => `91 passed`
 - X Chart-of-the-Day refinement shipped for Coatue-style framing and safer chart rebuilds:
   - synthesized two-level titles:
     - big narrative headline from tweet/chart takeaway
