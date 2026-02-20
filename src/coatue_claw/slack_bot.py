@@ -30,6 +30,7 @@ from coatue_claw.runtime_settings import (
     undo_last_settings_promotion,
     update_runtime_setting,
 )
+from coatue_claw.slack_channel_access import channels_to_join, parse_created_channel_id
 from coatue_claw.slack_config_intent import parse_config_intent
 from coatue_claw.slack_file_ingest import ingest_slack_files
 from coatue_claw.slack_pipeline import (
@@ -323,6 +324,66 @@ def _is_pipeline_admin(user_id: str | None) -> bool:
         return False
     allowed = {item.strip() for item in allowed_raw.split(",") if item.strip()}
     return user_id in allowed
+
+
+def _auto_join_channel(channel_id: str) -> tuple[bool, str]:
+    cid = str(channel_id or "").strip()
+    if not cid:
+        return False, "missing_channel_id"
+    try:
+        app.client.conversations_join(channel=cid)
+        return True, "joined"
+    except SlackApiError as exc:
+        err = ""
+        try:
+            err = str(exc.response.get("error") or "")
+        except Exception:
+            err = ""
+        if err in {"already_in_channel", "method_not_supported_for_channel_type", "is_archived"}:
+            return True, err
+        logger.warning("Failed to auto-join channel=%s error=%s", cid, err or str(exc))
+        return False, (err or "slack_api_error")
+    except Exception:
+        logger.exception("Unexpected failure auto-joining channel=%s", cid)
+        return False, "unexpected_error"
+
+
+def _bootstrap_public_channel_access() -> None:
+    enabled_raw = os.environ.get("COATUE_CLAW_SLACK_AUTOJOIN_PUBLIC_CHANNELS", "1").strip().lower()
+    enabled = enabled_raw not in {"0", "false", "no", "off"}
+    if not enabled:
+        logger.info("Slack public-channel auto-join disabled by COATUE_CLAW_SLACK_AUTOJOIN_PUBLIC_CHANNELS=%s", enabled_raw)
+        return
+
+    cursor: str | None = None
+    joined = 0
+    checked = 0
+    try:
+        while True:
+            kwargs: dict[str, object] = {
+                "types": "public_channel",
+                "exclude_archived": True,
+                "limit": 200,
+            }
+            if cursor:
+                kwargs["cursor"] = cursor
+            response = app.client.conversations_list(**kwargs)
+            channels = response.get("channels") if isinstance(response, dict) else None
+            channel_rows = channels if isinstance(channels, list) else []
+            to_join = channels_to_join(channel_rows)
+            checked += len(channel_rows)
+            for channel_id in to_join:
+                ok, _ = _auto_join_channel(channel_id)
+                if ok:
+                    joined += 1
+            meta = response.get("response_metadata") if isinstance(response, dict) else None
+            cursor = str(meta.get("next_cursor") or "").strip() if isinstance(meta, dict) else ""
+            if not cursor:
+                break
+    except Exception:
+        logger.exception("Failed during Slack public-channel auto-join bootstrap")
+        return
+    logger.info("Slack public-channel auto-join bootstrap complete checked=%s joined=%s", checked, joined)
 
 
 def _friendly_metric_label(metric_id: str) -> str:
@@ -1419,5 +1480,18 @@ def handle_mention(event, say):
     )
 
 
+@app.event("channel_created")
+def handle_channel_created(event, say):
+    channel_id = parse_created_channel_id(event if isinstance(event, dict) else {})
+    if not channel_id:
+        return
+    ok, reason = _auto_join_channel(channel_id)
+    if ok:
+        logger.info("Auto-joined new public channel=%s reason=%s", channel_id, reason)
+    else:
+        logger.warning("Could not auto-join new channel=%s reason=%s", channel_id, reason)
+
+
 if __name__ == "__main__":
+    _bootstrap_public_channel_access()
     SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"]).start()

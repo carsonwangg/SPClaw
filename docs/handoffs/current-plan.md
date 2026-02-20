@@ -40,6 +40,12 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Slack channel access hardening shipped:
+  - bot auto-joins newly created public channels (`channel_created` -> `conversations.join`)
+  - bot runs startup public-channel bootstrap to join existing public channels it is missing
+  - feature toggle: `COATUE_CLAW_SLACK_AUTOJOIN_PUBLIC_CHANNELS=1` (default on)
+  - private channels remain invite-only by Slack design
+  - tests: `tests/test_slack_channel_access.py`
 - X Chart posting target moved to `#charting`:
   - runtime env uses `COATUE_CLAW_X_CHART_SLACK_CHANNEL=C0AFXM2MWAV` (`#charting`) instead of `#general`
 - X Chart post-publish self-review loop shipped:
@@ -278,26 +284,30 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 ## Immediate Next Actions
 1. Validate Slack deploy pipeline commands in `#claw-lab` (`deploy latest`, `undo last deploy`, `run checks`, `build: ...`)
 2. Configure `SLACK_PIPELINE_ADMINS` on runtime host and validate permission boundaries
-3. Validate hybrid memory behavior in Slack:
+3. Ensure Slack app permissions for cross-channel posting are enabled:
+   - bot scopes: `channels:read`, `channels:join`, `chat:write`, `chat:write.public`
+   - bot event subscription: `channel_created`
+   - reinstall app after scope/event updates
+4. Validate hybrid memory behavior in Slack:
    - `remember ...` capture
    - `what is my ...` retrieval
    - `memory status`
    - `memory checkpoint`
-4. Confirm Google Drive desktop client is syncing `/Users/spclaw/Documents/SPClaw Database` to Spencer-shared Drive
-5. Validate category-based file flow with Spencer (`01_DROP_HERE_Incoming/{Universes|Companies|Industries}` -> local incoming mirror -> `02_READ_ONLY_Latest_AUTO/{Universes|Companies|Industries}`)
-6. Validate Slack file upload auto-ingest (`Slack upload` -> categorized `incoming/{Universes|Companies|Industries}` + DB record in `file_ingest.sqlite`)
-7. Validate launchd service persistence after next Mac mini reboot (`make openclaw-24x7-status`)
-8. Validate daily backfill flow (`claw memory extract-daily --dry-run --days 14`)
-9. Validate new diligence memo output in Slack (`diligence TICKER`) and confirm section completeness/citations + local database-first precheck behavior
-10. Configure email env vars in `/opt/coatue-claw/.env.prod` and validate `make openclaw-email-status` + `make openclaw-email-run-once`
-11. Deploy and enable `com.coatueclaw.x-chart-daily` on Mac mini with:
+5. Confirm Google Drive desktop client is syncing `/Users/spclaw/Documents/SPClaw Database` to Spencer-shared Drive
+6. Validate category-based file flow with Spencer (`01_DROP_HERE_Incoming/{Universes|Companies|Industries}` -> local incoming mirror -> `02_READ_ONLY_Latest_AUTO/{Universes|Companies|Industries}`)
+7. Validate Slack file upload auto-ingest (`Slack upload` -> categorized `incoming/{Universes|Companies|Industries}` + DB record in `file_ingest.sqlite`)
+8. Validate launchd service persistence after next Mac mini reboot (`make openclaw-24x7-status`)
+9. Validate daily backfill flow (`claw memory extract-daily --dry-run --days 14`)
+10. Validate new diligence memo output in Slack (`diligence TICKER`) and confirm section completeness/citations + local database-first precheck behavior
+11. Configure email env vars in `/opt/coatue-claw/.env.prod` and validate `make openclaw-email-status` + `make openclaw-email-run-once`
+12. Deploy and enable `com.coatueclaw.x-chart-daily` on Mac mini with:
     - `COATUE_CLAW_X_CHART_SLACK_CHANNEL`
     - `COATUE_CLAW_X_CHART_WINDOWS=09:00,12:00,18:00`
     - `COATUE_CLAW_X_CHART_TIMEZONE=America/Los_Angeles`
-12. Validate three scheduled daily posts in Slack (9am/12pm/6pm PT) and tune source priority list after first day.
-13. Pull latest on Mac mini, restart runtime, and verify `x chart now` posts a rebuilt graph-first chart (not source screenshot framing) with no-ellipsis title.
-14. Observe 1-2 days of live scheduled posts and tune reconstruction thresholds/source priorities if rebuild fallback rate is high.
-15. On Mac mini, verify `OPENAI_API_KEY` is set in `/opt/coatue-claw/.env.prod` so vision-assisted bar extraction is active for X chart rebuild quality.
+13. Validate three scheduled daily posts in Slack (9am/12pm/6pm PT) and tune source priority list after first day.
+14. Pull latest on Mac mini, restart runtime, and verify `x chart now` posts a rebuilt graph-first chart (not source screenshot framing) with no-ellipsis title.
+15. Observe 1-2 days of live scheduled posts and tune reconstruction thresholds/source priorities if rebuild fallback rate is high.
+16. On Mac mini, verify `OPENAI_API_KEY` is set in `/opt/coatue-claw/.env.prod` so vision-assisted bar extraction is active for X chart rebuild quality.
 
 ## 2026-02-19 Update - Build Request Runtime Robustness
 - Added a near-term reliability guard for Slack `build:` execution:

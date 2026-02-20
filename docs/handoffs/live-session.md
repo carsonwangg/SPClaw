@@ -4,6 +4,12 @@
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Current Status (2026-02-19)
+- Slack channel access hardening shipped for new channels:
+  - bot now auto-joins newly created public channels via `channel_created` handler + `conversations.join`
+  - bot also performs startup bootstrap over existing public channels and joins channels where it is not yet a member
+  - env flag: `COATUE_CLAW_SLACK_AUTOJOIN_PUBLIC_CHANNELS` (default `1`, set `0` to disable)
+  - private channels still require manual invite (Slack platform limitation)
+  - tests added: `tests/test_slack_channel_access.py`
 - X Chart destination channel updated to `#charting` for scheduled/manual chart posts.
   - Mac mini runtime env set: `COATUE_CLAW_X_CHART_SLACK_CHANNEL=C0AFXM2MWAV` (`#charting`)
 - X Chart post-publish checklist loop shipped:
@@ -504,30 +510,34 @@ Then confirm bot returns:
 - CSV/JSON/raw attachments
 
 ## Immediate Next Steps
-1. Run all Slack validation prompts above in `#charting`.
-2. Validate plain-English settings commands in Slack:
+1. Ensure Slack app permissions for cross-channel behavior:
+   - bot scopes: `channels:read`, `channels:join`, `chat:write`, `chat:write.public`
+   - event subscriptions: add `channel_created`
+   - reinstall app after scope/event changes
+2. Run all Slack validation prompts above in `#charting`.
+3. Validate plain-English settings commands in Slack:
    - `@Coatue Claw show my settings`
    - `@Coatue Claw going forward look for 12 peers`
    - `@Coatue Claw use market cap as the default x-axis`
    - `@Coatue Claw when you finish a chart, ask us if we want ticker changes`
-3. Validate `@Coatue Claw promote current settings` commits/pushes to `main` and reports commit hash in-thread.
-4. Validate `@Coatue Claw undo last promotion` produces a revert commit and restarts runtime.
-5. Validate Slack deploy pipeline in `#claw-lab`:
+4. Validate `@Coatue Claw promote current settings` commits/pushes to `main` and reports commit hash in-thread.
+5. Validate `@Coatue Claw undo last promotion` produces a revert commit and restarts runtime.
+6. Validate Slack deploy pipeline in `#claw-lab`:
    - `@Coatue Claw deploy latest`
    - `@Coatue Claw run checks`
    - `@Coatue Claw show pipeline status`
    - `@Coatue Claw show deploy history`
-6. Validate diligence memo output in Slack:
+7. Validate diligence memo output in Slack:
     - `@Coatue Claw diligence SNOW`
     - `@Coatue Claw dilligence MDB` (typo alias path)
     - confirm memo includes all required neutral sections plus source/timestamp attribution
     - confirm memo includes local database precheck summary and local report references when available
-7. Validate memory flows in Slack:
+8. Validate memory flows in Slack:
    - `@Coatue Claw remember my daughter's birthday is June 3rd`
    - `@Coatue Claw what is my daughter's birthday?`
    - `@Coatue Claw memory status`
    - `@Coatue Claw memory checkpoint`
-8. Configure `SLACK_PIPELINE_ADMINS` and optional `COATUE_CLAW_SLACK_BUILD_COMMAND` in runtime env for production permissions/runner control.
+9. Configure `SLACK_PIPELINE_ADMINS` and optional `COATUE_CLAW_SLACK_BUILD_COMMAND` in runtime env for production permissions/runner control.
 9. Validate 24/7 persistence after next Mac mini reboot:
    - run `make openclaw-24x7-status`
    - confirm both services auto-restart as `loaded=true` and `state=running`
