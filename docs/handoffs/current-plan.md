@@ -47,6 +47,12 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - DM recipients configured via `COATUE_CLAW_SPENCER_CHANGE_DIGEST_DM_USER_IDS`
   - runtime module: `src/coatue_claw/spencer_change_digest.py`
   - tests: `tests/test_spencer_change_log.py`, `tests/test_spencer_change_digest.py`
+  - runtime validation:
+    - Mac mini scheduler service `com.coatueclaw.spencer-change-digest` is loaded via launchd
+    - one-time forced send succeeded to configured recipient (`U0AGD28QSQG`)
+  - delivery fallback hardening:
+    - digest sender falls back across Slack token sources (env token -> OpenClaw config token)
+    - if IM scope is unavailable on `conversations.open`, sender posts to App Home DM channel (`channel=<user_id>`)
 - Spencer change-request tracker shipped:
   - captures Spencer-requested bot changes from Slack (`spcoatue` + `spencermpeter` user IDs by default; env-overridable)
   - persists requests to `/opt/coatue-claw-data/db/spencer_changes.sqlite`

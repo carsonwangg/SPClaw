@@ -22,6 +22,15 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - tests added:
     - `tests/test_spencer_change_log.py`
     - `tests/test_spencer_change_digest.py`
+  - Mac mini runtime validation:
+    - pulled latest (`5b26ea9`), restarted OpenClaw, and enabled scheduler service
+    - `make openclaw-24x7-status` confirms `com.coatueclaw.spencer-change-digest` is loaded
+    - forced send test succeeded:
+      - `/opt/coatue-claw/.venv/bin/python -m coatue_claw.spencer_change_digest run-once --force`
+      - Slack post delivered to user channel `U0AGD28QSQG` (`ts=1771557014.620259`)
+  - reliability hardening:
+    - digest sender now retries across Slack token sources (env + `~/.openclaw/openclaw.json`)
+    - if `conversations.open` lacks scope, it falls back to App Home DM posting (`channel=<user_id>`)
 - Spencer-request governance log shipped:
   - bot now auto-captures change requests from Spencer accounts (`spcoatue`/`spencermpeter` user IDs) when messages look like bot-change asks
   - each request is persisted in SQLite (`/opt/coatue-claw-data/db/spencer_changes.sqlite`) with status lifecycle:
