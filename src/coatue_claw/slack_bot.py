@@ -30,6 +30,12 @@ from coatue_claw.runtime_settings import (
     undo_last_settings_promotion,
     update_runtime_setting,
 )
+from coatue_claw.spencer_change_log import (
+    SpencerChangeLog,
+    format_changes as format_spencer_changes,
+    is_spencer_user,
+    looks_like_change_request,
+)
 from coatue_claw.slack_channel_access import channels_to_join, parse_created_channel_id
 from coatue_claw.slack_config_intent import parse_config_intent
 from coatue_claw.slack_file_ingest import ingest_slack_files
@@ -96,6 +102,7 @@ PENDING_CHART_CHOICES: dict[str, PendingChartChoice] = {}
 PENDING_CHART_FEEDBACK: dict[str, PendingChartFeedback] = {}
 PIPELINE_LOCK = threading.Lock()
 _MEMORY_RUNTIME: MemoryRuntime | None = None
+_SPENCER_CHANGE_LOG: SpencerChangeLog | None = None
 
 
 @app.use
@@ -219,6 +226,7 @@ def _format_chart_usage() -> str:
         "- memory: `memory status` or `what is my daughter's birthday?`\n"
         "- file ingest: upload a file in Slack and I'll auto-sort it into the knowledge folders\n"
         "- routing: messages default to OpenClaw unless you @ another user\n"
+        "- governance: `spencer changes`, `spencer changes open`, `spencer changes last 50`\n"
         "- default: YoY Revenue Growth is y-axis unless you specify axes"
     )
 
@@ -302,6 +310,92 @@ def _memory_runtime() -> MemoryRuntime | None:
         logger.exception("Failed to initialize memory runtime")
         _MEMORY_RUNTIME = None
     return _MEMORY_RUNTIME
+
+
+def _spencer_change_log() -> SpencerChangeLog | None:
+    global _SPENCER_CHANGE_LOG
+    if _SPENCER_CHANGE_LOG is not None:
+        return _SPENCER_CHANGE_LOG
+    try:
+        _SPENCER_CHANGE_LOG = SpencerChangeLog()
+    except Exception:
+        logger.exception("Failed to initialize spencer change log")
+        _SPENCER_CHANGE_LOG = None
+    return _SPENCER_CHANGE_LOG
+
+
+def _capture_spencer_change_request(
+    *,
+    user_id: str | None,
+    channel: str | None,
+    thread_ts: str | None,
+    message_ts: str | None,
+    text: str,
+) -> int | None:
+    if not is_spencer_user(user_id):
+        return None
+    if not looks_like_change_request(text):
+        return None
+    tracker = _spencer_change_log()
+    if tracker is None or not user_id:
+        return None
+    try:
+        return tracker.capture_request(
+            user_id=user_id,
+            channel=channel,
+            thread_ts=thread_ts,
+            message_ts=message_ts,
+            text=text,
+        )
+    except Exception:
+        logger.exception("Failed to capture spencer change request")
+        return None
+
+
+def _mark_spencer_change(change_id: int | None, *, status: str, note: str) -> None:
+    if change_id is None:
+        return
+    tracker = _spencer_change_log()
+    if tracker is None:
+        return
+    try:
+        tracker.update_status(change_id, status=status, note=note)
+    except Exception:
+        logger.exception("Failed to update spencer change status change_id=%s", change_id)
+
+
+def _handle_spencer_change_command(*, text: str, thread_ts: str, say) -> bool:
+    stripped = _strip_slack_mentions(text).strip()
+    lower = stripped.lower()
+    if not lower.startswith("spencer changes"):
+        return False
+    tracker = _spencer_change_log()
+    if tracker is None:
+        say(text="Spencer change tracker is unavailable right now.", thread_ts=thread_ts)
+        return True
+
+    status: str | None = None
+    if re.search(r"\b(open|pending)\b", lower):
+        status = "captured"
+    elif re.search(r"\b(implemented|done)\b", lower):
+        status = "implemented"
+    elif re.search(r"\b(blocked)\b", lower):
+        status = "blocked"
+
+    limit = 20
+    m = re.search(r"\blast\s+(\d{1,3})\b", lower)
+    if m:
+        try:
+            limit = max(1, min(100, int(m.group(1))))
+        except Exception:
+            limit = 20
+
+    rows = tracker.list_changes(limit=limit, status=status)
+    title = "Spencer change requests"
+    if status:
+        title = f"Spencer change requests ({status})"
+    say(text=format_spencer_changes(rows, title=title), thread_ts=thread_ts)
+    return True
 
 
 def _is_settings_admin(user_id: str | None) -> bool:
@@ -1223,6 +1317,18 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
     if not text.strip():
         return
 
+    change_id = _capture_spencer_change_request(
+        user_id=user_id,
+        channel=channel,
+        thread_ts=thread_ts,
+        message_ts=event_ts,
+        text=text,
+    )
+
+    if _handle_spencer_change_command(text=text, thread_ts=thread_ts, say=say):
+        _mark_spencer_change(change_id, status="handled", note="Reviewed via spencer changes command.")
+        return
+
     if _handle_memory_command(
         text=text,
         channel=channel,
@@ -1231,6 +1337,7 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
         thread_ts=thread_ts,
         say=say,
     ):
+        _mark_spencer_change(change_id, status="handled", note="Handled by memory workflow.")
         return
 
     memory = _memory_runtime()
@@ -1247,18 +1354,23 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
             logger.exception("Failed to ingest memory from mention")
 
     if _handle_settings_command(text=text, user_id=user_id, thread_ts=thread_ts, say=say):
+        _mark_spencer_change(change_id, status="implemented", note="Handled by settings workflow.")
         return
 
     if _handle_pipeline_command(text=text, user_id=user_id, thread_ts=thread_ts, say=say):
+        _mark_spencer_change(change_id, status="implemented", note="Handled by pipeline workflow.")
         return
 
     if _handle_x_post_compound_command(text=text, channel=channel, thread_ts=thread_ts, say=say):
+        _mark_spencer_change(change_id, status="implemented", note="Handled by X post compound workflow.")
         return
 
     if _handle_x_chart_command(text=text, channel=channel, thread_ts=thread_ts, say=say):
+        _mark_spencer_change(change_id, status="implemented", note="Handled by X chart workflow.")
         return
 
     if _handle_x_digest_command(text=text, channel=channel, thread_ts=thread_ts, say=say):
+        _mark_spencer_change(change_id, status="implemented", note="Handled by X digest workflow.")
         return
 
     try:
@@ -1266,9 +1378,11 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
     except RuntimeSettingsError as exc:
         logger.exception("Failed to load runtime settings: %s", exc)
         say(text=f"Failed to load runtime settings: {exc}", thread_ts=thread_ts)
+        _mark_spencer_change(change_id, status="blocked", note="Runtime settings failed to load.")
         return
 
     if _handle_universe_command(text, thread_ts=thread_ts, say=say):
+        _mark_spencer_change(change_id, status="implemented", note="Handled by universe workflow.")
         return
 
     pending_choice = PENDING_CHART_CHOICES.get(thread_ts)
@@ -1294,9 +1408,10 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
                         ),
                         thread_ts=thread_ts,
                     )
+                    _mark_spencer_change(change_id, status="blocked", note="Insufficient tickers from online discovery.")
                     return
                 PENDING_CHART_CHOICES.pop(thread_ts, None)
-                _run_chart_and_respond(
+                ok = _run_chart_and_respond(
                     say=say,
                     channel=channel,
                     thread_ts=thread_ts,
@@ -1307,11 +1422,17 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
                     source_label=f"online:{pending_choice.query}",
                     followup_prompt=settings.followup_prompt,
                 )
+                _mark_spencer_change(
+                    change_id,
+                    status=("implemented" if ok else "blocked"),
+                    note=("Chart rendered from online discovery." if ok else "Chart rendering failed."),
+                )
                 return
 
             use_name = selected_name or pending_choice.suggested_universe
             if not use_name:
                 say(text="Please specify which universe to use, e.g. `use universe defense`.", thread_ts=thread_ts)
+                _mark_spencer_change(change_id, status="needs_followup", note="Needs explicit universe choice.")
                 return
             universe_tickers = load_universe(use_name)
             if len(universe_tickers) < 2:
@@ -1322,9 +1443,10 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
                     ),
                     thread_ts=thread_ts,
                 )
+                _mark_spencer_change(change_id, status="blocked", note="Selected universe has too few tickers.")
                 return
             PENDING_CHART_CHOICES.pop(thread_ts, None)
-            _run_chart_and_respond(
+            ok = _run_chart_and_respond(
                 say=say,
                 channel=channel,
                 thread_ts=thread_ts,
@@ -1334,6 +1456,11 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
                 title_context=pending_choice.title_context,
                 source_label=f"universe:{use_name}",
                 followup_prompt=settings.followup_prompt,
+            )
+            _mark_spencer_change(
+                change_id,
+                status=("implemented" if ok else "blocked"),
+                note=(f"Chart rendered from universe {use_name}." if ok else "Chart rendering failed."),
             )
             return
 
@@ -1352,7 +1479,7 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
                 universe_tickers = load_universe(suggested_universe)
                 auto_tickers = _merge_unique_tickers(chart_intent.tickers, universe_tickers)
                 if len(auto_tickers) >= 2:
-                    _run_chart_and_respond(
+                    ok = _run_chart_and_respond(
                         say=say,
                         channel=channel,
                         thread_ts=thread_ts,
@@ -1363,12 +1490,17 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
                         source_label=f"universe:{suggested_universe}",
                         followup_prompt=settings.followup_prompt,
                     )
+                    _mark_spencer_change(
+                        change_id,
+                        status=("implemented" if ok else "blocked"),
+                        note=(f"Chart rendered from suggested universe {suggested_universe}." if ok else "Chart rendering failed."),
+                    )
                     return
 
             discovered = discover_online_tickers(query, limit=settings.peer_discovery_limit)
             auto_tickers = _merge_unique_tickers(chart_intent.tickers, discovered)
             if len(auto_tickers) >= 2:
-                _run_chart_and_respond(
+                ok = _run_chart_and_respond(
                     say=say,
                     channel=channel,
                     thread_ts=thread_ts,
@@ -1378,6 +1510,11 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
                     title_context=title_context,
                     source_label=f"online:{query}",
                     followup_prompt=settings.followup_prompt,
+                )
+                _mark_spencer_change(
+                    change_id,
+                    status=("implemented" if ok else "blocked"),
+                    note=("Chart rendered from online peer discovery." if ok else "Chart rendering failed."),
                 )
                 return
 
@@ -1406,9 +1543,10 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
                 ),
                 thread_ts=thread_ts,
             )
+            _mark_spencer_change(change_id, status="needs_followup", note="Awaiting ticker source selection.")
             return
 
-        _run_chart_and_respond(
+        ok = _run_chart_and_respond(
             say=say,
             channel=channel,
             thread_ts=thread_ts,
@@ -1418,6 +1556,11 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
             title_context=infer_chart_title_context(text),
             source_label="explicit_tickers",
             followup_prompt=settings.followup_prompt,
+        )
+        _mark_spencer_change(
+            change_id,
+            status=("implemented" if ok else "blocked"),
+            note=("Chart rendered from explicit tickers." if ok else "Chart rendering failed."),
         )
         return
 
@@ -1435,8 +1578,9 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
                     next_tickers.append(t)
             if len(next_tickers) < 2:
                 say(text="Need at least 2 tickers after feedback changes. Please add more tickers.", thread_ts=thread_ts)
+                _mark_spencer_change(change_id, status="needs_followup", note="Feedback removed too many tickers.")
                 return
-            _run_chart_and_respond(
+            ok = _run_chart_and_respond(
                 say=say,
                 channel=channel,
                 thread_ts=thread_ts,
@@ -1447,11 +1591,17 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
                 source_label=(pending_feedback.source_label or "feedback_update"),
                 followup_prompt=settings.followup_prompt,
             )
+            _mark_spencer_change(
+                change_id,
+                status=("implemented" if ok else "blocked"),
+                note=("Chart rerendered with feedback changes." if ok else "Chart rendering failed."),
+            )
             return
 
     ticker = _extract_diligence_ticker(text)
     if not ticker:
         say(text=_format_chart_usage(), thread_ts=thread_ts)
+        _mark_spencer_change(change_id, status="needs_followup", note="No recognizable command/ticker found.")
         return
 
     try:
@@ -1462,12 +1612,14 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
             text=f"Failed to build diligence packet for `{ticker}`. Check bot logs for details.",
             thread_ts=thread_ts,
         )
+        _mark_spencer_change(change_id, status="blocked", note=f"Diligence failed for ticker {ticker}.")
         return
 
     say(
         text=f"Diligence packet created for *{ticker}*: `{out}`",
         thread_ts=thread_ts,
     )
+    _mark_spencer_change(change_id, status="implemented", note=f"Diligence generated for ticker {ticker}.")
 
 
 @app.event("app_mention")

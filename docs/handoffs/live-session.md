@@ -4,6 +4,17 @@
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Current Status (2026-02-19)
+- Spencer-request governance log shipped:
+  - bot now auto-captures change requests from Spencer accounts (`spcoatue`/`spencermpeter` user IDs) when messages look like bot-change asks
+  - each request is persisted in SQLite (`/opt/coatue-claw-data/db/spencer_changes.sqlite`) with status lifecycle:
+    - `captured`, `handled`, `implemented`, `blocked`, `needs_followup`
+  - request status is auto-updated inline as bot workflows execute (settings/pipeline/chart/x digest/universe/diligence paths)
+  - new Slack review commands:
+    - `spencer changes`
+    - `spencer changes open`
+    - `spencer changes last 50`
+  - env override for tracked Spencer IDs: `COATUE_CLAW_SPENCER_USER_IDS`
+  - tests added: `tests/test_spencer_change_log.py`
 - Slack channel access hardening shipped for new channels:
   - bot now auto-joins newly created public channels via `channel_created` handler + `conversations.join`
   - bot also performs startup bootstrap over existing public channels and joins channels where it is not yet a member

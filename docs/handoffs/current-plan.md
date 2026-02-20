@@ -40,6 +40,16 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Spencer change-request tracker shipped:
+  - captures Spencer-requested bot changes from Slack (`spcoatue` + `spencermpeter` user IDs by default; env-overridable)
+  - persists requests to `/opt/coatue-claw-data/db/spencer_changes.sqlite`
+  - auto-updates request status through execution path (`captured`, `handled`, `implemented`, `blocked`, `needs_followup`)
+  - Slack retrieval commands:
+    - `spencer changes`
+    - `spencer changes open`
+    - `spencer changes last 50`
+  - module: `src/coatue_claw/spencer_change_log.py`
+  - tests: `tests/test_spencer_change_log.py`
 - Slack channel access hardening shipped:
   - bot auto-joins newly created public channels (`channel_created` -> `conversations.join`)
   - bot runs startup public-channel bootstrap to join existing public channels it is missing
