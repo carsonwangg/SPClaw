@@ -253,7 +253,6 @@ def test_style_draft_prefers_simple_feed_like_copy() -> None:
 
 
 def test_post_winner_uploads_file_in_initial_message(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_REQUIRE_REBUILD", "0")
     candidate = Candidate(
         candidate_key="x:88",
         source_type="x",
@@ -289,7 +288,7 @@ def test_post_winner_uploads_file_in_initial_message(monkeypatch, tmp_path: Path
     monkeypatch.setitem(sys.modules, "slack_sdk", types.SimpleNamespace(WebClient=FakeWebClient))
     monkeypatch.setitem(sys.modules, "slack_sdk.errors", types.SimpleNamespace(SlackApiError=FakeSlackApiError))
     monkeypatch.setattr("coatue_claw.x_chart_daily._slack_tokens", lambda: ["xoxb-test"])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._render_chart_of_day_style", lambda **kwargs: styled)
+    monkeypatch.setattr("coatue_claw.x_chart_daily._write_source_chart_image", lambda **kwargs: styled)
 
     result = _post_winner_to_slack(candidate=candidate, channel="C123", slot_key="manual-1", windows_text="09:00,12:00,18:00")
     assert result["ok"] is True
@@ -754,7 +753,7 @@ def test_run_chart_for_post_url_uses_vxtwitter_fallback(monkeypatch, tmp_path: P
     assert captured["source_id"] == "oguzerkan"
 
 
-def test_post_winner_rejects_when_rebuild_required_but_unavailable(monkeypatch) -> None:
+def test_post_winner_does_not_require_rebuild(monkeypatch, tmp_path: Path) -> None:
     candidate = Candidate(
         candidate_key="x:no-rebuild",
         source_type="x",
@@ -769,13 +768,33 @@ def test_post_winner_rejects_when_rebuild_required_but_unavailable(monkeypatch) 
         source_priority=1.0,
         score=50.0,
     )
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_REQUIRE_REBUILD", "1")
-    monkeypatch.setattr("coatue_claw.x_chart_daily._slack_tokens", lambda: ["xoxb-test"])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._has_reconstructable_chart_data", lambda c: False)
-    import pytest
 
-    with pytest.raises(XChartError):
-        _post_winner_to_slack(candidate=candidate, channel="C123", slot_key="manual-2", windows_text="09:00,12:00,18:00")
+    source_path = tmp_path / "source.png"
+    source_path.write_bytes(b"chart")
+    upload_calls: list[dict[str, object]] = []
+
+    class FakeWebClient:
+        def __init__(self, token: str) -> None:
+            self.token = token
+
+        def files_upload_v2(self, **kwargs):
+            upload_calls.append(kwargs)
+            return {"ok": True, "file": {"id": "F111"}}
+
+    class FakeSlackApiError(Exception):
+        def __init__(self, error: str) -> None:
+            self.response = {"error": error}
+            super().__init__(error)
+
+    monkeypatch.setitem(sys.modules, "slack_sdk", types.SimpleNamespace(WebClient=FakeWebClient))
+    monkeypatch.setitem(sys.modules, "slack_sdk.errors", types.SimpleNamespace(SlackApiError=FakeSlackApiError))
+    monkeypatch.setattr("coatue_claw.x_chart_daily._slack_tokens", lambda: ["xoxb-test"])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._write_source_chart_image", lambda **kwargs: source_path)
+
+    result = _post_winner_to_slack(candidate=candidate, channel="C123", slot_key="manual-2", windows_text="09:00,12:00,18:00")
+    assert result["ok"] is True
+    assert result["file_id"] == "F111"
+    assert len(upload_calls) == 1
 
 
 def test_render_chart_rejects_screenshot_fallback_even_if_env_disabled(monkeypatch, tmp_path: Path) -> None:

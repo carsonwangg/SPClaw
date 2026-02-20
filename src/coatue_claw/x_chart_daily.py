@@ -16,7 +16,7 @@ import textwrap
 from typing import Any
 import unicodedata
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
@@ -2066,6 +2066,36 @@ def _fetch_image_bytes(url: str | None) -> tuple[bytes | None, str]:
     return payload, ctype
 
 
+def _guess_image_extension(*, image_url: str | None, content_type: str) -> str:
+    ctype = (content_type or "").strip().lower()
+    if ctype in {"image/jpeg", "image/jpg"}:
+        return ".jpg"
+    if ctype == "image/png":
+        return ".png"
+    if ctype == "image/webp":
+        return ".webp"
+    if image_url:
+        path = urlparse(image_url).path or ""
+        suffix = Path(path).suffix.lower()
+        if suffix in {".jpg", ".jpeg"}:
+            return ".jpg"
+        if suffix in {".png", ".webp"}:
+            return suffix
+    return ".png"
+
+
+def _write_source_chart_image(*, candidate: Candidate, slot_key: str) -> Path:
+    payload, ctype = _fetch_image_bytes(candidate.image_url)
+    if not payload:
+        raise XChartError("No chart image found for this X post.")
+    output_dir = _output_dir()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    suffix = _guess_image_extension(image_url=candidate.image_url, content_type=ctype)
+    out_path = output_dir / f"{slot_key}-source{suffix}"
+    out_path.write_bytes(payload)
+    return out_path
+
+
 def _safe_image_from_url(url: str | None):
     if not url:
         return None
@@ -2642,39 +2672,35 @@ def _post_winner_to_slack(
 ) -> dict[str, Any]:
     tokens = _slack_tokens()
     style_draft = style_draft or _select_style_draft(candidate)
-    if _require_reconstruction() and (not _has_reconstructable_chart_data(candidate)):
-        raise XChartError("Skipped post because chart reconstruction was not reliable for this source image.")
     from slack_sdk import WebClient
     from slack_sdk.errors import SlackApiError
 
     takeaways = _build_takeaways(candidate)
-    render_qa: dict[str, Any] = {}
-    styled_path = _render_chart_of_day_style(
-        candidate=candidate,
-        slot_key=slot_key,
-        windows_text=windows_text,
-        style_draft=style_draft,
-        qa_sink=render_qa,
-    )
-    review = _post_publish_checklist(
-        candidate=candidate,
-        style_draft=style_draft,
-        styled_path=styled_path,
-        render_qa=render_qa,
-    )
+    source_path = _write_source_chart_image(candidate=candidate, slot_key=slot_key)
+    file_size = source_path.stat().st_size if source_path.exists() else 0
+    review = {
+        "passed": file_size > 0,
+        "failed": ([] if file_size > 0 else ["source_image_missing"]),
+        "checks": {
+            "source_image_available": file_size > 0,
+            "artifact_nonempty": file_size > 0,
+            "render_mode_source_snip": True,
+        },
+        "style_score": float(style_draft.score),
+        "style_iteration": int(style_draft.iteration),
+        "render_qa": {"render_mode": "source-snip"},
+        "artifact_path": str(source_path),
+        "artifact_size_bytes": int(file_size),
+    }
     clean_author = _normalize_render_text(candidate.author)
     clean_takeaway = _shorten_without_ellipsis(_normalize_render_text(takeaways[0]), max_chars=68)
-    style_pass = style_draft.score >= 6.0 and style_draft.checks.get("us_relevant", False)
     text_lines = [
         "*Coatue Chart of the Day*",
-        f"- Slot: `{slot_key}` ({windows_text})",
         f"- Source: `{clean_author}`",
-        f"- Score: `{candidate.score:.1f}`",
-        f"- Style fit: `{'pass' if style_pass else 'iterate'} {int(style_draft.score)}/7`",
         f"- Trend: {style_draft.headline}",
-        f"- Chart label: {style_draft.chart_label}",
         f"- Takeaway: {clean_takeaway}",
         f"- Link: {candidate.url}",
+        f"- Render: `source-snip`",
     ]
     last_error: str | None = None
     for token in tokens:
@@ -2682,7 +2708,7 @@ def _post_winner_to_slack(
         try:
             response = client.files_upload_v2(
                 channel=channel,
-                file=str(styled_path),
+                file=str(source_path),
                 title="Coatue Chart of the Day",
                 initial_comment="\n".join(text_lines),
             )
@@ -2702,7 +2728,8 @@ def _post_winner_to_slack(
                 "ts": None,
                 "channel": channel,
                 "file_id": file_id,
-                "styled_artifact": str(styled_path),
+                "source_artifact": str(source_path),
+                "styled_artifact": str(source_path),
                 "style_audit": {
                     "iteration": style_draft.iteration,
                     "score": style_draft.score,
@@ -2883,14 +2910,6 @@ def run_chart_for_post_url(
             winner = _fetch_vxtwitter_post_candidate(handle=handle, tweet_id=tweet_id)
             if winner is None:
                 raise XChartError("No chart candidate found in that X post (missing image or inaccessible tweet).")
-
-    # URL-specific path must reconstruct numeric data; do not post screenshot fallback.
-    image = _safe_image_from_url(winner.image_url)
-    vision_bars = _extract_rebuilt_bars_via_vision(candidate=winner)
-    cv_bars = _extract_rebuilt_bars(image=image, candidate=winner, allow_vision=False) if vision_bars is None else None
-    rebuilt = _extract_rebuilt_series(candidate=winner, image=image) if (vision_bars is None and cv_bars is None) else []
-    if vision_bars is None and cv_bars is None and not rebuilt:
-        raise XChartError("I couldn't reliably extract numeric values from that chart yet. Try another post image.")
 
     style_draft = _select_style_draft(winner)
     channel = (channel_override or "").strip() or _slack_channel()

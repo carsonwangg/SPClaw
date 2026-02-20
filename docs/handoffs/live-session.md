@@ -4,6 +4,12 @@
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Current Status (2026-02-19)
+- X chart rendering reverted to source-snip mode (latest):
+  - Slack chart posts now upload the raw chart image from the X post directly
+  - Coatue-style redraw/reconstruction is bypassed in posting flow
+  - URL-triggered chart runs (`run-post-url`) no longer fail on numeric reconstruction checks
+  - if no source image is available, bot returns explicit Slack error
+  - updated tests cover source-snip posting path and no-rebuild requirement
 - Spencer change-review + daily digest shipped:
   - Spencer requests are auto-captured from Slack (tracked user IDs: `spcoatue` + `spencermpeter` by default)
   - persisted DB: `/opt/coatue-claw-data/db/spencer_changes.sqlite`

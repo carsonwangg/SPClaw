@@ -40,7 +40,7 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
   - Hourly memory prune via `launchd` (`com.coatueclaw.memory-prune`)
   - Chart scout posting via `launchd` (`com.coatueclaw.x-chart-daily`) at local times from `COATUE_CLAW_X_CHART_WINDOWS` (default `09:00,12:00,18:00`)
   - Daily Spencer change-request digest DM via `launchd` (`com.coatueclaw.spencer-change-digest`) at `COATUE_CLAW_SPENCER_CHANGE_DIGEST_TIME` (default `18:00`)
-  - Chart scout posts include a rendered Coatue-style “Chart of the Day” image card (header, divider, summary rail, backdrop context, source footer)
+  - Chart scout posts upload the source chart image snip from the selected X post (no redraw/reconstruction step)
 
 Diligence output contract:
 - `claw diligence TICKER` generates a neutral, evidence-first 8-section investment memo with source/timestamp attribution.

@@ -86,5 +86,5 @@ Detailed runbook for humans and Codex:
 ## Slack X-URL Chart Rule
 - For Slack requests that include an X/Twitter status URL and ask for chart-of-the-day output, use the deterministic CLI path:
   - `/opt/coatue-claw/.venv/bin/python -m coatue_claw.x_chart_daily run-post-url "<x-url>" [--channel "<channel-id>"]`
-- Do not post tweet screenshots as final chart artifacts.
-- Treat reconstruction failures as hard errors and return the explicit error to Slack.
+- Final chart artifact should be the source chart image snip from the X post (no Coatue-style redraw/reconstruction required).
+- If source image is unavailable, return the explicit error to Slack.
