@@ -2948,6 +2948,7 @@ def status() -> dict[str, Any]:
     store = XChartStore()
     return {
         "ok": True,
+        "render_mode": "source-snip",
         "db_path": str(store.db_path),
         "timezone": os.environ.get("COATUE_CLAW_X_CHART_TIMEZONE", DEFAULT_TIMEZONE),
         "windows": ",".join(f"{h:02d}:{m:02d}" for h, m in _parse_windows()),

@@ -880,6 +880,7 @@ def _handle_x_chart_command(*, text: str, channel: str | None, thread_ts: str, s
         recent = s.get("recent_posts") or []
         lines = [
             "X chart scout status:",
+            f"- render_mode: `{s.get('render_mode')}`",
             f"- timezone: `{s.get('timezone')}`",
             f"- windows: `{s.get('windows')}`",
             f"- slack_channel: `{s.get('slack_channel')}`",

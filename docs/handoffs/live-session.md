@@ -13,6 +13,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `Title` (narrative headline)
     - `Chart label` (what the chart shows)
     - `Key takeaway` (concise readout)
+  - `x chart status` now shows `render_mode: source-snip` for runtime verification
   - updated tests cover source-snip posting path and no-rebuild requirement
 - Spencer change-review + daily digest shipped:
   - Spencer requests are auto-captured from Slack (tracked user IDs: `spcoatue` + `spencermpeter` by default)

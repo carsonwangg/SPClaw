@@ -48,6 +48,8 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
     - narrative `Title`
     - technical `Chart label`
     - concise `Key takeaway`
+  - runtime verification aid:
+    - `x chart status` now returns `render_mode: source-snip`
   - modules touched: `src/coatue_claw/x_chart_daily.py`
   - tests updated: `tests/test_x_chart_daily.py`
 - Spencer-request governance is now end-to-end:
