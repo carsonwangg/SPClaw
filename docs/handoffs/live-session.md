@@ -21,6 +21,9 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - rewrites generic/opening phrases (for example “It’s official…”) into concise trend language
     - applies keyword override for tariff/customs charts
     - trims trailing stopwords to avoid broken headline endings
+  - added chart-image hint fallback for low-signal tweet copy:
+    - reads chart title cue from image (vision) to synthesize concise headline
+    - prevents broken fragments like “It’s official: In ...”
   - `x chart status` now shows `render_mode: source-snip` for runtime verification
   - updated tests cover source-snip posting path and no-rebuild requirement
 - Spencer change-review + daily digest shipped:

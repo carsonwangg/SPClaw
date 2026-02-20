@@ -1127,6 +1127,55 @@ def _keyword_style_override(candidate: Candidate) -> tuple[str, str, str] | None
     return None
 
 
+def _extract_chart_title_hint_via_vision(candidate: Candidate) -> str | None:
+    if OpenAI is None:
+        return None
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    image_url = (candidate.image_url or "").strip()
+    if not api_key or not image_url:
+        return None
+    payload, mime = _fetch_image_bytes(image_url)
+    if not payload:
+        return None
+    try:
+        client = OpenAI(api_key=api_key)
+        model = os.environ.get("COATUE_CLAW_X_CHART_TITLE_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+        b64 = base64.b64encode(payload).decode("ascii")
+        data_url = f"data:{mime};base64,{b64}"
+        response = client.chat.completions.create(
+            model=model,
+            temperature=0,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": "You extract concise chart text cues."},
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "Read this chart image and return strict JSON: "
+                                '{"chart_title":"...", "metric_label":"..."} '
+                                "Use visible chart title and metric label only."
+                            ),
+                        },
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ],
+                },
+            ],
+        )
+        raw = ""
+        if response.choices and response.choices[0].message:
+            raw = str(response.choices[0].message.content or "").strip()
+        if not raw:
+            return None
+        parsed = json.loads(raw)
+    except Exception:
+        return None
+    hint = _shorten_without_ellipsis(str(parsed.get("chart_title") or ""), max_chars=80)
+    return hint or None
+
+
 def _sanitize_style_copy(*, candidate: Candidate, headline: str, chart_label: str, takeaway: str) -> tuple[str, str, str]:
     override = _keyword_style_override(candidate)
     if override is not None:
@@ -1137,9 +1186,19 @@ def _sanitize_style_copy(*, candidate: Candidate, headline: str, chart_label: st
     takeaway = _trim_trailing_stopwords(_shorten_without_ellipsis(takeaway, max_chars=62))
 
     if _is_low_signal_phrase(headline):
-        subject = _shorten_without_ellipsis(_strip_news_prefix(_normalize_render_text(candidate.title or candidate.text)), max_chars=36)
-        if "tariff" in subject.lower():
+        chart_hint = _extract_chart_title_hint_via_vision(candidate)
+        source_text = _normalize_render_text(candidate.text or candidate.title)
+        source_text = re.sub(r"^@\w+:\s*", "", _strip_news_prefix(source_text), flags=re.IGNORECASE).strip()
+        subject = _shorten_without_ellipsis(source_text, max_chars=36)
+        merged_hint = _normalize_render_text(f"{chart_hint or ''} {source_text}").lower()
+        if "tariff" in merged_hint or "customs" in merged_hint or "duties" in merged_hint:
             headline = "US tariff receipts are surging"
+            if _is_low_signal_phrase(chart_label):
+                chart_label = "Monthly US customs duties (US$B)"
+            if _is_low_signal_phrase(takeaway):
+                takeaway = "US customs-duty collections just hit a new high."
+        elif chart_hint:
+            headline = _shorten_without_ellipsis(_strip_news_prefix(chart_hint), max_chars=48)
         else:
             headline = _shorten_without_ellipsis(f"{subject} trend is accelerating", max_chars=48) if subject else "US trend is inflecting"
         headline = _trim_trailing_stopwords(headline)
