@@ -52,7 +52,7 @@ def test_run_once_sends_and_dedupes(tmp_path: Path, monkeypatch) -> None:
             return {"ok": True, "ts": "123.456"}
 
     monkeypatch.setattr("coatue_claw.spencer_change_digest.WebClient", FakeClient)
-    monkeypatch.setattr("coatue_claw.spencer_change_digest._resolve_bot_token", lambda: "xoxb-test")
+    monkeypatch.setattr("coatue_claw.spencer_change_digest._slack_tokens", lambda: ["xoxb-test"])
 
     first = run_once()
     second = run_once()

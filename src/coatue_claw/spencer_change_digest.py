@@ -12,8 +12,10 @@ from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 try:
     from slack_sdk import WebClient
+    from slack_sdk.errors import SlackApiError
 except Exception:  # pragma: no cover - optional dependency for non-Slack test envs
     WebClient = None  # type: ignore[assignment]
+    SlackApiError = Exception  # type: ignore[assignment]
 
 from coatue_claw.spencer_change_log import SpencerChange, SpencerChangeLog
 
@@ -40,20 +42,30 @@ def _today_key() -> str:
     return datetime.now(_timezone()).strftime("%Y-%m-%d")
 
 
-def _resolve_bot_token() -> str:
+def _slack_tokens() -> list[str]:
+    tokens: list[str] = []
     token = os.environ.get("SLACK_BOT_TOKEN", "").strip()
     if token:
-        return token
+        tokens.append(token)
     config_path = Path.home() / ".openclaw/openclaw.json"
     if config_path.exists():
         try:
             payload = json.loads(config_path.read_text(encoding="utf-8"))
             candidate = str(payload.get("channels", {}).get("slack", {}).get("botToken", "")).strip()
             if candidate:
-                return candidate
+                tokens.append(candidate)
         except Exception:
             pass
-    raise RuntimeError("Slack bot token missing (SLACK_BOT_TOKEN or ~/.openclaw/openclaw.json).")
+    unique: list[str] = []
+    seen: set[str] = set()
+    for item in tokens:
+        if item in seen:
+            continue
+        seen.add(item)
+        unique.append(item)
+    if not unique:
+        raise RuntimeError("Slack bot token missing (SLACK_BOT_TOKEN or ~/.openclaw/openclaw.json).")
+    return unique
 
 
 def _dm_user_ids() -> list[str]:
@@ -153,20 +165,37 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
 
     if WebClient is None:
         raise RuntimeError("slack_sdk is not installed in this environment.")
-    client = WebClient(token=_resolve_bot_token())
+    clients = [WebClient(token=item) for item in _slack_tokens()]
     db_path = tracker.db_path
     for user_id in recipients:
         if (not force) and _already_sent_today(db_path=db_path, digest_date=digest_date, recipient_user_id=user_id):
             result["skipped"].append({"user_id": user_id, "reason": "already_sent_today"})
             continue
-        dm = client.conversations_open(users=user_id)
-        channel_id = str((dm.get("channel") or {}).get("id") or "")
-        if not channel_id:
-            result["skipped"].append({"user_id": user_id, "reason": "dm_open_failed"})
-            continue
-        post = client.chat_postMessage(channel=channel_id, text=message)
-        _mark_sent(db_path=db_path, digest_date=digest_date, recipient_user_id=user_id, open_count=len(open_changes))
-        result["sent"].append({"user_id": user_id, "channel": channel_id, "ts": post.get("ts")})
+        sent = False
+        last_error = "unknown"
+        for client in clients:
+            try:
+                dm = client.conversations_open(users=user_id)
+                channel_id = str((dm.get("channel") or {}).get("id") or "")
+                if not channel_id:
+                    last_error = "dm_open_failed"
+                    continue
+                post = client.chat_postMessage(channel=channel_id, text=message)
+                _mark_sent(db_path=db_path, digest_date=digest_date, recipient_user_id=user_id, open_count=len(open_changes))
+                result["sent"].append({"user_id": user_id, "channel": channel_id, "ts": post.get("ts")})
+                sent = True
+                break
+            except SlackApiError as exc:
+                err = str(exc.response.get("error") or "")
+                last_error = err or "slack_api_error"
+                if err in {"account_inactive", "invalid_auth", "token_revoked", "not_authed"}:
+                    continue
+                break
+            except Exception:
+                last_error = "unexpected_error"
+                break
+        if not sent:
+            result["skipped"].append({"user_id": user_id, "reason": last_error})
     return result
 
 
