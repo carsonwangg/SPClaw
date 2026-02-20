@@ -289,6 +289,7 @@ def test_post_winner_uploads_file_in_initial_message(monkeypatch, tmp_path: Path
     monkeypatch.setitem(sys.modules, "slack_sdk.errors", types.SimpleNamespace(SlackApiError=FakeSlackApiError))
     monkeypatch.setattr("coatue_claw.x_chart_daily._slack_tokens", lambda: ["xoxb-test"])
     monkeypatch.setattr("coatue_claw.x_chart_daily._write_source_chart_image", lambda **kwargs: styled)
+    monkeypatch.setattr("coatue_claw.x_chart_daily._render_source_snip_card", lambda **kwargs: styled)
 
     result = _post_winner_to_slack(candidate=candidate, channel="C123", slot_key="manual-1", windows_text="09:00,12:00,18:00")
     assert result["ok"] is True
@@ -790,6 +791,7 @@ def test_post_winner_does_not_require_rebuild(monkeypatch, tmp_path: Path) -> No
     monkeypatch.setitem(sys.modules, "slack_sdk.errors", types.SimpleNamespace(SlackApiError=FakeSlackApiError))
     monkeypatch.setattr("coatue_claw.x_chart_daily._slack_tokens", lambda: ["xoxb-test"])
     monkeypatch.setattr("coatue_claw.x_chart_daily._write_source_chart_image", lambda **kwargs: source_path)
+    monkeypatch.setattr("coatue_claw.x_chart_daily._render_source_snip_card", lambda **kwargs: source_path)
 
     result = _post_winner_to_slack(candidate=candidate, channel="C123", slot_key="manual-2", windows_text="09:00,12:00,18:00")
     assert result["ok"] is True

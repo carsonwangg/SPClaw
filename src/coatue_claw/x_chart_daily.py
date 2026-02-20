@@ -2096,6 +2096,84 @@ def _write_source_chart_image(*, candidate: Candidate, slot_key: str) -> Path:
     return out_path
 
 
+def _render_source_snip_card(*, candidate: Candidate, slot_key: str, style_draft: StyleDraft, source_path: Path) -> Path:
+    try:
+        import matplotlib.image as mpimg
+        import matplotlib.pyplot as plt
+        from matplotlib.lines import Line2D
+    except Exception as exc:
+        raise XChartError("Chart card renderer unavailable (matplotlib missing).") from exc
+    from coatue_claw.valuation_chart import COATUE_FONT_FAMILY
+
+    if not source_path.exists():
+        raise XChartError("Source chart image is missing for card render.")
+    image = mpimg.imread(str(source_path))
+    output_dir = _output_dir()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out_path = output_dir / f"{slot_key}-source-card.png"
+
+    plt.rcParams["font.family"] = COATUE_FONT_FAMILY
+    fig = plt.figure(figsize=(15, 8.4), facecolor="#DCDDDF")
+
+    headline_text = _shorten_without_ellipsis(_normalize_render_text(style_draft.headline), max_chars=56)
+    chart_label_text = _shorten_without_ellipsis(_normalize_render_text(style_draft.chart_label), max_chars=62)
+    takeaway_text = _shorten_without_ellipsis(_normalize_render_text(style_draft.takeaway), max_chars=68)
+
+    fig.text(
+        0.05,
+        0.935,
+        headline_text,
+        ha="left",
+        va="center",
+        fontsize=28,
+        color="#1F2430",
+        family=COATUE_FONT_FAMILY,
+        weight="medium",
+    )
+    fig.add_artist(Line2D([0.05, 0.95], [0.892, 0.892], transform=fig.transFigure, color="#2F3745", linewidth=1.1))
+    fig.text(
+        0.05,
+        0.875,
+        chart_label_text,
+        ha="left",
+        va="center",
+        fontsize=11.2,
+        color="#2F3745",
+        family=COATUE_FONT_FAMILY,
+    )
+
+    chart_ax = fig.add_axes([0.05, 0.19, 0.90, 0.68], facecolor="#F4F5F6")
+    chart_ax.imshow(image)
+    chart_ax.set_xticks([])
+    chart_ax.set_yticks([])
+    for spine in chart_ax.spines.values():
+        spine.set_color("#E1E4EA")
+        spine.set_linewidth(1.2)
+
+    fig.text(
+        0.05,
+        0.115,
+        f"Takeaway: {takeaway_text}",
+        fontsize=10.8,
+        color="#1F2430",
+        family=COATUE_FONT_FAMILY,
+        weight="bold",
+        va="top",
+    )
+    fig.text(
+        0.05,
+        0.045,
+        f"Source: {candidate.url}",
+        fontsize=9.2,
+        color="#4B5563",
+        family=COATUE_FONT_FAMILY,
+    )
+
+    fig.savefig(out_path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+    return out_path
+
+
 def _safe_image_from_url(url: str | None):
     if not url:
         return None
@@ -2677,19 +2755,33 @@ def _post_winner_to_slack(
 
     takeaways = _build_takeaways(candidate)
     source_path = _write_source_chart_image(candidate=candidate, slot_key=slot_key)
-    file_size = source_path.stat().st_size if source_path.exists() else 0
+    artifact_path = source_path
+    render_mode = "source-snip"
+    try:
+        artifact_path = _render_source_snip_card(
+            candidate=candidate,
+            slot_key=slot_key,
+            style_draft=style_draft,
+            source_path=source_path,
+        )
+        render_mode = "source-snip-card"
+    except Exception as exc:
+        logger.warning("source snip card render failed, falling back to raw snip: %s", exc)
+        artifact_path = source_path
+        render_mode = "source-snip"
+    file_size = artifact_path.stat().st_size if artifact_path.exists() else 0
     review = {
         "passed": file_size > 0,
         "failed": ([] if file_size > 0 else ["source_image_missing"]),
         "checks": {
             "source_image_available": file_size > 0,
             "artifact_nonempty": file_size > 0,
-            "render_mode_source_snip": True,
+            "render_mode_source_snip": render_mode in {"source-snip", "source-snip-card"},
         },
         "style_score": float(style_draft.score),
         "style_iteration": int(style_draft.iteration),
-        "render_qa": {"render_mode": "source-snip"},
-        "artifact_path": str(source_path),
+        "render_qa": {"render_mode": render_mode},
+        "artifact_path": str(artifact_path),
         "artifact_size_bytes": int(file_size),
     }
     clean_author = _normalize_render_text(candidate.author)
@@ -2701,7 +2793,7 @@ def _post_winner_to_slack(
         f"- Chart label: {style_draft.chart_label}",
         f"- Key takeaway: {clean_takeaway}",
         f"- Link: {candidate.url}",
-        f"- Render: `source-snip`",
+        f"- Render: `{render_mode}`",
     ]
     last_error: str | None = None
     for token in tokens:
@@ -2709,7 +2801,7 @@ def _post_winner_to_slack(
         try:
             response = client.files_upload_v2(
                 channel=channel,
-                file=str(source_path),
+                file=str(artifact_path),
                 title="Coatue Chart of the Day",
                 initial_comment="\n".join(text_lines),
             )
@@ -2730,7 +2822,7 @@ def _post_winner_to_slack(
                 "channel": channel,
                 "file_id": file_id,
                 "source_artifact": str(source_path),
-                "styled_artifact": str(source_path),
+                "styled_artifact": str(artifact_path),
                 "style_audit": {
                     "iteration": style_draft.iteration,
                     "score": style_draft.score,
@@ -2948,7 +3040,7 @@ def status() -> dict[str, Any]:
     store = XChartStore()
     return {
         "ok": True,
-        "render_mode": "source-snip",
+        "render_mode": "source-snip-card",
         "db_path": str(store.db_path),
         "timezone": os.environ.get("COATUE_CLAW_X_CHART_TIMEZONE", DEFAULT_TIMEZONE),
         "windows": ",".join(f"{h:02d}:{m:02d}" for h, m in _parse_windows()),

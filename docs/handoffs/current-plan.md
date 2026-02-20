@@ -41,7 +41,9 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 
 ## Current Status
 - X chart posting mode reverted to source-snip:
-  - Slack chart output now uses the source X image directly (no Coatue-style reconstruction/redraw)
+  - Slack chart output now uses source-snip-card mode:
+    - source X chart image embedded in Coatue-branded output card
+    - no numeric reconstruction/redraw
   - URL chart requests (`run-post-url`) no longer enforce numeric reconstruction prechecks
   - explicit error is returned only when source image cannot be fetched
   - Slack copy retains title discipline:

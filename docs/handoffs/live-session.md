@@ -5,8 +5,9 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Current Status (2026-02-19)
 - X chart rendering reverted to source-snip mode (latest):
-  - Slack chart posts now upload the raw chart image from the X post directly
-  - Coatue-style redraw/reconstruction is bypassed in posting flow
+  - Slack chart posts now use source-snip-card mode:
+    - raw X chart image is embedded as-is inside a Coatue header/footer card
+    - no numeric reconstruction or chart redraw
   - URL-triggered chart runs (`run-post-url`) no longer fail on numeric reconstruction checks
   - if no source image is available, bot returns explicit Slack error
   - retained title quality instructions in Slack output:
