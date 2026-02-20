@@ -81,3 +81,43 @@ def test_status_reports_recent_runs(tmp_path: Path, monkeypatch) -> None:
     assert payload["ok"] is True
     assert payload["recipients"] == ["U_CARSON"]
     assert "recent_runs" in payload
+
+
+def test_missing_scope_falls_back_to_user_channel_post(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "spencer_changes.sqlite"
+    monkeypatch.setenv("COATUE_CLAW_SPENCER_CHANGE_DB_PATH", str(db_path))
+    monkeypatch.setenv("COATUE_CLAW_SPENCER_CHANGE_DIGEST_DM_USER_IDS", "U_CARSON")
+    log = SpencerChangeLog(db_path=db_path)
+    log.capture_request(
+        user_id="U0AFJ5RS31C",
+        channel="C123",
+        thread_ts="2.2",
+        message_ts="2.2",
+        text="Please update this workflow in Slack.",
+    )
+
+    class FakeSlackApiError(Exception):
+        def __init__(self, error: str) -> None:
+            self.response = {"error": error}
+
+    posted_channels: list[str] = []
+
+    class FakeClient:
+        def __init__(self, token: str) -> None:
+            self.token = token
+
+        def conversations_open(self, users: str):
+            raise FakeSlackApiError("missing_scope")
+
+        def chat_postMessage(self, channel: str, text: str):
+            posted_channels.append(channel)
+            return {"ok": True, "ts": "123.999"}
+
+    monkeypatch.setattr("coatue_claw.spencer_change_digest.WebClient", FakeClient)
+    monkeypatch.setattr("coatue_claw.spencer_change_digest.SlackApiError", FakeSlackApiError)
+    monkeypatch.setattr("coatue_claw.spencer_change_digest._slack_tokens", lambda: ["xoxb-test"])
+
+    payload = run_once(force=True)
+    assert payload["ok"] is True
+    assert len(payload["sent"]) == 1
+    assert posted_channels == ["U_CARSON"]

@@ -188,6 +188,22 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
             except SlackApiError as exc:
                 err = str(exc.response.get("error") or "")
                 last_error = err or "slack_api_error"
+                if err == "missing_scope":
+                    # Fallback path: post directly to App Home DM by user id.
+                    try:
+                        post = client.chat_postMessage(channel=user_id, text=message)
+                        _mark_sent(
+                            db_path=db_path,
+                            digest_date=digest_date,
+                            recipient_user_id=user_id,
+                            open_count=len(open_changes),
+                        )
+                        result["sent"].append({"user_id": user_id, "channel": user_id, "ts": post.get("ts")})
+                        sent = True
+                        break
+                    except Exception:
+                        last_error = "missing_scope"
+                        continue
                 if err in {"account_inactive", "invalid_auth", "token_revoked", "not_authed"}:
                     continue
                 break
