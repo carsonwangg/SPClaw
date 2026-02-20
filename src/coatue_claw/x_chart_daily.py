@@ -218,6 +218,23 @@ TICKER_NAME_HINTS: dict[str, str] = {
     "NVDA": "NVIDIA",
 }
 
+TRAILING_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "at",
+    "by",
+    "for",
+    "from",
+    "in",
+    "of",
+    "on",
+    "or",
+    "the",
+    "to",
+    "with",
+}
+
 
 class XChartError(RuntimeError):
     pass
@@ -1077,6 +1094,60 @@ def _synthesize_narrative_title(*, subject: str, verb: str, sentence: str) -> st
     if "record" in sentence.lower() or v_lower in NEUTRAL_MOVE_VERBS:
         return _shorten_without_ellipsis(f"{subject_core} are at an extreme", max_chars=56)
     return _shorten_without_ellipsis(_strip_news_prefix(sentence), max_chars=56)
+
+
+def _trim_trailing_stopwords(text: str) -> str:
+    parts = [p for p in _normalize_render_text(text).split(" ") if p]
+    while parts and parts[-1].lower() in TRAILING_STOPWORDS:
+        parts.pop()
+    return " ".join(parts).strip()
+
+
+def _is_low_signal_phrase(text: str) -> bool:
+    lower = _normalize_render_text(text).lower()
+    if not lower:
+        return True
+    if lower.startswith(("it's official", "breaking", "update", "new chart", "alert")):
+        return True
+    if "one of the most anticipated rulings" in lower:
+        return True
+    if lower in {"chart context", "us trend snapshot"}:
+        return True
+    return False
+
+
+def _keyword_style_override(candidate: Candidate) -> tuple[str, str, str] | None:
+    merged = _normalize_render_text(f"{candidate.title} {candidate.text}").lower()
+    if "tariff" in merged and ("customs" in merged or "duties" in merged):
+        return (
+            "US tariff receipts are surging",
+            "Monthly US customs duties (US$B)",
+            "US customs-duty collections just hit a new high.",
+        )
+    return None
+
+
+def _sanitize_style_copy(*, candidate: Candidate, headline: str, chart_label: str, takeaway: str) -> tuple[str, str, str]:
+    override = _keyword_style_override(candidate)
+    if override is not None:
+        headline, chart_label, takeaway = override
+
+    headline = _trim_trailing_stopwords(_shorten_without_ellipsis(headline, max_chars=48))
+    chart_label = _trim_trailing_stopwords(_shorten_without_ellipsis(chart_label, max_chars=56))
+    takeaway = _trim_trailing_stopwords(_shorten_without_ellipsis(takeaway, max_chars=62))
+
+    if _is_low_signal_phrase(headline):
+        subject = _shorten_without_ellipsis(_strip_news_prefix(_normalize_render_text(candidate.title or candidate.text)), max_chars=36)
+        if "tariff" in subject.lower():
+            headline = "US tariff receipts are surging"
+        else:
+            headline = _shorten_without_ellipsis(f"{subject} trend is accelerating", max_chars=48) if subject else "US trend is inflecting"
+        headline = _trim_trailing_stopwords(headline)
+
+    if _is_low_signal_phrase(takeaway):
+        core = _shorten_without_ellipsis(_strip_news_prefix(_normalize_render_text(candidate.text or candidate.title)), max_chars=62)
+        takeaway = _trim_trailing_stopwords(core or "US data trend moved sharply higher.")
+    return headline, chart_label, takeaway
 
 
 def _employees_robots_takeaway(sentence: str) -> str:
@@ -2001,6 +2072,13 @@ def _build_style_draft(candidate: Candidate, *, iteration: int) -> StyleDraft:
         headline = anchor or "US Trend Snapshot"
         takeaway = _truncate_words(body_text or title_core or title_text, max_words=7, max_chars=56)
         why_now = "Simple trend read."
+
+    headline, chart_label, takeaway = _sanitize_style_copy(
+        candidate=candidate,
+        headline=headline or "US Trend Snapshot",
+        chart_label=chart_label or "Chart Context",
+        takeaway=takeaway or "New US-facing data point with clear directional movement.",
+    )
 
     combined = " ".join([headline, takeaway, why_now]).strip()
     checks = {

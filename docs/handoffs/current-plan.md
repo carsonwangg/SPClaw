@@ -55,6 +55,10 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - title clipping fix in source-snip-card renderer:
     - auto-fit loop for headline/subheading width
     - hard fail-safe shortening when text still overflows
+  - low-signal copy rewrite guard:
+    - filters generic lead-ins and forces concise trend phrasing
+    - keyword override for tariff/customs posts
+    - trailing-stopword trimming to prevent awkward cutoffs
   - modules touched: `src/coatue_claw/x_chart_daily.py`
   - tests updated: `tests/test_x_chart_daily.py`
 - Spencer-request governance is now end-to-end:

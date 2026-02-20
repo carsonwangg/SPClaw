@@ -969,3 +969,29 @@ def test_style_draft_employees_vs_robots_titles_are_narrative() -> None:
     assert "employees vs robots" in draft.chart_label.lower()
     assert "robots deployed" in draft.takeaway.lower()
     assert "..." not in draft.headline
+
+
+def test_style_draft_rewrites_low_signal_tariff_title() -> None:
+    candidate = Candidate(
+        candidate_key="x:tariff",
+        source_type="x",
+        source_id="KobeissiLetter",
+        author="@KobeissiLetter",
+        title="@KobeissiLetter: It's official: In one of the most anticipated rulings in decades...",
+        text=(
+            "It's official: In one of the most anticipated rulings in decades, "
+            "the Supreme Court ruling impacts tariff refunds while US customs duties are at records."
+        ),
+        url="https://x.com/KobeissiLetter/status/2024887690093572404",
+        image_url="https://pbs.twimg.com/media/tariff.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=900,
+        source_priority=1.2,
+        score=90.0,
+    )
+    draft = _select_style_draft(candidate)
+    assert "it's official" not in draft.headline.lower()
+    assert "anticipated rulings" not in draft.headline.lower()
+    assert draft.headline.lower().startswith("us tariff")
+    assert len(draft.headline) <= 48
+    assert draft.headline.split(" ")[-1].lower() not in {"in", "of", "the", "to"}
