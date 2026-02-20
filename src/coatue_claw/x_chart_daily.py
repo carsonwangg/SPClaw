@@ -2119,7 +2119,7 @@ def _render_source_snip_card(*, candidate: Candidate, slot_key: str, style_draft
     chart_label_text = _shorten_without_ellipsis(_normalize_render_text(style_draft.chart_label), max_chars=62)
     takeaway_text = _shorten_without_ellipsis(_normalize_render_text(style_draft.takeaway), max_chars=68)
 
-    fig.text(
+    headline_obj = fig.text(
         0.05,
         0.935,
         headline_text,
@@ -2131,7 +2131,7 @@ def _render_source_snip_card(*, candidate: Candidate, slot_key: str, style_draft
         weight="medium",
     )
     fig.add_artist(Line2D([0.05, 0.95], [0.892, 0.892], transform=fig.transFigure, color="#2F3745", linewidth=1.1))
-    fig.text(
+    chart_label_obj = fig.text(
         0.05,
         0.875,
         chart_label_text,
@@ -2141,6 +2141,50 @@ def _render_source_snip_card(*, candidate: Candidate, slot_key: str, style_draft
         color="#2F3745",
         family=COATUE_FONT_FAMILY,
     )
+
+    # Prevent clipped title/subheading by auto-fitting to available card width.
+    for _ in range(8):
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        fig_bbox = fig.bbox
+        max_x = fig_bbox.x0 + (fig_bbox.width * 0.95)
+
+        h_bb = headline_obj.get_window_extent(renderer=renderer)
+        if h_bb.x1 > max_x:
+            current_size = float(headline_obj.get_fontsize())
+            if current_size > 22.0:
+                headline_obj.set_fontsize(current_size - 1.0)
+            headline_text = _shorten_without_ellipsis(headline_text, max_chars=max(28, len(headline_text) - 4))
+            headline_obj.set_text(headline_text)
+            continue
+
+        l_bb = chart_label_obj.get_window_extent(renderer=renderer)
+        if l_bb.x1 > max_x:
+            chart_label_text = _shorten_without_ellipsis(chart_label_text, max_chars=max(24, len(chart_label_text) - 4))
+            chart_label_obj.set_text(chart_label_text)
+            continue
+        break
+
+    # Hard fail-safe: if still overflowing after iterative fitting, force concise one-line copy.
+    for _ in range(12):
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        fig_bbox = fig.bbox
+        max_x = fig_bbox.x0 + (fig_bbox.width * 0.95)
+
+        h_bb = headline_obj.get_window_extent(renderer=renderer)
+        if h_bb.x1 > max_x:
+            headline_obj.set_fontsize(max(18.0, float(headline_obj.get_fontsize()) - 1.0))
+            headline_text = _shorten_without_ellipsis(headline_text, max_chars=max(22, len(headline_text) - 3))
+            headline_obj.set_text(headline_text)
+            continue
+
+        l_bb = chart_label_obj.get_window_extent(renderer=renderer)
+        if l_bb.x1 > max_x:
+            chart_label_text = _shorten_without_ellipsis(chart_label_text, max_chars=max(18, len(chart_label_text) - 3))
+            chart_label_obj.set_text(chart_label_text)
+            continue
+        break
 
     chart_ax = fig.add_axes([0.05, 0.19, 0.90, 0.68], facecolor="#F4F5F6")
     chart_ax.imshow(image)

@@ -14,6 +14,9 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `Title` (narrative headline)
     - `Chart label` (what the chart shows)
     - `Key takeaway` (concise readout)
+  - source-snip-card title readability guard added:
+    - headline/subheading now auto-fit to card width
+    - if text is too long, renderer force-shortens to concise one-line copy (no clipping)
   - `x chart status` now shows `render_mode: source-snip` for runtime verification
   - updated tests cover source-snip posting path and no-rebuild requirement
 - Spencer change-review + daily digest shipped:
