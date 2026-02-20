@@ -9,6 +9,10 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - Coatue-style redraw/reconstruction is bypassed in posting flow
   - URL-triggered chart runs (`run-post-url`) no longer fail on numeric reconstruction checks
   - if no source image is available, bot returns explicit Slack error
+  - retained title quality instructions in Slack output:
+    - `Title` (narrative headline)
+    - `Chart label` (what the chart shows)
+    - `Key takeaway` (concise readout)
   - updated tests cover source-snip posting path and no-rebuild requirement
 - Spencer change-review + daily digest shipped:
   - Spencer requests are auto-captured from Slack (tracked user IDs: `spcoatue` + `spencermpeter` by default)

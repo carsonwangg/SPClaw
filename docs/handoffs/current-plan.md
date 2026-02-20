@@ -44,6 +44,10 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - Slack chart output now uses the source X image directly (no Coatue-style reconstruction/redraw)
   - URL chart requests (`run-post-url`) no longer enforce numeric reconstruction prechecks
   - explicit error is returned only when source image cannot be fetched
+  - Slack copy retains title discipline:
+    - narrative `Title`
+    - technical `Chart label`
+    - concise `Key takeaway`
   - modules touched: `src/coatue_claw/x_chart_daily.py`
   - tests updated: `tests/test_x_chart_daily.py`
 - Spencer-request governance is now end-to-end:

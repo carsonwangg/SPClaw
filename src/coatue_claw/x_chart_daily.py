@@ -2697,8 +2697,9 @@ def _post_winner_to_slack(
     text_lines = [
         "*Coatue Chart of the Day*",
         f"- Source: `{clean_author}`",
-        f"- Trend: {style_draft.headline}",
-        f"- Takeaway: {clean_takeaway}",
+        f"- Title: {style_draft.headline}",
+        f"- Chart label: {style_draft.chart_label}",
+        f"- Key takeaway: {clean_takeaway}",
         f"- Link: {candidate.url}",
         f"- Render: `source-snip`",
     ]
