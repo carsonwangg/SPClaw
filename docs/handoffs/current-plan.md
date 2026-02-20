@@ -40,6 +40,17 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- X chart flow is now scout-first and slot-posted:
+  - launchd runs `x_chart_daily run-once` hourly (minute `0` by default via `COATUE_CLAW_X_CHART_SCOUT_MINUTE`)
+  - each hourly run stores candidates in `observed_candidates` and updates source trust signals
+  - when a post window is active, winner ranking is drawn from candidates observed since the last scheduled slot post
+  - this improves post quality by ranking across the full inter-slot pool instead of one fetch snapshot
+- X chart naming convention is now time-of-day based:
+  - `Coatue Chart of the Morning`, `...Afternoon`, `...Evening`
+  - applied in Slack upload title and initial message format
+- New pool controls are live:
+  - `COATUE_CLAW_X_CHART_POOL_KEEP_DAYS` (retention, default `10`)
+  - `COATUE_CLAW_X_CHART_POOL_LIMIT` (ranking pool size, default `600`)
 - X chart candidate selection now balances score + variety:
   - keeps highest-score behavior as baseline
   - when alternatives are close (within score floor), prefers less-recently-used source to avoid repeat posters

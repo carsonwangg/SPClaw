@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_WINDOWS = "09:00,12:00,18:00"
 DEFAULT_TIMEZONE = "America/Los_Angeles"
+DEFAULT_CONVENTION_NAMES = ("Morning", "Afternoon", "Evening")
 
 
 DEFAULT_PRIORITY_SOURCES: list[tuple[str, float]] = [
@@ -390,6 +391,35 @@ def _parse_windows(raw: str | None = None) -> list[tuple[int, int]]:
         out = [(9, 0), (12, 0), (18, 0)]
     out.sort()
     return out
+
+
+def _slot_name_for_hour(hour: int) -> str:
+    if 5 <= hour < 12:
+        return "Morning"
+    if 12 <= hour < 17:
+        return "Afternoon"
+    return "Evening"
+
+
+def _slot_name_for_key(*, slot_key: str, now_local: datetime, windows: list[tuple[int, int]]) -> str:
+    if slot_key.startswith("manual"):
+        return _slot_name_for_hour(now_local.hour)
+    m = re.search(r"-(\d{2}):(\d{2})$", slot_key)
+    if not m:
+        return _slot_name_for_hour(now_local.hour)
+    target = (int(m.group(1)), int(m.group(2)))
+    ordered = sorted(windows)
+    for idx, item in enumerate(ordered):
+        if item != target:
+            continue
+        if idx < len(DEFAULT_CONVENTION_NAMES):
+            return DEFAULT_CONVENTION_NAMES[idx]
+        return _slot_name_for_hour(target[0])
+    return _slot_name_for_hour(target[0])
+
+
+def _convention_name(*, slot_key: str, now_local: datetime, windows: list[tuple[int, int]]) -> str:
+    return f"Coatue Chart of the {_slot_name_for_key(slot_key=slot_key, now_local=now_local, windows=windows)}"
 
 
 def _canonical_handle(handle: str) -> str:
@@ -1392,6 +1422,26 @@ class XChartStore:
             )
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS observed_candidates (
+                    candidate_key TEXT PRIMARY KEY,
+                    source_type TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    author TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    url TEXT NOT NULL,
+                    image_url TEXT,
+                    created_at TEXT,
+                    engagement INTEGER NOT NULL,
+                    source_priority REAL NOT NULL,
+                    score REAL NOT NULL,
+                    first_seen_utc TEXT NOT NULL,
+                    last_seen_utc TEXT NOT NULL
+                );
+                """
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS post_reviews (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     slot_key TEXT NOT NULL,
@@ -1411,6 +1461,7 @@ class XChartStore:
             )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_post_reviews_recent ON post_reviews(reviewed_at_utc DESC);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_post_reviews_source ON post_reviews(source_id, reviewed_at_utc DESC);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_observed_candidates_last_seen ON observed_candidates(last_seen_utc DESC);")
 
     def _seed_default_sources(self) -> None:
         now = datetime.now(UTC).isoformat()
@@ -1562,6 +1613,126 @@ class XChartStore:
                 (limit,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def upsert_observed_candidates(self, candidates: list[Candidate]) -> int:
+        if not candidates:
+            return 0
+        now = datetime.now(UTC).isoformat()
+        count = 0
+        with self._connect() as conn:
+            for candidate in candidates:
+                row = conn.execute(
+                    "SELECT first_seen_utc FROM observed_candidates WHERE candidate_key = ? LIMIT 1",
+                    (candidate.candidate_key,),
+                ).fetchone()
+                first_seen = str(row["first_seen_utc"]) if row is not None else now
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO observed_candidates (
+                        candidate_key, source_type, source_id, author, title, text, url, image_url, created_at,
+                        engagement, source_priority, score, first_seen_utc, last_seen_utc
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        candidate.candidate_key,
+                        candidate.source_type,
+                        candidate.source_id,
+                        candidate.author,
+                        candidate.title,
+                        candidate.text,
+                        candidate.url,
+                        candidate.image_url,
+                        candidate.created_at,
+                        int(candidate.engagement),
+                        float(candidate.source_priority),
+                        float(candidate.score),
+                        first_seen,
+                        now,
+                    ),
+                )
+                count += 1
+        return count
+
+    def latest_scheduled_posted_at_utc(self) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT posted_at_utc
+                FROM posted_slots
+                WHERE slot_key NOT LIKE 'manual%%'
+                ORDER BY posted_at_utc DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        if row is None:
+            return None
+        value = str(row["posted_at_utc"] or "").strip()
+        return value or None
+
+    def observed_candidates_since(self, *, since_utc: str | None, limit: int = 400) -> list[Candidate]:
+        safe_limit = max(20, min(2000, int(limit)))
+        with self._connect() as conn:
+            if since_utc:
+                rows = conn.execute(
+                    """
+                    SELECT candidate_key, source_type, source_id, author, title, text, url, image_url, created_at,
+                           engagement, source_priority, score, first_seen_utc, last_seen_utc
+                    FROM observed_candidates
+                    WHERE last_seen_utc > ?
+                    ORDER BY score DESC, last_seen_utc DESC
+                    LIMIT ?
+                    """,
+                    (since_utc, safe_limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT candidate_key, source_type, source_id, author, title, text, url, image_url, created_at,
+                           engagement, source_priority, score, first_seen_utc, last_seen_utc
+                    FROM observed_candidates
+                    ORDER BY score DESC, last_seen_utc DESC
+                    LIMIT ?
+                    """,
+                    (safe_limit,),
+                ).fetchall()
+        out: list[Candidate] = []
+        for row in rows:
+            out.append(
+                Candidate(
+                    candidate_key=str(row["candidate_key"]),
+                    source_type=str(row["source_type"]),
+                    source_id=str(row["source_id"]),
+                    author=str(row["author"]),
+                    title=str(row["title"]),
+                    text=str(row["text"]),
+                    url=str(row["url"]),
+                    image_url=(str(row["image_url"]) if row["image_url"] is not None else None),
+                    created_at=(str(row["created_at"]) if row["created_at"] is not None else None),
+                    engagement=int(row["engagement"] or 0),
+                    source_priority=float(row["source_priority"] or 0.0),
+                    score=float(row["score"] or 0.0),
+                )
+            )
+        return out
+
+    def observed_candidates_count_since(self, *, since_utc: str | None) -> int:
+        with self._connect() as conn:
+            if since_utc:
+                row = conn.execute(
+                    "SELECT COUNT(1) AS c FROM observed_candidates WHERE last_seen_utc > ?",
+                    (since_utc,),
+                ).fetchone()
+            else:
+                row = conn.execute("SELECT COUNT(1) AS c FROM observed_candidates").fetchone()
+        return int((row["c"] if row is not None else 0) or 0)
+
+    def prune_observed_candidates(self, *, keep_days: int = 10) -> int:
+        cutoff = (datetime.now(UTC) - timedelta(days=max(2, keep_days))).isoformat()
+        with self._connect() as conn:
+            before = conn.total_changes
+            conn.execute("DELETE FROM observed_candidates WHERE last_seen_utc < ?", (cutoff,))
+            after = conn.total_changes
+        return max(0, int(after - before))
 
     def record_post_review(
         self,
@@ -2988,6 +3159,7 @@ def _post_winner_to_slack(
     channel: str,
     slot_key: str,
     windows_text: str,
+    convention_name: str | None = None,
     style_draft: StyleDraft | None = None,
     store: XChartStore | None = None,
 ) -> dict[str, Any]:
@@ -3028,8 +3200,9 @@ def _post_winner_to_slack(
     }
     clean_author = _normalize_render_text(candidate.author)
     clean_takeaway = _shorten_without_ellipsis(_normalize_render_text(style_draft.takeaway), max_chars=68)
+    title_text = _normalize_render_text(convention_name or "Coatue Chart")
     text_lines = [
-        "*Coatue Chart of the Day*",
+        f"*{title_text}*",
         f"- Source: `{clean_author}`",
         f"- Title: {style_draft.headline}",
         f"- Chart label: {style_draft.chart_label}",
@@ -3044,7 +3217,7 @@ def _post_winner_to_slack(
             response = client.files_upload_v2(
                 channel=channel,
                 file=str(artifact_path),
-                title="Coatue Chart of the Day",
+                title=title_text,
                 initial_comment="\n".join(text_lines),
             )
             if store is not None:
@@ -3095,17 +3268,6 @@ def run_chart_scout_once(
     windows = _parse_windows()
     slot_key = _slot_key(now_local=now_local, windows=windows, manual=manual)
     windows_text = ",".join(f"{h:02d}:{m:02d}" for h, m in windows)
-    if slot_key is None:
-        return {
-            "ok": True,
-            "posted": False,
-            "reason": "outside_scheduled_window",
-            "now_local": now_local.isoformat(),
-            "windows": windows_text,
-        }
-    if (not manual) and store.was_slot_posted(slot_key):
-        return {"ok": True, "posted": False, "reason": "slot_already_posted", "slot_key": slot_key}
-
     token = _resolve_bearer_token()
     source_limit = max(8, min(60, int(os.environ.get("COATUE_CLAW_X_CHART_SOURCE_LIMIT", "25"))))
     top_sources = store.top_sources(limit=source_limit)
@@ -3113,6 +3275,9 @@ def run_chart_scout_once(
     x_candidates = _fetch_x_candidates_from_sources(handles=handles, token=token, hours=48)
     vc_candidates = _fetch_visualcapitalist_candidates(max_items=20)
     all_candidates = _dedupe_candidates(x_candidates + vc_candidates)
+    observed_count = store.upsert_observed_candidates(all_candidates)
+    pool_prune_days = max(2, min(30, int(os.environ.get("COATUE_CLAW_X_CHART_POOL_KEEP_DAYS", "10"))))
+    pruned_count = store.prune_observed_candidates(keep_days=pool_prune_days)
 
     for item in all_candidates[:80]:
         if item.source_type == "x":
@@ -3123,7 +3288,35 @@ def run_chart_scout_once(
         if engagement >= int(os.environ.get("COATUE_CLAW_X_CHART_DISCOVERY_MIN_ENGAGEMENT", "120")):
             store.note_candidate_observed(handle, engagement=engagement)
 
-    winner = _pick_winner(store=store, candidates=all_candidates)
+    if slot_key is None:
+        return {
+            "ok": True,
+            "posted": False,
+            "reason": "scouted_pool_updated",
+            "now_local": now_local.isoformat(),
+            "windows": windows_text,
+            "candidates_scanned": len(all_candidates),
+            "candidates_observed": observed_count,
+            "pool_pruned": pruned_count,
+        }
+
+    if (not manual) and store.was_slot_posted(slot_key):
+        return {
+            "ok": True,
+            "posted": False,
+            "reason": "slot_already_posted",
+            "slot_key": slot_key,
+            "candidates_scanned": len(all_candidates),
+            "candidates_observed": observed_count,
+            "pool_pruned": pruned_count,
+        }
+
+    since_utc = None if manual else store.latest_scheduled_posted_at_utc()
+    pool_limit = max(50, min(2000, int(os.environ.get("COATUE_CLAW_X_CHART_POOL_LIMIT", "600"))))
+    pool_candidates = store.observed_candidates_since(since_utc=since_utc, limit=pool_limit)
+    ranking_pool = _dedupe_candidates(pool_candidates) if pool_candidates else all_candidates
+
+    winner = _pick_winner(store=store, candidates=ranking_pool)
     if winner is None:
         return {
             "ok": True,
@@ -3131,8 +3324,13 @@ def run_chart_scout_once(
             "reason": "no_candidate_available",
             "slot_key": slot_key,
             "candidates_scanned": len(all_candidates),
+            "candidates_observed": observed_count,
+            "pool_candidates": len(ranking_pool),
+            "since_utc": since_utc,
+            "pool_pruned": pruned_count,
         }
     style_draft = _select_style_draft(winner)
+    convention_name = _convention_name(slot_key=slot_key, now_local=now_local, windows=windows)
 
     output_dir = _output_dir()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -3144,6 +3342,7 @@ def run_chart_scout_once(
                 "",
                 f"- slot_key: `{slot_key}`",
                 f"- generated_at_utc: `{now_utc.isoformat()}`",
+                f"- convention: `{convention_name}`",
                 f"- source: `{winner.source_type}:{winner.source_id}`",
                 f"- author: `{winner.author}`",
                 f"- score: `{winner.score:.2f}`",
@@ -3172,6 +3371,7 @@ def run_chart_scout_once(
             "posted": False,
             "reason": "dry_run",
             "slot_key": slot_key,
+            "convention": convention_name,
             "winner": {
                 "source": f"{winner.source_type}:{winner.source_id}",
                 "author": winner.author,
@@ -3182,6 +3382,8 @@ def run_chart_scout_once(
                 "style_iteration": style_draft.iteration,
             },
             "artifact": str(out_path),
+            "pool_candidates": len(ranking_pool),
+            "since_utc": since_utc,
         }
 
     channel = (channel_override or "").strip() or _slack_channel()
@@ -3190,6 +3392,7 @@ def run_chart_scout_once(
         channel=channel,
         slot_key=slot_key,
         windows_text=windows_text,
+        convention_name=convention_name,
         style_draft=style_draft,
         store=store,
     )
@@ -3198,6 +3401,7 @@ def run_chart_scout_once(
         "ok": True,
         "posted": True,
         "slot_key": slot_key,
+        "convention": convention_name,
         "channel": channel,
         "post": post,
         "winner": {
@@ -3210,6 +3414,8 @@ def run_chart_scout_once(
             "style_iteration": style_draft.iteration,
         },
         "artifact": str(out_path),
+        "pool_candidates": len(ranking_pool),
+        "since_utc": since_utc,
     }
 
 
@@ -3250,12 +3456,15 @@ def run_chart_for_post_url(
     channel = (channel_override or "").strip() or _slack_channel()
     now_local = datetime.now(UTC).astimezone(_timezone())
     slot_key = f"manual-url-{now_local.strftime('%Y%m%d-%H%M%S')}"
-    windows_text = ",".join(f"{h:02d}:{m:02d}" for h, m in _parse_windows())
+    windows = _parse_windows()
+    windows_text = ",".join(f"{h:02d}:{m:02d}" for h, m in windows)
+    convention_name = _convention_name(slot_key=slot_key, now_local=now_local, windows=windows)
     post = _post_winner_to_slack(
         candidate=winner,
         channel=channel,
         slot_key=slot_key,
         windows_text=windows_text,
+        convention_name=convention_name,
         style_draft=style_draft,
         store=store,
     )
@@ -3264,6 +3473,7 @@ def run_chart_for_post_url(
         "ok": True,
         "posted": True,
         "slot_key": slot_key,
+        "convention": convention_name,
         "channel": channel,
         "post": post,
         "winner": {
@@ -3280,14 +3490,18 @@ def run_chart_for_post_url(
 
 def status() -> dict[str, Any]:
     store = XChartStore()
+    last_scheduled = store.latest_scheduled_posted_at_utc()
     return {
         "ok": True,
         "render_mode": "source-snip-card",
+        "schedule_mode": "hourly-scout+windowed-post",
         "db_path": str(store.db_path),
         "timezone": os.environ.get("COATUE_CLAW_X_CHART_TIMEZONE", DEFAULT_TIMEZONE),
         "windows": ",".join(f"{h:02d}:{m:02d}" for h, m in _parse_windows()),
         "slack_channel": os.environ.get("COATUE_CLAW_X_CHART_SLACK_CHANNEL", ""),
         "sources_count": len(store.list_sources(limit=1000)),
+        "last_scheduled_posted_at_utc": last_scheduled,
+        "pool_candidates_since_last_post": store.observed_candidates_count_since(since_utc=last_scheduled),
         "recent_posts": store.latest_posts(limit=5),
         "review_summary": store.recent_review_summary(limit=20),
     }

@@ -13,6 +13,7 @@ from coatue_claw.x_chart_daily import (
     XChartError,
     _build_x_title,
     _compute_y_ticks,
+    _convention_name,
     _fallback_bar_labels,
     _extract_rebuilt_bars_via_vision,
     _extract_rebuilt_bars,
@@ -93,6 +94,138 @@ def test_run_chart_scout_dry_run(tmp_path: Path, monkeypatch) -> None:
     assert result["ok"] is True
     assert result["reason"] == "dry_run"
     assert result["winner"]["source"] == "x:fiscal_AI"
+
+
+def test_run_chart_scout_outside_window_updates_pool(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
+
+    candidate = Candidate(
+        candidate_key="x:pool-1",
+        source_type="x",
+        source_id="fiscal_AI",
+        author="@fiscal_AI",
+        title="US software momentum rises",
+        text="US software momentum rises",
+        url="https://x.com/fiscal_AI/status/pool-1",
+        image_url="https://example.com/pool-1.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=120,
+        source_priority=1.6,
+        score=91.0,
+    )
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [candidate])
+
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = datetime(2026, 2, 19, 10, 31, 0, tzinfo=UTC)
+            if tz is None:
+                return base
+            return base.astimezone(tz)
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
+
+    result = run_chart_scout_once(manual=False, dry_run=False)
+    assert result["ok"] is True
+    assert result["posted"] is False
+    assert result["reason"] == "scouted_pool_updated"
+    assert result["candidates_observed"] == 1
+
+    store = XChartStore()
+    pooled = store.observed_candidates_since(since_utc=None, limit=20)
+    assert len(pooled) == 1
+    assert pooled[0].candidate_key == "x:pool-1"
+
+
+def test_run_chart_scout_window_uses_hourly_pool_since_last_slot(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
+
+    high = Candidate(
+        candidate_key="x:high",
+        source_type="x",
+        source_id="fiscal_AI",
+        author="@fiscal_AI",
+        title="High score trend",
+        text="High score trend",
+        url="https://x.com/fiscal_AI/status/high",
+        image_url="https://example.com/high.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=300,
+        source_priority=1.6,
+        score=99.0,
+    )
+    lower = Candidate(
+        candidate_key="x:low",
+        source_type="x",
+        source_id="KobeissiLetter",
+        author="@KobeissiLetter",
+        title="Lower score trend",
+        text="Lower score trend",
+        url="https://x.com/KobeissiLetter/status/low",
+        image_url="https://example.com/low.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=140,
+        source_priority=1.3,
+        score=81.0,
+    )
+
+    class Frozen(datetime):
+        current = datetime(2026, 2, 19, 10, 5, 0, tzinfo=UTC)
+
+        @classmethod
+        def now(cls, tz=None):
+            base = cls.current
+            if tz is None:
+                return base
+            return base.astimezone(tz)
+
+    def _fetch_candidates(**kwargs):
+        if Frozen.current.hour == 10:
+            return [high]
+        return [lower]
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
+    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", _fetch_candidates)
+
+    posted: dict[str, str] = {}
+
+    def _fake_post(**kwargs):
+        candidate = kwargs["candidate"]
+        posted["candidate_url"] = candidate.url
+        return {"ok": True, "channel": kwargs["channel"], "file_id": "FTEST"}
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
+
+    first = run_chart_scout_once(manual=False, dry_run=False, channel_override="C123")
+    assert first["posted"] is False
+    assert first["reason"] == "scouted_pool_updated"
+
+    Frozen.current = datetime(2026, 2, 19, 12, 0, 0, tzinfo=UTC)
+    second = run_chart_scout_once(manual=False, dry_run=False, channel_override="C123")
+    assert second["posted"] is True
+    assert posted["candidate_url"] == "https://x.com/fiscal_AI/status/high"
+    assert second["convention"] == "Coatue Chart of the Afternoon"
+
+
+def test_convention_name_uses_morning_afternoon_evening_windows() -> None:
+    now = datetime(2026, 2, 19, 12, 0, 0, tzinfo=UTC)
+    windows = [(9, 0), (12, 0), (18, 0)]
+    assert _convention_name(slot_key="2026-02-19-09:00", now_local=now, windows=windows) == "Coatue Chart of the Morning"
+    assert _convention_name(slot_key="2026-02-19-12:00", now_local=now, windows=windows) == "Coatue Chart of the Afternoon"
+    assert _convention_name(slot_key="2026-02-19-18:00", now_local=now, windows=windows) == "Coatue Chart of the Evening"
 
 
 def test_pick_winner_prefers_variety_within_score_floor(monkeypatch) -> None:

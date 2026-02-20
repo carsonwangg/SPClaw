@@ -3,7 +3,30 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
-## Current Status (2026-02-19)
+## Current Status (2026-02-20)
+- X chart pipeline now runs as hourly scout + windowed post:
+  - every run ingests candidates into a persistent `observed_candidates` pool in SQLite
+  - scheduled posting windows still use `COATUE_CLAW_X_CHART_WINDOWS` (`09:00,12:00,18:00` default)
+  - at post time, winner is ranked from pooled candidates observed since the previous scheduled post (not just the current fetch)
+  - non-window runs now return `reason: scouted_pool_updated` after refreshing the pool
+  - pool retention/pruning controls:
+    - `COATUE_CLAW_X_CHART_POOL_KEEP_DAYS` (default `10`)
+    - `COATUE_CLAW_X_CHART_POOL_LIMIT` (default `600`)
+- Naming convention updated from “Chart of the Day” to slot naming:
+  - `Coatue Chart of the Morning`
+  - `Coatue Chart of the Afternoon`
+  - `Coatue Chart of the Evening`
+  - naming is applied to Slack initial comment + uploaded file title
+- launchd scheduler updated for hourly scout cadence:
+  - `com.coatueclaw.x-chart-daily` now runs hourly at minute `0` by default (`COATUE_CLAW_X_CHART_SCOUT_MINUTE`)
+  - posting still occurs only when the hourly run lands in an allowed window
+- tests added/updated:
+  - `test_run_chart_scout_outside_window_updates_pool`
+  - `test_run_chart_scout_window_uses_hourly_pool_since_last_slot`
+  - `test_convention_name_uses_morning_afternoon_evening_windows`
+  - `tests/test_launchd_runtime.py` expectations updated for hourly scheduler
+
+## Previous Status Snapshot (2026-02-19)
 - X chart source variety control shipped:
   - winner selection still starts from highest scores, but now applies source diversity in a near-top-score pool
   - default behavior:

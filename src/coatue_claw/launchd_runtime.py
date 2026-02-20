@@ -47,21 +47,15 @@ def _runtime_env() -> dict[str, str]:
     }
 
 
-def _x_chart_windows() -> list[dict[str, int]]:
-    raw = (os.environ.get("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00") or "").strip()
-    out: list[dict[str, int]] = []
-    for part in raw.split(","):
-        p = part.strip()
-        m = re.fullmatch(r"(\d{1,2}):(\d{2})", p)
-        if not m:
-            continue
-        hour = int(m.group(1))
-        minute = int(m.group(2))
-        if 0 <= hour <= 23 and 0 <= minute <= 59:
-            out.append({"Hour": hour, "Minute": minute})
-    if not out:
-        out = [{"Hour": 9, "Minute": 0}, {"Hour": 12, "Minute": 0}, {"Hour": 18, "Minute": 0}]
-    return out
+def _x_chart_hourly_schedule() -> list[dict[str, int]]:
+    raw = (os.environ.get("COATUE_CLAW_X_CHART_SCOUT_MINUTE", "0") or "0").strip()
+    try:
+        minute = int(raw)
+    except Exception:
+        minute = 0
+    if minute < 0 or minute > 59:
+        minute = 0
+    return [{"Minute": minute}]
 
 
 def _spencer_digest_schedule() -> list[dict[str, int]]:
@@ -113,8 +107,8 @@ def _service_specs() -> dict[str, dict[str, Any]]:
         "Label": X_CHART_LABEL,
         "ProgramArguments": [python_bin, "-m", "coatue_claw.x_chart_daily", "run-once"],
         "WorkingDirectory": str(repo),
-        "RunAtLoad": False,
-        "StartCalendarInterval": _x_chart_windows(),
+        "RunAtLoad": True,
+        "StartCalendarInterval": _x_chart_hourly_schedule(),
         "ProcessType": "Background",
         "StandardOutPath": str(logs_dir / "x-chart-daily.stdout.log"),
         "StandardErrorPath": str(logs_dir / "x-chart-daily.stderr.log"),
