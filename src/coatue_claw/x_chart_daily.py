@@ -1208,7 +1208,8 @@ def _sanitize_style_copy(*, candidate: Candidate, headline: str, chart_label: st
             chart_label = _trim_trailing_stopwords(_shorten_without_ellipsis(_strip_news_prefix(chart_hint), max_chars=56))
 
     if _is_low_signal_phrase(takeaway):
-        if "tariff" in merged_hint or "customs" in merged_hint or "duties" in merged_hint:
+        merged_context = _normalize_render_text(f"{headline} {chart_label} {merged_hint}").lower()
+        if "tariff" in merged_context or "customs" in merged_context or "duties" in merged_context:
             takeaway = "US customs-duty collections just hit a new high."
         elif chart_hint:
             takeaway = _shorten_without_ellipsis(_strip_news_prefix(chart_hint), max_chars=62)
@@ -2944,7 +2945,6 @@ def _post_winner_to_slack(
     from slack_sdk import WebClient
     from slack_sdk.errors import SlackApiError
 
-    takeaways = _build_takeaways(candidate)
     source_path = _write_source_chart_image(candidate=candidate, slot_key=slot_key)
     artifact_path = source_path
     render_mode = "source-snip"
@@ -2976,7 +2976,7 @@ def _post_winner_to_slack(
         "artifact_size_bytes": int(file_size),
     }
     clean_author = _normalize_render_text(candidate.author)
-    clean_takeaway = _shorten_without_ellipsis(_normalize_render_text(takeaways[0]), max_chars=68)
+    clean_takeaway = _shorten_without_ellipsis(_normalize_render_text(style_draft.takeaway), max_chars=68)
     text_lines = [
         "*Coatue Chart of the Day*",
         f"- Source: `{clean_author}`",

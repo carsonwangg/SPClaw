@@ -26,6 +26,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - prevents broken fragments like “It’s official: In ...”
   - takeaway rewrite guard now runs independently of headline quality
     - prevents generic/clipped takeaway copy even when headline is already concise
+  - Slack post summary now uses the sanitized style takeaway (same as chart card), not raw excerpt fallback
   - `x chart status` now shows `render_mode: source-snip` for runtime verification
   - updated tests cover source-snip posting path and no-rebuild requirement
 - Spencer change-review + daily digest shipped:
