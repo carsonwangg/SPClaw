@@ -24,6 +24,8 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - added chart-image hint fallback for low-signal tweet copy:
     - reads chart title cue from image (vision) to synthesize concise headline
     - prevents broken fragments like “It’s official: In ...”
+  - takeaway rewrite guard now runs independently of headline quality
+    - prevents generic/clipped takeaway copy even when headline is already concise
   - `x chart status` now shows `render_mode: source-snip` for runtime verification
   - updated tests cover source-snip posting path and no-rebuild requirement
 - Spencer change-review + daily digest shipped:

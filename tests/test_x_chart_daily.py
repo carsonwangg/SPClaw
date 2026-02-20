@@ -1020,3 +1020,35 @@ def test_style_draft_uses_chart_hint_for_low_signal_copy(monkeypatch) -> None:
     assert draft.headline == "US tariff receipts are surging"
     assert draft.chart_label == "Monthly US customs duties (US$B)"
     assert draft.takeaway == "US customs-duty collections just hit a new high."
+
+
+def test_style_draft_rewrites_low_signal_takeaway_even_if_headline_is_good(monkeypatch) -> None:
+    candidate = Candidate(
+        candidate_key="x:tariff-llm",
+        source_type="x",
+        source_id="KobeissiLetter",
+        author="@KobeissiLetter",
+        title="@KobeissiLetter: It's official: In one of the most anticipated rulings in decades...",
+        text="It's official: In one of the most anticipated rulings in decades...",
+        url="https://x.com/KobeissiLetter/status/2024887690093572404",
+        image_url="https://pbs.twimg.com/media/tariff.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=900,
+        source_priority=1.2,
+        score=90.0,
+    )
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._synthesize_style_via_llm",
+        lambda _candidate: {
+            "headline": "US tariff receipts are surging",
+            "chart_label": "Monthly US customs duties (US$B)",
+            "takeaway": "It's official: In one of the most anticipated rulings",
+        },
+    )
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._extract_chart_title_hint_via_vision",
+        lambda _candidate: "The US Tariff Take Has Surged",
+    )
+    draft = _select_style_draft(candidate)
+    assert draft.headline == "US tariff receipts are surging"
+    assert draft.takeaway == "US customs-duty collections just hit a new high."

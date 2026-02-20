@@ -60,6 +60,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
     - keyword override for tariff/customs posts
     - trailing-stopword trimming to prevent awkward cutoffs
     - vision chart-title hint fallback when tweet text is generic/opening-heavy
+    - applies independently to headline/chart-label/takeaway (not headline-only)
   - modules touched: `src/coatue_claw/x_chart_daily.py`
   - tests updated: `tests/test_x_chart_daily.py`
 - Spencer-request governance is now end-to-end:

@@ -1185,27 +1185,37 @@ def _sanitize_style_copy(*, candidate: Candidate, headline: str, chart_label: st
     chart_label = _trim_trailing_stopwords(_shorten_without_ellipsis(chart_label, max_chars=56))
     takeaway = _trim_trailing_stopwords(_shorten_without_ellipsis(takeaway, max_chars=62))
 
+    source_text = _normalize_render_text(candidate.text or candidate.title)
+    source_text = re.sub(r"^@\w+:\s*", "", _strip_news_prefix(source_text), flags=re.IGNORECASE).strip()
+    need_hint = _is_low_signal_phrase(headline) or _is_low_signal_phrase(chart_label) or _is_low_signal_phrase(takeaway)
+    chart_hint = _extract_chart_title_hint_via_vision(candidate) if need_hint else None
+    merged_hint = _normalize_render_text(f"{chart_hint or ''} {source_text}").lower()
+
     if _is_low_signal_phrase(headline):
-        chart_hint = _extract_chart_title_hint_via_vision(candidate)
-        source_text = _normalize_render_text(candidate.text or candidate.title)
-        source_text = re.sub(r"^@\w+:\s*", "", _strip_news_prefix(source_text), flags=re.IGNORECASE).strip()
         subject = _shorten_without_ellipsis(source_text, max_chars=36)
-        merged_hint = _normalize_render_text(f"{chart_hint or ''} {source_text}").lower()
         if "tariff" in merged_hint or "customs" in merged_hint or "duties" in merged_hint:
             headline = "US tariff receipts are surging"
-            if _is_low_signal_phrase(chart_label):
-                chart_label = "Monthly US customs duties (US$B)"
-            if _is_low_signal_phrase(takeaway):
-                takeaway = "US customs-duty collections just hit a new high."
         elif chart_hint:
             headline = _shorten_without_ellipsis(_strip_news_prefix(chart_hint), max_chars=48)
         else:
             headline = _shorten_without_ellipsis(f"{subject} trend is accelerating", max_chars=48) if subject else "US trend is inflecting"
         headline = _trim_trailing_stopwords(headline)
 
+    if _is_low_signal_phrase(chart_label):
+        if "tariff" in merged_hint or "customs" in merged_hint or "duties" in merged_hint:
+            chart_label = "Monthly US customs duties (US$B)"
+        elif chart_hint:
+            chart_label = _trim_trailing_stopwords(_shorten_without_ellipsis(_strip_news_prefix(chart_hint), max_chars=56))
+
     if _is_low_signal_phrase(takeaway):
-        core = _shorten_without_ellipsis(_strip_news_prefix(_normalize_render_text(candidate.text or candidate.title)), max_chars=62)
-        takeaway = _trim_trailing_stopwords(core or "US data trend moved sharply higher.")
+        if "tariff" in merged_hint or "customs" in merged_hint or "duties" in merged_hint:
+            takeaway = "US customs-duty collections just hit a new high."
+        elif chart_hint:
+            takeaway = _shorten_without_ellipsis(_strip_news_prefix(chart_hint), max_chars=62)
+        else:
+            core = _shorten_without_ellipsis(source_text, max_chars=62)
+            takeaway = core or "US data trend moved sharply higher."
+        takeaway = _trim_trailing_stopwords(takeaway)
     return headline, chart_label, takeaway
 
 
