@@ -18,7 +18,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `Coatue Chart of the Evening`
   - naming is applied to Slack initial comment + uploaded file title
 - launchd scheduler updated for hourly scout cadence:
-  - `com.coatueclaw.x-chart-daily` now runs hourly at minute `0` by default (`COATUE_CLAW_X_CHART_SCOUT_MINUTE`)
+  - `com.coatueclaw.x-chart-daily` now runs every `3600s` by default (`COATUE_CLAW_X_CHART_SCOUT_INTERVAL_SECONDS`)
   - posting still occurs only when the hourly run lands in an allowed window
 - tests added/updated:
   - `test_run_chart_scout_outside_window_updates_pool`

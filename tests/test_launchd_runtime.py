@@ -31,7 +31,7 @@ def test_service_specs_build_expected_commands(tmp_path: Path, monkeypatch) -> N
     x_chart = specs[launchd_runtime.X_CHART_LABEL]
     assert x_chart["ProgramArguments"] == ["/tmp/python", "-m", "coatue_claw.x_chart_daily", "run-once"]
     assert x_chart["RunAtLoad"] is True
-    assert x_chart["StartCalendarInterval"] == [{"Minute": 0}]
+    assert x_chart["StartInterval"] == 3600
 
     spencer = specs[launchd_runtime.SPENCER_CHANGE_DIGEST_LABEL]
     assert spencer["ProgramArguments"] == ["/tmp/python", "-m", "coatue_claw.spencer_change_digest", "run-once"]

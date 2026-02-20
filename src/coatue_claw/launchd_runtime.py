@@ -47,15 +47,13 @@ def _runtime_env() -> dict[str, str]:
     }
 
 
-def _x_chart_hourly_schedule() -> list[dict[str, int]]:
-    raw = (os.environ.get("COATUE_CLAW_X_CHART_SCOUT_MINUTE", "0") or "0").strip()
+def _x_chart_hourly_interval_seconds() -> int:
+    raw = (os.environ.get("COATUE_CLAW_X_CHART_SCOUT_INTERVAL_SECONDS", "3600") or "3600").strip()
     try:
-        minute = int(raw)
+        seconds = int(raw)
     except Exception:
-        minute = 0
-    if minute < 0 or minute > 59:
-        minute = 0
-    return [{"Minute": minute}]
+        seconds = 3600
+    return max(300, min(86400, seconds))
 
 
 def _spencer_digest_schedule() -> list[dict[str, int]]:
@@ -108,7 +106,7 @@ def _service_specs() -> dict[str, dict[str, Any]]:
         "ProgramArguments": [python_bin, "-m", "coatue_claw.x_chart_daily", "run-once"],
         "WorkingDirectory": str(repo),
         "RunAtLoad": True,
-        "StartCalendarInterval": _x_chart_hourly_schedule(),
+        "StartInterval": _x_chart_hourly_interval_seconds(),
         "ProcessType": "Background",
         "StandardOutPath": str(logs_dir / "x-chart-daily.stdout.log"),
         "StandardErrorPath": str(logs_dir / "x-chart-daily.stderr.log"),

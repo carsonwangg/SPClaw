@@ -41,7 +41,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 
 ## Current Status
 - X chart flow is now scout-first and slot-posted:
-  - launchd runs `x_chart_daily run-once` hourly (minute `0` by default via `COATUE_CLAW_X_CHART_SCOUT_MINUTE`)
+  - launchd runs `x_chart_daily run-once` hourly (`StartInterval=3600`; configurable via `COATUE_CLAW_X_CHART_SCOUT_INTERVAL_SECONDS`)
   - each hourly run stores candidates in `observed_candidates` and updates source trust signals
   - when a post window is active, winner ranking is drawn from candidates observed since the last scheduled slot post
   - this improves post quality by ranking across the full inter-slot pool instead of one fetch snapshot
