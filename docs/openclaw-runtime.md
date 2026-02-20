@@ -9,6 +9,7 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
 - Coatue 24/7 services:
   - `~/Library/LaunchAgents/com.coatueclaw.email-gateway.plist`
   - `~/Library/LaunchAgents/com.coatueclaw.memory-prune.plist`
+  - `~/Library/LaunchAgents/com.coatueclaw.spencer-change-digest.plist`
 - Gateway logs: `/tmp/openclaw/openclaw-YYYY-MM-DD.log`
 - App repo: `/opt/coatue-claw`
 - Runtime data: `/opt/coatue-claw-data`
@@ -38,6 +39,7 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
 - Scheduled (wired):
   - Hourly memory prune via `launchd` (`com.coatueclaw.memory-prune`)
   - Chart scout posting via `launchd` (`com.coatueclaw.x-chart-daily`) at local times from `COATUE_CLAW_X_CHART_WINDOWS` (default `09:00,12:00,18:00`)
+  - Daily Spencer change-request digest DM via `launchd` (`com.coatueclaw.spencer-change-digest`) at `COATUE_CLAW_SPENCER_CHANGE_DIGEST_TIME` (default `18:00`)
   - Chart scout posts include a rendered Coatue-style “Chart of the Day” image card (header, divider, summary rail, backdrop context, source footer)
 
 Diligence output contract:
@@ -98,6 +100,8 @@ Memory output contract:
   - `make openclaw-x-chart-status`
   - `make openclaw-x-chart-run-once`
   - `make openclaw-x-chart-sources`
+  - `make openclaw-spencer-digest-status`
+  - `make openclaw-spencer-digest-run-once`
 
 24/7 runtime bootstrap on Mac mini:
 1. `cd /opt/coatue-claw`
@@ -199,6 +203,13 @@ X chart scout environment controls:
 - `COATUE_CLAW_X_CHART_DB_PATH`: optional SQLite store path (default `/opt/coatue-claw-data/db/x_chart_daily.sqlite`)
 - `COATUE_CLAW_X_CHART_DIR`: optional markdown artifact output dir (default `/opt/coatue-claw-data/artifacts/x-chart-daily`)
 - `COATUE_CLAW_VISUALCAPITALIST_FEED_URL`: optional feed override (default `https://www.visualcapitalist.com/feed/`)
+
+Spencer change-digest environment controls:
+- `COATUE_CLAW_SPENCER_USER_IDS`: comma-separated Slack user IDs treated as Spencer request sources
+- `COATUE_CLAW_SPENCER_CHANGE_DB_PATH`: optional SQLite path for tracked Spencer requests
+- `COATUE_CLAW_SPENCER_CHANGE_DIGEST_DM_USER_IDS`: comma-separated Slack user IDs to DM with daily open-request digest
+- `COATUE_CLAW_SPENCER_CHANGE_DIGEST_TIME`: local daily digest time (`HH:MM`, default `18:00`)
+- `COATUE_CLAW_SPENCER_CHANGE_DIGEST_TZ`: timezone used in digest header text (default `America/Los_Angeles`)
 
 Email integration environment controls:
 - `COATUE_CLAW_EMAIL_ENABLED`: set `true` to enable email processing

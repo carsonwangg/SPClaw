@@ -40,6 +40,13 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Spencer-request governance is now end-to-end:
+  - auto-capture + status tracking for Spencer bot-change asks
+  - on-demand Slack review commands (`spencer changes`, `spencer changes open`, `spencer changes last 50`)
+  - scheduled daily DM digest at 6:00 PM local time via launchd service `com.coatueclaw.spencer-change-digest`
+  - DM recipients configured via `COATUE_CLAW_SPENCER_CHANGE_DIGEST_DM_USER_IDS`
+  - runtime module: `src/coatue_claw/spencer_change_digest.py`
+  - tests: `tests/test_spencer_change_log.py`, `tests/test_spencer_change_digest.py`
 - Spencer change-request tracker shipped:
   - captures Spencer-requested bot changes from Slack (`spcoatue` + `spencermpeter` user IDs by default; env-overridable)
   - persists requests to `/opt/coatue-claw-data/db/spencer_changes.sqlite`

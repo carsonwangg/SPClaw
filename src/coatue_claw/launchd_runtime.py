@@ -16,6 +16,7 @@ load_dotenv("/opt/coatue-claw/.env.prod")
 EMAIL_LABEL = "com.coatueclaw.email-gateway"
 MEMORY_PRUNE_LABEL = "com.coatueclaw.memory-prune"
 X_CHART_LABEL = "com.coatueclaw.x-chart-daily"
+SPENCER_CHANGE_DIGEST_LABEL = "com.coatueclaw.spencer-change-digest"
 
 
 def _repo_root() -> Path:
@@ -63,6 +64,18 @@ def _x_chart_windows() -> list[dict[str, int]]:
     return out
 
 
+def _spencer_digest_schedule() -> list[dict[str, int]]:
+    raw = (os.environ.get("COATUE_CLAW_SPENCER_CHANGE_DIGEST_TIME", "18:00") or "").strip()
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})", raw)
+    if not m:
+        return [{"Hour": 18, "Minute": 0}]
+    hour = int(m.group(1))
+    minute = int(m.group(2))
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return [{"Hour": 18, "Minute": 0}]
+    return [{"Hour": hour, "Minute": minute}]
+
+
 def _service_specs() -> dict[str, dict[str, Any]]:
     repo = _repo_root()
     data = _data_root()
@@ -108,10 +121,23 @@ def _service_specs() -> dict[str, dict[str, Any]]:
         "EnvironmentVariables": _runtime_env(),
     }
 
+    spencer_digest = {
+        "Label": SPENCER_CHANGE_DIGEST_LABEL,
+        "ProgramArguments": [python_bin, "-m", "coatue_claw.spencer_change_digest", "run-once"],
+        "WorkingDirectory": str(repo),
+        "RunAtLoad": False,
+        "StartCalendarInterval": _spencer_digest_schedule(),
+        "ProcessType": "Background",
+        "StandardOutPath": str(logs_dir / "spencer-change-digest.stdout.log"),
+        "StandardErrorPath": str(logs_dir / "spencer-change-digest.stderr.log"),
+        "EnvironmentVariables": _runtime_env(),
+    }
+
     return {
         EMAIL_LABEL: poller,
         MEMORY_PRUNE_LABEL: prune,
         X_CHART_LABEL: x_chart,
+        SPENCER_CHANGE_DIGEST_LABEL: spencer_digest,
     }
 
 
@@ -230,13 +256,15 @@ def status(*, services: list[str]) -> dict[str, Any]:
 def _resolve_services(raw: str) -> list[str]:
     value = raw.strip().lower()
     if value in {"all", "24x7", "default"}:
-        return [EMAIL_LABEL, MEMORY_PRUNE_LABEL, X_CHART_LABEL]
+        return [EMAIL_LABEL, MEMORY_PRUNE_LABEL, X_CHART_LABEL, SPENCER_CHANGE_DIGEST_LABEL]
     if value == "email":
         return [EMAIL_LABEL]
     if value in {"memory", "memory-prune", "prune"}:
         return [MEMORY_PRUNE_LABEL]
     if value in {"x", "xchart", "chart", "x-chart"}:
         return [X_CHART_LABEL]
+    if value in {"spencer", "spencer-digest", "changes"}:
+        return [SPENCER_CHANGE_DIGEST_LABEL]
     raise ValueError(f"unknown service selector: {raw}")
 
 
@@ -246,7 +274,7 @@ def main() -> None:
 
     for name in ("enable", "disable", "status"):
         cmd = sub.add_parser(name)
-        cmd.add_argument("--service", default="all", choices=["all", "email", "memory", "xchart"])  # simplified UX
+        cmd.add_argument("--service", default="all", choices=["all", "email", "memory", "xchart", "spencer"])  # simplified UX
         if name == "disable":
             cmd.add_argument("--remove-plists", action="store_true")
 

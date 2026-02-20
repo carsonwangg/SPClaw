@@ -4,6 +4,24 @@
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Current Status (2026-02-19)
+- Spencer change-review + daily digest shipped:
+  - Spencer requests are auto-captured from Slack (tracked user IDs: `spcoatue` + `spencermpeter` by default)
+  - persisted DB: `/opt/coatue-claw-data/db/spencer_changes.sqlite`
+  - statuses: `captured`, `handled`, `implemented`, `blocked`, `needs_followup`
+  - review commands in Slack:
+    - `spencer changes`
+    - `spencer changes open`
+    - `spencer changes last 50`
+  - daily DM digest runtime added:
+    - service label: `com.coatueclaw.spencer-change-digest`
+    - schedule env: `COATUE_CLAW_SPENCER_CHANGE_DIGEST_TIME` (default `18:00`)
+    - recipients env: `COATUE_CLAW_SPENCER_CHANGE_DIGEST_DM_USER_IDS`
+  - Make targets added:
+    - `openclaw-spencer-digest-status`
+    - `openclaw-spencer-digest-run-once`
+  - tests added:
+    - `tests/test_spencer_change_log.py`
+    - `tests/test_spencer_change_digest.py`
 - Spencer-request governance log shipped:
   - bot now auto-captures change requests from Spencer accounts (`spcoatue`/`spencermpeter` user IDs) when messages look like bot-change asks
   - each request is persisted in SQLite (`/opt/coatue-claw-data/db/spencer_changes.sqlite`) with status lifecycle:
