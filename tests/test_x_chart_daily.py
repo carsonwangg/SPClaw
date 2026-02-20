@@ -23,6 +23,7 @@ from coatue_claw.x_chart_daily import (
     _normalize_render_text,
     _parse_windows,
     _parse_x_candidates,
+    _pick_winner,
     _post_publish_checklist,
     _post_winner_to_slack,
     _render_chart_of_day_style,
@@ -92,6 +93,99 @@ def test_run_chart_scout_dry_run(tmp_path: Path, monkeypatch) -> None:
     assert result["ok"] is True
     assert result["reason"] == "dry_run"
     assert result["winner"]["source"] == "x:fiscal_AI"
+
+
+def test_pick_winner_prefers_variety_within_score_floor(monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_SOURCE_VARIETY_LOOKBACK", "6")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_SOURCE_VARIETY_SCORE_FLOOR", "0.90")
+
+    class _Store:
+        def was_item_posted_recently(self, candidate_key: str, *, days: int = 30) -> bool:
+            return False
+
+        def latest_posts(self, *, limit: int = 10):
+            return [
+                {"source": "x:KobeissiLetter"},
+                {"source": "x:KobeissiLetter"},
+                {"source": "x:KobeissiLetter"},
+                {"source": "x:fiscal_AI"},
+            ][:limit]
+
+    kobeissi = Candidate(
+        candidate_key="x:top",
+        source_type="x",
+        source_id="KobeissiLetter",
+        author="@KobeissiLetter",
+        title="Top",
+        text="Top",
+        url="https://x.com/KobeissiLetter/status/top",
+        image_url="https://example.com/top.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=1000,
+        source_priority=1.3,
+        score=100.0,
+    )
+    fiscal = Candidate(
+        candidate_key="x:alt",
+        source_type="x",
+        source_id="fiscal_AI",
+        author="@fiscal_AI",
+        title="Alt",
+        text="Alt",
+        url="https://x.com/fiscal_AI/status/alt",
+        image_url="https://example.com/alt.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=950,
+        source_priority=1.6,
+        score=93.0,
+    )
+    picked = _pick_winner(store=_Store(), candidates=[kobeissi, fiscal])
+    assert picked is not None
+    assert picked.source_id == "fiscal_AI"
+
+
+def test_pick_winner_keeps_top_when_alternative_too_low(monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_SOURCE_VARIETY_LOOKBACK", "6")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_SOURCE_VARIETY_SCORE_FLOOR", "0.90")
+
+    class _Store:
+        def was_item_posted_recently(self, candidate_key: str, *, days: int = 30) -> bool:
+            return False
+
+        def latest_posts(self, *, limit: int = 10):
+            return [{"source": "x:KobeissiLetter"}][:limit]
+
+    kobeissi = Candidate(
+        candidate_key="x:top2",
+        source_type="x",
+        source_id="KobeissiLetter",
+        author="@KobeissiLetter",
+        title="Top2",
+        text="Top2",
+        url="https://x.com/KobeissiLetter/status/top2",
+        image_url="https://example.com/top2.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=1000,
+        source_priority=1.3,
+        score=100.0,
+    )
+    fiscal = Candidate(
+        candidate_key="x:low-alt",
+        source_type="x",
+        source_id="fiscal_AI",
+        author="@fiscal_AI",
+        title="Low",
+        text="Low",
+        url="https://x.com/fiscal_AI/status/low",
+        image_url="https://example.com/low.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=300,
+        source_priority=1.6,
+        score=80.0,
+    )
+    picked = _pick_winner(store=_Store(), candidates=[kobeissi, fiscal])
+    assert picked is not None
+    assert picked.source_id == "KobeissiLetter"
 
 
 def test_cli_run_post_url_command(monkeypatch, capsys) -> None:

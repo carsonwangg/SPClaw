@@ -4,6 +4,18 @@
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Current Status (2026-02-19)
+- X chart source variety control shipped:
+  - winner selection still starts from highest scores, but now applies source diversity in a near-top-score pool
+  - default behavior:
+    - lookback: last `6` posted charts
+    - diversity pool: candidates within `90%` of top score
+    - pick least-recently-used source from that pool; otherwise keep top score winner
+  - env controls:
+    - `COATUE_CLAW_X_CHART_SOURCE_VARIETY_LOOKBACK` (default `6`)
+    - `COATUE_CLAW_X_CHART_SOURCE_VARIETY_SCORE_FLOOR` (default `0.90`)
+  - tests added:
+    - `test_pick_winner_prefers_variety_within_score_floor`
+    - `test_pick_winner_keeps_top_when_alternative_too_low`
 - X chart rendering reverted to source-snip mode (latest):
   - Slack chart posts now use source-snip-card mode:
     - raw X chart image is embedded as-is inside a Coatue header/footer card

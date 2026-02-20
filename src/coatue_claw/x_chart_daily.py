@@ -2085,12 +2085,63 @@ def _dedupe_candidates(candidates: list[Candidate]) -> list[Candidate]:
     return out
 
 
+def _normalize_posted_source(source: str) -> str:
+    raw = str(source or "").strip()
+    if not raw:
+        return ""
+    if ":" in raw:
+        left, right = raw.split(":", 1)
+        if left.strip().lower() == "x":
+            return _canonical_handle(right)
+    return _canonical_handle(raw) or raw.lower()
+
+
+def _source_variety_params() -> tuple[int, float]:
+    lookback_raw = (os.environ.get("COATUE_CLAW_X_CHART_SOURCE_VARIETY_LOOKBACK", "6") or "6").strip()
+    floor_raw = (os.environ.get("COATUE_CLAW_X_CHART_SOURCE_VARIETY_SCORE_FLOOR", "0.90") or "0.90").strip()
+    try:
+        lookback = max(2, min(20, int(lookback_raw)))
+    except Exception:
+        lookback = 6
+    try:
+        floor = float(floor_raw)
+    except Exception:
+        floor = 0.90
+    floor = max(0.75, min(0.99, floor))
+    return lookback, floor
+
+
 def _pick_winner(*, store: XChartStore, candidates: list[Candidate]) -> Candidate | None:
+    pool: list[Candidate] = []
     for item in candidates:
         if store.was_item_posted_recently(item.candidate_key, days=30):
             continue
-        return item
-    return None
+        pool.append(item)
+    if not pool:
+        return None
+
+    # Keep "highest score" behavior but add source variety when alternatives are near the top score.
+    top = pool[0]
+    lookback, floor = _source_variety_params()
+    recent = store.latest_posts(limit=lookback)
+    counts: dict[str, int] = {}
+    for row in recent:
+        key = _normalize_posted_source(str(row.get("source") or ""))
+        if not key:
+            continue
+        counts[key] = int(counts.get(key, 0)) + 1
+
+    score_floor = float(top.score) * float(floor)
+    near_top = [c for c in pool if float(c.score) >= score_floor]
+    if len(near_top) <= 1:
+        return top
+
+    def _rank_key(c: Candidate) -> tuple[int, float]:
+        source_key = _canonical_handle(c.source_id) or c.source_id.lower()
+        return (int(counts.get(source_key, 0)), -float(c.score))
+
+    near_top.sort(key=_rank_key)
+    return near_top[0]
 
 
 def _build_takeaways(candidate: Candidate) -> list[str]:

@@ -40,6 +40,16 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- X chart candidate selection now balances score + variety:
+  - keeps highest-score behavior as baseline
+  - when alternatives are close (within score floor), prefers less-recently-used source to avoid repeat posters
+  - defaults:
+    - `COATUE_CLAW_X_CHART_SOURCE_VARIETY_LOOKBACK=6`
+    - `COATUE_CLAW_X_CHART_SOURCE_VARIETY_SCORE_FLOOR=0.90`
+  - if alternatives are not close enough, top scorer still wins
+  - tests:
+    - `test_pick_winner_prefers_variety_within_score_floor`
+    - `test_pick_winner_keeps_top_when_alternative_too_low`
 - X chart posting mode reverted to source-snip:
   - Slack chart output now uses source-snip-card mode:
     - source X chart image embedded in Coatue-branded output card
