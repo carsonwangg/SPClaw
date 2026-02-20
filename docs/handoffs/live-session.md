@@ -4,6 +4,21 @@
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Current Status (2026-02-20)
+- Board Seat-as-a-Service daily scheduler shipped for portco channels:
+  - new runtime module: `src/coatue_claw/board_seat_daily.py`
+  - daily post per company/channel with duplicate guard (one post per company per local day)
+  - default portco channel map:
+    - `anduril`, `anthropic`, `cursor`, `neuralink`, `openai`, `physical-intelligence`, `ramp`, `spacex`, `stripe`, `sunday-robotics`
+  - post format follows the Anduril board-seat frame and is tailored by company:
+    - `Signal`, `Board lens`, `Watchlist`, `Team ask`
+  - channel context source: recent Slack history in each channel (default 24h lookback); fallback template when no high-signal context exists
+  - launchd service added: `com.coatueclaw.board-seat-daily` (`COATUE_CLAW_BOARD_SEAT_TIME`, default `08:30`)
+  - Make targets added:
+    - `openclaw-board-seat-status`
+    - `openclaw-board-seat-run-once`
+  - tests added:
+    - `tests/test_board_seat_daily.py`
+    - `tests/test_launchd_runtime.py` updated for new service
 - X chart pipeline now runs as hourly scout + windowed post:
   - every run ingests candidates into a persistent `observed_candidates` pool in SQLite
   - scheduled posting windows still use `COATUE_CLAW_X_CHART_WINDOWS` (`09:00,12:00,18:00` default)

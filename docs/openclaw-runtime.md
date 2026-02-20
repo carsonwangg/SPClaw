@@ -9,6 +9,8 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
 - Coatue 24/7 services:
   - `~/Library/LaunchAgents/com.coatueclaw.email-gateway.plist`
   - `~/Library/LaunchAgents/com.coatueclaw.memory-prune.plist`
+  - `~/Library/LaunchAgents/com.coatueclaw.x-chart-daily.plist`
+  - `~/Library/LaunchAgents/com.coatueclaw.board-seat-daily.plist`
   - `~/Library/LaunchAgents/com.coatueclaw.spencer-change-digest.plist`
 - Gateway logs: `/tmp/openclaw/openclaw-YYYY-MM-DD.log`
 - App repo: `/opt/coatue-claw`
@@ -38,7 +40,8 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
   - Weekly idea scan
 - Scheduled (wired):
   - Hourly memory prune via `launchd` (`com.coatueclaw.memory-prune`)
-  - Chart scout posting via `launchd` (`com.coatueclaw.x-chart-daily`) at local times from `COATUE_CLAW_X_CHART_WINDOWS` (default `09:00,12:00,18:00`)
+  - Chart scout via `launchd` (`com.coatueclaw.x-chart-daily`) every hour (`StartInterval=3600` default), with posting gated by `COATUE_CLAW_X_CHART_WINDOWS` (default `09:00,12:00,18:00`)
+  - Board Seat daily post via `launchd` (`com.coatueclaw.board-seat-daily`) at `COATUE_CLAW_BOARD_SEAT_TIME` (default `08:30`)
   - Daily Spencer change-request digest DM via `launchd` (`com.coatueclaw.spencer-change-digest`) at `COATUE_CLAW_SPENCER_CHANGE_DIGEST_TIME` (default `18:00`)
   - Chart scout posts upload the source chart image snip from the selected X post (no redraw/reconstruction step)
 
@@ -203,6 +206,15 @@ X chart scout environment controls:
 - `COATUE_CLAW_X_CHART_DB_PATH`: optional SQLite store path (default `/opt/coatue-claw-data/db/x_chart_daily.sqlite`)
 - `COATUE_CLAW_X_CHART_DIR`: optional markdown artifact output dir (default `/opt/coatue-claw-data/artifacts/x-chart-daily`)
 - `COATUE_CLAW_VISUALCAPITALIST_FEED_URL`: optional feed override (default `https://www.visualcapitalist.com/feed/`)
+
+Board Seat daily environment controls:
+- `COATUE_CLAW_BOARD_SEAT_PORTCOS`: comma-separated `Company:channel` mappings (default includes anduril/anthropic/cursor/neuralink/openai/physical-intelligence/ramp/spacex/stripe/sunday-robotics)
+- `COATUE_CLAW_BOARD_SEAT_TIME`: local daily runtime time (`HH:MM`, default `08:30`)
+- `COATUE_CLAW_BOARD_SEAT_TZ`: timezone for run date (default `America/Los_Angeles`)
+- `COATUE_CLAW_BOARD_SEAT_LOOKBACK_HOURS`: Slack history window used for context (default `24`)
+- `COATUE_CLAW_BOARD_SEAT_MAX_MESSAGES`: max context messages fetched per channel (default `160`)
+- `COATUE_CLAW_BOARD_SEAT_DB_PATH`: optional SQLite path for daily run ledger
+- `COATUE_CLAW_BOARD_SEAT_MODEL`: optional LLM model for synthesis (default `gpt-5-mini`)
 
 Spencer change-digest environment controls:
 - `COATUE_CLAW_SPENCER_USER_IDS`: comma-separated Slack user IDs treated as Spencer request sources
