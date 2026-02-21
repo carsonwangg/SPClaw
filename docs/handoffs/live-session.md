@@ -708,3 +708,23 @@ Then confirm bot returns:
 ### 2026-02-19 Ship Status
 - rg fallback prompt patch is ready to ship on `main` in this session.
 - Next operator action after pull: `make openclaw-restart` then re-run Slack refine request.
+
+## 2026-02-21 - X Chart Title Coherence Hardening
+- Issue fixed: Chart-of-the-* titles could become ungrammatical from noisy/truncated source copy (example observed in Slack: `Institutional investors sold a are at an extreme`).
+- Root cause:
+  - subject extraction occasionally preserved a partial action phrase (`sold a`), then narrative template appended `are at an extreme`.
+- Code updates in `/Users/carsonwang/CoatueClaw/src/coatue_claw/x_chart_daily.py`:
+  - added subject cleanup before narrative synthesis (`_clean_subject_for_headline`)
+  - added singular/plural copula selection (`_subject_is_plural`) so templates use `is/are` correctly
+  - added explicit institutional net-seller/net-buyer narrative rules
+  - added incoherent-headline detector (`_has_incoherent_headline`)
+  - added final grammar-repair fallback inside `_sanitize_style_copy`
+  - added style quality/checklist guardrails so ungrammatical headlines fail QA
+- Tests:
+  - added regression test `test_style_draft_rewrites_incoherent_institutional_selling_headline`
+  - validation run: `PYTHONPATH=src pytest -q tests/test_x_chart_daily.py` -> `44 passed`
+
+### Immediate Next Steps
+1. Deploy latest `main` to `/opt/coatue-claw` and restart runtime (`make openclaw-restart`).
+2. Run manual post-url smoke tests with known noisy titles and verify coherent final headline in Slack.
+3. Monitor next scheduled morning/afternoon/evening chart posts for title quality regressions.

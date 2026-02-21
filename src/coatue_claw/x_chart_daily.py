@@ -236,6 +236,38 @@ TRAILING_STOPWORDS = {
     "with",
 }
 
+SUBJECT_TRAILING_ACTION_VERBS = (
+    "sold",
+    "bought",
+    "buying",
+    "selling",
+    "hit",
+    "reached",
+    "stands",
+    "standing",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+)
+
+PLURAL_SUBJECT_HINTS = {
+    "investors",
+    "clients",
+    "funds",
+    "flows",
+    "receipts",
+    "duties",
+    "sales",
+    "earnings",
+    "jobs",
+    "rates",
+    "prices",
+    "stocks",
+    "etfs",
+}
+
 
 class XChartError(RuntimeError):
     pass
@@ -811,6 +843,8 @@ def _style_copy_quality_errors(style_draft: StyleDraft) -> list[str]:
         errors.append("chart label too long")
     if len(_normalize_render_text(style_draft.takeaway)) > 68:
         errors.append("takeaway too long")
+    if _has_incoherent_headline(style_draft.headline):
+        errors.append("headline grammar invalid")
     return errors
 
 
@@ -1098,15 +1132,26 @@ def _synthesize_chart_label(*, subject: str, sentence: str, mode_hint: str) -> s
 
 
 def _synthesize_narrative_title(*, subject: str, verb: str, sentence: str) -> str:
-    subject_core = _shorten_without_ellipsis(_strip_news_prefix(subject), max_chars=40)
+    subject_core = _clean_subject_for_headline(subject=subject, sentence=sentence)
     s_lower = subject_core.lower()
     v_lower = verb.lower()
     sentence_lower = sentence.lower()
+    copula = "are" if _subject_is_plural(subject_core) else "is"
     if "employees" in sentence_lower and "robots" in sentence_lower:
         entity = _entity_hint_from_text(sentence=sentence, fallback=subject_core)
         if "ratio" in sentence_lower or "replacing humans" in sentence_lower:
             return _shorten_without_ellipsis(f"{entity} is increasing automation intensity", max_chars=56)
         return _shorten_without_ellipsis(f"{entity} is scaling robots faster than headcount", max_chars=56)
+    if (
+        "institutional" in sentence_lower
+        and ("net sellers" in sentence_lower or "sold a net" in sentence_lower or "biggest net sellers" in sentence_lower)
+    ):
+        return "Institutional selling is at an extreme"
+    if (
+        "institutional" in sentence_lower
+        and ("net buyers" in sentence_lower or "bought a net" in sentence_lower or "biggest net buyers" in sentence_lower)
+    ):
+        return "Institutional buying is accelerating"
     if "etf inflows" in s_lower:
         if v_lower in POSITIVE_MOVE_VERBS or "record" in sentence.lower():
             return "ETF appetite is re-accelerating"
@@ -1118,11 +1163,11 @@ def _synthesize_narrative_title(*, subject: str, verb: str, sentence: str) -> st
         if v_lower in POSITIVE_MOVE_VERBS:
             return "Consumer confidence is improving"
     if v_lower in POSITIVE_MOVE_VERBS:
-        return _shorten_without_ellipsis(f"{subject_core} are inflecting higher", max_chars=56)
+        return _shorten_without_ellipsis(f"{subject_core} {copula} inflecting higher", max_chars=56)
     if v_lower in NEGATIVE_MOVE_VERBS:
-        return _shorten_without_ellipsis(f"{subject_core} are rolling over", max_chars=56)
+        return _shorten_without_ellipsis(f"{subject_core} {copula} rolling over", max_chars=56)
     if "record" in sentence.lower() or v_lower in NEUTRAL_MOVE_VERBS:
-        return _shorten_without_ellipsis(f"{subject_core} are at an extreme", max_chars=56)
+        return _shorten_without_ellipsis(f"{subject_core} {copula} at an extreme", max_chars=56)
     return _shorten_without_ellipsis(_strip_news_prefix(sentence), max_chars=56)
 
 
@@ -1144,6 +1189,61 @@ def _is_low_signal_phrase(text: str) -> bool:
     if lower in {"chart context", "us trend snapshot"}:
         return True
     return False
+
+
+def _clean_subject_for_headline(*, subject: str, sentence: str) -> str:
+    subject_core = _trim_trailing_stopwords(_shorten_without_ellipsis(_strip_news_prefix(subject), max_chars=40))
+    if subject_core:
+        subject_core = re.sub(
+            rf"\b(?:{'|'.join(re.escape(v) for v in SUBJECT_TRAILING_ACTION_VERBS)})\b(?:\s+\w+){{0,2}}$",
+            "",
+            subject_core,
+            flags=re.IGNORECASE,
+        ).strip(" ,:-")
+        subject_core = _trim_trailing_stopwords(subject_core)
+    if len(subject_core.split()) >= 2:
+        return subject_core
+
+    sentence_core = re.sub(r"^@\w+:\s*", "", _strip_news_prefix(sentence), flags=re.IGNORECASE).strip()
+    sentence_core = re.sub(
+        r"\b(?:surged|rose|jumped|climbed|rebounded|accelerated|increased|grew|fell|dropped|declined|slowed|rolled over|sank|contracted|decelerated|sold|bought|buying|selling|hit|reached|stands at|is at)\b.*$",
+        "",
+        sentence_core,
+        flags=re.IGNORECASE,
+    ).strip(" ,:-")
+    sentence_core = _trim_trailing_stopwords(_shorten_without_ellipsis(sentence_core, max_chars=40))
+    if len(sentence_core.split()) >= 2:
+        return sentence_core
+    return subject_core or "US data"
+
+
+def _subject_is_plural(subject: str) -> bool:
+    lower = _normalize_render_text(subject).lower()
+    if not lower:
+        return False
+    if " and " in lower:
+        return True
+    words = [w for w in re.split(r"\s+", lower) if w]
+    if not words:
+        return False
+    tail = words[-1].strip(".,:;")
+    if tail in PLURAL_SUBJECT_HINTS:
+        return True
+    if tail.endswith("s") and not tail.endswith(("ss", "is", "us")):
+        return True
+    return False
+
+
+def _has_incoherent_headline(text: str) -> bool:
+    lower = _normalize_render_text(text).lower()
+    if not lower:
+        return True
+    bad_patterns = (
+        r"\b(a|an|the)\s+(is|are|was|were)\b",
+        r"\b(sold|bought|buying|selling)\s+(a|an|the)\s+(is|are|was|were)\b",
+        r"\b(is|are|was|were)\s+(is|are|was|were)\b",
+    )
+    return any(re.search(pat, lower) is not None for pat in bad_patterns)
 
 
 def _keyword_style_override(candidate: Candidate) -> tuple[str, str, str] | None:
@@ -1247,6 +1347,21 @@ def _sanitize_style_copy(*, candidate: Candidate, headline: str, chart_label: st
             core = _shorten_without_ellipsis(source_text, max_chars=62)
             takeaway = core or "US data trend moved sharply higher."
         takeaway = _trim_trailing_stopwords(takeaway)
+    if _has_incoherent_headline(headline):
+        merged_context = _normalize_render_text(f"{source_text} {chart_hint or ''}").lower()
+        if "institutional" in merged_context and ("seller" in merged_context or "sold" in merged_context):
+            headline = "Institutional selling is at an extreme"
+        elif "institutional" in merged_context and ("buyer" in merged_context or "bought" in merged_context):
+            headline = "Institutional buying is accelerating"
+        elif "seller" in merged_context or "sold" in merged_context:
+            headline = "Selling pressure is at an extreme"
+        elif "buyer" in merged_context or "bought" in merged_context:
+            headline = "Buying pressure is accelerating"
+        elif chart_hint:
+            headline = _shorten_without_ellipsis(_strip_news_prefix(chart_hint), max_chars=48)
+        else:
+            headline = "US trend is at an extreme"
+        headline = _trim_trailing_stopwords(_shorten_without_ellipsis(headline, max_chars=48))
     return headline, chart_label, takeaway
 
 
@@ -2376,6 +2491,7 @@ def _build_style_draft(candidate: Candidate, *, iteration: int) -> StyleDraft:
     checks = {
         "us_relevant": _is_us_relevant_post(f"{candidate.title} {candidate.text}"),
         "headline_short": bool(headline) and len(headline) <= 72,
+        "headline_grammar": not _has_incoherent_headline(headline),
         "takeaway_short": bool(takeaway) and len(takeaway) <= 68,
         "trend_explicit": _contains_trend_signal(f"{candidate.title} {candidate.text}"),
         "plain_language": not any(term in combined.lower() for term in SLIDE_JARGON_KEYWORDS),

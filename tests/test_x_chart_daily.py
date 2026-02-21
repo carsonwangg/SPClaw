@@ -1310,3 +1310,32 @@ def test_style_draft_rewrites_low_signal_takeaway_from_headline_context(monkeypa
     )
     draft = _select_style_draft(candidate)
     assert draft.takeaway == "US customs-duty collections just hit a new high."
+
+
+def test_style_draft_rewrites_incoherent_institutional_selling_headline(monkeypatch) -> None:
+    candidate = Candidate(
+        candidate_key="x:inst-sellers",
+        source_type="x",
+        source_id="KobeissiLetter",
+        author="@KobeissiLetter",
+        title="@KobeissiLetter: Institutional investors sold a net -$8.3 billion of US equities last week",
+        text="Exhibit 12: Institutional clients were the biggest net sellers last week.",
+        url="https://x.com/KobeissiLetter/status/2024990952742682803",
+        image_url="https://pbs.twimg.com/media/inst-sellers.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=900,
+        source_priority=1.2,
+        score=90.0,
+    )
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._synthesize_style_via_llm",
+        lambda _candidate: {
+            "headline": "Institutional investors sold a are at an extreme",
+            "chart_label": "US institutional net buying (selling) (US$M)",
+            "takeaway": "Institutional investors sold a net -$8.3 billion of US equities.",
+        },
+    )
+    draft = _select_style_draft(candidate)
+    assert draft.headline == "Institutional selling is at an extreme"
+    assert "sold a are" not in draft.headline.lower()
+    assert draft.checks["headline_grammar"] is True

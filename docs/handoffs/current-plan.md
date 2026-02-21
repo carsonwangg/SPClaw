@@ -399,3 +399,18 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 
 ## 2026-02-19 Ship Status
 - Shipping prompt fallback + test to `main` to prevent Slack build-request failures when `rg` is missing.
+
+## 2026-02-21 Plan Update - Chart Title Coherence
+
+### Completed
+- Hardened X chart title synthesis to prevent ungrammatical English in final chart header output.
+- Added grammar-aware cleanup + fallback rewrite path in `src/coatue_claw/x_chart_daily.py`.
+- Added regression coverage for the observed Slack failure pattern.
+
+### In Progress
+- Runtime verification on Mac mini after deploy/restart:
+  - check manual post-url path + scheduled slot behavior.
+
+### Next
+1. Verify chart title quality in `#charting` for noisy source posts.
+2. If any title still fails coherence checks, capture artifact + source URL and add targeted override/test.
