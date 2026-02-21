@@ -47,6 +47,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - default channel set: anduril/anthropic/cursor/neuralink/openai/physical-intelligence/ramp/spacex/stripe/sunday-robotics
   - behavior: one post per company per local day (duplicate-protected in SQLite ledger)
   - per-channel output uses board-seat frame (`Signal`, `Board lens`, `Watchlist`, `Team ask`) and incorporates last-24h channel context when available
+  - `missing_scope` fallback is built in for Slack channel lookup: posts can still deliver by channel name even without `conversations:read`
   - config supports custom company:channel map with `COATUE_CLAW_BOARD_SEAT_PORTCOS`
 - X chart flow is now scout-first and slot-posted:
   - launchd runs `x_chart_daily run-once` hourly (`StartInterval=3600`; configurable via `COATUE_CLAW_X_CHART_SCOUT_INTERVAL_SECONDS`)

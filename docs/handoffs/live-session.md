@@ -12,6 +12,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - post format follows the Anduril board-seat frame and is tailored by company:
     - `Signal`, `Board lens`, `Watchlist`, `Team ask`
   - channel context source: recent Slack history in each channel (default 24h lookback); fallback template when no high-signal context exists
+  - Slack scope fallback: if `conversations:read` is unavailable (`missing_scope`), service posts by channel name directly and skips history-context enrichment
   - launchd service added: `com.coatueclaw.board-seat-daily` (`COATUE_CLAW_BOARD_SEAT_TIME`, default `08:30`)
   - Make targets added:
     - `openclaw-board-seat-status`

@@ -226,12 +226,19 @@ def _resolve_channel_id(client: Any, channel_ref: str) -> str | None:
     target = ref.lstrip("#").strip().lower()
     cursor: str | None = None
     while True:
-        payload = client.conversations_list(
-            types="public_channel,private_channel",
-            exclude_archived=True,
-            limit=500,
-            cursor=cursor,
-        )
+        try:
+            payload = client.conversations_list(
+                types="public_channel,private_channel",
+                exclude_archived=True,
+                limit=500,
+                cursor=cursor,
+            )
+        except SlackApiError as exc:
+            err = str(exc.response.get("error") or "")
+            if err == "missing_scope":
+                # Fallback: post directly by channel name when list scope is unavailable.
+                return target
+            return None
         channels = payload.get("channels") if isinstance(payload, dict) else None
         for item in channels if isinstance(channels, list) else []:
             name = str(item.get("name") or "").strip().lower()
@@ -254,13 +261,19 @@ def _fetch_recent_context(client: Any, *, channel_id: str, company: str) -> list
     cursor: str | None = None
     snippets: list[str] = []
     while len(snippets) < max_messages:
-        payload = client.conversations_history(
-            channel=channel_id,
-            oldest=str(oldest),
-            inclusive=False,
-            limit=min(200, max_messages - len(snippets)),
-            cursor=cursor,
-        )
+        try:
+            payload = client.conversations_history(
+                channel=channel_id,
+                oldest=str(oldest),
+                inclusive=False,
+                limit=min(200, max_messages - len(snippets)),
+                cursor=cursor,
+            )
+        except SlackApiError as exc:
+            err = str(exc.response.get("error") or "")
+            if err == "missing_scope":
+                return []
+            return []
         messages = payload.get("messages") if isinstance(payload, dict) else None
         for item in messages if isinstance(messages, list) else []:
             if not isinstance(item, dict):

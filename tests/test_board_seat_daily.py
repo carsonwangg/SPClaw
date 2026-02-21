@@ -82,3 +82,18 @@ def test_run_once_dry_run_without_slack_sdk(tmp_path: Path, monkeypatch) -> None
     assert len(payload["sent"]) == 1
     assert payload["sent"][0]["company"] == "Cursor"
     assert "preview" in payload["sent"][0]
+
+
+def test_resolve_channel_id_falls_back_to_name_on_missing_scope(monkeypatch) -> None:
+    class FakeSlackApiError(Exception):
+        def __init__(self, error: str) -> None:
+            self.response = {"error": error}
+            super().__init__(error)
+
+    class FakeClient:
+        def conversations_list(self, **kwargs):
+            raise FakeSlackApiError("missing_scope")
+
+    monkeypatch.setattr(board_seat_daily, "SlackApiError", FakeSlackApiError)
+    channel = board_seat_daily._resolve_channel_id(FakeClient(), "anduril")
+    assert channel == "anduril"
