@@ -23,6 +23,24 @@ def test_run_once_dry_run(tmp_path: Path, monkeypatch) -> None:
     assert payload["open_count"] >= 1
     assert "preview" in payload
     assert "#1" in payload["preview"]
+    assert "Spencer Peterson" in payload["preview"]
+
+
+def test_run_once_dry_run_includes_carson_label(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "spencer_changes.sqlite"
+    monkeypatch.setenv("COATUE_CLAW_SPENCER_CHANGE_DB_PATH", str(db_path))
+    log = SpencerChangeLog(db_path=db_path)
+    log.capture_request(
+        user_id="U0AGD28QSQG",
+        channel="C123",
+        thread_ts="1.4",
+        message_ts="1.4",
+        text="Please change how this behaves in #charting.",
+    )
+
+    payload = run_once(dry_run=True)
+    assert payload["ok"] is True
+    assert "Carson Wang" in payload["preview"]
 
 
 def test_run_once_sends_and_dedupes(tmp_path: Path, monkeypatch) -> None:

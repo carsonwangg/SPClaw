@@ -217,6 +217,7 @@ Board Seat daily environment controls:
 - `COATUE_CLAW_BOARD_SEAT_MODEL`: optional LLM model for synthesis (default `gpt-5-mini`)
 
 Spencer change-digest environment controls:
+- `COATUE_CLAW_CHANGE_TRACKER_USERS`: optional comma-separated `user_id:label` mappings for tracked requesters (example: `U0AGD28QSQG:Carson Wang,U0AFJ5RS31C:Spencer Peterson`)
 - `COATUE_CLAW_SPENCER_USER_IDS`: comma-separated Slack user IDs treated as Spencer request sources
 - `COATUE_CLAW_SPENCER_CHANGE_DB_PATH`: optional SQLite path for tracked Spencer requests
 - `COATUE_CLAW_SPENCER_CHANGE_DIGEST_DM_USER_IDS`: comma-separated Slack user IDs to DM with daily open-request digest

@@ -7,12 +7,14 @@ from coatue_claw.spencer_change_log import (
     format_changes,
     is_spencer_user,
     looks_like_change_request,
+    requester_label,
 )
 
 
 def test_is_spencer_user_defaults() -> None:
     assert is_spencer_user("U0AFJ5RS31C") is True
     assert is_spencer_user("U0AFJ5T6JTY") is True
+    assert is_spencer_user("U0AGD28QSQG") is True
     assert is_spencer_user("U123") is False
 
 
@@ -38,3 +40,9 @@ def test_capture_update_and_list(tmp_path: Path) -> None:
     rendered = format_changes(rows)
     assert "#1" in rendered
     assert "anduril" in rendered.lower()
+    assert "Spencer Peterson" in rendered
+
+
+def test_requester_label_defaults() -> None:
+    assert requester_label("U0AFJ5RS31C") == "Spencer Peterson"
+    assert requester_label("U0AGD28QSQG") == "Carson Wang"

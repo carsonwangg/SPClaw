@@ -8,7 +8,11 @@ import re
 import sqlite3
 
 
-DEFAULT_SPENCER_USER_IDS = ("U0AFJ5RS31C", "U0AFJ5T6JTY")
+DEFAULT_TRACKED_CHANGE_USERS: dict[str, str] = {
+    "U0AFJ5RS31C": "Spencer Peterson",
+    "U0AFJ5T6JTY": "Spencer Peterson",
+    "U0AGD28QSQG": "Carson Wang",
+}
 
 
 def _utc_now_iso() -> str:
@@ -39,20 +43,54 @@ def _normalize_status(status: str) -> str:
     return "captured"
 
 
+def _parse_change_tracker_users(raw: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for item in raw.split(","):
+        part = item.strip()
+        if not part:
+            continue
+        if ":" in part:
+            user_id, label = part.split(":", 1)
+            uid = user_id.strip()
+            name = label.strip()
+            if uid:
+                out[uid] = name or uid
+            continue
+        out[part] = part
+    return out
+
+
+def tracked_change_users() -> dict[str, str]:
+    raw_new = os.environ.get("COATUE_CLAW_CHANGE_TRACKER_USERS", "").strip()
+    if raw_new:
+        parsed = _parse_change_tracker_users(raw_new)
+        if parsed:
+            return parsed
+
+    raw_legacy = os.environ.get("COATUE_CLAW_SPENCER_USER_IDS", "").strip()
+    if raw_legacy:
+        parsed = _parse_change_tracker_users(raw_legacy)
+        if parsed:
+            # legacy env only had IDs; synthesize labels from defaults when known.
+            return {uid: DEFAULT_TRACKED_CHANGE_USERS.get(uid, uid) for uid in parsed.keys()}
+
+    return dict(DEFAULT_TRACKED_CHANGE_USERS)
+
+
 def spencer_user_ids() -> set[str]:
-    raw = os.environ.get("COATUE_CLAW_SPENCER_USER_IDS", "").strip()
-    if not raw:
-        return set(DEFAULT_SPENCER_USER_IDS)
-    out = {item.strip() for item in raw.split(",") if item.strip()}
-    if out:
-        return out
-    return set(DEFAULT_SPENCER_USER_IDS)
+    return set(tracked_change_users().keys())
 
 
 def is_spencer_user(user_id: str | None) -> bool:
     if not user_id:
         return False
     return user_id in spencer_user_ids()
+
+
+def requester_label(user_id: str | None) -> str:
+    if not user_id:
+        return "Unknown"
+    return tracked_change_users().get(user_id, user_id)
 
 
 def looks_like_change_request(text: str) -> bool:
@@ -225,7 +263,7 @@ class SpencerChangeLog:
         return out
 
 
-def format_changes(changes: list[SpencerChange], *, title: str = "Spencer Change Requests") -> str:
+def format_changes(changes: list[SpencerChange], *, title: str = "Tracked Change Requests") -> str:
     if not changes:
         return f"{title}:\n- none captured yet."
     lines = [f"{title}:"]
@@ -233,7 +271,8 @@ def format_changes(changes: list[SpencerChange], *, title: str = "Spencer Change
         channel_ref = f"<#{item.channel}>" if item.channel else "unknown-channel"
         text = _normalize_text(item.text, max_chars=150)
         note = f" | note: {item.implementation_note}" if item.implementation_note else ""
+        requester = requester_label(item.user_id)
         lines.append(
-            f"- `#{item.change_id}` [{item.status}] {channel_ref} at `{item.captured_at_utc}` | {text}{note}"
+            f"- `#{item.change_id}` [{item.status}] [{requester}] {channel_ref} at `{item.captured_at_utc}` | {text}{note}"
         )
     return "\n".join(lines)

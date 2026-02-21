@@ -17,7 +17,7 @@ except Exception:  # pragma: no cover - optional dependency for non-Slack test e
     WebClient = None  # type: ignore[assignment]
     SlackApiError = Exception  # type: ignore[assignment]
 
-from coatue_claw.spencer_change_log import SpencerChange, SpencerChangeLog
+from coatue_claw.spencer_change_log import SpencerChange, SpencerChangeLog, requester_label
 
 load_dotenv("/opt/coatue-claw/.env.prod")
 
@@ -84,7 +84,7 @@ def _open_changes(changes: list[SpencerChange]) -> list[SpencerChange]:
 def _format_digest(changes: list[SpencerChange]) -> str:
     now_local = datetime.now(_timezone()).strftime("%b %d, %Y %I:%M %p %Z")
     lines = [
-        f"Spencer change requests still open (as of {now_local}):",
+        f"Tracked change requests still open (as of {now_local}):",
     ]
     if not changes:
         lines.append("- None. All tracked requests are implemented.")
@@ -92,13 +92,14 @@ def _format_digest(changes: list[SpencerChange]) -> str:
 
     for item in changes[:25]:
         channel_ref = f"<#{item.channel}>" if item.channel else "unknown-channel"
+        who = requester_label(item.user_id)
         text = item.text
         if len(text) > 140:
             text = text[:137].rstrip() + "..."
-        lines.append(f"- #{item.change_id} [{item.status}] {channel_ref}: {text}")
+        lines.append(f"- #{item.change_id} [{item.status}] [{who}] {channel_ref}: {text}")
     if len(changes) > 25:
         lines.append(f"- ... plus {len(changes) - 25} more")
-    lines.append("Run `spencer changes` in Slack for the full list.")
+    lines.append("Run `change requests` (or `spencer changes`) in Slack for the full list.")
     return "\n".join(lines)
 
 

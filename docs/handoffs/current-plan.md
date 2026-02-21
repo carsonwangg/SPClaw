@@ -40,6 +40,10 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Change-request governance now tracks both Spencer and Carson with explicit attribution:
+  - captured items include requester identity in command output + daily digest
+  - command aliases now include `change requests` / `tracked changes` in addition to `spencer changes`
+  - optional requester mapping env: `COATUE_CLAW_CHANGE_TRACKER_USERS=user_id:label,...`
 - Board Seat-as-a-Service daily loop is now implemented:
   - service: `com.coatueclaw.board-seat-daily` via `launchd`
   - runtime module: `src/coatue_claw/board_seat_daily.py`

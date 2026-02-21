@@ -4,6 +4,16 @@
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Current Status (2026-02-20)
+- Change tracker now captures both Spencer + Carson requests with requester attribution:
+  - default tracked users include `Spencer Peterson` + `Carson Wang`
+  - list output now labels each item with requester name
+  - daily digest now labels each open request with requester name
+  - tracker commands accept:
+    - `spencer changes`
+    - `change requests`
+    - `tracked changes`
+  - optional override via env:
+    - `COATUE_CLAW_CHANGE_TRACKER_USERS` (format `user_id:label,...`)
 - Board Seat-as-a-Service daily scheduler shipped for portco channels:
   - new runtime module: `src/coatue_claw/board_seat_daily.py`
   - daily post per company/channel with duplicate guard (one post per company per local day)

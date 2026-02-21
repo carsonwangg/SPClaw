@@ -226,7 +226,7 @@ def _format_chart_usage() -> str:
         "- memory: `memory status` or `what is my daughter's birthday?`\n"
         "- file ingest: upload a file in Slack and I'll auto-sort it into the knowledge folders\n"
         "- routing: messages default to OpenClaw unless you @ another user\n"
-        "- governance: `spencer changes`, `spencer changes open`, `spencer changes last 50`\n"
+        "- governance: `spencer changes`, `change requests`, `spencer changes last 50`\n"
         "- default: YoY Revenue Growth is y-axis unless you specify axes"
     )
 
@@ -367,11 +367,16 @@ def _mark_spencer_change(change_id: int | None, *, status: str, note: str) -> No
 def _handle_spencer_change_command(*, text: str, thread_ts: str, say) -> bool:
     stripped = _strip_slack_mentions(text).strip()
     lower = stripped.lower()
-    if not lower.startswith("spencer changes"):
+    is_command = (
+        lower.startswith("spencer changes")
+        or lower.startswith("change requests")
+        or lower.startswith("tracked changes")
+    )
+    if not is_command:
         return False
     tracker = _spencer_change_log()
     if tracker is None:
-        say(text="Spencer change tracker is unavailable right now.", thread_ts=thread_ts)
+        say(text="Change tracker is unavailable right now.", thread_ts=thread_ts)
         return True
 
     status: str | None = None
@@ -391,9 +396,9 @@ def _handle_spencer_change_command(*, text: str, thread_ts: str, say) -> bool:
             limit = 20
 
     rows = tracker.list_changes(limit=limit, status=status)
-    title = "Spencer change requests"
+    title = "Tracked change requests (Spencer + Carson)"
     if status:
-        title = f"Spencer change requests ({status})"
+        title = f"Tracked change requests ({status})"
     say(text=format_spencer_changes(rows, title=title), thread_ts=thread_ts)
     return True
 
