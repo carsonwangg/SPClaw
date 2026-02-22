@@ -1020,6 +1020,8 @@ def _fetch_x_evidence(*, ticker: str, hours: int) -> tuple[str | None, str | Non
         author_id = str(row.get("author_id") or "").strip()
         if not text or not tweet_id:
             continue
+        if not _is_relevant_ticker_post(text=text, ticker=ticker):
+            continue
         metrics = row.get("public_metrics") if isinstance(row.get("public_metrics"), dict) else {}
         engagement = int(metrics.get("like_count", 0)) + int(metrics.get("retweet_count", 0)) + int(metrics.get("reply_count", 0)) + int(metrics.get("quote_count", 0))
         if engagement > best_engagement:
@@ -1030,6 +1032,56 @@ def _fetch_x_evidence(*, ticker: str, hours: int) -> tuple[str | None, str | Non
     if best_engagement < 0:
         return (None, None, 0)
     return (best_text, best_url, best_engagement)
+
+
+def _is_relevant_ticker_post(*, text: str, ticker: str) -> bool:
+    cleaned = _normalize_whitespace(text)
+    if not cleaned:
+        return False
+    upper = cleaned.upper()
+    t = ticker.upper().strip()
+    if not t:
+        return False
+
+    has_cashtag = bool(re.search(rf"\${re.escape(t)}\b", upper))
+    has_symbol = bool(re.search(rf"\b{re.escape(t)}\b", upper))
+    if len(t) <= 3 and not has_cashtag:
+        return False
+    if not has_cashtag and not has_symbol:
+        return False
+
+    finance_keywords = (
+        "STOCK",
+        "SHARES",
+        "EARNINGS",
+        "GUIDANCE",
+        "REVENUE",
+        "MARGIN",
+        "PRICE TARGET",
+        "UPGRADE",
+        "DOWNGRADE",
+        "BUY",
+        "SELL",
+        "OUTLOOK",
+        "CLOUD",
+        "CAPEX",
+        "DEMAND",
+        "ESTIMATE",
+    )
+    if not any(word in upper for word in finance_keywords):
+        return False
+
+    noise_keywords = (
+        "RUN RATE",
+        "CRICKET",
+        "MATCH",
+        "GOAL",
+        "SCORE",
+        "FINAL",
+    )
+    if any(word in upper for word in noise_keywords):
+        return False
+    return True
 
 
 def _fetch_yahoo_news(*, ticker: str, hours: int) -> tuple[str | None, str | None]:

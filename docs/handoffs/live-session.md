@@ -15,9 +15,14 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - catalyst line sanitization now strips hashtags, cashtags, handles, URLs, and non-MD emoji
   - catalyst generation now enforces causal wording (`after/on/as/amid`) so each line explains why the stock moved
   - retained source links only (`[X]` / `[News]`) per mover
+  - added relevance filtering for X evidence on ambiguous tickers:
+    - short symbols (3 chars or less) now require cashtag usage (for example `$NET`)
+    - finance-keyword gate blocks non-market chatter
+    - noise-term guard filters sports/context collisions (for example `run rate`, `match`)
   - tests updated:
     - `tests/test_market_daily.py::test_build_message_format`
     - `tests/test_market_daily.py::test_catalyst_sanitization_removes_tags_urls_and_extra_emoji`
+    - `tests/test_market_daily.py::test_relevant_ticker_post_filters_ambiguous_short_tickers`
 
 - MD (Market Daily) 2x/day feature is now implemented in repo (`main`) with Slack/CLI/runtime wiring:
   - new module: `src/coatue_claw/market_daily.py`

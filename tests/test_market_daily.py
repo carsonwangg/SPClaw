@@ -9,6 +9,7 @@ from coatue_claw.market_daily import (
     QuoteSnapshot,
     _build_message,
     _ensure_reason_like_line,
+    _is_relevant_ticker_post,
     _merge_universe,
     _parse_times,
     _select_top_movers,
@@ -216,3 +217,14 @@ def test_catalyst_sanitization_removes_tags_urls_and_extra_emoji() -> None:
     assert "$NVDA" not in line
     assert "http" not in line
     assert "🚀" not in line
+
+
+def test_relevant_ticker_post_filters_ambiguous_short_tickers() -> None:
+    assert _is_relevant_ticker_post(
+        text="$NET stock drops after earnings miss and weaker margin guidance",
+        ticker="NET",
+    )
+    assert not _is_relevant_ticker_post(
+        text="India's net run rate collapsed after the match",
+        ticker="NET",
+    )
