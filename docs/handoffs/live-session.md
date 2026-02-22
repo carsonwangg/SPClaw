@@ -728,3 +728,17 @@ Then confirm bot returns:
 1. Deploy latest `main` to `/opt/coatue-claw` and restart runtime (`make openclaw-restart`).
 2. Run manual post-url smoke tests with known noisy titles and verify coherent final headline in Slack.
 3. Monitor next scheduled morning/afternoon/evening chart posts for title quality regressions.
+
+## 2026-02-21 - Remove Chart Label From Source-Snip Output
+- User request: remove chart-label line from chart-of-the-* output now that final render is a direct X source snip card.
+- Changes:
+  - removed chart-label subtitle line from source snip card renderer (`_render_source_snip_card`)
+  - removed `- Chart label: ...` from Slack initial comment payload in `_post_winner_to_slack`
+  - retained internal style-draft `chart_label` field for QA/scoring only (not user-facing in snip mode)
+- Tests:
+  - updated `tests/test_x_chart_daily.py` to assert Slack initial comment no longer includes `Chart label:`
+  - validation run: `PYTHONPATH=src pytest -q tests/test_x_chart_daily.py` -> `44 passed`
+
+### Immediate Next Steps
+1. Deploy/restart on mini and run one `run-post-url` smoke test.
+2. Confirm Slack output in `#charting` includes title + takeaway + source link, with no chart-label line.

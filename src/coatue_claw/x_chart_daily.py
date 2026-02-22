@@ -2602,7 +2602,6 @@ def _render_source_snip_card(*, candidate: Candidate, slot_key: str, style_draft
     fig = plt.figure(figsize=(15, 8.4), facecolor="#DCDDDF")
 
     headline_text = _shorten_without_ellipsis(_normalize_render_text(style_draft.headline), max_chars=56)
-    chart_label_text = _shorten_without_ellipsis(_normalize_render_text(style_draft.chart_label), max_chars=62)
     takeaway_text = _shorten_without_ellipsis(_normalize_render_text(style_draft.takeaway), max_chars=68)
 
     headline_obj = fig.text(
@@ -2617,18 +2616,8 @@ def _render_source_snip_card(*, candidate: Candidate, slot_key: str, style_draft
         weight="medium",
     )
     fig.add_artist(Line2D([0.05, 0.95], [0.892, 0.892], transform=fig.transFigure, color="#2F3745", linewidth=1.1))
-    chart_label_obj = fig.text(
-        0.05,
-        0.875,
-        chart_label_text,
-        ha="left",
-        va="center",
-        fontsize=11.2,
-        color="#2F3745",
-        family=COATUE_FONT_FAMILY,
-    )
 
-    # Prevent clipped title/subheading by auto-fitting to available card width.
+    # Prevent clipped title by auto-fitting to available card width.
     for _ in range(8):
         fig.canvas.draw()
         renderer = fig.canvas.get_renderer()
@@ -2642,12 +2631,6 @@ def _render_source_snip_card(*, candidate: Candidate, slot_key: str, style_draft
                 headline_obj.set_fontsize(current_size - 1.0)
             headline_text = _shorten_without_ellipsis(headline_text, max_chars=max(28, len(headline_text) - 4))
             headline_obj.set_text(headline_text)
-            continue
-
-        l_bb = chart_label_obj.get_window_extent(renderer=renderer)
-        if l_bb.x1 > max_x:
-            chart_label_text = _shorten_without_ellipsis(chart_label_text, max_chars=max(24, len(chart_label_text) - 4))
-            chart_label_obj.set_text(chart_label_text)
             continue
         break
 
@@ -2663,12 +2646,6 @@ def _render_source_snip_card(*, candidate: Candidate, slot_key: str, style_draft
             headline_obj.set_fontsize(max(18.0, float(headline_obj.get_fontsize()) - 1.0))
             headline_text = _shorten_without_ellipsis(headline_text, max_chars=max(22, len(headline_text) - 3))
             headline_obj.set_text(headline_text)
-            continue
-
-        l_bb = chart_label_obj.get_window_extent(renderer=renderer)
-        if l_bb.x1 > max_x:
-            chart_label_text = _shorten_without_ellipsis(chart_label_text, max_chars=max(18, len(chart_label_text) - 3))
-            chart_label_obj.set_text(chart_label_text)
             continue
         break
 
@@ -3321,7 +3298,6 @@ def _post_winner_to_slack(
         f"*{title_text}*",
         f"- Source: `{clean_author}`",
         f"- Title: {style_draft.headline}",
-        f"- Chart label: {style_draft.chart_label}",
         f"- Key takeaway: {clean_takeaway}",
         f"- Link: {candidate.url}",
         f"- Render: `{render_mode}`",

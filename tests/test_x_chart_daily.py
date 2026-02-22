@@ -526,6 +526,7 @@ def test_post_winner_uploads_file_in_initial_message(monkeypatch, tmp_path: Path
     assert upload_calls[0]["channel"] == "C123"
     assert upload_calls[0]["file"] == str(styled)
     assert "initial_comment" in upload_calls[0]
+    assert "Chart label:" not in str(upload_calls[0]["initial_comment"])
     assert "thread_ts" not in upload_calls[0]
     assert "post_publish_review" in result
 

@@ -414,3 +414,13 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 ### Next
 1. Verify chart title quality in `#charting` for noisy source posts.
 2. If any title still fails coherence checks, capture artifact + source URL and add targeted override/test.
+
+## 2026-02-21 Plan Update - Source-Snip Copy Simplification
+
+### Completed
+- Removed user-facing chart-label from X source-snip output (image subtitle + Slack comment line).
+- Preserved internal chart-label generation for style QA/scoring.
+
+### Next
+1. Verify live `run-post-url` post in `#charting` has no chart-label line.
+2. Continue monitoring title coherence + truncation in scheduled posts.
