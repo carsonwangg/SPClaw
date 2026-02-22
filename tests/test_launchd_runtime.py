@@ -43,6 +43,22 @@ def test_service_specs_build_expected_commands(tmp_path: Path, monkeypatch) -> N
     assert board["RunAtLoad"] is False
     assert board["StartCalendarInterval"] == [{"Hour": 8, "Minute": 30}]
 
+    md = specs[launchd_runtime.MARKET_DAILY_LABEL]
+    assert md["ProgramArguments"] == ["/tmp/python", "-m", "coatue_claw.market_daily", "run-once"]
+    assert md["RunAtLoad"] is False
+    assert md["StartCalendarInterval"] == [
+        {"Weekday": 1, "Hour": 7, "Minute": 0},
+        {"Weekday": 1, "Hour": 14, "Minute": 15},
+        {"Weekday": 2, "Hour": 7, "Minute": 0},
+        {"Weekday": 2, "Hour": 14, "Minute": 15},
+        {"Weekday": 3, "Hour": 7, "Minute": 0},
+        {"Weekday": 3, "Hour": 14, "Minute": 15},
+        {"Weekday": 4, "Hour": 7, "Minute": 0},
+        {"Weekday": 4, "Hour": 14, "Minute": 15},
+        {"Weekday": 5, "Hour": 7, "Minute": 0},
+        {"Weekday": 5, "Hour": 14, "Minute": 15},
+    ]
+
 
 def test_write_service_plists(tmp_path: Path, monkeypatch) -> None:
     repo = tmp_path / "repo"
@@ -61,6 +77,7 @@ def test_write_service_plists(tmp_path: Path, monkeypatch) -> None:
         launchd_runtime.X_CHART_LABEL,
         launchd_runtime.SPENCER_CHANGE_DIGEST_LABEL,
         launchd_runtime.BOARD_SEAT_DAILY_LABEL,
+        launchd_runtime.MARKET_DAILY_LABEL,
     }
     for label, plist_path in written.items():
         path = Path(plist_path)
@@ -77,12 +94,30 @@ def test_resolve_services() -> None:
         launchd_runtime.X_CHART_LABEL,
         launchd_runtime.SPENCER_CHANGE_DIGEST_LABEL,
         launchd_runtime.BOARD_SEAT_DAILY_LABEL,
+        launchd_runtime.MARKET_DAILY_LABEL,
     ]
     assert launchd_runtime._resolve_services("email") == [launchd_runtime.EMAIL_LABEL]
     assert launchd_runtime._resolve_services("memory") == [launchd_runtime.MEMORY_PRUNE_LABEL]
     assert launchd_runtime._resolve_services("xchart") == [launchd_runtime.X_CHART_LABEL]
     assert launchd_runtime._resolve_services("spencer") == [launchd_runtime.SPENCER_CHANGE_DIGEST_LABEL]
     assert launchd_runtime._resolve_services("boardseat") == [launchd_runtime.BOARD_SEAT_DAILY_LABEL]
+    assert launchd_runtime._resolve_services("marketdaily") == [launchd_runtime.MARKET_DAILY_LABEL]
+
+
+def test_market_daily_schedule_env_override(monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_MD_TIMES", "08:05,15:40")
+    assert launchd_runtime._market_daily_schedule() == [
+        {"Weekday": 1, "Hour": 8, "Minute": 5},
+        {"Weekday": 1, "Hour": 15, "Minute": 40},
+        {"Weekday": 2, "Hour": 8, "Minute": 5},
+        {"Weekday": 2, "Hour": 15, "Minute": 40},
+        {"Weekday": 3, "Hour": 8, "Minute": 5},
+        {"Weekday": 3, "Hour": 15, "Minute": 40},
+        {"Weekday": 4, "Hour": 8, "Minute": 5},
+        {"Weekday": 4, "Hour": 15, "Minute": 40},
+        {"Weekday": 5, "Hour": 8, "Minute": 5},
+        {"Weekday": 5, "Hour": 15, "Minute": 40},
+    ]
 
 
 def test_launchctl_domains(monkeypatch) -> None:

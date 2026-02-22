@@ -19,6 +19,12 @@ from coatue_claw.chart_title_context import infer_chart_title_context
 from coatue_claw.cli import run_diligence
 from coatue_claw.memory_extraction import parse_memory_lookup_query
 from coatue_claw.memory_runtime import MemoryRuntime
+from coatue_claw.market_daily import MarketDailyError
+from coatue_claw.market_daily import holdings as market_daily_holdings
+from coatue_claw.market_daily import refresh_coatue_holdings as market_daily_refresh_holdings
+from coatue_claw.market_daily import run_once as run_market_daily_once
+from coatue_claw.market_daily import set_override as market_daily_set_override
+from coatue_claw.market_daily import status as market_daily_status
 from coatue_claw.online_universe import discover_online_tickers
 from coatue_claw.runtime_settings import (
     PromotionError,
@@ -214,6 +220,7 @@ def _format_chart_usage() -> str:
     return (
         "Usage:\n"
         "- `diligence TICKER`\n"
+        "- `md now` / `md status` / `md holdings refresh`\n"
         "- `x digest <topic|ticker|handle> [last 24h] [limit 50]`\n"
         "- `x chart now` (run chart-scout winner now)\n"
         "- `x chart sources` / `x chart add @handle priority 1.2`\n"
@@ -857,6 +864,173 @@ def _handle_x_digest_command(*, text: str, channel: str | None, thread_ts: str, 
     return True
 
 
+def _handle_market_daily_command(*, text: str, channel: str | None, thread_ts: str, say) -> bool:
+    stripped = _strip_slack_mentions(text).strip()
+    lower = stripped.lower()
+    if not re.match(r"^md\b", lower):
+        return False
+
+    if re.fullmatch(r"md(\s+help)?", lower):
+        say(
+            text=(
+                "MD commands:\n"
+                "- `md now`\n"
+                "- `md now force`\n"
+                "- `md status`\n"
+                "- `md holdings refresh`\n"
+                "- `md holdings show`\n"
+                "- `md include TICKER`\n"
+                "- `md exclude TICKER`"
+            ),
+            thread_ts=thread_ts,
+        )
+        return True
+
+    if re.fullmatch(r"md\s+status", lower):
+        try:
+            payload = market_daily_status()
+        except Exception as exc:
+            say(text=f"MD status failed: {exc}", thread_ts=thread_ts)
+            return True
+        recent = payload.get("recent_runs") or []
+        lines = [
+            "MD status:",
+            f"- timezone: `{payload.get('timezone')}`",
+            f"- times: `{payload.get('times')}`",
+            f"- channel: `{payload.get('channel')}`",
+            f"- top_n: `{payload.get('top_n')}`",
+            f"- top_k: `{payload.get('top_k')}`",
+            f"- holdings_count: `{payload.get('holdings_count')}`",
+            f"- overrides: `{len(payload.get('overrides') or [])}`",
+            f"- recent_runs: `{len(recent)}`",
+        ]
+        if recent:
+            latest = recent[0]
+            lines.append(
+                f"- latest: `{latest.get('run_date_local')}` `{latest.get('slot_name')}` `{latest.get('status')}`"
+            )
+        say(text="\n".join(lines), thread_ts=thread_ts)
+        return True
+
+    if re.fullmatch(r"md\s+holdings\s+refresh", lower):
+        say(text="Refreshing Coatue holdings from latest 13F...", thread_ts=thread_ts)
+        try:
+            payload = market_daily_refresh_holdings()
+        except Exception as exc:
+            say(text=f"MD holdings refresh failed: {exc}", thread_ts=thread_ts)
+            return True
+        say(
+            text=(
+                "MD holdings refresh result:\n"
+                f"- updated: `{payload.get('updated')}`\n"
+                f"- reason: `{payload.get('reason', 'n/a')}`\n"
+                f"- rows: `{payload.get('rows', 0)}`\n"
+                f"- resolved_rows: `{payload.get('resolved_rows', 0)}`"
+            ),
+            thread_ts=thread_ts,
+        )
+        return True
+
+    if re.fullmatch(r"md\s+holdings(\s+show)?", lower):
+        try:
+            payload = market_daily_holdings()
+        except Exception as exc:
+            say(text=f"MD holdings lookup failed: {exc}", thread_ts=thread_ts)
+            return True
+        tickers = payload.get("tickers") or []
+        preview = ",".join(tickers[:40]) if tickers else "none"
+        say(
+            text=(
+                "MD holdings:\n"
+                f"- count: `{payload.get('count', 0)}`\n"
+                f"- last_updated_utc: `{payload.get('last_updated_utc', 'n/a')}`\n"
+                f"- tickers: `{preview}`"
+            ),
+            thread_ts=thread_ts,
+        )
+        return True
+
+    include_match = re.fullmatch(r"md\s+include\s+([A-Za-z.$-]{1,12})", stripped, flags=re.IGNORECASE)
+    if include_match:
+        ticker = include_match.group(1)
+        try:
+            payload = market_daily_set_override(ticker=ticker, action="include", updated_by="slack")
+        except MarketDailyError as exc:
+            say(text=f"MD include failed: {exc}", thread_ts=thread_ts)
+            return True
+        say(
+            text=(
+                f"Included `{payload.get('ticker')}` in MD universe overrides.\n"
+                f"- overrides_count: `{len(payload.get('overrides') or [])}`"
+            ),
+            thread_ts=thread_ts,
+        )
+        return True
+
+    exclude_match = re.fullmatch(r"md\s+exclude\s+([A-Za-z.$-]{1,12})", stripped, flags=re.IGNORECASE)
+    if exclude_match:
+        ticker = exclude_match.group(1)
+        try:
+            payload = market_daily_set_override(ticker=ticker, action="exclude", updated_by="slack")
+        except MarketDailyError as exc:
+            say(text=f"MD exclude failed: {exc}", thread_ts=thread_ts)
+            return True
+        say(
+            text=(
+                f"Excluded `{payload.get('ticker')}` from MD universe overrides.\n"
+                f"- overrides_count: `{len(payload.get('overrides') or [])}`"
+            ),
+            thread_ts=thread_ts,
+        )
+        return True
+
+    now_match = re.fullmatch(r"md\s+now(\s+force)?", lower)
+    if now_match:
+        forced = "force" in lower
+        say(text=f"Running MD now (manual slot, force={forced})...", thread_ts=thread_ts)
+        try:
+            result = run_market_daily_once(
+                manual=True,
+                force=forced,
+                dry_run=False,
+                channel_override=None,
+            )
+        except MarketDailyError as exc:
+            say(text=f"MD run failed: {exc}", thread_ts=thread_ts)
+            return True
+        except Exception:
+            logger.exception("Unexpected MD run failure")
+            say(text="MD run failed unexpectedly. Check logs.", thread_ts=thread_ts)
+            return True
+
+        if result.get("posted"):
+            movers = result.get("movers") or []
+            top = movers[0] if movers else {}
+            say(
+                text=(
+                    "MD posted.\n"
+                    f"- slot: `{result.get('slot')}`\n"
+                    f"- run_id: `{result.get('run_id')}`\n"
+                    f"- top_mover: `{top.get('ticker', 'n/a')}` `{top.get('pct_move', 'n/a')}`\n"
+                    f"- artifact: `{result.get('artifact_path')}`"
+                ),
+                thread_ts=thread_ts,
+            )
+            return True
+        say(
+            text=(
+                "MD did not post.\n"
+                f"- reason: `{result.get('reason', result.get('status', 'unknown'))}`\n"
+                f"- slot: `{result.get('slot', 'n/a')}`"
+            ),
+            thread_ts=thread_ts,
+        )
+        return True
+
+    say(text="Try `md help` for market-daily commands.", thread_ts=thread_ts)
+    return True
+
+
 def _handle_x_chart_command(*, text: str, channel: str | None, thread_ts: str, say) -> bool:
     stripped = _strip_slack_mentions(text).strip()
     lower = stripped.lower()
@@ -1377,6 +1551,10 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
 
     if _handle_x_digest_command(text=text, channel=channel, thread_ts=thread_ts, say=say):
         _mark_spencer_change(change_id, status="implemented", note="Handled by X digest workflow.")
+        return
+
+    if _handle_market_daily_command(text=text, channel=channel, thread_ts=thread_ts, say=say):
+        _mark_spencer_change(change_id, status="implemented", note="Handled by market daily workflow.")
         return
 
     try:

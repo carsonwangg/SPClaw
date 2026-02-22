@@ -4,6 +4,54 @@
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Current Status (2026-02-20)
+- MD (Market Daily) 2x/day feature is now implemented in repo (`main`) with Slack/CLI/runtime wiring:
+  - new module: `src/coatue_claw/market_daily.py`
+  - SQLite store: `/opt/coatue-claw-data/db/market_daily.sqlite`
+    - tables: `md_runs`, `md_universe_snapshots`, `md_coatue_holdings`, `md_overrides`, `md_cusip_ticker_cache`
+  - universe flow:
+    - seed file: `config/md_tmt_seed_universe.csv`
+    - top-40 ranking by yfinance market cap
+    - Coatue 13F overlay + manual include/exclude overrides
+  - move ranking:
+    - `% move = (last - prev_close) / prev_close`
+    - top movers by abs % move with market-cap tie-breaker
+  - catalyst flow:
+    - X recent search + Yahoo news evidence
+    - per-mover concise one-line catalyst with fallback when no clear signal
+  - Slack command surface added:
+    - `md now`, `md now force`
+    - `md status`
+    - `md holdings refresh`
+    - `md holdings show`
+    - `md include <TICKER>`
+    - `md exclude <TICKER>`
+  - CLI command surface added:
+    - `claw market-daily run-once [--manual] [--force] [--dry-run] [--channel ...]`
+    - `claw market-daily status`
+    - `claw market-daily holdings`
+    - `claw market-daily refresh-coatue-holdings`
+    - `claw market-daily include <TICKER>` / `exclude <TICKER>`
+  - launchd service added:
+    - label: `com.coatueclaw.market-daily`
+    - schedule: weekdays at `07:00` and `14:15` local time
+    - program: `python -m coatue_claw.market_daily run-once`
+  - Make targets added:
+    - `openclaw-market-daily-status`
+    - `openclaw-market-daily-run-once`
+    - `openclaw-market-daily-refresh-holdings`
+  - docs updated:
+    - `docs/openclaw-runtime.md` includes MD runtime + env contract
+  - tests added:
+    - `tests/test_market_daily.py`
+    - `tests/test_launchd_runtime.py` updated for market-daily service/schedule
+  - validation:
+    - `PYTHONPATH=src pytest -q` => `140 passed`
+- Immediate runtime verification required on Mac mini:
+  - `make openclaw-market-daily-status`
+  - `make openclaw-market-daily-run-once DRY_RUN=1`
+  - `make openclaw-24x7-enable` (loads new market-daily launchd plist)
+  - `make openclaw-24x7-status` (confirm `com.coatueclaw.market-daily` loaded)
+
 - Change tracker now captures both Spencer + Carson requests with requester attribution:
   - default tracked users include `Spencer Peterson` + `Carson Wang`
   - list output now labels each item with requester name

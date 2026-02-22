@@ -18,6 +18,7 @@ MEMORY_PRUNE_LABEL = "com.coatueclaw.memory-prune"
 X_CHART_LABEL = "com.coatueclaw.x-chart-daily"
 SPENCER_CHANGE_DIGEST_LABEL = "com.coatueclaw.spencer-change-digest"
 BOARD_SEAT_DAILY_LABEL = "com.coatueclaw.board-seat-daily"
+MARKET_DAILY_LABEL = "com.coatueclaw.market-daily"
 
 
 def _repo_root() -> Path:
@@ -79,6 +80,28 @@ def _board_seat_schedule() -> list[dict[str, int]]:
     if not (0 <= hour <= 23 and 0 <= minute <= 59):
         return [{"Hour": 8, "Minute": 30}]
     return [{"Hour": hour, "Minute": minute}]
+
+
+def _market_daily_schedule() -> list[dict[str, int]]:
+    raw = (os.environ.get("COATUE_CLAW_MD_TIMES", "07:00,14:15") or "").strip()
+    picks: list[tuple[int, int]] = []
+    for token in raw.split(","):
+        token = token.strip()
+        m = re.fullmatch(r"(\d{1,2}):(\d{2})", token)
+        if not m:
+            continue
+        hour = int(m.group(1))
+        minute = int(m.group(2))
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            picks.append((hour, minute))
+    if len(picks) < 2:
+        picks = [(7, 0), (14, 15)]
+    picks = sorted(picks)[:2]
+    out: list[dict[str, int]] = []
+    for weekday in (1, 2, 3, 4, 5):
+        for hour, minute in picks:
+            out.append({"Weekday": weekday, "Hour": hour, "Minute": minute})
+    return out
 
 
 def _service_specs() -> dict[str, dict[str, Any]]:
@@ -150,12 +173,25 @@ def _service_specs() -> dict[str, dict[str, Any]]:
         "EnvironmentVariables": _runtime_env(),
     }
 
+    market_daily = {
+        "Label": MARKET_DAILY_LABEL,
+        "ProgramArguments": [python_bin, "-m", "coatue_claw.market_daily", "run-once"],
+        "WorkingDirectory": str(repo),
+        "RunAtLoad": False,
+        "StartCalendarInterval": _market_daily_schedule(),
+        "ProcessType": "Background",
+        "StandardOutPath": str(logs_dir / "market-daily.stdout.log"),
+        "StandardErrorPath": str(logs_dir / "market-daily.stderr.log"),
+        "EnvironmentVariables": _runtime_env(),
+    }
+
     return {
         EMAIL_LABEL: poller,
         MEMORY_PRUNE_LABEL: prune,
         X_CHART_LABEL: x_chart,
         SPENCER_CHANGE_DIGEST_LABEL: spencer_digest,
         BOARD_SEAT_DAILY_LABEL: board_seat_daily,
+        MARKET_DAILY_LABEL: market_daily,
     }
 
 
@@ -274,7 +310,14 @@ def status(*, services: list[str]) -> dict[str, Any]:
 def _resolve_services(raw: str) -> list[str]:
     value = raw.strip().lower()
     if value in {"all", "24x7", "default"}:
-        return [EMAIL_LABEL, MEMORY_PRUNE_LABEL, X_CHART_LABEL, SPENCER_CHANGE_DIGEST_LABEL, BOARD_SEAT_DAILY_LABEL]
+        return [
+            EMAIL_LABEL,
+            MEMORY_PRUNE_LABEL,
+            X_CHART_LABEL,
+            SPENCER_CHANGE_DIGEST_LABEL,
+            BOARD_SEAT_DAILY_LABEL,
+            MARKET_DAILY_LABEL,
+        ]
     if value == "email":
         return [EMAIL_LABEL]
     if value in {"memory", "memory-prune", "prune"}:
@@ -285,6 +328,8 @@ def _resolve_services(raw: str) -> list[str]:
         return [SPENCER_CHANGE_DIGEST_LABEL]
     if value in {"board", "boardseat", "board-seat"}:
         return [BOARD_SEAT_DAILY_LABEL]
+    if value in {"marketdaily", "market-daily", "md"}:
+        return [MARKET_DAILY_LABEL]
     raise ValueError(f"unknown service selector: {raw}")
 
 
@@ -297,7 +342,7 @@ def main() -> None:
         cmd.add_argument(
             "--service",
             default="all",
-            choices=["all", "email", "memory", "xchart", "spencer", "boardseat"],
+            choices=["all", "email", "memory", "xchart", "spencer", "boardseat", "marketdaily"],
         )  # simplified UX
         if name == "disable":
             cmd.add_argument("--remove-plists", action="store_true")

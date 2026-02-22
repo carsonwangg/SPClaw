@@ -12,6 +12,7 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
   - `~/Library/LaunchAgents/com.coatueclaw.x-chart-daily.plist`
   - `~/Library/LaunchAgents/com.coatueclaw.board-seat-daily.plist`
   - `~/Library/LaunchAgents/com.coatueclaw.spencer-change-digest.plist`
+  - `~/Library/LaunchAgents/com.coatueclaw.market-daily.plist`
 - Gateway logs: `/tmp/openclaw/openclaw-YYYY-MM-DD.log`
 - App repo: `/opt/coatue-claw`
 - Runtime data: `/opt/coatue-claw-data`
@@ -35,6 +36,8 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
   - `claw x-digest "QUERY" --hours 24 --limit 50`
   - `claw x-chart run-once --manual`
   - `claw x-chart status|list-sources|add-source`
+  - `claw market-daily run-once --manual|--force|--dry-run`
+  - `claw market-daily status|holdings|refresh-coatue-holdings`
   - `claw memory status|query|prune|extract-daily|checkpoint`
 - Scheduled (planned but not yet wired in this repo):
   - Weekly idea scan
@@ -43,6 +46,7 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
   - Chart scout via `launchd` (`com.coatueclaw.x-chart-daily`) every hour (`StartInterval=3600` default), with posting gated by `COATUE_CLAW_X_CHART_WINDOWS` (default `09:00,12:00,18:00`)
   - Board Seat daily post via `launchd` (`com.coatueclaw.board-seat-daily`) at `COATUE_CLAW_BOARD_SEAT_TIME` (default `08:30`)
   - Daily Spencer change-request digest DM via `launchd` (`com.coatueclaw.spencer-change-digest`) at `COATUE_CLAW_SPENCER_CHANGE_DIGEST_TIME` (default `18:00`)
+  - MD (Market Daily) via `launchd` (`com.coatueclaw.market-daily`) on US weekdays at `COATUE_CLAW_MD_TIMES` (default `07:00,14:15`, local PT runtime)
   - Chart scout posts upload the source chart image snip from the selected X post (no redraw/reconstruction step)
 
 Diligence output contract:
@@ -105,6 +109,9 @@ Memory output contract:
   - `make openclaw-x-chart-sources`
   - `make openclaw-spencer-digest-status`
   - `make openclaw-spencer-digest-run-once`
+  - `make openclaw-market-daily-status`
+  - `make openclaw-market-daily-run-once`
+  - `make openclaw-market-daily-refresh-holdings`
 
 24/7 runtime bootstrap on Mac mini:
 1. `cd /opt/coatue-claw`
@@ -206,6 +213,19 @@ X chart scout environment controls:
 - `COATUE_CLAW_X_CHART_DB_PATH`: optional SQLite store path (default `/opt/coatue-claw-data/db/x_chart_daily.sqlite`)
 - `COATUE_CLAW_X_CHART_DIR`: optional markdown artifact output dir (default `/opt/coatue-claw-data/artifacts/x-chart-daily`)
 - `COATUE_CLAW_VISUALCAPITALIST_FEED_URL`: optional feed override (default `https://www.visualcapitalist.com/feed/`)
+
+MD (Market Daily) environment controls:
+- `COATUE_CLAW_MD_SLACK_CHANNEL`: Slack destination channel id/name (default `general`)
+- `COATUE_CLAW_MD_TZ`: slot timezone (default `America/Los_Angeles`)
+- `COATUE_CLAW_MD_TIMES`: local run times (`HH:MM,HH:MM`, default `07:00,14:15`)
+- `COATUE_CLAW_MD_TOP_N`: mover count (default `3`)
+- `COATUE_CLAW_MD_TMT_TOP_K`: top-ranked seed members to keep before overlay (default `40`)
+- `COATUE_CLAW_MD_CANDIDATE_SEED_PATH`: CSV universe seed path (default `/opt/coatue-claw/config/md_tmt_seed_universe.csv`)
+- `COATUE_CLAW_MD_DB_PATH`: SQLite path (default `/opt/coatue-claw-data/db/market_daily.sqlite`)
+- `COATUE_CLAW_MD_ARTIFACT_DIR`: markdown artifact output dir (default `/opt/coatue-claw-data/artifacts/market-daily`)
+- `COATUE_CLAW_MD_COATUE_CIK`: Coatue CIK for auto 13F refresh
+- `COATUE_CLAW_MD_OPENFIGI_API_KEY`: optional OpenFIGI key for stronger CUSIP->ticker resolution
+- `COATUE_CLAW_MD_MODEL`: optional catalyst summarizer model (default `gpt-5-mini`)
 
 Board Seat daily environment controls:
 - `COATUE_CLAW_BOARD_SEAT_PORTCOS`: comma-separated `Company:channel` mappings (default includes anduril/anthropic/cursor/neuralink/openai/physical-intelligence/ramp/spacex/stripe/sunday-robotics)

@@ -9,6 +9,11 @@ import json
 from coatue_claw.chart_metrics import DEFAULT_X_METRIC, DEFAULT_Y_METRIC, METRIC_SPECS
 from coatue_claw.diligence_report import build_neutral_investment_memo
 from coatue_claw.memory_runtime import MemoryRuntime
+from coatue_claw.market_daily import holdings as market_daily_holdings
+from coatue_claw.market_daily import refresh_coatue_holdings as market_daily_refresh_holdings
+from coatue_claw.market_daily import run_once as run_market_daily_once
+from coatue_claw.market_daily import set_override as market_daily_set_override
+from coatue_claw.market_daily import status as market_daily_status
 from coatue_claw.valuation_chart import run_valuation_chart
 from coatue_claw.x_chart_daily import add_source as add_x_chart_source
 from coatue_claw.x_chart_daily import list_sources as list_x_chart_sources
@@ -75,6 +80,63 @@ def _run_memory_command(args) -> None:
         return
 
 
+def _run_market_daily_command(args) -> None:
+    if args.market_daily_cmd == "run-once":
+        print(
+            json.dumps(
+                run_market_daily_once(
+                    manual=bool(args.manual),
+                    force=bool(args.force),
+                    dry_run=bool(args.dry_run),
+                    channel_override=(str(args.channel).strip() or None),
+                ),
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return
+
+    if args.market_daily_cmd == "status":
+        print(json.dumps(market_daily_status(), indent=2, sort_keys=True))
+        return
+
+    if args.market_daily_cmd == "refresh-coatue-holdings":
+        print(json.dumps(market_daily_refresh_holdings(), indent=2, sort_keys=True))
+        return
+
+    if args.market_daily_cmd == "holdings":
+        print(json.dumps(market_daily_holdings(), indent=2, sort_keys=True))
+        return
+
+    if args.market_daily_cmd == "include":
+        print(
+            json.dumps(
+                market_daily_set_override(
+                    ticker=str(args.ticker).strip(),
+                    action="include",
+                    updated_by="cli",
+                ),
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return
+
+    if args.market_daily_cmd == "exclude":
+        print(
+            json.dumps(
+                market_daily_set_override(
+                    ticker=str(args.ticker).strip(),
+                    action="exclude",
+                    updated_by="cli",
+                ),
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return
+
+
 def main():
     parser = argparse.ArgumentParser("coatue-claw")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -126,6 +188,24 @@ def main():
     xca = xc_sub.add_parser("add-source")
     xca.add_argument("handle")
     xca.add_argument("--priority", type=float, default=1.0)
+
+    md = sub.add_parser("market-daily")
+    md_sub = md.add_subparsers(dest="market_daily_cmd", required=True)
+
+    mdr = md_sub.add_parser("run-once")
+    mdr.add_argument("--manual", action="store_true")
+    mdr.add_argument("--force", action="store_true")
+    mdr.add_argument("--dry-run", action="store_true")
+    mdr.add_argument("--channel", default="")
+
+    md_sub.add_parser("status")
+    md_sub.add_parser("holdings")
+    md_sub.add_parser("refresh-coatue-holdings")
+
+    mdi = md_sub.add_parser("include")
+    mdi.add_argument("ticker")
+    mde = md_sub.add_parser("exclude")
+    mde.add_argument("ticker")
 
     args = parser.parse_args()
 
@@ -187,6 +267,10 @@ def main():
             return
         if args.x_chart_cmd == "add-source":
             print(json.dumps(add_x_chart_source(args.handle, priority=float(args.priority)), indent=2, sort_keys=True))
+            return
+
+    if args.cmd == "market-daily":
+        _run_market_daily_command(args)
 
 
 if __name__ == "__main__":

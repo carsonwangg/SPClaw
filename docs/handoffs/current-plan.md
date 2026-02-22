@@ -40,6 +40,15 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- MD (Market Daily) is now shipped in code and wired across CLI + Slack + launchd:
+  - module: `src/coatue_claw/market_daily.py`
+  - schedule: weekdays `07:00` and `14:15` local via `com.coatueclaw.market-daily`
+  - Slack commands: `md now|status|holdings refresh|holdings show|include|exclude`
+  - artifacts: `/opt/coatue-claw-data/artifacts/market-daily/md-<slot>-<timestamp>.md`
+  - DB: `/opt/coatue-claw-data/db/market_daily.sqlite`
+  - seed universe: `config/md_tmt_seed_universe.csv`
+  - Make targets: `openclaw-market-daily-status|run-once|refresh-holdings`
+  - test coverage added: `tests/test_market_daily.py` + launchd runtime expectations
 - Change-request governance now tracks both Spencer and Carson with explicit attribution:
   - captured items include requester identity in command output + daily digest
   - command aliases now include `change requests` / `tracked changes` in addition to `spencer changes`
