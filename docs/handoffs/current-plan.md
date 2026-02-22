@@ -47,6 +47,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - catalyst lines are sanitized (no hashtags/cashtags/handles/URLs/extra emoji) and forced to causal explanation style
   - source links remain as `[X]` / `[News]` only
   - X evidence relevance guard added for ambiguous tickers (short symbols require cashtag + finance-keyword match)
+  - vague X-only catalyst snippets now auto-fallback to a coherent company-specific-driver sentence
 - MD (Market Daily) is now shipped in code and wired across CLI + Slack + launchd:
   - module: `src/coatue_claw/market_daily.py`
   - schedule: weekdays `07:00` and `14:15` local via `com.coatueclaw.market-daily`

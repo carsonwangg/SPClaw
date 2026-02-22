@@ -1172,6 +1172,7 @@ def _strip_non_md_artifacts(text: str) -> str:
 
 def _ensure_reason_like_line(text: str, *, evidence: CatalystEvidence) -> str:
     cleaned = _strip_non_md_artifacts(text)
+    cleaned = re.split(r"[.!?;]", cleaned, maxsplit=1)[0].strip()
     if not cleaned:
         cleaned = "After mixed news flow, no single confirmed driver emerged."
 
@@ -1181,12 +1182,50 @@ def _ensure_reason_like_line(text: str, *, evidence: CatalystEvidence) -> str:
         if evidence.news_title:
             cleaned = f"After {(_strip_non_md_artifacts(evidence.news_title)).rstrip('.')}"
         elif evidence.x_text:
-            cleaned = f"Amid discussion of {(_strip_non_md_artifacts(evidence.x_text)).rstrip('.')}"
+            x_clean = re.split(r"[.!?;]", _strip_non_md_artifacts(evidence.x_text), maxsplit=1)[0].strip()
+            if _looks_like_specific_catalyst(x_clean):
+                cleaned = f"Amid {x_clean.rstrip('.')}"
+            else:
+                cleaned = "Likely sector repricing/positioning; no single company-specific headline identified."
         else:
             cleaned = "After mixed news flow, no single confirmed driver emerged."
 
     cleaned = _shorten(cleaned, 110)
     return cleaned.rstrip(" .") + "."
+
+
+def _looks_like_specific_catalyst(text: str) -> bool:
+    if not text:
+        return False
+    upper = text.upper()
+    generic_markers = (
+        "UNDER-THE-RADAR",
+        "COULD SIGNAL",
+        "NEW TREND",
+        "TOP ",
+        "BEST ",
+        "WATCHLIST",
+        "IDEAS",
+    )
+    if any(marker in upper for marker in generic_markers):
+        return False
+    markers = (
+        "EARNINGS",
+        "GUIDANCE",
+        "DEAL",
+        "CONTRACT",
+        "UPGRADE",
+        "DOWNGRADE",
+        "FORECAST",
+        "REVENUE",
+        "MARGIN",
+        "ACQUISITION",
+        "BUYBACK",
+        "LAYOFF",
+        "APPROVAL",
+        "REGULATORY",
+    )
+    return any(marker in upper for marker in markers)
 
 
 def _shorten(text: str, limit: int) -> str:

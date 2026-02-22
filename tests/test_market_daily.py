@@ -228,3 +228,16 @@ def test_relevant_ticker_post_filters_ambiguous_short_tickers() -> None:
         text="India's net run rate collapsed after the match",
         ticker="NET",
     )
+
+
+def test_reason_line_uses_generic_fallback_for_vague_x_only_text() -> None:
+    evidence = CatalystEvidence(
+        ticker="ORCL",
+        x_text="3 Under-the-Radar Earnings Surprises Could Signal a New Trend",
+        x_url="https://x.com/i/web/status/1",
+        x_engagement=20,
+        news_title=None,
+        news_url=None,
+    )
+    line = _ensure_reason_like_line("3 Under-the-Radar Earnings Surprises Could Signal a New Trend", evidence=evidence)
+    assert "company-specific headline" in line

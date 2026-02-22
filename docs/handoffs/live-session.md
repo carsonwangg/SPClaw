@@ -19,6 +19,9 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - short symbols (3 chars or less) now require cashtag usage (for example `$NET`)
     - finance-keyword gate blocks non-market chatter
     - noise-term guard filters sports/context collisions (for example `run rate`, `match`)
+  - catalyst coherence guard added:
+    - truncates to a single readable sentence
+    - for vague X-only snippets, falls back to a clean company-specific-driver fallback line
   - tests updated:
     - `tests/test_market_daily.py::test_build_message_format`
     - `tests/test_market_daily.py::test_catalyst_sanitization_removes_tags_urls_and_extra_emoji`
