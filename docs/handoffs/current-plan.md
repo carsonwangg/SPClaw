@@ -40,6 +40,12 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- MD output copy contract refined:
+  - no universe line in Slack post
+  - slot copy says `3 biggest movers this morning/afternoon`
+  - mover rows use only `📈`/`📉` directional emoji
+  - catalyst lines are sanitized (no hashtags/cashtags/handles/URLs/extra emoji) and forced to causal explanation style
+  - source links remain as `[X]` / `[News]` only
 - MD (Market Daily) is now shipped in code and wired across CLI + Slack + launchd:
   - module: `src/coatue_claw/market_daily.py`
   - schedule: weekdays `07:00` and `14:15` local via `com.coatueclaw.market-daily`

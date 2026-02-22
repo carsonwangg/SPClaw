@@ -1061,7 +1061,7 @@ def _fetch_yahoo_news(*, ticker: str, hours: int) -> tuple[str | None, str | Non
 
 
 def _summarize_catalyst(*, ticker: str, slot_name: str, evidence: CatalystEvidence) -> str:
-    fallback = "No clear single catalyst; likely positioning/flow"
+    fallback = "After mixed news flow, no single confirmed driver emerged."
     x_text = evidence.x_text or ""
     news_title = evidence.news_title or ""
     if not x_text and not news_title:
@@ -1070,11 +1070,12 @@ def _summarize_catalyst(*, ticker: str, slot_name: str, evidence: CatalystEviden
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if OpenAI is None or not api_key:
         base = news_title or x_text
-        return _shorten(base or fallback, 110)
+        return _ensure_reason_like_line(base or fallback, evidence=evidence)
 
     prompt = (
         "Write one plain-English catalyst line for a market mover.\n"
-        "Rules: <=110 chars, coherent sentence fragment, no emoji, no hype, no ticker symbol repetition.\n"
+        "Rules: <=110 chars, explain WHY the move happened, no emoji, no hype, no hashtag/cashtag/handles/URLs.\n"
+        "Use causal wording like 'after', 'on', 'as', or 'amid'.\n"
         f"Slot: {slot_name}\n"
         f"Ticker: {ticker}\n"
         f"X evidence: {x_text}\n"
@@ -1097,11 +1098,43 @@ def _summarize_catalyst(*, ticker: str, slot_name: str, evidence: CatalystEviden
             text = str(response.choices[0].message.content or "").strip()
         text = _normalize_whitespace(text)
         if text:
-            return _shorten(text, 110)
+            return _ensure_reason_like_line(text, evidence=evidence)
     except Exception:
         pass
 
-    return _shorten(news_title or x_text or fallback, 110)
+    return _ensure_reason_like_line(news_title or x_text or fallback, evidence=evidence)
+
+
+def _strip_non_md_artifacts(text: str) -> str:
+    cleaned = _normalize_whitespace(text)
+    cleaned = re.sub(r"https?://\S+", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", " ", cleaned)
+    cleaned = re.sub(r"(^|\s)#[A-Za-z0-9_]+\b", " ", cleaned)
+    cleaned = re.sub(r"(^|\s)@[A-Za-z0-9_]+\b", " ", cleaned)
+    cleaned = re.sub(r"(^|\s)\$[A-Za-z]{1,6}\b", " ", cleaned)
+    cleaned = re.sub(r"\bBREAKING:\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .,:;|")
+    return cleaned
+
+
+def _ensure_reason_like_line(text: str, *, evidence: CatalystEvidence) -> str:
+    cleaned = _strip_non_md_artifacts(text)
+    if not cleaned:
+        cleaned = "After mixed news flow, no single confirmed driver emerged."
+
+    lower = cleaned.lower()
+    causal = (" after ", " on ", " as ", " amid ", " due to ", " because ", " following ")
+    if not any(marker in f" {lower} " for marker in causal):
+        if evidence.news_title:
+            cleaned = f"After {(_strip_non_md_artifacts(evidence.news_title)).rstrip('.')}"
+        elif evidence.x_text:
+            cleaned = f"Amid discussion of {(_strip_non_md_artifacts(evidence.x_text)).rstrip('.')}"
+        else:
+            cleaned = "After mixed news flow, no single confirmed driver emerged."
+
+    cleaned = _shorten(cleaned, 110)
+    return cleaned.rstrip(" .") + "."
 
 
 def _shorten(text: str, limit: int) -> str:
@@ -1176,19 +1209,22 @@ def _build_message(
 ) -> str:
     slot_title = "MD — Market Open" if slot_name == "open" else "MD — Market Close+"
     as_of = now_local.strftime("%-I:%M %p PT")
+    period_label = "morning" if slot_name == "open" else "afternoon"
     lines = [f"*{slot_title} | As of {as_of}*"]
-    lines.append(f"Universe: Top 40 US TMT + Coatue overlay ({universe_count} names)")
+    lines.append(f"3 biggest movers this {period_label}:")
 
     for idx, mover in enumerate(movers):
         ev = catalyst_rows[idx] if idx < len(catalyst_rows) else CatalystEvidence(ticker=mover.ticker, x_text=None, x_url=None, x_engagement=0, news_title=None, news_url=None)
-        cat = catalyst_lines[idx] if idx < len(catalyst_lines) else "No clear single catalyst; likely positioning/flow"
+        cat = catalyst_lines[idx] if idx < len(catalyst_lines) else "After mixed news flow, no single confirmed driver emerged."
+        cat = _ensure_reason_like_line(cat, evidence=ev)
         links: list[str] = []
         if ev.x_url:
             links.append(f"<{ev.x_url}|[X]>")
         if ev.news_url:
             links.append(f"<{ev.news_url}|[News]>")
         link_text = f" {' '.join(links)}" if links else ""
-        lines.append(f"- {mover.ticker} {_format_pct(mover.pct_move)} — {cat}{link_text}")
+        emoji = "📈" if (mover.pct_move or 0.0) >= 0 else "📉"
+        lines.append(f"- {emoji} {mover.ticker} {_format_pct(mover.pct_move)} — {cat}{link_text}")
 
     lines.append(f"Data UTC: {_utc_now_iso()} | Sources: Yahoo fast_info + X recent search + Yahoo news")
     return "\n".join(lines)

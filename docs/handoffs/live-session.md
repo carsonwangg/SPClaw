@@ -4,6 +4,21 @@
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Current Status (2026-02-20)
+- MD Slack output style tightened for readability and user-facing copy:
+  - mover lines now include only directional emoji:
+    - up movers: `📈`
+    - down movers: `📉`
+  - removed universe line from Slack post body
+  - replaced with slot-aware opener:
+    - `3 biggest movers this morning:`
+    - `3 biggest movers this afternoon:`
+  - catalyst line sanitization now strips hashtags, cashtags, handles, URLs, and non-MD emoji
+  - catalyst generation now enforces causal wording (`after/on/as/amid`) so each line explains why the stock moved
+  - retained source links only (`[X]` / `[News]`) per mover
+  - tests updated:
+    - `tests/test_market_daily.py::test_build_message_format`
+    - `tests/test_market_daily.py::test_catalyst_sanitization_removes_tags_urls_and_extra_emoji`
+
 - MD (Market Daily) 2x/day feature is now implemented in repo (`main`) with Slack/CLI/runtime wiring:
   - new module: `src/coatue_claw/market_daily.py`
   - SQLite store: `/opt/coatue-claw-data/db/market_daily.sqlite`

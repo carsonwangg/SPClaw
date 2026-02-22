@@ -8,6 +8,7 @@ from coatue_claw.market_daily import (
     MarketDailyStore,
     QuoteSnapshot,
     _build_message,
+    _ensure_reason_like_line,
     _merge_universe,
     _parse_times,
     _select_top_movers,
@@ -191,10 +192,27 @@ def test_build_message_format() -> None:
         universe_count=41,
         movers=movers,
         catalyst_rows=evidence,
-        catalyst_lines=["AI demand remains strong"],
+        catalyst_lines=["After strong AI demand, enterprise orders accelerated."],
     )
     assert "MD — Market Open" in text
-    assert "Universe: Top 40 US TMT + Coatue overlay (41 names)" in text
+    assert "3 biggest movers this morning:" in text
+    assert "📈" in text
     assert "NVDA +10.0%" in text
     assert "<https://x.com/i/web/status/1|[X]>" in text
     assert "<https://example.com/news|[News]>" in text
+
+
+def test_catalyst_sanitization_removes_tags_urls_and_extra_emoji() -> None:
+    evidence = CatalystEvidence(
+        ticker="NVDA",
+        x_text="BREAKING: #AI $NVDA demand up https://x.com/test 🚀",
+        x_url="https://x.com/i/web/status/1",
+        x_engagement=20,
+        news_title="NVIDIA signs new cloud deal",
+        news_url="https://example.com/news",
+    )
+    line = _ensure_reason_like_line("BREAKING: #AI $NVDA up 🚀 https://x.com/test", evidence=evidence)
+    assert "#" not in line
+    assert "$NVDA" not in line
+    assert "http" not in line
+    assert "🚀" not in line
