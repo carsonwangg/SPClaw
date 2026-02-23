@@ -1094,3 +1094,51 @@ Then confirm bot returns:
 1. Add/confirm Slack scopes for deep backfill (`channels:history` and private-channel equivalent as needed), reinstall app, then re-run history backfill.
 2. Re-run board-seat force run in `#anduril` after new Anduril signals appear and confirm post is allowed only when significant change is detected.
 3. Expand repeat detector from textual similarity to named-investment entity tracking (e.g., Epirus/Shield AI/Saronic) if repeated-name risk remains high.
+
+## 2026-02-23 - X Chart Fragment-Tail Guardrails (Title + Takeaway)
+- Runtime module updated: `/opt/coatue-claw/src/coatue_claw/x_chart_daily.py`
+  - added deterministic tail-fragment dictionaries:
+    - `TRAILING_DETERMINERS`
+    - `TRAILING_QUALIFIERS`
+  - added new validators:
+    - `_has_fragment_tail(words)`
+    - `_tail_complete(text)`
+  - title/takeaway completeness now rejects clipped tails like:
+    - `... in their`
+    - `... in their initial`
+    - `... in early`
+  - title/takeaway finalizers now fail fast on fragment tails after clipping and force rewrite path instead of posting incomplete phrases.
+  - headline/takeaway rewrite flow updated to apply fragment-tail rewrites and diagnostic reasons:
+    - `headline_tail_fragment_rewritten`
+    - `takeaway_tail_fragment_rewritten`
+    - `headline_unrecoverable` (unchanged for hard failures)
+  - style quality and publish gates now include tail-fragment checks:
+    - `_style_copy_quality_errors(...)`
+    - `_style_copy_publish_issues(...)`
+  - style draft checks include:
+    - `headline_tail_complete`
+    - `takeaway_tail_complete`
+  - post-review metadata now includes:
+    - `_post_publish_checklist(...).checks.headline_tail_complete`
+    - `_post_publish_checklist(...).checks.takeaway_tail_complete`
+    - `_post_winner_to_slack(...).review.checks.headline_tail_complete`
+    - `_post_winner_to_slack(...).review.checks.takeaway_tail_complete`
+- Tests updated in `/opt/coatue-claw/tests/test_x_chart_daily.py`:
+  - `test_headline_validator_rejects_trailing_possessive_fragment`
+  - `test_takeaway_validator_rejects_trailing_possessive_fragment`
+  - `test_headline_finalizer_returns_empty_for_clipped_their_fragment`
+  - `test_takeaway_finalizer_returns_empty_for_clipped_initial_fragment`
+  - `test_style_draft_rewrites_fragmented_kobeissi_copy`
+  - `test_run_chart_scout_falls_back_when_top_candidate_has_fragment_tail`
+  - updated explicit URL rewrite regression to assert fragment-tail rewrite behavior and diagnostics.
+- Validation:
+  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_x_chart_daily.py` -> `61 passed`
+  - full smoke: `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q` -> unchanged unrelated failures:
+    - `tests/test_spencer_change_digest.py::test_run_once_dry_run_includes_carson_label`
+    - `tests/test_spencer_change_log.py::test_is_spencer_user_defaults`
+    - `tests/test_spencer_change_log.py::test_requester_label_defaults`
+
+### Immediate Next Steps
+1. Pull latest `main` on the Mac mini and restart runtime (`make openclaw-restart`).
+2. Trigger `x chart now` in Slack and confirm title/takeaway no longer end in clipped tails.
+3. Trigger one explicit URL post for a fragment-prone source and confirm URL is preserved with rewritten coherent copy.

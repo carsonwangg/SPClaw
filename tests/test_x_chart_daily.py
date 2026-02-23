@@ -374,6 +374,93 @@ def test_run_chart_scout_falls_back_when_top_candidate_headline_is_incomplete(tm
     assert _is_complete_headline_phrase(str(captured["headline"])) is True
 
 
+def test_run_chart_scout_falls_back_when_top_candidate_has_fragment_tail(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
+
+    bad_top = Candidate(
+        candidate_key="x:fragment-top",
+        source_type="x",
+        source_id="KobeissiLetter",
+        author="@KobeissiLetter",
+        title="US stock market futures open lower in their initial trading session",
+        text="US stock market futures open lower in their initial trading session",
+        url="https://x.com/KobeissiLetter/status/fragment-top",
+        image_url="https://example.com/top.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=950,
+        source_priority=1.3,
+        score=99.0,
+    )
+    good_second = Candidate(
+        candidate_key="x:fragment-good",
+        source_type="x",
+        source_id="fiscal_AI",
+        author="@fiscal_AI",
+        title="US stock market futures open lower in early trade",
+        text="US stock market futures open lower in early trade.",
+        url="https://x.com/fiscal_AI/status/fragment-good",
+        image_url="https://example.com/good.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=600,
+        source_priority=1.2,
+        score=93.0,
+    )
+
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = datetime(2026, 2, 19, 12, 0, 0, tzinfo=UTC)
+            if tz is None:
+                return base
+            return base.astimezone(tz)
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
+    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [bad_top, good_second])
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._synthesize_style_via_llm",
+        lambda candidate: (
+            {
+                "headline": "US stock market futures open lower in their",
+                "chart_label": "US stock futures snapshot",
+                "takeaway": "US stock market futures open lower in their initial",
+            }
+            if candidate.candidate_key == "x:fragment-top"
+            else {
+                "headline": "US stock market futures open lower in early trade",
+                "chart_label": "US stock futures snapshot",
+                "takeaway": "US stock market futures open lower in early trade.",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._rewrite_headline_from_candidate",
+        lambda candidate: ("", "headline_unrecoverable") if candidate.candidate_key == "x:fragment-top" else ("US stock futures are trending lower", "headline_rewritten"),
+    )
+
+    captured: dict[str, object] = {}
+
+    def _fake_post(**kwargs):
+        captured["candidate_url"] = kwargs["candidate"].url
+        captured["headline"] = kwargs["style_draft"].headline
+        captured["takeaway"] = kwargs["style_draft"].takeaway
+        return {"ok": True, "channel": kwargs["channel"], "file_id": "FTEST"}
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
+
+    result = run_chart_scout_once(manual=False, dry_run=False, channel_override="C123")
+    assert result["posted"] is True
+    assert result["candidate_fallback_used"] is True
+    assert captured["candidate_url"] == "https://x.com/fiscal_AI/status/fragment-good"
+    assert _is_complete_headline_phrase(str(captured["headline"])) is True
+    assert _is_complete_sentence(str(captured["takeaway"])) is True
+
+
 def test_run_chart_scout_returns_non_post_when_no_publishable_candidate(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
@@ -751,14 +838,29 @@ def test_headline_phrase_validator_rejects_fragment_home_sellers_now_is() -> Non
     assert _is_complete_headline_phrase("U.S. housing sellers are at a record high") is True
 
 
+def test_headline_validator_rejects_trailing_possessive_fragment() -> None:
+    assert _is_complete_headline_phrase("US stock market futures open lower in their") is False
+    assert _is_complete_headline_phrase("US stock market futures open lower in early trade") is True
+
+
 def test_headline_phrase_finalizer_returns_empty_for_dangling_copula() -> None:
     finalized = _finalize_headline_phrase("U.S. Housing Market Home Sellers now is", max_chars=48)
+    assert finalized == ""
+
+
+def test_headline_finalizer_returns_empty_for_clipped_their_fragment() -> None:
+    finalized = _finalize_headline_phrase("US stock market futures open lower in their initial session", max_chars=48)
     assert finalized == ""
 
 
 def test_takeaway_sentence_validator_rejects_fragment_fell_to_lowest() -> None:
     assert _is_complete_sentence("U.S. Housing Market Pending Home Sales fell to lowest") is False
     assert _is_complete_sentence("U.S. Housing Market Pending Home Sales hit a record low.") is True
+
+
+def test_takeaway_validator_rejects_trailing_possessive_fragment() -> None:
+    assert _is_complete_sentence("US stock market futures open lower in their.") is False
+    assert _is_complete_sentence("US stock market futures open lower in early trade.") is True
 
 
 def test_takeaway_sentence_finalizer_returns_complete_sentence() -> None:
@@ -770,6 +872,11 @@ def test_takeaway_sentence_finalizer_returns_complete_sentence() -> None:
     )
     assert finalized_good.endswith(".")
     assert _is_complete_sentence(finalized_good) is True
+
+
+def test_takeaway_finalizer_returns_empty_for_clipped_initial_fragment() -> None:
+    finalized = _finalize_takeaway_sentence("US stock market futures open lower in their initial setup", max_chars=52)
+    assert finalized == ""
 
 
 def test_compute_y_ticks_non_normalized_has_multiple_ticks() -> None:
@@ -810,6 +917,8 @@ def test_post_publish_checklist_passes_for_clean_rebuilt_chart(tmp_path: Path) -
     )
     assert review["passed"] is True
     assert review["failed"] == []
+    assert review["checks"]["headline_tail_complete"] is True
+    assert review["checks"]["takeaway_tail_complete"] is True
 
 
 def test_review_feedback_penalizes_failing_source(tmp_path: Path, monkeypatch) -> None:
@@ -1172,7 +1281,7 @@ def test_run_chart_for_post_url_rewrites_takeaway_but_keeps_requested_url(monkey
             {
                 "id": "2025715989384663396",
                 "author_id": "u1",
-                "text": "BREAKING : U.S. Housing Market Pending Home Sales fell to lowest level ever recorded",
+                "text": "US stock market futures open lower in their initial trading session",
                 "created_at": "2026-02-23T00:00:00Z",
                 "public_metrics": {"like_count": 10, "retweet_count": 5, "reply_count": 2, "quote_count": 1},
                 "attachments": {"media_keys": ["m1"]},
@@ -1188,9 +1297,9 @@ def test_run_chart_for_post_url_rewrites_takeaway_but_keeps_requested_url(monkey
     monkeypatch.setattr(
         "coatue_claw.x_chart_daily._synthesize_style_via_llm",
         lambda _candidate: {
-            "headline": "U.S. Housing Market Home Sellers now is",
-            "chart_label": "U.S",
-            "takeaway": "U.S. Housing Market Pending Home Sales fell to lowest",
+            "headline": "US stock market futures open lower in their",
+            "chart_label": "US index futures snapshot",
+            "takeaway": "US stock market futures open lower in their initial",
         },
     )
     monkeypatch.setattr(
@@ -1223,6 +1332,7 @@ def test_run_chart_for_post_url_rewrites_takeaway_but_keeps_requested_url(monkey
     assert result["posted"] is True
     assert result["candidate_fallback_used"] is False
     assert result["copy_rewrite_applied"] is True
+    assert result["copy_rewrite_reason"] in {"headline_tail_fragment_rewritten", "takeaway_tail_fragment_rewritten"}
     assert captured["candidate_url"] == "https://x.com/Barchart/status/2025715989384663396"
     assert _is_complete_headline_phrase(str(captured["headline"])) is True
     assert _is_complete_sentence(str(captured["takeaway"])) is True
@@ -1723,6 +1833,7 @@ def test_style_draft_rewrites_broken_headline_phrase(monkeypatch) -> None:
     assert _is_complete_headline_phrase(draft.headline) is True
     assert draft.headline.lower().endswith("now is") is False
     assert draft.checks["headline_complete_phrase"] is True
+    assert draft.checks["headline_tail_complete"] is True
     assert draft.copy_rewrite_applied is True
     assert draft.copy_rewrite_reason == "headline_rewritten"
 
@@ -1758,4 +1869,37 @@ def test_style_draft_rewrites_degenerate_fields_and_fragment_takeaway(monkeypatc
     assert draft.checks["headline_non_degenerate"] is True
     assert draft.checks["chart_label_non_degenerate"] is True
     assert draft.checks["takeaway_complete_sentence"] is True
+    assert draft.copy_rewrite_applied is True
+
+
+def test_style_draft_rewrites_fragmented_kobeissi_copy(monkeypatch) -> None:
+    candidate = Candidate(
+        candidate_key="x:kobeissi-tail-fragment",
+        source_type="x",
+        source_id="KobeissiLetter",
+        author="@KobeissiLetter",
+        title="@KobeissiLetter: US stock market futures open lower in their initial trading session",
+        text="US stock market futures open lower in their initial trading session",
+        url="https://x.com/KobeissiLetter/status/2025717706368987399",
+        image_url="https://pbs.twimg.com/media/futures-fragment.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=600,
+        source_priority=1.3,
+        score=90.0,
+    )
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._synthesize_style_via_llm",
+        lambda _candidate: {
+            "headline": "US stock market futures open lower in their",
+            "chart_label": "US index futures snapshot",
+            "takeaway": "US stock market futures open lower in their initial",
+        },
+    )
+    draft = _select_style_draft(candidate)
+    assert _is_complete_headline_phrase(draft.headline) is True
+    assert _is_complete_sentence(draft.takeaway) is True
+    assert draft.headline.lower().endswith("in their") is False
+    assert draft.takeaway.lower().endswith("their initial.") is False
+    assert draft.checks["headline_tail_complete"] is True
+    assert draft.checks["takeaway_tail_complete"] is True
     assert draft.copy_rewrite_applied is True

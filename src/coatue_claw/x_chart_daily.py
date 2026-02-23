@@ -236,6 +236,46 @@ TRAILING_STOPWORDS = {
     "with",
 }
 
+TRAILING_DETERMINERS = {
+    "a",
+    "an",
+    "the",
+    "this",
+    "that",
+    "these",
+    "those",
+    "my",
+    "your",
+    "his",
+    "her",
+    "its",
+    "our",
+    "their",
+    "any",
+    "some",
+    "each",
+    "either",
+    "neither",
+    "every",
+    "another",
+}
+
+TRAILING_QUALIFIERS = {
+    "initial",
+    "early",
+    "late",
+    "prior",
+    "next",
+    "current",
+    "latest",
+    "previous",
+    "first",
+    "second",
+    "third",
+    "fourth",
+    "final",
+}
+
 LOW_SIGNAL_COPY_VALUES = {
     "u.s",
     "u.s.",
@@ -579,6 +619,29 @@ def _strip_trailing_headline_dangling_endings(text: str) -> str:
     return " ".join(words).strip()
 
 
+def _tail_tokens(text: str) -> list[str]:
+    return [token for token in re.findall(r"[a-z0-9']+", _normalize_render_text(text).lower()) if token]
+
+
+def _has_fragment_tail(words: list[str]) -> bool:
+    if not words:
+        return True
+    tail = words[-1]
+    if tail in TRAILING_DETERMINERS or tail in TRAILING_QUALIFIERS:
+        return True
+    if len(words) >= 2:
+        prev = words[-2]
+        if prev in TRAILING_STOPWORDS and (tail in TRAILING_DETERMINERS or tail in TRAILING_QUALIFIERS):
+            return True
+        if prev in TRAILING_DETERMINERS and tail in TRAILING_QUALIFIERS:
+            return True
+    return False
+
+
+def _tail_complete(text: str) -> bool:
+    return not _has_fragment_tail(_tail_tokens(text))
+
+
 def _is_complete_headline_phrase(text: str) -> bool:
     cleaned = _normalize_render_text(text).strip()
     if not cleaned:
@@ -603,6 +666,8 @@ def _is_complete_headline_phrase(text: str) -> bool:
     tail = stripped_words[-1].strip(".,;:!?").lower()
     if tail in HEADLINE_DANGLING_ENDINGS:
         return False
+    if not _tail_complete(cleaned.rstrip(".!?")):
+        return False
     return stripped == cleaned.rstrip(".!?")
 
 
@@ -626,10 +691,14 @@ def _finalize_headline_phrase(text: str, *, max_chars: int) -> str:
     # If we had to trim dangling endings, force a semantic rewrite instead of posting a clipped phrase.
     if removed_words > 0:
         return ""
+    if not _tail_complete(cleaned):
+        return ""
     if len(cleaned) > max_chars:
         clipped = _shorten_without_ellipsis(cleaned, max_chars=max_chars)
         clipped = _strip_trailing_headline_dangling_endings(clipped)
         if not clipped:
+            return ""
+        if not _tail_complete(clipped):
             return ""
         cleaned = clipped
     if len(cleaned) > max_chars:
@@ -642,14 +711,32 @@ def _rewrite_headline_from_candidate(candidate: Candidate) -> tuple[str, str]:
     parts = re.split(r"(?<=[.!?])\s+", source_sentence)
     if len(parts) > 1 and len(parts[0].split()) >= 3:
         source_sentence = parts[0].strip()
+    source_has_fragment_tail = not _tail_complete(source_sentence)
     subject, verb = _extract_subject_and_verb(source_sentence)
+    subject_core = _clean_subject_for_headline(subject=subject, sentence=source_sentence)
+    lower = source_sentence.lower()
+    if source_has_fragment_tail and subject_core:
+        copula = "are" if _subject_is_plural(subject_core) else "is"
+        rewrite = ""
+        if "record low" in lower or "lowest" in lower:
+            rewrite = f"{subject_core} {copula} at a record low"
+        elif "record high" in lower or "highest" in lower:
+            rewrite = f"{subject_core} {copula} at a record high"
+        elif "up" in lower or "higher" in lower:
+            rewrite = f"{subject_core} {copula} trending higher"
+        elif "down" in lower or "lower" in lower:
+            rewrite = f"{subject_core} {copula} trending lower"
+        else:
+            rewrite = f"{subject_core} {copula} inflecting lower"
+        finalized = _finalize_headline_phrase(rewrite, max_chars=48)
+        if finalized:
+            return finalized, "headline_tail_fragment_rewritten"
+
     narrative = _synthesize_narrative_title(subject=subject, verb=verb, sentence=source_sentence)
     finalized = _finalize_headline_phrase(narrative, max_chars=48)
     if finalized:
         return finalized, "headline_rewritten"
 
-    subject_core = _clean_subject_for_headline(subject=subject, sentence=source_sentence)
-    lower = source_sentence.lower()
     if subject_core:
         compact_subject = _shorten_without_ellipsis(subject_core, max_chars=26)
         if len(compact_subject.split()) < 2:
@@ -701,6 +788,8 @@ def _is_complete_sentence(text: str) -> bool:
     tail = stripped_words[-1].strip(".,;:!?").lower()
     if tail in TAKEAWAY_DANGLING_ENDINGS:
         return False
+    if not _tail_complete(cleaned.rstrip(".!?")):
+        return False
     return True
 
 
@@ -748,12 +837,16 @@ def _finalize_takeaway_sentence(text: str, *, max_chars: int) -> str:
         }
         if after_words[-1].strip(".,;:!?").lower() in trailing_verb_like:
             return ""
+    if not _tail_complete(cleaned):
+        return ""
     if cleaned[-1] not in ".!?":
         cleaned = f"{cleaned}."
     if len(cleaned) > max_chars:
         clipped = _shorten_without_ellipsis(cleaned.rstrip(".!?"), max_chars=max(8, max_chars - 1))
         clipped = _strip_trailing_dangling_endings(clipped)
         if not clipped:
+            return ""
+        if not _tail_complete(clipped):
             return ""
         cleaned = f"{clipped}."
     if len(cleaned) > max_chars:
@@ -766,6 +859,7 @@ def _rewrite_takeaway_from_candidate(candidate: Candidate) -> tuple[str, str]:
     parts = re.split(r"(?<=[.!?])\s+", source_sentence)
     if len(parts) > 1 and len(parts[0].split()) >= 3:
         source_sentence = parts[0].strip()
+    source_has_fragment_tail = not _tail_complete(source_sentence)
     subject, verb = _extract_subject_and_verb(source_sentence)
     subject_core = _clean_subject_for_headline(subject=subject, sentence=source_sentence)
     if not subject_core:
@@ -788,9 +882,13 @@ def _rewrite_takeaway_from_candidate(candidate: Candidate) -> tuple[str, str]:
         rewritten = f"{subject_core} {copula} trending lower."
     elif subject_core and len(subject_core.split()) >= 2:
         rewritten = f"{subject_core} {copula} moving sharply."
+    if source_has_fragment_tail and not rewritten and subject_core:
+        rewritten = f"{subject_core} {copula} moved lower in early trading."
 
     finalized = _finalize_takeaway_sentence(rewritten or source_sentence, max_chars=68)
     if finalized:
+        if source_has_fragment_tail:
+            return finalized, "takeaway_tail_fragment_rewritten"
         return finalized, "source_rewrite"
     return "US trend is shifting quickly.", "safe_fallback"
 
@@ -1156,6 +1254,10 @@ def _style_copy_quality_errors(style_draft: StyleDraft) -> list[str]:
         errors.append("headline incomplete phrase")
     if not _is_complete_sentence(style_draft.takeaway):
         errors.append("takeaway incomplete sentence")
+    if not _tail_complete(style_draft.headline):
+        errors.append("headline tail fragment")
+    if not _tail_complete(style_draft.takeaway):
+        errors.append("takeaway tail fragment")
     if _is_degenerate_copy_value(style_draft.headline):
         errors.append("headline degenerate")
     if _is_degenerate_copy_value(style_draft.chart_label):
@@ -1185,9 +1287,11 @@ def _post_publish_checklist(
         "no_ellipsis": ("..." not in headline and "..." not in chart_label and "..." not in takeaway),
         "headline_len_ok": (0 < len(headline) <= 58),
         "headline_complete_phrase": _is_complete_headline_phrase(headline),
+        "headline_tail_complete": _tail_complete(headline),
         "chart_label_len_ok": (0 < len(chart_label) <= 62),
         "takeaway_len_ok": (0 < len(takeaway) <= 68),
         "takeaway_complete_sentence": _is_complete_sentence(takeaway),
+        "takeaway_tail_complete": _tail_complete(takeaway),
         "headline_non_degenerate": not _is_degenerate_copy_value(headline),
         "chart_label_non_degenerate": not _is_degenerate_copy_value(chart_label),
         "reconstruction_mode_ok": reconstruction_mode in {"bar", "line"},
@@ -1694,6 +1798,8 @@ def _sanitize_style_copy(
 
     subject, verb = _extract_subject_and_verb(_extract_first_sentence(source_text or candidate.title))
     mode_hint = _mode_hint_from_text(candidate)
+    headline_tail_fragment = not _tail_complete(headline)
+    takeaway_tail_fragment = not _tail_complete(takeaway)
 
     finalized_headline = _finalize_headline_phrase(headline, max_chars=48)
     if not finalized_headline:
@@ -1701,7 +1807,10 @@ def _sanitize_style_copy(
         rewritten_headline, reason = _rewrite_headline_from_candidate(candidate)
         finalized_headline = _finalize_headline_phrase(rewritten_headline, max_chars=48)
         if finalized_headline:
-            rewrite_reason = reason
+            if headline_tail_fragment:
+                rewrite_reason = "headline_tail_fragment_rewritten"
+            else:
+                rewrite_reason = reason
             headline = finalized_headline
         else:
             rewrite_reason = "headline_unrecoverable"
@@ -1724,7 +1833,10 @@ def _sanitize_style_copy(
         finalized_takeaway = _finalize_takeaway_sentence(rewritten_takeaway, max_chars=68)
         if finalized_takeaway:
             if rewrite_reason is None:
-                rewrite_reason = reason
+                if takeaway_tail_fragment:
+                    rewrite_reason = "takeaway_tail_fragment_rewritten"
+                else:
+                    rewrite_reason = reason
         else:
             finalized_takeaway = "US trend is shifting quickly."
             if rewrite_reason is None:
@@ -2863,8 +2975,10 @@ def _build_style_draft(candidate: Candidate, *, iteration: int) -> StyleDraft:
         "headline_short": bool(headline) and len(headline) <= 72,
         "headline_grammar": not _has_incoherent_headline(headline),
         "headline_complete_phrase": _is_complete_headline_phrase(headline),
+        "headline_tail_complete": _tail_complete(headline),
         "takeaway_short": bool(takeaway) and len(takeaway) <= 68,
         "takeaway_complete_sentence": _is_complete_sentence(takeaway),
+        "takeaway_tail_complete": _tail_complete(takeaway),
         "headline_non_degenerate": not _is_degenerate_copy_value(headline),
         "chart_label_non_degenerate": not _is_degenerate_copy_value(chart_label),
         "trend_explicit": _contains_trend_signal(f"{candidate.title} {candidate.text}"),
@@ -2904,8 +3018,12 @@ def _style_copy_publish_issues(style_draft: StyleDraft) -> list[str]:
     issues: list[str] = []
     if not _is_complete_headline_phrase(style_draft.headline):
         issues.append("headline_incomplete_phrase")
+    if not _tail_complete(style_draft.headline):
+        issues.append("headline_tail_fragment")
     if not _is_complete_sentence(style_draft.takeaway):
         issues.append("takeaway_incomplete_sentence")
+    if not _tail_complete(style_draft.takeaway):
+        issues.append("takeaway_tail_fragment")
     if _is_degenerate_copy_value(style_draft.headline):
         issues.append("headline_degenerate")
     if _is_degenerate_copy_value(style_draft.chart_label):
@@ -3680,7 +3798,9 @@ def _post_winner_to_slack(
         "artifact_nonempty": file_size > 0,
         "render_mode_source_snip": render_mode in {"source-snip", "source-snip-card"},
         "headline_complete_phrase": _is_complete_headline_phrase(style_draft.headline),
+        "headline_tail_complete": _tail_complete(style_draft.headline),
         "takeaway_complete_sentence": _is_complete_sentence(style_draft.takeaway),
+        "takeaway_tail_complete": _tail_complete(style_draft.takeaway),
         "headline_non_degenerate": not _is_degenerate_copy_value(style_draft.headline),
         "chart_label_non_degenerate": not _is_degenerate_copy_value(style_draft.chart_label),
     }
