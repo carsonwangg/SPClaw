@@ -340,3 +340,35 @@ def test_debug_catalyst_returns_expected_shape(monkeypatch) -> None:
     assert payload["ticker"] == "NET"
     assert payload["chosen_source"] == "yahoo_news"
     assert payload["links"]["web"] == "https://stocktwits.com/news/example"
+
+
+def test_negative_mover_prefers_negative_driver_language(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    candidates = [
+        md._EvidenceCandidate(
+            source_type="yahoo_news",
+            text="Cloudflare and Mastercard announce strategic cybersecurity partnership",
+            url="https://finance.yahoo.com/news/partnership",
+            published_at_utc=datetime(2026, 2, 20, 10, 0, 0, tzinfo=UTC),
+            score=0.9,
+            driver_keywords=("cybersecurity_competition",),
+        ),
+        md._EvidenceCandidate(
+            source_type="yahoo_news",
+            text="Cybersecurity stocks drop as Anthropic launches Claude Code Security tool",
+            url="https://finance.yahoo.com/news/anthropic",
+            published_at_utc=datetime(2026, 2, 20, 10, 30, 0, tzinfo=UTC),
+            score=0.9,
+            driver_keywords=("anthropic_claude", "cybersecurity_competition"),
+        ),
+    ]
+
+    monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 20, 0, 0, 0, tzinfo=UTC))
+    monkeypatch.setattr("coatue_claw.market_daily._company_aliases", lambda ticker: ["Cloudflare"])
+    monkeypatch.setattr("coatue_claw.market_daily._collect_evidence_for_ticker", lambda ticker, aliases, since_utc: (candidates, []))
+
+    mover = QuoteSnapshot("NET", 100.0, 92.0, 100.0, -0.08, "2026-02-20T12:00:00+00:00")
+    rows, lines = md._build_catalyst_rows(movers=[mover], slot_name="open")
+    assert "anthropic" in (rows[0].news_title or "").lower()
+    assert ("after" in lines[0].lower()) or (" as " in lines[0].lower())
