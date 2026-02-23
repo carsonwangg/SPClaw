@@ -48,6 +48,9 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
     - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_ENABLED=1`
     - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_SCORE=0.64`
     - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_MARGIN=0.06`
+  - added cybersecurity basket coherence pass:
+    - when CRWD/NET-style names sell off together and one confirms Anthropic/Claude cyber catalyst, peers reuse that cause phrasing in the same MD run
+  - directional ranking now penalizes positive partnership-only headlines on down moves
 - MD specific-cause enforcement for selloffs is now implemented (NET/CRWD Anthropic miss class):
   - final catalyst lines can name a specific event only when corroborated by:
     - >=2 independent sources

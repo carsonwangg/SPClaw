@@ -15,6 +15,11 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_MARGIN` (default `0.06`)
   - test added:
     - `test_single_strong_quality_source_can_drive_decisive_primary_reason`
+- MD basket-cause coherence now handles the NET/CRWD Anthropic case:
+  - if one cybersecurity mover has confirmed `anthropic_claude_cyber`, peer cybersecurity selloff movers in the same run inherit that same cause phrase
+  - directional scoring now penalizes upbeat partnership headlines for down-move cause selection
+  - tests added:
+    - `test_cyber_basket_carries_anthropic_cause_to_net`
 - MD specific-cause enforcement is now shipped for selloffs (NET/CRWD Anthropic case class):
   - cause naming now requires corroboration gate: at least 2 independent sources + 2 distinct domains + at least one quality domain
   - evidence is now normalized/deduped by canonical URL + title fingerprint, including DDG absolute redirect unwrapping

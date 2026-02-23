@@ -591,4 +591,56 @@ def test_single_strong_quality_source_can_drive_decisive_primary_reason(monkeypa
     movers = [QuoteSnapshot("NET", 100.0, 92.0, 100.0, -0.08, "2026-02-20T12:00:00+00:00")]
     rows, lines = md._build_catalyst_rows(movers=movers, slot_name="open")
     assert rows[0].confirmed_cluster == "anthropic_claude_cyber"
-    assert lines[0] == "Shares fell after Anthropic launched Claude Code Security."
+    assert lines[0] == "Shares fell after Anthropic launched Claude Code Security, pressuring cybersecurity stocks."
+
+
+def test_cyber_basket_carries_anthropic_cause_to_net(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    def _fake_build(mover, slot_name, since_utc):
+        if mover.ticker == "CRWD":
+            ev = CatalystEvidence(
+                ticker="CRWD",
+                x_text=None,
+                x_url=None,
+                x_engagement=0,
+                news_title="Cybersecurity stocks fell after Anthropic launched Claude Code Security tool",
+                news_url="https://finance.yahoo.com/news/anthropic-cyber",
+                web_title=None,
+                web_url=None,
+                confidence=0.9,
+                chosen_source="yahoo_news",
+                driver_keywords=("anthropic_claude_cyber",),
+                confirmed_cluster="anthropic_claude_cyber",
+                confirmed_cause_phrase="Anthropic launched Claude Code Security, pressuring cybersecurity stocks.",
+            )
+            return ev, "Shares fell after Anthropic launched Claude Code Security, pressuring cybersecurity stocks."
+
+        ev = CatalystEvidence(
+            ticker="NET",
+            x_text=None,
+            x_url=None,
+            x_engagement=0,
+            news_title="Cloudflare and Mastercard announce strategic cybersecurity partnership",
+            news_url="https://finance.yahoo.com/news/partnership",
+            web_title=None,
+            web_url=None,
+            confidence=0.7,
+            chosen_source="yahoo_news",
+            driver_keywords=("deal_contract",),
+            confirmed_cluster="deal_contract",
+            confirmed_cause_phrase="a major deal or contract update changed sentiment.",
+        )
+        return ev, "Shares fell after a major deal or contract update changed sentiment."
+
+    monkeypatch.setattr("coatue_claw.market_daily._build_catalyst_for_mover", _fake_build)
+    monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 20, 0, 0, 0, tzinfo=UTC))
+
+    movers = [
+        QuoteSnapshot("NET", 100.0, 92.0, 100.0, -0.08, "2026-02-20T12:00:00+00:00"),
+        QuoteSnapshot("CRWD", 100.0, 92.1, 100.0, -0.079, "2026-02-20T12:00:00+00:00"),
+    ]
+    rows, lines = md._build_catalyst_rows(movers=movers, slot_name="close")
+    assert rows[0].confirmed_cluster == "anthropic_claude_cyber"
+    assert "anthropic launched claude code security" in lines[0].lower()
+    assert lines[0] == lines[1]

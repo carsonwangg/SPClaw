@@ -1113,7 +1113,7 @@ _DRIVER_KEYWORDS: dict[str, tuple[str, ...]] = {
 }
 
 _CLUSTER_EVENT_PHRASES: dict[str, str] = {
-    "anthropic_claude_cyber": "Anthropic launched Claude Code Security.",
+    "anthropic_claude_cyber": "Anthropic launched Claude Code Security, pressuring cybersecurity stocks.",
     "anthropic_claude": "Anthropic launched new Claude security capabilities.",
     "cybersecurity_competition": "new security tooling intensified competitive pressure.",
     "earnings_guidance": "earnings and guidance reset expectations.",
@@ -1156,6 +1156,10 @@ _GENERIC_WRAPPER_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bstock is down today\b", flags=re.IGNORECASE),
     re.compile(r"\bstock down today\b", flags=re.IGNORECASE),
 )
+
+_BASKET_MEMBERS: dict[str, set[str]] = {
+    "cybersecurity": {"NET", "CRWD", "PANW", "OKTA", "ZS", "FTNT", "S"},
+}
 
 
 @dataclass(frozen=True)
@@ -1753,7 +1757,7 @@ def _directional_bonus(*, text: str, pct_move: float | None) -> float:
     if pct_move is None:
         return 0.0
     lower = text.lower()
-    up_terms = ("surge", "rises", "rose", "gains", "jumps", "up ", "beats", "upgrades")
+    up_terms = ("surge", "rises", "rose", "gains", "jumps", "up ", "beats", "upgrades", "partnership", "announces", "announce")
     down_terms = ("drops", "drop", "fell", "falls", "slides", "selloff", "sold off", "down ", "misses", "downgrade", "weighed", "pressured", "under pressure")
     if pct_move < 0:
         if any(term in lower for term in down_terms):
@@ -1766,6 +1770,16 @@ def _directional_bonus(*, text: str, pct_move: float | None) -> float:
         if any(term in lower for term in down_terms):
             return -0.08
     return 0.0
+
+
+def _basket_name_for_ticker(ticker: str) -> str | None:
+    t = _normalize_ticker(ticker)
+    if not t:
+        return None
+    for basket, members in _BASKET_MEMBERS.items():
+        if t in members:
+            return basket
+    return None
 
 
 def _effective_candidate_score(*, candidate: _EvidenceCandidate, pct_move: float | None) -> float:
@@ -2334,6 +2348,37 @@ def _build_catalyst_rows(*, movers: list[QuoteSnapshot], slot_name: str) -> tupl
                     pct_move=movers[idx].pct_move if idx < len(movers) else None,
                     phrase=phrase,
                 )
+
+        # Basket-level carry-through: if one cyber name has confirmed Anthropic/Claude cause,
+        # apply the same cause phrase to other cyber selloff names in the same run.
+        anthro_idxs = [
+            idx
+            for idx, row in enumerate(rows)
+            if row.confirmed_cluster == "anthropic_claude_cyber" and idx < len(movers) and ((movers[idx].pct_move or 0.0) < 0.0)
+        ]
+        if anthro_idxs:
+            phrase = rows[anthro_idxs[0]].confirmed_cause_phrase or _CLUSTER_EVENT_PHRASES["anthropic_claude_cyber"]
+            cyber_selloff_idxs = [
+                idx
+                for idx, mover in enumerate(movers)
+                if _basket_name_for_ticker(mover.ticker) == "cybersecurity" and ((mover.pct_move or 0.0) < 0.0)
+            ]
+            if len(cyber_selloff_idxs) >= 2:
+                for idx in cyber_selloff_idxs:
+                    current = rows[idx]
+                    if current.confirmed_cluster == "anthropic_claude_cyber":
+                        continue
+                    if current.confirmed_cluster not in {None, "deal_contract", "analyst_move", "product_launch"} and lines[idx] != FALLBACK_CAUSE_LINE:
+                        continue
+                    rows[idx] = replace(
+                        current,
+                        confirmed_cluster="anthropic_claude_cyber",
+                        confirmed_cause_phrase=phrase,
+                    )
+                    lines[idx] = _build_reason_line_from_phrase(
+                        pct_move=movers[idx].pct_move if idx < len(movers) else None,
+                        phrase=phrase,
+                    )
     return rows, lines
 
 
