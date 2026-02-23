@@ -18,9 +18,11 @@ from coatue_claw.x_chart_daily import (
     _extract_rebuilt_bars_via_vision,
     _extract_rebuilt_bars,
     _extract_rebuilt_series,
+    _finalize_headline_phrase,
     _finalize_takeaway_sentence,
     _infer_bar_labels_from_text,
     _infer_chart_mode,
+    _is_complete_headline_phrase,
     _is_complete_sentence,
     _is_us_relevant_post,
     _normalize_render_text,
@@ -285,6 +287,145 @@ def test_run_chart_scout_falls_back_when_top_candidate_copy_is_bad(tmp_path: Pat
     assert result["candidate_fallback_used"] is True
     assert captured["candidate_url"] == "https://x.com/fiscal_AI/status/good"
     assert _is_complete_sentence(str(captured["takeaway"])) is True
+
+
+def test_run_chart_scout_falls_back_when_top_candidate_headline_is_incomplete(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
+
+    bad_top = Candidate(
+        candidate_key="x:bad-headline",
+        source_type="x",
+        source_id="Barchart",
+        author="@Barchart",
+        title="US housing sellers and buyers",
+        text="US housing sellers now outnumber buyers in market.",
+        url="https://x.com/Barchart/status/bad-headline",
+        image_url="https://example.com/top.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=950,
+        source_priority=1.3,
+        score=99.0,
+    )
+    good_second = Candidate(
+        candidate_key="x:good-headline",
+        source_type="x",
+        source_id="fiscal_AI",
+        author="@fiscal_AI",
+        title="US housing sellers outnumber buyers",
+        text="US housing sellers now outnumber buyers.",
+        url="https://x.com/fiscal_AI/status/good-headline",
+        image_url="https://example.com/good.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=600,
+        source_priority=1.2,
+        score=93.0,
+    )
+
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = datetime(2026, 2, 19, 12, 0, 0, tzinfo=UTC)
+            if tz is None:
+                return base
+            return base.astimezone(tz)
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
+    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [bad_top, good_second])
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._synthesize_style_via_llm",
+        lambda candidate: (
+            {
+                "headline": "U.S. Housing Market Home Sellers now is",
+                "chart_label": "U.S. housing sellers versus buyers",
+                "takeaway": "US housing sellers now outnumber buyers.",
+            }
+            if candidate.candidate_key == "x:bad-headline"
+            else {
+                "headline": "US housing sellers now outnumber buyers",
+                "chart_label": "U.S. housing sellers versus buyers",
+                "takeaway": "US housing sellers now outnumber buyers.",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._rewrite_headline_from_candidate",
+        lambda candidate: ("", "headline_unrecoverable") if candidate.candidate_key == "x:bad-headline" else ("US housing sellers outnumber buyers", "headline_rewritten"),
+    )
+
+    captured: dict[str, object] = {}
+
+    def _fake_post(**kwargs):
+        captured["candidate_url"] = kwargs["candidate"].url
+        captured["headline"] = kwargs["style_draft"].headline
+        return {"ok": True, "channel": kwargs["channel"], "file_id": "FTEST"}
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
+
+    result = run_chart_scout_once(manual=False, dry_run=False, channel_override="C123")
+    assert result["posted"] is True
+    assert result["candidate_fallback_used"] is True
+    assert captured["candidate_url"] == "https://x.com/fiscal_AI/status/good-headline"
+    assert _is_complete_headline_phrase(str(captured["headline"])) is True
+
+
+def test_run_chart_scout_returns_non_post_when_no_publishable_candidate(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
+
+    bad_only = Candidate(
+        candidate_key="x:only-bad",
+        source_type="x",
+        source_id="Barchart",
+        author="@Barchart",
+        title="US housing sellers and buyers",
+        text="US housing sellers now outnumber buyers in market.",
+        url="https://x.com/Barchart/status/only-bad",
+        image_url="https://example.com/top.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=950,
+        source_priority=1.3,
+        score=99.0,
+    )
+
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = datetime(2026, 2, 19, 12, 0, 0, tzinfo=UTC)
+            if tz is None:
+                return base
+            return base.astimezone(tz)
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
+    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [bad_only])
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._synthesize_style_via_llm",
+        lambda _candidate: {
+            "headline": "U.S. Housing Market Home Sellers now is",
+            "chart_label": "U.S. housing sellers versus buyers",
+            "takeaway": "US housing sellers now outnumber buyers.",
+        },
+    )
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._rewrite_headline_from_candidate",
+        lambda _candidate: ("", "headline_unrecoverable"),
+    )
+
+    result = run_chart_scout_once(manual=False, dry_run=False, channel_override="C123")
+    assert result["posted"] is False
+    assert result["reason"] == "no_publishable_candidate_available"
+    assert "headline_incomplete_phrase" in result["publish_issues"]
+    assert result["copy_rewrite_reason"] == "headline_unrecoverable"
 
 
 def test_convention_name_uses_morning_afternoon_evening_windows() -> None:
@@ -603,6 +744,16 @@ def test_shorten_without_ellipsis_removes_three_dots() -> None:
     shortened = _shorten_without_ellipsis(text, max_chars=58)
     assert "..." not in shortened
     assert len(shortened) <= 58
+
+
+def test_headline_phrase_validator_rejects_fragment_home_sellers_now_is() -> None:
+    assert _is_complete_headline_phrase("U.S. Housing Market Home Sellers now is") is False
+    assert _is_complete_headline_phrase("U.S. housing sellers are at a record high") is True
+
+
+def test_headline_phrase_finalizer_returns_empty_for_dangling_copula() -> None:
+    finalized = _finalize_headline_phrase("U.S. Housing Market Home Sellers now is", max_chars=48)
+    assert finalized == ""
 
 
 def test_takeaway_sentence_validator_rejects_fragment_fell_to_lowest() -> None:
@@ -1037,7 +1188,7 @@ def test_run_chart_for_post_url_rewrites_takeaway_but_keeps_requested_url(monkey
     monkeypatch.setattr(
         "coatue_claw.x_chart_daily._synthesize_style_via_llm",
         lambda _candidate: {
-            "headline": "U.S",
+            "headline": "U.S. Housing Market Home Sellers now is",
             "chart_label": "U.S",
             "takeaway": "U.S. Housing Market Pending Home Sales fell to lowest",
         },
@@ -1059,6 +1210,7 @@ def test_run_chart_for_post_url_rewrites_takeaway_but_keeps_requested_url(monkey
 
     def _fake_post(**kwargs):
         captured["candidate_url"] = kwargs["candidate"].url
+        captured["headline"] = kwargs["style_draft"].headline
         captured["takeaway"] = kwargs["style_draft"].takeaway
         return {"ok": True, "channel": kwargs["channel"], "styled_artifact": str(tmp_path / "styled.png")}
 
@@ -1072,7 +1224,62 @@ def test_run_chart_for_post_url_rewrites_takeaway_but_keeps_requested_url(monkey
     assert result["candidate_fallback_used"] is False
     assert result["copy_rewrite_applied"] is True
     assert captured["candidate_url"] == "https://x.com/Barchart/status/2025715989384663396"
+    assert _is_complete_headline_phrase(str(captured["headline"])) is True
     assert _is_complete_sentence(str(captured["takeaway"])) is True
+
+
+def test_run_chart_for_post_url_errors_when_headline_unrecoverable(monkeypatch, tmp_path: Path) -> None:
+    import pytest
+
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
+    monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
+
+    payload = {
+        "data": [
+            {
+                "id": "2026003310256533863",
+                "author_id": "u1",
+                "text": "BREAKING : U.S. Housing Market Pending Home Sales fell to record low",
+                "created_at": "2026-02-23T00:00:00Z",
+                "public_metrics": {"like_count": 10, "retweet_count": 5, "reply_count": 2, "quote_count": 1},
+                "attachments": {"media_keys": ["m1"]},
+            }
+        ],
+        "includes": {
+            "users": [{"id": "u1", "username": "Barchart"}],
+            "media": [{"media_key": "m1", "type": "photo", "url": "https://example.com/chart.png"}],
+        },
+    }
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily._http_json", lambda **kwargs: payload)
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._synthesize_style_via_llm",
+        lambda _candidate: {
+            "headline": "U.S. Housing Market Home Sellers now is",
+            "chart_label": "U.S. housing sellers and buyers",
+            "takeaway": "U.S. Housing Market Pending Home Sales hit a record low.",
+        },
+    )
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._rewrite_headline_from_candidate",
+        lambda _candidate: ("", "headline_unrecoverable"),
+    )
+
+    posted = {"called": False}
+
+    def _fake_post(**kwargs):
+        posted["called"] = True
+        return {"ok": True, "channel": kwargs["channel"], "styled_artifact": str(tmp_path / "styled.png")}
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
+    with pytest.raises(XChartError) as exc:
+        run_chart_for_post_url(
+            post_url="https://x.com/Barchart/status/2026003310256533863",
+            channel_override="C123",
+        )
+    assert "headline_incomplete_phrase" in str(exc.value)
+    assert posted["called"] is False
 
 
 def test_run_chart_for_post_url_uses_vxtwitter_fallback(monkeypatch, tmp_path: Path) -> None:
@@ -1487,6 +1694,37 @@ def test_style_draft_rewrites_incoherent_institutional_selling_headline(monkeypa
     assert draft.headline == "Institutional selling is at an extreme"
     assert "sold a are" not in draft.headline.lower()
     assert draft.checks["headline_grammar"] is True
+
+
+def test_style_draft_rewrites_broken_headline_phrase(monkeypatch) -> None:
+    candidate = Candidate(
+        candidate_key="x:home-sellers-title-fragment",
+        source_type="x",
+        source_id="Barchart",
+        author="@Barchart",
+        title="@Barchart: Number of Homebuyers in Market Falls to Record Low",
+        text="U.S. Housing Market Home Sellers now outnumber Buyers.",
+        url="https://x.com/Barchart/status/2026003310256533863",
+        image_url="https://pbs.twimg.com/media/home-sellers.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=700,
+        source_priority=1.2,
+        score=91.0,
+    )
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._synthesize_style_via_llm",
+        lambda _candidate: {
+            "headline": "U.S. Housing Market Home Sellers now is",
+            "chart_label": "U.S. housing sellers versus buyers",
+            "takeaway": "U.S. Housing Market Home Sellers now outnumber Buyers.",
+        },
+    )
+    draft = _select_style_draft(candidate)
+    assert _is_complete_headline_phrase(draft.headline) is True
+    assert draft.headline.lower().endswith("now is") is False
+    assert draft.checks["headline_complete_phrase"] is True
+    assert draft.copy_rewrite_applied is True
+    assert draft.copy_rewrite_reason == "headline_rewritten"
 
 
 def test_style_draft_rewrites_degenerate_fields_and_fragment_takeaway(monkeypatch) -> None:

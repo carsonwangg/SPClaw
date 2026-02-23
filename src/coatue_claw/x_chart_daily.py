@@ -265,6 +265,31 @@ TAKEAWAY_DANGLING_ENDINGS = {
     "least",
 }
 
+HEADLINE_DANGLING_ENDINGS = {
+    "to",
+    "for",
+    "of",
+    "in",
+    "on",
+    "at",
+    "with",
+    "from",
+    "by",
+    "as",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "being",
+    "been",
+    "now",
+    "then",
+    "than",
+    "vs",
+    "versus",
+}
+
 SUBJECT_TRAILING_ACTION_VERBS = (
     "sold",
     "bought",
@@ -544,6 +569,120 @@ def _strip_trailing_dangling_endings(text: str) -> str:
     return " ".join(words).strip()
 
 
+def _strip_trailing_headline_dangling_endings(text: str) -> str:
+    words = [w for w in _normalize_render_text(text).split(" ") if w]
+    while words:
+        tail = words[-1].strip(".,;:!?").lower()
+        if tail not in HEADLINE_DANGLING_ENDINGS and tail not in TRAILING_STOPWORDS:
+            break
+        words.pop()
+    return " ".join(words).strip()
+
+
+def _is_complete_headline_phrase(text: str) -> bool:
+    cleaned = _normalize_render_text(text).strip()
+    if not cleaned:
+        return False
+    if "..." in cleaned:
+        return False
+    if _is_degenerate_copy_value(cleaned):
+        return False
+    if cleaned[-1] in {":", ";", ",", "-"}:
+        return False
+    words = [w for w in re.split(r"\s+", cleaned) if w]
+    if len(words) < 3:
+        return False
+    if _has_incoherent_headline(cleaned):
+        return False
+    stripped = _strip_trailing_headline_dangling_endings(cleaned.rstrip(".!?"))
+    if not stripped:
+        return False
+    stripped_words = [w for w in stripped.split(" ") if w]
+    if len(stripped_words) < 3:
+        return False
+    tail = stripped_words[-1].strip(".,;:!?").lower()
+    if tail in HEADLINE_DANGLING_ENDINGS:
+        return False
+    return stripped == cleaned.rstrip(".!?")
+
+
+def _finalize_headline_phrase(text: str, *, max_chars: int) -> str:
+    cleaned = _normalize_render_text(text)
+    cleaned = re.sub(r"^@\w+:\s*", "", cleaned, flags=re.IGNORECASE).strip()
+    cleaned = _strip_news_prefix(cleaned)
+    if not cleaned:
+        return ""
+    parts = re.split(r"(?<=[.!?])\s+", cleaned)
+    if len(parts) > 1 and len(parts[0].split()) >= 3:
+        cleaned = parts[0].strip()
+    cleaned = _shorten_without_ellipsis(cleaned, max_chars=max_chars)
+    cleaned = _trim_trailing_stopwords(cleaned)
+    before_words = [w for w in _normalize_render_text(cleaned).split(" ") if w]
+    cleaned = _strip_trailing_headline_dangling_endings(cleaned)
+    after_words = [w for w in _normalize_render_text(cleaned).split(" ") if w]
+    removed_words = max(0, len(before_words) - len(after_words))
+    if not cleaned:
+        return ""
+    # If we had to trim dangling endings, force a semantic rewrite instead of posting a clipped phrase.
+    if removed_words > 0:
+        return ""
+    if len(cleaned) > max_chars:
+        clipped = _shorten_without_ellipsis(cleaned, max_chars=max_chars)
+        clipped = _strip_trailing_headline_dangling_endings(clipped)
+        if not clipped:
+            return ""
+        cleaned = clipped
+    if len(cleaned) > max_chars:
+        return ""
+    return cleaned if _is_complete_headline_phrase(cleaned) else ""
+
+
+def _rewrite_headline_from_candidate(candidate: Candidate) -> tuple[str, str]:
+    source_sentence = re.sub(r"^@\w+:\s*", "", _strip_news_prefix(candidate.text or candidate.title), flags=re.IGNORECASE).strip()
+    parts = re.split(r"(?<=[.!?])\s+", source_sentence)
+    if len(parts) > 1 and len(parts[0].split()) >= 3:
+        source_sentence = parts[0].strip()
+    subject, verb = _extract_subject_and_verb(source_sentence)
+    narrative = _synthesize_narrative_title(subject=subject, verb=verb, sentence=source_sentence)
+    finalized = _finalize_headline_phrase(narrative, max_chars=48)
+    if finalized:
+        return finalized, "headline_rewritten"
+
+    subject_core = _clean_subject_for_headline(subject=subject, sentence=source_sentence)
+    lower = source_sentence.lower()
+    if subject_core:
+        compact_subject = _shorten_without_ellipsis(subject_core, max_chars=26)
+        if len(compact_subject.split()) < 2:
+            if "housing" in lower:
+                compact_subject = "US housing activity"
+            elif "sales" in lower:
+                compact_subject = "US sales trend"
+            else:
+                compact_subject = _shorten_without_ellipsis(
+                    _entity_hint_from_text(sentence=source_sentence, fallback=candidate.title),
+                    max_chars=24,
+                )
+        copula = "are" if _subject_is_plural(compact_subject) else "is"
+        rewrite = ""
+        if "record low" in lower or "lowest" in lower:
+            rewrite = f"{compact_subject} {copula} at a record low"
+        elif "record high" in lower or "highest" in lower:
+            rewrite = f"{compact_subject} {copula} at a record high"
+        elif verb.lower() in POSITIVE_MOVE_VERBS:
+            rewrite = f"{compact_subject} {copula} inflecting higher"
+        elif verb.lower() in NEGATIVE_MOVE_VERBS:
+            rewrite = f"{compact_subject} {copula} rolling over"
+        elif "up" in lower or "higher" in lower:
+            rewrite = f"{compact_subject} {copula} trending higher"
+        elif "down" in lower or "lower" in lower:
+            rewrite = f"{compact_subject} {copula} trending lower"
+        finalized = _finalize_headline_phrase(rewrite, max_chars=48)
+        if finalized:
+            return finalized, "headline_rewritten"
+
+    return "", "headline_unrecoverable"
+
+
 def _is_complete_sentence(text: str) -> bool:
     cleaned = _normalize_render_text(text)
     if not cleaned:
@@ -664,6 +803,10 @@ def _extract_first_sentence(text: str) -> str:
     if not parts:
         return normalized
     first = parts[0].strip()
+    if len(parts) > 1 and len(first.split()) < 3:
+        merged = _normalize_render_text(f"{first} {parts[1]}").strip()
+        if len(merged.split()) >= 3:
+            return merged
     return first or normalized
 
 
@@ -1009,6 +1152,8 @@ def _style_copy_quality_errors(style_draft: StyleDraft) -> list[str]:
         errors.append("chart label too long")
     if len(_normalize_render_text(style_draft.takeaway)) > 68:
         errors.append("takeaway too long")
+    if not _is_complete_headline_phrase(style_draft.headline):
+        errors.append("headline incomplete phrase")
     if not _is_complete_sentence(style_draft.takeaway):
         errors.append("takeaway incomplete sentence")
     if _is_degenerate_copy_value(style_draft.headline):
@@ -1039,6 +1184,7 @@ def _post_publish_checklist(
         "plain_language": bool(style_draft.checks.get("plain_language", False)),
         "no_ellipsis": ("..." not in headline and "..." not in chart_label and "..." not in takeaway),
         "headline_len_ok": (0 < len(headline) <= 58),
+        "headline_complete_phrase": _is_complete_headline_phrase(headline),
         "chart_label_len_ok": (0 < len(chart_label) <= 62),
         "takeaway_len_ok": (0 < len(takeaway) <= 68),
         "takeaway_complete_sentence": _is_complete_sentence(takeaway),
@@ -1548,13 +1694,20 @@ def _sanitize_style_copy(
 
     subject, verb = _extract_subject_and_verb(_extract_first_sentence(source_text or candidate.title))
     mode_hint = _mode_hint_from_text(candidate)
-    if _is_degenerate_copy_value(headline):
+
+    finalized_headline = _finalize_headline_phrase(headline, max_chars=48)
+    if not finalized_headline:
         rewrite_applied = True
-        rewrite_reason = rewrite_reason or "headline_rewritten"
-        rebuilt = _synthesize_narrative_title(subject=subject, verb=verb, sentence=source_text or candidate.title)
-        headline = _trim_trailing_stopwords(_shorten_without_ellipsis(rebuilt, max_chars=48))
-        if _is_degenerate_copy_value(headline):
-            headline = "US trend is inflecting"
+        rewritten_headline, reason = _rewrite_headline_from_candidate(candidate)
+        finalized_headline = _finalize_headline_phrase(rewritten_headline, max_chars=48)
+        if finalized_headline:
+            rewrite_reason = reason
+            headline = finalized_headline
+        else:
+            rewrite_reason = "headline_unrecoverable"
+            headline = _shorten_without_ellipsis(_normalize_render_text(headline), max_chars=48)
+    else:
+        headline = finalized_headline
 
     if _is_degenerate_copy_value(chart_label):
         rewrite_applied = True
@@ -1570,10 +1723,12 @@ def _sanitize_style_copy(
         rewritten_takeaway, reason = _rewrite_takeaway_from_candidate(candidate)
         finalized_takeaway = _finalize_takeaway_sentence(rewritten_takeaway, max_chars=68)
         if finalized_takeaway:
-            rewrite_reason = reason
+            if rewrite_reason is None:
+                rewrite_reason = reason
         else:
             finalized_takeaway = "US trend is shifting quickly."
-            rewrite_reason = "safe_fallback"
+            if rewrite_reason is None:
+                rewrite_reason = "safe_fallback"
     takeaway = finalized_takeaway
     if rewrite_applied and rewrite_reason is None:
         rewrite_reason = "copy_rewrite"
@@ -2707,6 +2862,7 @@ def _build_style_draft(candidate: Candidate, *, iteration: int) -> StyleDraft:
         "us_relevant": _is_us_relevant_post(f"{candidate.title} {candidate.text}"),
         "headline_short": bool(headline) and len(headline) <= 72,
         "headline_grammar": not _has_incoherent_headline(headline),
+        "headline_complete_phrase": _is_complete_headline_phrase(headline),
         "takeaway_short": bool(takeaway) and len(takeaway) <= 68,
         "takeaway_complete_sentence": _is_complete_sentence(takeaway),
         "headline_non_degenerate": not _is_degenerate_copy_value(headline),
@@ -2746,6 +2902,8 @@ def _select_style_draft(candidate: Candidate, *, max_iterations: int = 3) -> Sty
 
 def _style_copy_publish_issues(style_draft: StyleDraft) -> list[str]:
     issues: list[str] = []
+    if not _is_complete_headline_phrase(style_draft.headline):
+        issues.append("headline_incomplete_phrase")
     if not _is_complete_sentence(style_draft.takeaway):
         issues.append("takeaway_incomplete_sentence")
     if _is_degenerate_copy_value(style_draft.headline):
@@ -3521,6 +3679,7 @@ def _post_winner_to_slack(
         "source_image_available": file_size > 0,
         "artifact_nonempty": file_size > 0,
         "render_mode_source_snip": render_mode in {"source-snip", "source-snip-card"},
+        "headline_complete_phrase": _is_complete_headline_phrase(style_draft.headline),
         "takeaway_complete_sentence": _is_complete_sentence(style_draft.takeaway),
         "headline_non_degenerate": not _is_degenerate_copy_value(style_draft.headline),
         "chart_label_non_degenerate": not _is_degenerate_copy_value(style_draft.chart_label),
@@ -3702,11 +3861,32 @@ def run_chart_scout_once(
         break
 
     if winner is None or style_draft is None:
-        winner = top_choice
-        style_draft = _select_style_draft(winner)
-        copy_rewrite_applied = bool(style_draft.copy_rewrite_applied)
-        copy_rewrite_reason = style_draft.copy_rewrite_reason
-        candidate_fallback_used = False
+        top_draft = _select_style_draft(top_choice)
+        top_issues = _style_copy_publish_issues(top_draft)
+        return {
+            "ok": True,
+            "posted": False,
+            "reason": "no_publishable_candidate_available",
+            "slot_key": slot_key,
+            "copy_rewrite_applied": bool(top_draft.copy_rewrite_applied),
+            "copy_rewrite_reason": top_draft.copy_rewrite_reason or "headline_unrecoverable",
+            "candidate_fallback_used": False,
+            "publish_issues": top_issues,
+            "top_candidate": {
+                "source": f"{top_choice.source_type}:{top_choice.source_id}",
+                "author": top_choice.author,
+                "title": top_choice.title,
+                "url": top_choice.url,
+                "score": top_choice.score,
+                "style_score": top_draft.score,
+                "style_iteration": top_draft.iteration,
+            },
+            "candidates_scanned": len(all_candidates),
+            "candidates_observed": observed_count,
+            "pool_candidates": len(ranking_pool),
+            "since_utc": since_utc,
+            "pool_pruned": pruned_count,
+        }
 
     convention_name = _convention_name(slot_key=slot_key, now_local=now_local, windows=windows)
 

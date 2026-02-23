@@ -998,3 +998,55 @@ Then confirm bot returns:
 2. In Slack `#charting`, run `@Coatue Claw x chart now` and confirm takeaway is a complete sentence with no clipped ending.
 3. Run one explicit URL request and confirm posted source URL is unchanged while takeaway is rewritten when needed.
 4. Triage unrelated full-suite failures in `tests/test_spencer_change_digest.py` and `tests/test_spencer_change_log.py` separately from X-chart pipeline.
+
+## 2026-02-23 - X Chart Headline Completeness Guardrail
+- Issue fixed: source-snip chart posts could still ship malformed titles (example observed in Slack: `U.S. Housing Market Home Sellers now is`).
+- Root cause:
+  - title pipeline had length + degenerate checks but no deterministic headline-phrase completeness gate;
+  - `U.S.` abbreviation splitting in first-sentence extraction could collapse subject parsing and degrade headline quality.
+- Code updates in `/opt/coatue-claw/src/coatue_claw/x_chart_daily.py`:
+  - added headline-quality helpers:
+    - `_is_complete_headline_phrase`
+    - `_finalize_headline_phrase`
+    - `_rewrite_headline_from_candidate`
+    - `_strip_trailing_headline_dangling_endings`
+  - added headline dangling ending rules (copulas/prepositions and fragment tails like `now is`).
+  - integrated headline finalization + rewrite into `_sanitize_style_copy(...)`:
+    - no generic forced fallback title on unrecoverable headline;
+    - sets `copy_rewrite_reason=headline_unrecoverable` when title cannot be repaired.
+  - fixed `_extract_first_sentence(...)` to avoid `U.S.` abbreviation truncation when the first segment is too short.
+  - made headline completeness publish-critical:
+    - `_style_copy_quality_errors` includes `headline incomplete phrase`
+    - `_style_copy_publish_issues` includes `headline_incomplete_phrase`
+    - style checks include `headline_complete_phrase`
+    - post-review checks include `headline_complete_phrase`
+  - scout behavior update:
+    - if all candidates fail publish copy quality (including headline completeness), scout run returns non-post result:
+      - `reason=no_publishable_candidate_available`
+      - `publish_issues=[...]`
+    - scout no longer force-posts top invalid candidate in this failure mode.
+  - explicit URL behavior remains strict:
+    - requested URL is preserved
+    - run errors if headline remains invalid after rewrite.
+- Tests added/updated in `/opt/coatue-claw/tests/test_x_chart_daily.py`:
+  - `test_headline_phrase_validator_rejects_fragment_home_sellers_now_is`
+  - `test_headline_phrase_finalizer_returns_empty_for_dangling_copula`
+  - `test_style_draft_rewrites_broken_headline_phrase`
+  - `test_run_chart_scout_falls_back_when_top_candidate_headline_is_incomplete`
+  - `test_run_chart_scout_returns_non_post_when_no_publishable_candidate`
+  - `test_run_chart_for_post_url_errors_when_headline_unrecoverable`
+  - expanded explicit-URL rewrite regression to assert headline validity.
+- Validation:
+  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_x_chart_daily.py` -> `55 passed`.
+  - full smoke: `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q` -> unchanged unrelated failures:
+    - `tests/test_spencer_change_digest.py::test_run_once_dry_run_includes_carson_label`
+    - `tests/test_spencer_change_log.py::test_is_spencer_user_defaults`
+    - `tests/test_spencer_change_log.py::test_requester_label_defaults`
+
+### Immediate Next Steps
+1. Pull latest `main` on Mac mini and restart runtime (`make openclaw-restart`).
+2. In Slack `#charting`, run one `x chart now` and confirm title is a complete grammatical phrase (no clipped ending).
+3. Run one explicit URL command for the same source class and confirm:
+   - URL is unchanged
+   - title is either repaired or request fails with publish-copy error (no invalid title post).
+4. Triage the unrelated Spencer-change identity defaults failures in a separate patch.

@@ -574,3 +574,38 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 2. Validate one scout post and one explicit URL post in `#charting` for sentence completeness and source URL retention.
 3. Review next scheduled chart window for any residual low-signal rewrites (`copy_rewrite_reason=safe_fallback`) and tune synthesis prompts only if needed.
 4. Handle unrelated full-suite failing tests (`tests/test_spencer_change_digest.py`, `tests/test_spencer_change_log.py`) in a separate patch.
+
+## 2026-02-23 Plan Update - X Chart Headline Completeness Hardening
+
+### Completed
+- Added deterministic headline completeness guardrails in `src/coatue_claw/x_chart_daily.py`:
+  - `_is_complete_headline_phrase`
+  - `_finalize_headline_phrase`
+  - `_rewrite_headline_from_candidate`
+- Added headline dangling-ending filters so malformed endings (for example `...now is`) are blocked.
+- Fixed first-sentence extraction for abbreviation-leading text (`U.S.`), preventing subject truncation.
+- Integrated headline enforcement into `_sanitize_style_copy(...)`:
+  - rewrite attempted if headline is invalid;
+  - unrecoverable headlines now set `copy_rewrite_reason=headline_unrecoverable`;
+  - no generic fallback headline is force-posted in unrecoverable cases.
+- Extended publish-critical checks:
+  - style errors now include `headline incomplete phrase`
+  - publish issues now include `headline_incomplete_phrase`
+  - style/post-review checks now include `headline_complete_phrase`.
+- Updated scout failure behavior:
+  - if no candidate is publishable after copy-quality gates, return non-post result with explicit reason `no_publishable_candidate_available` and `publish_issues`.
+- Explicit URL mode remains strict:
+  - URL never swapped
+  - request errors if headline remains invalid after rewrite.
+- Added/updated regression coverage in `tests/test_x_chart_daily.py` for headline validator/finalizer, style rewrite behavior, scout fallback/skip behavior, and explicit-URL unrecoverable-title error.
+- Validation:
+  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_x_chart_daily.py` -> `55 passed`.
+
+### In Progress
+- Runtime verification in live Slack usage for malformed title class (`...now is`) after deploy/restart.
+
+### Next
+1. Deploy latest `main` on Mac mini and restart OpenClaw runtime.
+2. Validate one scout run and one explicit URL run in `#charting` for title completeness and strict URL behavior.
+3. Track occurrences of `copy_rewrite_reason=headline_unrecoverable`; if frequent for specific source families, add targeted synthesis heuristics.
+4. Resolve unrelated Spencer-change identity default test failures in a dedicated patch.
