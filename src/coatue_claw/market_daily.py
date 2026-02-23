@@ -1614,6 +1614,16 @@ def _collect_evidence_for_ticker(
     return (sorted(combined, key=lambda c: (-c.score, _source_rank(c.source_type))), rejected)
 
 
+def _preferred_evidence_text(evidence: CatalystEvidence) -> str:
+    if evidence.chosen_source == "web" and evidence.web_title:
+        return evidence.web_title
+    if evidence.chosen_source == "x" and evidence.x_text:
+        return evidence.x_text
+    if evidence.chosen_source == "yahoo_news" and evidence.news_title:
+        return evidence.news_title
+    return evidence.news_title or evidence.web_title or evidence.x_text or ""
+
+
 def _summarize_catalyst(*, ticker: str, slot_name: str, evidence: CatalystEvidence) -> str:
     fallback = "No clear single catalyst; likely positioning/flow."
     x_text = evidence.x_text or ""
@@ -1626,7 +1636,7 @@ def _summarize_catalyst(*, ticker: str, slot_name: str, evidence: CatalystEviden
 
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if OpenAI is None or not api_key:
-        base = news_title or web_title or x_text
+        base = _preferred_evidence_text(evidence)
         return _ensure_reason_like_line(base or fallback, evidence=evidence)
 
     prompt = (
@@ -1661,7 +1671,7 @@ def _summarize_catalyst(*, ticker: str, slot_name: str, evidence: CatalystEviden
     except Exception:
         pass
 
-    return _ensure_reason_like_line(news_title or web_title or x_text or fallback, evidence=evidence)
+    return _ensure_reason_like_line(_preferred_evidence_text(evidence) or fallback, evidence=evidence)
 
 
 def _strip_non_md_artifacts(text: str) -> str:
@@ -1938,7 +1948,11 @@ def _build_catalyst_for_mover(*, mover: QuoteSnapshot, slot_name: str, since_utc
     )
     ranked = sorted(
         candidates,
-        key=lambda c: (-_effective_candidate_score(candidate=c, pct_move=mover.pct_move), _source_rank(c.source_type)),
+        key=lambda c: (
+            -_effective_candidate_score(candidate=c, pct_move=mover.pct_move),
+            -_directional_bonus(text=c.text, pct_move=mover.pct_move),
+            _source_rank(c.source_type),
+        ),
     )
     chosen = ranked[0] if ranked else None
 
