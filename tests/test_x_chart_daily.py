@@ -943,6 +943,7 @@ def test_post_winner_preserves_takeaway_punctuation_in_slack_comment(monkeypatch
     assert len(upload_calls) == 1
     initial_comment = str(upload_calls[0]["initial_comment"])
     assert "- Key takeaway: US stocks erase nearly -$800 billion in market cap and trade war headlines return." in initial_comment
+    assert "- Render:" not in initial_comment
 
 
 def test_shorten_without_ellipsis_removes_three_dots() -> None:

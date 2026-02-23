@@ -1261,3 +1261,31 @@ Then confirm bot returns:
    - one-sentence takeaway using connector (`while`) and terminal punctuation.
 2. Monitor the next 3 manual `run-post-url` uses for `takeaway_clause_rewritten` rate; if frequent, add pre-LLM prompt guidance to avoid unjoined clause patterns earlier.
 3. Keep Spencer-change identity failures out of this charting branch and patch separately.
+
+## 2026-02-23 - X Chart Post Copy Cleanup + #charting Purge Attempt
+- Runtime module updated: `/opt/coatue-claw/src/coatue_claw/x_chart_daily.py`
+  - removed `- Render: ...` line from Slack chart post `initial_comment` output.
+  - post summary now includes only:
+    - Source
+    - Title
+    - Key takeaway
+    - Link
+- Test updated: `/opt/coatue-claw/tests/test_x_chart_daily.py`
+  - `test_post_winner_preserves_takeaway_punctuation_in_slack_comment` now asserts `- Render:` is absent.
+- Validation:
+  - targeted tests:
+    - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_x_chart_daily.py /opt/coatue-claw/tests/test_slack_x_chart_intent.py` -> `77 passed`
+- Slack channel cleanup run (`#charting`, channel id `C0AFXM2MWAV`):
+  - API delete pass results:
+    - `messages_seen: 48`
+    - `deleted: 36`
+    - `cant_delete_message: 12`
+  - follow-up pass:
+    - `messages_seen: 11`
+    - `deleted_now: 0`
+    - `cant_delete_now: 11`
+  - remaining messages are non-bot/user or channel-system events (join/rename/user posts), which the current bot token cannot delete.
+
+### Immediate Next Steps
+1. If full channel wipe is still required, use a user/admin token with delete rights (or manual Slack admin UI deletion for non-bot messages).
+2. Keep current bot deletion helper for future bot-authored cleanup runs.

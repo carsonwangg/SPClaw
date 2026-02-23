@@ -4689,7 +4689,6 @@ def _post_winner_to_slack(
         f"- Title: {style_draft.headline}",
         f"- Key takeaway: {clean_takeaway}",
         f"- Link: {candidate.url}",
-        f"- Render: `{render_mode}`",
     ]
     last_error: str | None = None
     for token in tokens:
