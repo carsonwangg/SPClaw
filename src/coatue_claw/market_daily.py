@@ -83,6 +83,9 @@ class CatalystEvidence:
     confirmed_cause_phrase: str | None = None
     corroborated_sources: int = 0
     corroborated_domains: int = 0
+    web_backend: str | None = None
+    selected_cluster: str | None = None
+    cluster_debug: tuple[str, ...] = ()
 
 
 def _utc_now_iso() -> str:
@@ -187,16 +190,28 @@ def _web_search_enabled() -> bool:
 
 
 def _web_search_backend() -> str:
-    return (os.environ.get("COATUE_CLAW_MD_WEB_SEARCH_BACKEND", "ddg_html") or "ddg_html").strip().lower()
+    return (os.environ.get("COATUE_CLAW_MD_WEB_SEARCH_BACKEND", "google_serp") or "google_serp").strip().lower()
+
+
+def _google_serp_api_key() -> str | None:
+    for key in ("COATUE_CLAW_MD_GOOGLE_SERP_API_KEY", "SERPAPI_API_KEY"):
+        value = (os.environ.get(key, "") or "").strip()
+        if value:
+            return value
+    return None
+
+
+def _google_serp_endpoint() -> str:
+    return (os.environ.get("COATUE_CLAW_MD_GOOGLE_SERP_ENDPOINT", "https://serpapi.com/search.json") or "https://serpapi.com/search.json").strip()
 
 
 def _web_max_results() -> int:
-    raw = (os.environ.get("COATUE_CLAW_MD_WEB_MAX_RESULTS", "8") or "8").strip()
+    raw = (os.environ.get("COATUE_CLAW_MD_WEB_MAX_RESULTS", "20") or "20").strip()
     try:
         val = int(raw)
     except Exception:
-        val = 8
-    return max(1, min(15, val))
+        val = 20
+    return max(1, min(40, val))
 
 
 def _min_evidence_confidence() -> float:
@@ -247,20 +262,20 @@ def _decisive_primary_reason_enabled() -> bool:
 
 
 def _decisive_primary_reason_min_score() -> float:
-    raw = (os.environ.get("COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_SCORE", "0.64") or "0.64").strip()
+    raw = (os.environ.get("COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_SCORE", "0.60") or "0.60").strip()
     try:
         val = float(raw)
     except Exception:
-        val = 0.64
+        val = 0.60
     return max(0.3, min(0.95, val))
 
 
 def _decisive_primary_reason_min_margin() -> float:
-    raw = (os.environ.get("COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_MARGIN", "0.06") or "0.06").strip()
+    raw = (os.environ.get("COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_MARGIN", "0.03") or "0.03").strip()
     try:
         val = float(raw)
     except Exception:
-        val = 0.06
+        val = 0.03
     return max(0.0, min(0.5, val))
 
 
@@ -1092,6 +1107,7 @@ _COMPANY_ALIAS_OVERRIDES: dict[str, list[str]] = {
     "OKTA": ["Okta"],
     "PANW": ["Palo Alto Networks"],
     "ORCL": ["Oracle"],
+    "BKNG": ["Booking Holdings", "Booking.com", "online travel agency", "OTA"],
 }
 
 _DRIVER_KEYWORDS: dict[str, tuple[str, ...]] = {
@@ -1105,6 +1121,22 @@ _DRIVER_KEYWORDS: dict[str, tuple[str, ...]] = {
     ),
     "anthropic_claude": ("anthropic", "claude", "code security"),
     "cybersecurity_competition": ("cybersecurity", "security tool", "threat detection", "vulnerability"),
+    "ota_ai_disruption": (
+        "ai threat",
+        "ai panic",
+        "agent disruption",
+        "ota disruption",
+        "online travel agency",
+        "booking holdings",
+        "booking.com",
+    ),
+    "travel_demand_outlook": (
+        "travel demand slowdown",
+        "forward outlook pressure",
+        "forward outlook",
+        "demand slowdown",
+        "ota industry",
+    ),
     "earnings_guidance": ("earnings", "guidance", "forecast", "outlook"),
     "macro_rates": ("rate cut", "rates", "treasury", "yield"),
     "deal_contract": ("deal", "contract", "partnership"),
@@ -1116,6 +1148,8 @@ _CLUSTER_EVENT_PHRASES: dict[str, str] = {
     "anthropic_claude_cyber": "Anthropic launched Claude Code Security, pressuring cybersecurity stocks.",
     "anthropic_claude": "Anthropic launched new Claude security capabilities.",
     "cybersecurity_competition": "new security tooling intensified competitive pressure.",
+    "ota_ai_disruption": "AI-agent disruption fears pressured online travel stocks.",
+    "travel_demand_outlook": "forward outlook concerns pressured travel demand expectations.",
     "earnings_guidance": "earnings and guidance reset expectations.",
     "macro_rates": "rates and macro signals shifted risk appetite.",
     "product_launch": "a product launch reset expectations.",
@@ -1125,6 +1159,7 @@ _CLUSTER_EVENT_PHRASES: dict[str, str] = {
 _CLUSTER_PRIORITY_BONUS: dict[str, float] = {
     "anthropic_claude_cyber": 0.35,
     "anthropic_claude": 0.2,
+    "ota_ai_disruption": 0.22,
 }
 
 _CLUSTER_REUSE_ALLOWLIST: set[str] = {"anthropic_claude_cyber", "anthropic_claude"}
@@ -1139,6 +1174,9 @@ _DOMAIN_WEIGHTS: dict[str, float] = {
     "wsj.com": 0.86,
     "seekingalpha.com": 0.82,
     "coincentral.com": 0.75,
+    "tikr.com": 0.72,
+    "fool.com": 0.7,
+    "benzinga.com": 0.74,
 }
 
 _QUALITY_CAUSE_DOMAINS: set[str] = {
@@ -1178,6 +1216,7 @@ class _EvidenceCandidate:
     reject_reason: str | None = None
     canonical_url: str | None = None
     domain: str | None = None
+    backend: str | None = None
 
 
 def _company_aliases(ticker: str) -> list[str]:
@@ -1358,8 +1397,28 @@ def _is_generic_headline_wrapper(*, text: str, ticker: str, aliases: list[str]) 
     if not cleaned:
         return True
     lower = cleaned.lower()
+    specific_event_terms = (
+        "after",
+        "amid",
+        "due to",
+        "because",
+        "following",
+        "anthropic",
+        "claude",
+        "security",
+        "guidance",
+        "outlook",
+        "downgrade",
+        "upgrade",
+        "lawsuit",
+        "ai threat",
+        "ai panic",
+        "ota disruption",
+    )
     for pattern in _GENERIC_WRAPPER_PATTERNS:
         if pattern.search(lower):
+            if any(term in lower for term in specific_event_terms) and len(_extract_driver_keywords(cleaned)) > 0:
+                return False
             return True
     tokenized = re.sub(r"[^a-z0-9$ ]+", " ", lower)
     words = [w for w in tokenized.split() if w]
@@ -1437,8 +1496,31 @@ def _compute_evidence_score(
         mention += 0.3
     keyword_hits = len(_extract_driver_keywords(text))
     keyword_score = min(0.35, keyword_hits * 0.12)
+    lower = text.lower()
+    causal_bonus = 0.0
+    if any(term in lower for term in (" after ", " amid ", " due to ", " because ", " following ", " as ")):
+        causal_bonus += 0.09
+    if any(
+        term in lower
+        for term in (
+            "anthropic",
+            "claude code security",
+            "guidance",
+            "outlook",
+            "lawsuit",
+            "downgrade",
+            "upgrade",
+            "earnings",
+            "ai threat",
+            "ai panic",
+            "ota disruption",
+            "travel demand slowdown",
+        )
+    ):
+        causal_bonus += 0.06
+    generic_penalty = -0.18 if _is_generic_headline_wrapper(text=text, ticker=ticker, aliases=aliases) else 0.0
     source_bonus = {"yahoo_news": 0.18, "x": 0.12, "web": 0.1}.get(source_type, 0.0)
-    score = (0.35 * recency) + (0.3 * domain) + mention + keyword_score + source_bonus
+    score = (0.35 * recency) + (0.3 * domain) + mention + keyword_score + source_bonus + causal_bonus + generic_penalty
     return max(0.0, min(1.0, score))
 
 
@@ -1703,16 +1785,176 @@ def _ddg_resolve_url(raw_url: str) -> str:
     return decoded
 
 
-def _fetch_web_evidence_ddg(*, ticker: str, aliases: list[str], since_utc: datetime, pct_move: float | None = None) -> list[_EvidenceCandidate]:
-    if (not _web_search_enabled()) or _web_search_backend() != "ddg_html":
-        return []
+def _web_queries_for_ticker(*, ticker: str, aliases: list[str], pct_move: float | None) -> list[str]:
     primary = aliases[0] if aliases else ticker
-    down_or_up = "fall today why" if (pct_move or 0.0) < 0 else "rise today why"
+    down_or_up = "down" if (pct_move or 0.0) < 0 else "up"
     queries = [
-        f"{ticker} {primary} stock {down_or_up}",
+        f"why is {ticker} stock {down_or_up}",
+        f"{ticker} {primary} stock {down_or_up} reason today",
+        f"{ticker} {primary} selloff cause",
         f"{ticker} {primary} stock move today why",
-        f"{ticker} {primary} cybersecurity anthropic claude",
     ]
+    if ticker.upper() == "BKNG":
+        queries.extend(
+            [
+                "why is BKNG stock down",
+                "BKNG stock down reason today",
+                "Booking Holdings selloff cause",
+                "BKNG AI threat travel OTA",
+            ]
+        )
+    uniq: list[str] = []
+    seen: set[str] = set()
+    for q in queries:
+        key = _normalize_whitespace(q).lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        uniq.append(q)
+    return uniq
+
+
+def _google_serp_candidate_text(*, title: str, snippet: str) -> str:
+    t = _normalize_whitespace(title)
+    s = _normalize_whitespace(snippet)
+    if t and s:
+        return f"{t}. {s}"
+    return t or s
+
+
+def _fetch_web_evidence_google_serp(*, ticker: str, aliases: list[str], since_utc: datetime, pct_move: float | None = None) -> list[_EvidenceCandidate]:
+    if not _web_search_enabled():
+        return []
+    api_key = _google_serp_api_key()
+    if not api_key:
+        return []
+    endpoint = _google_serp_endpoint()
+    out: list[_EvidenceCandidate] = []
+    seen_urls: set[str] = set()
+    max_results = _web_max_results()
+    headers = {"Accept": "application/json", "User-Agent": "CoatueClaw/1.0"}
+
+    for query in _web_queries_for_ticker(ticker=ticker, aliases=aliases, pct_move=pct_move):
+        if len(out) >= max_results:
+            break
+        params = {
+            "engine": "google",
+            "q": query,
+            "hl": "en",
+            "gl": "us",
+            "num": str(min(20, max_results)),
+            "api_key": api_key,
+        }
+        try:
+            payload = _http_json(endpoint, headers=headers, params=params)
+        except Exception:
+            continue
+
+        answer_box = payload.get("answer_box") if isinstance(payload, dict) else None
+        if isinstance(answer_box, dict):
+            a_title = str(answer_box.get("title") or "")
+            a_snippet = str(answer_box.get("snippet") or answer_box.get("answer") or "")
+            if isinstance(answer_box.get("snippet_highlighted_words"), list):
+                words = " ".join(str(x) for x in answer_box.get("snippet_highlighted_words") if str(x).strip())
+                if words:
+                    a_snippet = f"{a_snippet} {words}".strip()
+            a_url = str(answer_box.get("link") or answer_box.get("source") or "").strip()
+            text = _google_serp_candidate_text(title=a_title, snippet=a_snippet)
+            if text:
+                if a_url:
+                    a_url = _canonicalize_url(a_url) or a_url
+                if (not a_url) or (a_url not in seen_urls):
+                    if _is_relevant_ticker_headline(text=text, ticker=ticker, aliases=aliases):
+                        score = _compute_evidence_score(
+                            source_type="web",
+                            text=text,
+                            url=a_url,
+                            published_at_utc=None,
+                            since_utc=since_utc,
+                            ticker=ticker,
+                            aliases=aliases,
+                        )
+                        out.append(
+                            _EvidenceCandidate(
+                                source_type="web",
+                                text=text,
+                                url=a_url,
+                                published_at_utc=None,
+                                score=max(0.0, min(1.0, score + 0.1)),
+                                driver_keywords=_extract_driver_keywords(text),
+                                canonical_url=a_url,
+                                domain=_domain_from_url(a_url),
+                                backend="google_serp",
+                            )
+                        )
+                        if a_url:
+                            seen_urls.add(a_url)
+                        if len(out) >= max_results:
+                            break
+
+        if len(out) >= max_results:
+            break
+
+        for key in ("organic_results", "news_results", "top_stories"):
+            rows = payload.get(key) if isinstance(payload, dict) else None
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                title = _normalize_whitespace(str(row.get("title") or ""))
+                snippet = _normalize_whitespace(str(row.get("snippet") or ""))
+                if isinstance(row.get("snippet_highlighted_words"), list):
+                    words = " ".join(str(x) for x in row.get("snippet_highlighted_words") if str(x).strip())
+                    if words:
+                        snippet = f"{snippet} {words}".strip()
+                article_url = str(row.get("link") or row.get("url") or "").strip()
+                if not article_url:
+                    continue
+                article_url = _canonicalize_url(article_url) or article_url
+                if (not article_url) or (article_url in seen_urls):
+                    continue
+                text = _google_serp_candidate_text(title=title, snippet=snippet)
+                if not text:
+                    continue
+                if not _is_relevant_ticker_headline(text=text, ticker=ticker, aliases=aliases):
+                    continue
+                seen_urls.add(article_url)
+                score = _compute_evidence_score(
+                    source_type="web",
+                    text=text,
+                    url=article_url,
+                    published_at_utc=None,
+                    since_utc=since_utc,
+                    ticker=ticker,
+                    aliases=aliases,
+                )
+                if snippet:
+                    score = max(0.0, min(1.0, score + 0.06))
+                out.append(
+                    _EvidenceCandidate(
+                        source_type="web",
+                        text=text,
+                        url=article_url,
+                        published_at_utc=None,
+                        score=score,
+                        driver_keywords=_extract_driver_keywords(text),
+                        canonical_url=article_url,
+                        domain=_domain_from_url(article_url),
+                        backend="google_serp",
+                    )
+                )
+                if len(out) >= max_results:
+                    break
+            if len(out) >= max_results:
+                break
+    return sorted(out, key=lambda x: -x.score)
+
+
+def _fetch_web_evidence_ddg(*, ticker: str, aliases: list[str], since_utc: datetime, pct_move: float | None = None) -> list[_EvidenceCandidate]:
+    if not _web_search_enabled():
+        return []
+    queries = _web_queries_for_ticker(ticker=ticker, aliases=aliases, pct_move=pct_move)
     headers = {"User-Agent": "Mozilla/5.0", "Accept": "text/html,application/xhtml+xml"}
     seen_urls: set[str] = set()
     out: list[_EvidenceCandidate] = []
@@ -1760,11 +2002,59 @@ def _fetch_web_evidence_ddg(*, ticker: str, aliases: list[str], since_utc: datet
                     published_at_utc=None,
                     score=score,
                     driver_keywords=_extract_driver_keywords(title),
+                    canonical_url=article_url,
+                    domain=_domain_from_url(article_url),
+                    backend="ddg_html",
                 )
             )
             if len(out) >= max_results:
                 break
     return sorted(out, key=lambda x: -x.score)
+
+
+def _fetch_web_evidence(
+    *,
+    ticker: str,
+    aliases: list[str],
+    since_utc: datetime,
+    pct_move: float | None = None,
+) -> tuple[list[_EvidenceCandidate], str | None, list[str]]:
+    if not _web_search_enabled():
+        return ([], None, ["web:disabled"])
+    backend_pref = _web_search_backend()
+    notes: list[str] = []
+    backend_order: list[str]
+    if backend_pref in {"google_serp", "google"}:
+        backend_order = ["google_serp", "ddg_html"]
+    elif backend_pref in {"ddg_html", "ddg"}:
+        backend_order = ["ddg_html"]
+    else:
+        backend_order = ["google_serp", "ddg_html"]
+
+    for backend in backend_order:
+        if backend == "google_serp":
+            if not _google_serp_api_key():
+                notes.append("web:google_serp_api_key_missing")
+                continue
+            rows = _normalize_evidence_candidates(
+                candidates=_fetch_web_evidence_google_serp(ticker=ticker, aliases=aliases, since_utc=since_utc, pct_move=pct_move),
+                ticker=ticker,
+                aliases=aliases,
+            )
+            if rows:
+                return (rows, "google_serp", notes)
+            notes.append("web:google_serp_no_signal")
+            continue
+
+        rows = _normalize_evidence_candidates(
+            candidates=_fetch_web_evidence_ddg(ticker=ticker, aliases=aliases, since_utc=since_utc, pct_move=pct_move),
+            ticker=ticker,
+            aliases=aliases,
+        )
+        if rows:
+            return (rows, "ddg_html", notes)
+        notes.append("web:ddg_html_no_signal")
+    return ([], None, notes)
 
 
 def _source_rank(source_type: str) -> int:
@@ -1945,7 +2235,7 @@ def _collect_evidence_for_ticker(
     aliases: list[str],
     since_utc: datetime,
     pct_move: float | None = None,
-) -> tuple[list[_EvidenceCandidate], list[str]]:
+) -> tuple[list[_EvidenceCandidate], list[str], str | None]:
     rejected: list[str] = []
     x_candidates = _fetch_x_evidence_candidates(ticker=ticker, aliases=aliases, since_utc=since_utc)
     if not x_candidates:
@@ -1959,19 +2249,27 @@ def _collect_evidence_for_ticker(
     source_diversity = len({c.source_type for c in combined})
     directional_hits = any(_directional_bonus(text=c.text, pct_move=pct_move) > 0 for c in combined)
     needs_web = (x_y_best < _min_evidence_confidence()) or (source_diversity < 2) or (not directional_hits)
+    web_backend: str | None = None
     if needs_web:
-        web_candidates = _normalize_evidence_candidates(
-            candidates=_fetch_web_evidence_ddg(ticker=ticker, aliases=aliases, since_utc=since_utc, pct_move=pct_move),
+        web_candidates, web_backend, web_notes = _fetch_web_evidence(
             ticker=ticker,
             aliases=aliases,
+            since_utc=since_utc,
+            pct_move=pct_move,
         )
+        rejected.extend(web_notes)
         if web_candidates:
             combined = _normalize_evidence_candidates(candidates=(combined + web_candidates), ticker=ticker, aliases=aliases)
+            rejected.append(f"web:backend={web_backend}")
         else:
             rejected.append("web:no_relevant_results")
     if not combined:
         rejected.append("all_sources:empty")
-    return (sorted(combined, key=lambda c: (-_effective_candidate_score(candidate=c, pct_move=pct_move), _source_rank(c.source_type))), rejected)
+    return (
+        sorted(combined, key=lambda c: (-_effective_candidate_score(candidate=c, pct_move=pct_move), _source_rank(c.source_type))),
+        rejected,
+        web_backend,
+    )
 
 
 def _preferred_evidence_text(evidence: CatalystEvidence) -> str:
@@ -2161,7 +2459,7 @@ def _build_message(
         emoji = "📈" if (mover.pct_move or 0.0) >= 0 else "📉"
         lines.append(f"- {emoji} {mover.ticker} {_format_pct(mover.pct_move)} — {cat}{link_text}")
 
-    lines.append(f"Data UTC: {_utc_now_iso()} | Sources: Yahoo fast_info + X recent search + Yahoo news + web fallback")
+    lines.append(f"Data UTC: {_utc_now_iso()} | Sources: Yahoo fast_info + X recent search + Yahoo news + web search")
     return "\n".join(lines)
 
 
@@ -2205,8 +2503,16 @@ def _write_artifact(
         lines.append(f"  - since_utc: {ev.since_utc or 'n/a'}")
         if ev.chosen_source:
             lines.append(f"  - chosen_source: {ev.chosen_source}")
+        if ev.web_backend:
+            lines.append(f"  - web_backend: {ev.web_backend}")
+        if ev.selected_cluster:
+            lines.append(f"  - selected_cluster: {ev.selected_cluster}")
         if ev.driver_keywords:
             lines.append(f"  - driver_keywords: {', '.join(ev.driver_keywords)}")
+        if ev.cluster_debug:
+            lines.append("  - cluster_debug:")
+            for entry in ev.cluster_debug:
+                lines.append(f"    - {entry}")
         if ev.x_url:
             lines.append(f"  - x: {ev.x_url}")
         if ev.news_url:
@@ -2259,12 +2565,17 @@ def _post_to_slack(*, channel_ref: str, text: str) -> tuple[str | None, str | No
 
 def _build_catalyst_for_mover(*, mover: QuoteSnapshot, slot_name: str, since_utc: datetime) -> tuple[CatalystEvidence, str]:
     aliases = _company_aliases(mover.ticker)
-    candidates, rejected = _collect_evidence_for_ticker(
+    collected = _collect_evidence_for_ticker(
         ticker=mover.ticker,
         aliases=aliases,
         since_utc=since_utc,
         pct_move=mover.pct_move,
     )
+    if len(collected) == 3:
+        candidates, rejected, web_backend = collected
+    else:  # backwards-compatible for patched tests/mocks returning legacy shape
+        candidates, rejected = collected  # type: ignore[misc]
+        web_backend = None
     ranked = sorted(
         candidates,
         key=lambda c: (
@@ -2287,6 +2598,12 @@ def _build_catalyst_for_mover(*, mover: QuoteSnapshot, slot_name: str, since_utc
     top_cluster = cluster_ranking[0][0] if cluster_ranking else None
     top_cluster_score = cluster_ranking[0][1] if cluster_ranking else 0.0
     second_cluster_score = cluster_ranking[1][1] if len(cluster_ranking) > 1 else 0.0
+    cluster_debug: list[str] = []
+    for cluster, score in cluster_ranking[:5]:
+        members = _cluster_members(ranked_specific, cluster)
+        cluster_debug.append(
+            f"{cluster}: score={score:.2f} sources={_cluster_independent_sources(members)} domains={_cluster_domain_count(members)} quality={1 if _cluster_has_quality_domain(members) else 0}"
+        )
 
     top_cluster_rows = _cluster_members(ranked_specific, top_cluster) if top_cluster else []
     corroborated_sources = _cluster_independent_sources(top_cluster_rows) if top_cluster_rows else 0
@@ -2315,6 +2632,13 @@ def _build_catalyst_for_mover(*, mover: QuoteSnapshot, slot_name: str, since_utc
         confidence = max(_min_evidence_confidence(), min(1.0, confidence + 0.12))
     elif decisive_primary:
         confidence = max(_min_evidence_confidence(), min(1.0, confidence + 0.07))
+    else:
+        if not top_cluster:
+            rejected.append("cluster:none_detected")
+        else:
+            rejected.append(f"cluster:{top_cluster}:unconfirmed sources={corroborated_sources} domains={corroborated_domains}")
+            if len(cluster_ranking) > 1 and (top_cluster_score - second_cluster_score) < _decisive_primary_reason_min_margin():
+                rejected.append("cluster:ambiguous_competing_signals")
 
     cause_phrase = None
     if top_cluster_confirmed or decisive_primary:
@@ -2328,7 +2652,7 @@ def _build_catalyst_for_mover(*, mover: QuoteSnapshot, slot_name: str, since_utc
             f"{c.source_type}({_effective_candidate_score(candidate=c, pct_move=mover.pct_move):.2f}): {c.text} [{c.url or 'no-url'}]",
             180,
         )
-        for c in ranked[:3]
+        for c in ranked[:5]
     )
 
     evidence = CatalystEvidence(
@@ -2350,6 +2674,9 @@ def _build_catalyst_for_mover(*, mover: QuoteSnapshot, slot_name: str, since_utc
         confirmed_cause_phrase=(cause_phrase if (top_cluster_confirmed or decisive_primary) else None),
         corroborated_sources=corroborated_sources,
         corroborated_domains=corroborated_domains,
+        web_backend=web_backend,
+        selected_cluster=top_cluster,
+        cluster_debug=tuple(cluster_debug),
     )
     if (top_cluster_confirmed or decisive_primary) and cause_phrase:
         line = _build_reason_line_from_phrase(pct_move=mover.pct_move, phrase=cause_phrase)
@@ -2443,13 +2770,16 @@ def debug_catalyst(*, ticker: str, slot_name: str = "open") -> dict[str, Any]:
         "since_utc": evidence.since_utc,
         "confidence": evidence.confidence,
         "chosen_source": evidence.chosen_source,
+        "web_backend": evidence.web_backend,
         "driver_keywords": list(evidence.driver_keywords),
+        "selected_cluster": evidence.selected_cluster,
         "confirmed_cluster": evidence.confirmed_cluster,
         "confirmed_cause_phrase": evidence.confirmed_cause_phrase,
         "corroborated_sources": evidence.corroborated_sources,
         "corroborated_domains": evidence.corroborated_domains,
         "line": line,
         "top_evidence": list(evidence.top_evidence),
+        "cluster_debug": list(evidence.cluster_debug),
         "rejected_reasons": list(evidence.rejected_reasons),
         "links": {
             "x": evidence.x_url,
@@ -2657,8 +2987,12 @@ def status() -> dict[str, Any]:
         "max_lookback_hours": _max_lookback_hours(),
         "web_search_enabled": _web_search_enabled(),
         "web_search_backend": _web_search_backend(),
+        "google_serp_configured": bool(_google_serp_api_key()),
         "web_max_results": _web_max_results(),
         "min_evidence_confidence": _min_evidence_confidence(),
+        "decisive_primary_reason_enabled": _decisive_primary_reason_enabled(),
+        "decisive_primary_reason_min_score": _decisive_primary_reason_min_score(),
+        "decisive_primary_reason_min_margin": _decisive_primary_reason_min_margin(),
         "seed_path": str(_seed_path()),
         "recent_runs": store.latest_runs(limit=10),
         "holdings_count": store.coatue_holdings_count(),

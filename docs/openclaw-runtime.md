@@ -229,8 +229,10 @@ MD (Market Daily) environment controls:
 - `COATUE_CLAW_MD_MAX_LOOKBACK_HOURS`: max evidence lookback cap for session windows (default `96`)
 - `COATUE_CLAW_MD_X_MAX_RESULTS`: X search depth for catalyst retrieval (default `50`)
 - `COATUE_CLAW_MD_WEB_SEARCH_ENABLED`: enable web fallback retrieval (`1`/`0`, default `1`)
-- `COATUE_CLAW_MD_WEB_SEARCH_BACKEND`: web fallback backend (default `ddg_html`)
-- `COATUE_CLAW_MD_WEB_MAX_RESULTS`: max web evidence links per ticker (default `8`)
+- `COATUE_CLAW_MD_WEB_SEARCH_BACKEND`: web backend (`google_serp` primary with `ddg_html` fallback, default `google_serp`)
+- `COATUE_CLAW_MD_GOOGLE_SERP_API_KEY`: SERP API key for Google-backed evidence retrieval
+- `COATUE_CLAW_MD_GOOGLE_SERP_ENDPOINT`: optional SERP endpoint override (default `https://serpapi.com/search.json`)
+- `COATUE_CLAW_MD_WEB_MAX_RESULTS`: max web evidence links per ticker (default `20`)
 - `COATUE_CLAW_MD_MIN_EVIDENCE_CONFIDENCE`: confidence threshold before fallback reason line (default `0.55`)
 - `COATUE_CLAW_MD_MIN_CAUSE_SOURCES`: minimum independent corroborating sources required to name a specific cause (default `2`)
 - `COATUE_CLAW_MD_MIN_CAUSE_DOMAINS`: minimum distinct corroborating domains required to name a specific cause (default `2`)
@@ -238,8 +240,8 @@ MD (Market Daily) environment controls:
 - `COATUE_CLAW_MD_GENERIC_HEADLINE_BLOCKLIST_ENABLED`: block generic wrappers (for example "stock is down today") from final catalyst lines (`1`/`0`, default `1`)
 - `COATUE_CLAW_MD_REASON_MODE`: catalyst reasoning mode (default `best_effort`)
 - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_ENABLED`: allow decisive single-source event phrasing when one high-quality source is dominant (`1`/`0`, default `1`)
-- `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_SCORE`: minimum effective evidence score for decisive-primary override (default `0.64`)
-- `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_MARGIN`: minimum top-cluster score gap vs runner-up for decisive-primary override (default `0.06`)
+- `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_SCORE`: minimum effective evidence score for decisive-primary override (default `0.60`)
+- `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_MARGIN`: minimum top-cluster score gap vs runner-up for decisive-primary override (default `0.03`)
 - Basket coherence rule: if a confirmed `anthropic_claude_cyber` cause is present for one cybersecurity mover in a run, peer cybersecurity selloff movers reuse that same cause phrase.
 - MD fallback line (when corroboration gate fails): `Likely positioning/flow; no single confirmed catalyst.`
 

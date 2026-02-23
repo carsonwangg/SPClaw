@@ -9,6 +9,7 @@ from coatue_claw.market_daily import (
     QuoteSnapshot,
     debug_catalyst,
     _fetch_web_evidence_ddg,
+    _fetch_web_evidence_google_serp,
     _fetch_yahoo_news,
     _session_anchor_start_utc,
     _build_message,
@@ -345,6 +346,75 @@ def test_ddg_resolve_handles_absolute_redirect_url() -> None:
     assert resolved == "https://stocktwits.com/news/anthropic-net-drop"
 
 
+def test_google_serp_web_parses_snippets_and_answer_box(monkeypatch) -> None:
+    payload = {
+        "answer_box": {
+            "title": "Why BKNG stock is down",
+            "snippet": "AI threat narrative around agents disrupting OTA margins pressured shares.",
+            "link": "https://www.tikr.com/blog/booking-stock-tumbles-6-ai-panic",
+        },
+        "organic_results": [
+            {
+                "title": "Booking Holdings falls as AI agents threaten OTA economics",
+                "snippet": "Investors cited AI threat and forward outlook pressure.",
+                "link": "https://finance.yahoo.com/news/booking-holdings-falls-ai-agents-120000000.html",
+            }
+        ],
+    }
+    monkeypatch.setenv("COATUE_CLAW_MD_GOOGLE_SERP_API_KEY", "test-key")
+    monkeypatch.setattr("coatue_claw.market_daily._http_json", lambda url, headers, params=None, method="GET", body=None: payload)
+    rows = _fetch_web_evidence_google_serp(
+        ticker="BKNG",
+        aliases=["Booking Holdings", "Booking.com"],
+        since_utc=datetime(2026, 2, 22, 0, 0, 0, tzinfo=UTC),
+        pct_move=-0.07,
+    )
+    assert rows
+    assert any("ai threat" in row.text.lower() for row in rows)
+    assert any(row.backend == "google_serp" for row in rows)
+
+
+def test_bkng_dominant_ai_threat_cluster_outputs_specific_reason(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    def _fake_collect(ticker, aliases, since_utc, pct_move=None):
+        return (
+            [
+                md._EvidenceCandidate(
+                    source_type="web",
+                    text="Booking Holdings shares fell after AI threat and agent disruption concerns hit OTA names.",
+                    url="https://www.tikr.com/blog/booking-stock-tumbles-6-ai-panic",
+                    published_at_utc=None,
+                    score=0.9,
+                    driver_keywords=("ota_ai_disruption",),
+                    canonical_url="https://www.tikr.com/blog/booking-stock-tumbles-6-ai-panic",
+                    domain="tikr.com",
+                    backend="google_serp",
+                ),
+                md._EvidenceCandidate(
+                    source_type="yahoo_news",
+                    text="Booking Holdings drops as AI threat narrative pressures online travel agency outlook.",
+                    url="https://finance.yahoo.com/news/booking-holdings-drops-ai-threat-130000000.html",
+                    published_at_utc=datetime(2026, 2, 23, 12, 0, 0, tzinfo=UTC),
+                    score=0.88,
+                    driver_keywords=("ota_ai_disruption", "travel_demand_outlook"),
+                    canonical_url="https://finance.yahoo.com/news/booking-holdings-drops-ai-threat-130000000.html",
+                    domain="finance.yahoo.com",
+                ),
+            ],
+            [],
+            "google_serp",
+        )
+
+    monkeypatch.setattr("coatue_claw.market_daily._collect_evidence_for_ticker", _fake_collect)
+    monkeypatch.setattr("coatue_claw.market_daily._company_aliases", lambda ticker: ["Booking Holdings", "Booking.com"])
+    monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 23, 0, 0, 0, tzinfo=UTC))
+    mover = QuoteSnapshot("BKNG", 100.0, 92.4, 100.0, -0.076, "2026-02-23T15:00:00+00:00")
+    rows, lines = md._build_catalyst_rows(movers=[mover], slot_name="open")
+    assert rows[0].confirmed_cluster == "ota_ai_disruption"
+    assert "ai-agent disruption fears pressured online travel stocks" in lines[0].lower()
+
+
 def test_debug_catalyst_returns_expected_shape(monkeypatch) -> None:
     evidence = CatalystEvidence(
         ticker="NET",
@@ -440,16 +510,17 @@ def test_collect_evidence_triggers_web_when_directional_signal_missing(monkeypat
 
     def _fake_web(ticker, aliases, since_utc, pct_move=None):
         calls["web"] += 1
-        return web_candidates
+        return (web_candidates, "google_serp", [])
 
-    monkeypatch.setattr("coatue_claw.market_daily._fetch_web_evidence_ddg", _fake_web)
-    rows, _ = md._collect_evidence_for_ticker(
+    monkeypatch.setattr("coatue_claw.market_daily._fetch_web_evidence", _fake_web)
+    rows, _, web_backend = md._collect_evidence_for_ticker(
         ticker="NET",
         aliases=["Cloudflare"],
         since_utc=datetime(2026, 2, 20, 0, 0, 0, tzinfo=UTC),
         pct_move=-0.05,
     )
     assert calls["web"] == 1
+    assert web_backend == "google_serp"
     assert any(r.source_type == "web" for r in rows)
 
 

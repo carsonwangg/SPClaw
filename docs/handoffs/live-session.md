@@ -4,6 +4,25 @@
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Current Status (2026-02-23)
+- MD BKNG catalyst miss fix is now shipped with Google-first evidence:
+  - web retrieval is now `google_serp` primary with `ddg_html` fallback (instead of DDG-only)
+  - Google payload parsing now includes `organic_results`, `news_results`, and `answer_box` snippets
+  - retrieval depth increased (`COATUE_CLAW_MD_WEB_MAX_RESULTS=20` default)
+  - BKNG-specific query templates + aliases added (`Booking Holdings`, `Booking.com`, `OTA`)
+  - new BKNG causal clusters:
+    - `ota_ai_disruption`
+    - `travel_demand_outlook`
+  - scoring now upweights snippet-level causal phrases and only blocks generic wrappers when they lack specific event content
+  - debug output now shows:
+    - top 5 evidence candidates
+    - selected cluster + cluster scoring diagnostics
+    - web backend used (`google_serp` vs `ddg_html`)
+  - decisive defaults tuned to reduce over-fallback:
+    - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_SCORE=0.60`
+    - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_MARGIN=0.03`
+  - tests:
+    - `PYTHONPATH=src pytest -q tests/test_market_daily.py` => `28 passed`
+    - `PYTHONPATH=src pytest -q` => `162 passed`
 - MD cause wording is now less conservative by default (decisive-primary mode):
   - if one high-quality source clearly dominates the evidence cluster, MD now states the primary reason directly
   - strict generic-wrapper blocklist still applies (no `stock down today` / `news today` style lines)
@@ -11,8 +30,8 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `Likely positioning/flow; no single confirmed catalyst.`
   - new knobs:
     - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_ENABLED` (default `1`)
-    - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_SCORE` (default `0.64`)
-    - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_MARGIN` (default `0.06`)
+    - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_SCORE` (default `0.60`)
+    - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_MARGIN` (default `0.03`)
   - test added:
     - `test_single_strong_quality_source_can_drive_decisive_primary_reason`
 - MD basket-cause coherence now handles the NET/CRWD Anthropic case:
@@ -54,7 +73,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - local validation:
     - `PYTHONPATH=src pytest -q` => `155 passed`
 - MD catalyst reliability fix for NET/Anthropic-class misses is now implemented in repo:
-  - source coverage expanded from X+Yahoo-only to X + Yahoo + DDG web fallback (when confidence is weak)
+  - source coverage expanded from X+Yahoo-only to X + Yahoo + Google SERP primary + DDG fallback (when confidence is weak)
   - Yahoo parser now supports both legacy yfinance fields and nested `content.*` schema (`pubDate`, `title`, `clickThroughUrl.url`/`canonicalUrl.url`)
   - evidence windows are now session-anchored instead of fixed-hour:
     - open slot starts at previous regular-session close

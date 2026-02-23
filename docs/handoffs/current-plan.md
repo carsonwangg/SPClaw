@@ -40,14 +40,36 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- MD BKNG/Google-visible cause reliability fix shipped:
+  - web evidence path is now `google_serp` primary with automatic `ddg_html` fallback
+  - Google evidence ingestion now parses title + snippet + answer-box text (not title-only)
+  - web retrieval depth increased (`COATUE_CLAW_MD_WEB_MAX_RESULTS` default `20`)
+  - BKNG-specific query templates and aliases added:
+    - `why is BKNG stock down`
+    - `BKNG stock down reason today`
+    - `Booking Holdings selloff cause`
+    - `BKNG AI threat travel OTA`
+  - new BKNG/OTA cause clusters added:
+    - `ota_ai_disruption`
+    - `travel_demand_outlook`
+  - scoring now boosts snippet-level causal language and suppresses generic wrappers unless a specific causal narrative is present
+  - decisive defaults are now more assertive:
+    - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_SCORE=0.60`
+    - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_MARGIN=0.03`
+  - debug transparency expanded:
+    - top 5 evidence rows
+    - selected cluster + cluster scoring diagnostics
+    - web backend used (`google_serp` vs `ddg_html`)
+  - regression validation:
+    - `PYTHONPATH=src pytest -q` => `162 passed`
 - MD is now tuned for decisive “primary reason” output:
   - when one high-quality source clearly dominates cluster evidence, MD states the reason directly instead of defaulting to uncertainty
   - generic wrapper blocking remains enforced to prevent tautological headlines
   - fallback line is still used only for genuinely weak/ambiguous evidence
   - env controls:
     - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_ENABLED=1`
-    - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_SCORE=0.64`
-    - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_MARGIN=0.06`
+    - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_SCORE=0.60`
+    - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_MARGIN=0.03`
   - added cybersecurity basket coherence pass:
     - when CRWD/NET-style names sell off together and one confirms Anthropic/Claude cyber catalyst, peers reuse that cause phrasing in the same MD run
   - directional ranking now penalizes positive partnership-only headlines on down moves
@@ -75,7 +97,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - tests updated and passing:
     - `PYTHONPATH=src pytest -q` => `155 passed`
 - MD catalyst reliability fix (NET / Anthropic miss class) is now implemented:
-  - evidence stack upgraded from X+Yahoo to X + Yahoo + DDG fallback (`COATUE_CLAW_MD_WEB_SEARCH_ENABLED=1`)
+  - evidence stack upgraded from X+Yahoo to X + Yahoo + Google SERP primary + DDG fallback (`COATUE_CLAW_MD_WEB_SEARCH_ENABLED=1`)
   - Yahoo ingestion now supports both legacy and nested yfinance schemas
   - catalyst lookback now uses session anchors (prev close / same-day open) with configurable cap
   - X retrieval depth and query quality improved for ambiguous tickers (`COATUE_CLAW_MD_X_MAX_RESULTS`, alias-aware query + filters)
