@@ -37,7 +37,7 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
   - `claw x-chart run-once --manual`
   - `claw x-chart status|list-sources|add-source`
   - `claw market-daily run-once --manual|--force|--dry-run`
-  - `claw market-daily status|holdings|refresh-coatue-holdings`
+  - `claw market-daily status|holdings|refresh-coatue-holdings|debug-catalyst`
   - `claw memory status|query|prune|extract-daily|checkpoint`
 - Scheduled (planned but not yet wired in this repo):
   - Weekly idea scan
@@ -226,6 +226,12 @@ MD (Market Daily) environment controls:
 - `COATUE_CLAW_MD_COATUE_CIK`: Coatue CIK for auto 13F refresh
 - `COATUE_CLAW_MD_OPENFIGI_API_KEY`: optional OpenFIGI key for stronger CUSIP->ticker resolution
 - `COATUE_CLAW_MD_MODEL`: optional catalyst summarizer model (default `gpt-5-mini`)
+- `COATUE_CLAW_MD_MAX_LOOKBACK_HOURS`: max evidence lookback cap for session windows (default `96`)
+- `COATUE_CLAW_MD_X_MAX_RESULTS`: X search depth for catalyst retrieval (default `50`)
+- `COATUE_CLAW_MD_WEB_SEARCH_ENABLED`: enable web fallback retrieval (`1`/`0`, default `1`)
+- `COATUE_CLAW_MD_WEB_SEARCH_BACKEND`: web fallback backend (default `ddg_html`)
+- `COATUE_CLAW_MD_WEB_MAX_RESULTS`: max web evidence links per ticker (default `8`)
+- `COATUE_CLAW_MD_MIN_EVIDENCE_CONFIDENCE`: confidence threshold before fallback reason line (default `0.55`)
 
 Board Seat daily environment controls:
 - `COATUE_CLAW_BOARD_SEAT_PORTCOS`: comma-separated `Company:channel` mappings (default includes anduril/anthropic/cursor/neuralink/openai/physical-intelligence/ramp/spacex/stripe/sunday-robotics)

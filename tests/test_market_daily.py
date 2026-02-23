@@ -7,6 +7,10 @@ from coatue_claw.market_daily import (
     CatalystEvidence,
     MarketDailyStore,
     QuoteSnapshot,
+    debug_catalyst,
+    _fetch_web_evidence_ddg,
+    _fetch_yahoo_news,
+    _session_anchor_start_utc,
     _build_message,
     _ensure_reason_like_line,
     _is_relevant_ticker_post,
@@ -224,6 +228,11 @@ def test_relevant_ticker_post_filters_ambiguous_short_tickers() -> None:
         text="$NET stock drops after earnings miss and weaker margin guidance",
         ticker="NET",
     )
+    assert _is_relevant_ticker_post(
+        text="Cloudflare stock falls after Anthropic launches Claude security tool",
+        ticker="NET",
+        aliases=["Cloudflare"],
+    )
     assert not _is_relevant_ticker_post(
         text="India's net run rate collapsed after the match",
         ticker="NET",
@@ -240,4 +249,94 @@ def test_reason_line_uses_generic_fallback_for_vague_x_only_text() -> None:
         news_url=None,
     )
     line = _ensure_reason_like_line("3 Under-the-Radar Earnings Surprises Could Signal a New Trend", evidence=evidence)
-    assert "company-specific headline" in line
+    assert "No clear single catalyst" in line
+
+
+def test_fetch_yahoo_news_parses_nested_schema(monkeypatch) -> None:
+    class FakeTicker:
+        news = [
+            {
+                "content": {
+                    "pubDate": "2026-02-20T10:12:00Z",
+                    "title": "Cybersecurity stocks fall after Anthropic launches Claude security tool",
+                    "clickThroughUrl": {
+                        "url": "https://finance.yahoo.com/news/cybersecurity-stocks-fall-anthropic-101200000.html"
+                    },
+                }
+            }
+        ]
+
+    monkeypatch.setattr("coatue_claw.market_daily.yf.Ticker", lambda ticker: FakeTicker())
+    title, url = _fetch_yahoo_news(
+        ticker="NET",
+        since_utc=datetime(2026, 2, 19, 0, 0, 0, tzinfo=UTC),
+    )
+    assert "Anthropic" in (title or "")
+    assert (url or "").startswith("https://finance.yahoo.com/news/")
+
+
+def test_session_anchor_open_uses_previous_market_close(monkeypatch) -> None:
+    class FakeBars:
+        empty = False
+        index = [
+            datetime(2026, 2, 20, 21, 0, 0, tzinfo=UTC),  # Friday
+            datetime(2026, 2, 23, 21, 0, 0, tzinfo=UTC),  # Monday
+        ]
+
+    class FakeTicker:
+        def history(self, **kwargs):
+            return FakeBars()
+
+    monkeypatch.setattr("coatue_claw.market_daily.yf.Ticker", lambda ticker: FakeTicker())
+    since = _session_anchor_start_utc(
+        slot_name="open",
+        now_utc=datetime(2026, 2, 23, 15, 0, 0, tzinfo=UTC),
+    )
+    assert since == datetime(2026, 2, 20, 21, 0, 0, tzinfo=UTC)
+
+
+def test_ddg_web_fallback_parses_result_links(monkeypatch) -> None:
+    html = """
+    <html><body>
+      <a class="result__a" href="/l/?uddg=https%3A%2F%2Fstocktwits.com%2Fnews%2Fanthropic-net-drop">Cloudflare stock dropped after Anthropic launch</a>
+    </body></html>
+    """
+    monkeypatch.setattr("coatue_claw.market_daily._fetch_text", lambda url, headers: html)
+    rows = _fetch_web_evidence_ddg(
+        ticker="NET",
+        aliases=["Cloudflare"],
+        since_utc=datetime(2026, 2, 19, 0, 0, 0, tzinfo=UTC),
+    )
+    assert rows
+    assert rows[0].source_type == "web"
+    assert "Anthropic" in rows[0].text
+    assert rows[0].url == "https://stocktwits.com/news/anthropic-net-drop"
+
+
+def test_debug_catalyst_returns_expected_shape(monkeypatch) -> None:
+    evidence = CatalystEvidence(
+        ticker="NET",
+        x_text="Cloudflare sold off after Anthropic announced Claude Code Security",
+        x_url="https://x.com/i/web/status/1",
+        x_engagement=12,
+        news_title="Cybersecurity stocks slide after Anthropic launch",
+        news_url="https://finance.yahoo.com/news/example",
+        web_title="Cloudflare stock drops on Anthropic security release",
+        web_url="https://stocktwits.com/news/example",
+        confidence=0.8,
+        chosen_source="yahoo_news",
+        driver_keywords=("anthropic_claude",),
+        top_evidence=("yahoo_news(0.80): sample",),
+        rejected_reasons=("x:no_relevant_matches",),
+        since_utc="2026-02-20T21:00:00+00:00",
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._build_catalyst_for_mover",
+        lambda mover, slot_name, since_utc: (evidence, "After Anthropic launched Claude security tooling, NET sold off."),
+    )
+    monkeypatch.setattr("coatue_claw.market_daily._fetch_quote_snapshots", lambda tickers: [])
+    payload = debug_catalyst(ticker="NET", slot_name="open")
+    assert payload["ok"] is True
+    assert payload["ticker"] == "NET"
+    assert payload["chosen_source"] == "yahoo_news"
+    assert payload["links"]["web"] == "https://stocktwits.com/news/example"

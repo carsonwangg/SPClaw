@@ -20,6 +20,7 @@ from coatue_claw.cli import run_diligence
 from coatue_claw.memory_extraction import parse_memory_lookup_query
 from coatue_claw.memory_runtime import MemoryRuntime
 from coatue_claw.market_daily import MarketDailyError
+from coatue_claw.market_daily import debug_catalyst as market_daily_debug_catalyst
 from coatue_claw.market_daily import holdings as market_daily_holdings
 from coatue_claw.market_daily import refresh_coatue_holdings as market_daily_refresh_holdings
 from coatue_claw.market_daily import run_once as run_market_daily_once
@@ -880,7 +881,8 @@ def _handle_market_daily_command(*, text: str, channel: str | None, thread_ts: s
                 "- `md holdings refresh`\n"
                 "- `md holdings show`\n"
                 "- `md include TICKER`\n"
-                "- `md exclude TICKER`"
+                "- `md exclude TICKER`\n"
+                "- `md debug TICKER [open|close]`"
             ),
             thread_ts=thread_ts,
         )
@@ -948,6 +950,38 @@ def _handle_market_daily_command(*, text: str, channel: str | None, thread_ts: s
             ),
             thread_ts=thread_ts,
         )
+        return True
+
+    debug_match = re.fullmatch(r"md\s+debug\s+([A-Za-z.$-]{1,12})(?:\s+(open|close))?", stripped, flags=re.IGNORECASE)
+    if debug_match:
+        ticker = debug_match.group(1)
+        slot = (debug_match.group(2) or "open").lower()
+        try:
+            payload = market_daily_debug_catalyst(ticker=ticker, slot_name=slot)
+        except Exception as exc:
+            say(text=f"MD debug failed: {exc}", thread_ts=thread_ts)
+            return True
+        lines = [
+            f"MD debug `{payload.get('ticker')}` (`{payload.get('slot')}`):",
+            f"- confidence: `{float(payload.get('confidence') or 0.0):.2f}`",
+            f"- chosen_source: `{payload.get('chosen_source') or 'none'}`",
+            f"- line: {payload.get('line')}",
+        ]
+        links = payload.get("links") if isinstance(payload.get("links"), dict) else {}
+        if links:
+            if links.get("x"):
+                lines.append(f"- x: {links['x']}")
+            if links.get("news"):
+                lines.append(f"- news: {links['news']}")
+            if links.get("web"):
+                lines.append(f"- web: {links['web']}")
+        top = payload.get("top_evidence") if isinstance(payload.get("top_evidence"), list) else []
+        for entry in top[:3]:
+            lines.append(f"- evidence: {entry}")
+        rejected = payload.get("rejected_reasons") if isinstance(payload.get("rejected_reasons"), list) else []
+        if rejected:
+            lines.append(f"- rejected: {', '.join(str(x) for x in rejected)}")
+        say(text="\n".join(lines), thread_ts=thread_ts)
         return True
 
     include_match = re.fullmatch(r"md\s+include\s+([A-Za-z.$-]{1,12})", stripped, flags=re.IGNORECASE)

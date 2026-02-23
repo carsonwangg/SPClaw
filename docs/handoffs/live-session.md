@@ -3,6 +3,35 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Current Status (2026-02-23)
+- MD catalyst reliability fix for NET/Anthropic-class misses is now implemented in repo:
+  - source coverage expanded from X+Yahoo-only to X + Yahoo + DDG web fallback (when confidence is weak)
+  - Yahoo parser now supports both legacy yfinance fields and nested `content.*` schema (`pubDate`, `title`, `clickThroughUrl.url`/`canonicalUrl.url`)
+  - evidence windows are now session-anchored instead of fixed-hour:
+    - open slot starts at previous regular-session close
+    - close slot starts at same-day session open
+    - lookback cap enforced by `COATUE_CLAW_MD_MAX_LOOKBACK_HOURS` (default `96`)
+  - X retrieval now uses richer ticker+alias query and configurable depth (`COATUE_CLAW_MD_X_MAX_RESULTS`, default `50`)
+  - evidence scoring now includes source quality, recency, mention strength, driver keywords, and directional move-aware ranking
+  - fallback reason line now uses concise default:
+    - `No clear single catalyst; likely positioning/flow.`
+  - Slack output style remains unchanged (📈/📉 + concise reason + source links), with optional `[Web]` link when web fallback is used
+  - markdown artifact now includes evidence diagnostics per mover:
+    - confidence, chosen source, driver keywords, top evidence considered, and reject reasons
+  - new debug surfaces shipped:
+    - CLI: `claw market-daily debug-catalyst <TICKER> [--slot open|close]`
+    - Slack: `md debug <TICKER> [open|close]`
+  - tests added/updated in `tests/test_market_daily.py`:
+    - nested Yahoo schema parsing
+    - Monday-open previous-close session window behavior
+    - DDG fallback parsing
+    - short-ticker alias relevance behavior
+    - debug output shape
+  - local validation:
+    - `PYTHONPATH=src pytest -q tests/test_market_daily.py tests/test_launchd_runtime.py tests/test_slack_channel_access.py tests/test_slack_pipeline.py tests/test_slack_routing.py`
+    - `26 passed`
+  - local dry-run to `/opt/coatue-claw-data` cannot execute from laptop sandbox due path permission; runtime verification is required on Mac mini.
+
 ## Current Status (2026-02-20)
 - MD Slack output style tightened for readability and user-facing copy:
   - mover lines now include only directional emoji:

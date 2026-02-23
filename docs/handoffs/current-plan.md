@@ -40,6 +40,17 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- MD catalyst reliability fix (NET / Anthropic miss class) is now implemented:
+  - evidence stack upgraded from X+Yahoo to X + Yahoo + DDG fallback (`COATUE_CLAW_MD_WEB_SEARCH_ENABLED=1`)
+  - Yahoo ingestion now supports both legacy and nested yfinance schemas
+  - catalyst lookback now uses session anchors (prev close / same-day open) with configurable cap
+  - X retrieval depth and query quality improved for ambiguous tickers (`COATUE_CLAW_MD_X_MAX_RESULTS`, alias-aware query + filters)
+  - evidence scoring/clustering now drives confidence and chosen catalyst, with directional ranking for up/down movers
+  - markdown artifacts now include per-mover evidence diagnostics and reject reasons
+  - debug interfaces shipped:
+    - CLI `claw market-daily debug-catalyst <TICKER> [--slot open|close]`
+    - Slack `md debug <TICKER> [open|close]`
+  - tests updated (`tests/test_market_daily.py`) and passing
 - MD output copy contract refined:
   - no universe line in Slack post
   - slot copy says `3 biggest movers this morning/afternoon`

@@ -9,6 +9,7 @@ import json
 from coatue_claw.chart_metrics import DEFAULT_X_METRIC, DEFAULT_Y_METRIC, METRIC_SPECS
 from coatue_claw.diligence_report import build_neutral_investment_memo
 from coatue_claw.memory_runtime import MemoryRuntime
+from coatue_claw.market_daily import debug_catalyst as market_daily_debug_catalyst
 from coatue_claw.market_daily import holdings as market_daily_holdings
 from coatue_claw.market_daily import refresh_coatue_holdings as market_daily_refresh_holdings
 from coatue_claw.market_daily import run_once as run_market_daily_once
@@ -136,6 +137,19 @@ def _run_market_daily_command(args) -> None:
         )
         return
 
+    if args.market_daily_cmd == "debug-catalyst":
+        print(
+            json.dumps(
+                market_daily_debug_catalyst(
+                    ticker=str(args.ticker).strip(),
+                    slot_name=str(args.slot).strip().lower(),
+                ),
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return
+
 
 def main():
     parser = argparse.ArgumentParser("coatue-claw")
@@ -206,6 +220,9 @@ def main():
     mdi.add_argument("ticker")
     mde = md_sub.add_parser("exclude")
     mde.add_argument("ticker")
+    mdd = md_sub.add_parser("debug-catalyst")
+    mdd.add_argument("ticker")
+    mdd.add_argument("--slot", choices=("open", "close"), default="open")
 
     args = parser.parse_args()
 
