@@ -20,6 +20,12 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - directional scoring now penalizes upbeat partnership headlines for down-move cause selection
   - tests added:
     - `test_cyber_basket_carries_anthropic_cause_to_net`
+- ORCL/generic-cause wording fix:
+  - removed generic `deal_contract` fallback phrase (`a major deal or contract update changed sentiment`)
+  - deal/contract lines now use the concrete selected headline event text
+  - expanded wrapper blocklist for weak templates like:
+    - `why ... shares ... today`
+    - `shares ... trading lower today`
 - MD specific-cause enforcement is now shipped for selloffs (NET/CRWD Anthropic case class):
   - cause naming now requires corroboration gate: at least 2 independent sources + 2 distinct domains + at least one quality domain
   - evidence is now normalized/deduped by canonical URL + title fingerprint, including DDG absolute redirect unwrapping

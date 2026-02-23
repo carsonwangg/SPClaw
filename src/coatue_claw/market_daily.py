@@ -1118,7 +1118,6 @@ _CLUSTER_EVENT_PHRASES: dict[str, str] = {
     "cybersecurity_competition": "new security tooling intensified competitive pressure.",
     "earnings_guidance": "earnings and guidance reset expectations.",
     "macro_rates": "rates and macro signals shifted risk appetite.",
-    "deal_contract": "a major deal or contract update changed sentiment.",
     "product_launch": "a product launch reset expectations.",
     "analyst_move": "analyst rating changes moved expectations.",
 }
@@ -1155,6 +1154,9 @@ _GENERIC_WRAPPER_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bnews today\b", flags=re.IGNORECASE),
     re.compile(r"\bstock is down today\b", flags=re.IGNORECASE),
     re.compile(r"\bstock down today\b", flags=re.IGNORECASE),
+    re.compile(r"\bwhy\b.*\bshares?\b.*\btoday\b", flags=re.IGNORECASE),
+    re.compile(r"\bshares?\b.*\btrading lower today\b", flags=re.IGNORECASE),
+    re.compile(r"\bshares?\b.*\bfalling today\b", flags=re.IGNORECASE),
 )
 
 _BASKET_MEMBERS: dict[str, set[str]] = {
