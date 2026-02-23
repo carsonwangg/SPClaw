@@ -14,6 +14,7 @@ from coatue_claw.market_daily import (
     _build_message,
     _ensure_reason_like_line,
     _is_relevant_ticker_post,
+    _is_relevant_ticker_headline,
     _merge_universe,
     _parse_times,
     _select_top_movers,
@@ -239,6 +240,19 @@ def test_relevant_ticker_post_filters_ambiguous_short_tickers() -> None:
     )
 
 
+def test_relevant_ticker_headline_filters_unrelated_titles() -> None:
+    assert _is_relevant_ticker_headline(
+        text="Oracle Faces AI Lawsuits As Federal Cloud Contracts Expand",
+        ticker="ORCL",
+        aliases=["Oracle"],
+    )
+    assert not _is_relevant_ticker_headline(
+        text="Mastercard Partnerships With Ericsson And Cloudflare Reshape Digital Finance Role",
+        ticker="ORCL",
+        aliases=["Oracle"],
+    )
+
+
 def test_reason_line_uses_generic_fallback_for_vague_x_only_text() -> None:
     evidence = CatalystEvidence(
         ticker="ORCL",
@@ -257,10 +271,19 @@ def test_fetch_yahoo_news_parses_nested_schema(monkeypatch) -> None:
         news = [
             {
                 "content": {
-                    "pubDate": "2026-02-20T10:12:00Z",
-                    "title": "Cybersecurity stocks fall after Anthropic launches Claude security tool",
+                    "pubDate": "2026-02-20T10:11:00Z",
+                    "title": "Mastercard Partnerships With Ericsson And Cloudflare Reshape Digital Finance Role",
                     "clickThroughUrl": {
-                        "url": "https://finance.yahoo.com/news/cybersecurity-stocks-fall-anthropic-101200000.html"
+                        "url": "https://finance.yahoo.com/news/mastercard-partnerships-ericsson-cloudflare-031333933.html"
+                    },
+                }
+            },
+            {
+                "content": {
+                    "pubDate": "2026-02-20T10:12:00Z",
+                    "title": "Oracle Faces AI Lawsuits As Federal Cloud Contracts Expand",
+                    "clickThroughUrl": {
+                        "url": "https://finance.yahoo.com/news/oracle-faces-ai-lawsuits-federal-231206167.html"
                     },
                 }
             }
@@ -268,11 +291,11 @@ def test_fetch_yahoo_news_parses_nested_schema(monkeypatch) -> None:
 
     monkeypatch.setattr("coatue_claw.market_daily.yf.Ticker", lambda ticker: FakeTicker())
     title, url = _fetch_yahoo_news(
-        ticker="NET",
+        ticker="ORCL",
         since_utc=datetime(2026, 2, 19, 0, 0, 0, tzinfo=UTC),
     )
-    assert "Anthropic" in (title or "")
-    assert (url or "").startswith("https://finance.yahoo.com/news/")
+    assert "Oracle Faces AI Lawsuits" in (title or "")
+    assert (url or "") == "https://finance.yahoo.com/news/oracle-faces-ai-lawsuits-federal-231206167.html"
 
 
 def test_session_anchor_open_uses_previous_market_close(monkeypatch) -> None:

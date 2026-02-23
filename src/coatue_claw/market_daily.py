@@ -1591,6 +1591,18 @@ def _is_relevant_ticker_post(*, text: str, ticker: str, aliases: list[str] | Non
     return True
 
 
+def _is_relevant_ticker_headline(*, text: str, ticker: str, aliases: list[str] | None = None) -> bool:
+    cleaned = _normalize_whitespace(text)
+    if not cleaned:
+        return False
+    t = ticker.upper().strip()
+    upper = cleaned.upper()
+    has_cashtag = bool(re.search(rf"\${re.escape(t)}\b", upper))
+    has_symbol = bool(re.search(rf"\b{re.escape(t)}\b", upper))
+    has_alias = any(alias.lower() in cleaned.lower() for alias in (aliases or []))
+    return has_cashtag or has_symbol or has_alias
+
+
 def _yahoo_item_title_url_published(item: dict[str, Any]) -> tuple[str, str, datetime | None]:
     content = item.get("content") if isinstance(item.get("content"), dict) else {}
     legacy_ts = item.get("providerPublishTime")
@@ -1633,6 +1645,8 @@ def _fetch_yahoo_news_candidates(*, ticker: str, aliases: list[str], since_utc: 
             continue
         title, link, published = _yahoo_item_title_url_published(item)
         if not title or not link:
+            continue
+        if not _is_relevant_ticker_headline(text=title, ticker=ticker, aliases=aliases):
             continue
         if published and published < since_utc:
             continue

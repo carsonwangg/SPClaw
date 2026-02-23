@@ -23,6 +23,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - ORCL/generic-cause wording fix:
   - removed generic `deal_contract` fallback phrase (`a major deal or contract update changed sentiment`)
   - deal/contract lines now use the concrete selected headline event text
+  - Yahoo headline relevance filter now requires ticker/alias mention, preventing unrelated cross-company headlines in ORCL/NET lines
   - expanded wrapper blocklist for weak templates like:
     - `why ... shares ... today`
     - `shares ... trading lower today`
