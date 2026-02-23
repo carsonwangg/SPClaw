@@ -562,3 +562,33 @@ def test_single_source_only_uses_uncertainty_fallback(monkeypatch) -> None:
     movers = [QuoteSnapshot("NET", 100.0, 92.0, 100.0, -0.08, "2026-02-20T12:00:00+00:00")]
     _, lines = md._build_catalyst_rows(movers=movers, slot_name="open")
     assert lines[0] == "Likely positioning/flow; no single confirmed catalyst."
+
+
+def test_single_strong_quality_source_can_drive_decisive_primary_reason(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    def _fake_collect(ticker, aliases, since_utc, pct_move=None):
+        return (
+            [
+                md._EvidenceCandidate(
+                    source_type="yahoo_news",
+                    text="Cybersecurity stocks fell after Anthropic launched Claude Code Security tool",
+                    url="https://finance.yahoo.com/news/cybersecurity-stocks-fall-anthropic-101200000.html",
+                    published_at_utc=datetime(2026, 2, 20, 10, 0, 0, tzinfo=UTC),
+                    score=0.93,
+                    driver_keywords=("anthropic_claude_cyber", "anthropic_claude"),
+                    canonical_url="https://finance.yahoo.com/news/cybersecurity-stocks-fall-anthropic-101200000.html",
+                    domain="finance.yahoo.com",
+                ),
+            ],
+            [],
+        )
+
+    monkeypatch.setattr("coatue_claw.market_daily._collect_evidence_for_ticker", _fake_collect)
+    monkeypatch.setattr("coatue_claw.market_daily._company_aliases", lambda ticker: [ticker])
+    monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 20, 0, 0, 0, tzinfo=UTC))
+
+    movers = [QuoteSnapshot("NET", 100.0, 92.0, 100.0, -0.08, "2026-02-20T12:00:00+00:00")]
+    rows, lines = md._build_catalyst_rows(movers=movers, slot_name="open")
+    assert rows[0].confirmed_cluster == "anthropic_claude_cyber"
+    assert lines[0] == "Shares fell after Anthropic launched Claude Code Security."

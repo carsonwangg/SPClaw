@@ -237,6 +237,9 @@ MD (Market Daily) environment controls:
 - `COATUE_CLAW_MD_ENABLE_CAUSE_CLUSTER_REUSE`: reuse one confirmed basket cause phrase across multiple movers in the same run (`1`/`0`, default `1`)
 - `COATUE_CLAW_MD_GENERIC_HEADLINE_BLOCKLIST_ENABLED`: block generic wrappers (for example "stock is down today") from final catalyst lines (`1`/`0`, default `1`)
 - `COATUE_CLAW_MD_REASON_MODE`: catalyst reasoning mode (default `best_effort`)
+- `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_ENABLED`: allow decisive single-source event phrasing when one high-quality source is dominant (`1`/`0`, default `1`)
+- `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_SCORE`: minimum effective evidence score for decisive-primary override (default `0.64`)
+- `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_MARGIN`: minimum top-cluster score gap vs runner-up for decisive-primary override (default `0.06`)
 - MD fallback line (when corroboration gate fails): `Likely positioning/flow; no single confirmed catalyst.`
 
 Board Seat daily environment controls:

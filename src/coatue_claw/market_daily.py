@@ -241,6 +241,29 @@ def _reason_mode() -> str:
     return mode if mode in {"best_effort"} else "best_effort"
 
 
+def _decisive_primary_reason_enabled() -> bool:
+    raw = (os.environ.get("COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_ENABLED", "1") or "1").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _decisive_primary_reason_min_score() -> float:
+    raw = (os.environ.get("COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_SCORE", "0.64") or "0.64").strip()
+    try:
+        val = float(raw)
+    except Exception:
+        val = 0.64
+    return max(0.3, min(0.95, val))
+
+
+def _decisive_primary_reason_min_margin() -> float:
+    raw = (os.environ.get("COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_MARGIN", "0.06") or "0.06").strip()
+    try:
+        val = float(raw)
+    except Exception:
+        val = 0.06
+    return max(0.0, min(0.5, val))
+
+
 def _x_api_base() -> str:
     return (os.environ.get("COATUE_CLAW_X_API_BASE", "https://api.x.com").strip() or "https://api.x.com").rstrip("/")
 
@@ -1815,6 +1838,32 @@ def _cluster_event_phrase(cluster: str, *, candidate: _EvidenceCandidate | None)
     return cleaned
 
 
+def _can_use_decisive_primary_reason(
+    *,
+    cluster_candidate: _EvidenceCandidate | None,
+    top_cluster_score: float,
+    second_cluster_score: float,
+    pct_move: float | None,
+) -> bool:
+    if not _decisive_primary_reason_enabled():
+        return False
+    if cluster_candidate is None:
+        return False
+    if cluster_candidate.reject_reason == "generic_wrapper":
+        return False
+    if _contains_disallowed_reason_phrasing(cluster_candidate.text):
+        return False
+    if not _is_quality_domain(cluster_candidate.domain or cluster_candidate.url):
+        return False
+    eff = _effective_candidate_score(candidate=cluster_candidate, pct_move=pct_move)
+    if eff < _decisive_primary_reason_min_score():
+        return False
+    margin = top_cluster_score - second_cluster_score
+    if margin < _decisive_primary_reason_min_margin():
+        return False
+    return True
+
+
 def _build_reason_line_from_phrase(*, pct_move: float | None, phrase: str | None) -> str:
     if not phrase:
         return FALLBACK_CAUSE_LINE
@@ -2184,7 +2233,10 @@ def _build_catalyst_for_mover(*, mover: QuoteSnapshot, slot_name: str, since_utc
     for cluster, bonus in _CLUSTER_PRIORITY_BONUS.items():
         if cluster in cluster_scores:
             cluster_scores[cluster] += bonus
-    top_cluster = sorted(cluster_scores.items(), key=lambda kv: kv[1], reverse=True)[0][0] if cluster_scores else None
+    cluster_ranking = sorted(cluster_scores.items(), key=lambda kv: kv[1], reverse=True)
+    top_cluster = cluster_ranking[0][0] if cluster_ranking else None
+    top_cluster_score = cluster_ranking[0][1] if cluster_ranking else 0.0
+    second_cluster_score = cluster_ranking[1][1] if len(cluster_ranking) > 1 else 0.0
 
     top_cluster_rows = _cluster_members(ranked_specific, top_cluster) if top_cluster else []
     corroborated_sources = _cluster_independent_sources(top_cluster_rows) if top_cluster_rows else 0
@@ -2202,12 +2254,20 @@ def _build_catalyst_for_mover(*, mover: QuoteSnapshot, slot_name: str, since_utc
             ),
         )[0]
 
+    decisive_primary = _can_use_decisive_primary_reason(
+        cluster_candidate=cluster_candidate,
+        top_cluster_score=top_cluster_score,
+        second_cluster_score=second_cluster_score,
+        pct_move=mover.pct_move,
+    )
     confidence = _effective_candidate_score(candidate=cluster_candidate, pct_move=mover.pct_move) if cluster_candidate else 0.0
     if top_cluster_confirmed:
         confidence = max(_min_evidence_confidence(), min(1.0, confidence + 0.12))
+    elif decisive_primary:
+        confidence = max(_min_evidence_confidence(), min(1.0, confidence + 0.07))
 
     cause_phrase = None
-    if top_cluster_confirmed:
+    if top_cluster_confirmed or decisive_primary:
         cause_phrase = _cluster_event_phrase(top_cluster or "", candidate=cluster_candidate)
 
     best_x = _pick_best_by_source(ranked, "x", pct_move=mover.pct_move)
@@ -2236,12 +2296,12 @@ def _build_catalyst_for_mover(*, mover: QuoteSnapshot, slot_name: str, since_utc
         top_evidence=top_evidence,
         rejected_reasons=tuple(rejected),
         since_utc=since_utc.replace(microsecond=0).isoformat(),
-        confirmed_cluster=(top_cluster if top_cluster_confirmed else None),
-        confirmed_cause_phrase=(cause_phrase if top_cluster_confirmed else None),
+        confirmed_cluster=(top_cluster if (top_cluster_confirmed or decisive_primary) else None),
+        confirmed_cause_phrase=(cause_phrase if (top_cluster_confirmed or decisive_primary) else None),
         corroborated_sources=corroborated_sources,
         corroborated_domains=corroborated_domains,
     )
-    if top_cluster_confirmed and cause_phrase:
+    if (top_cluster_confirmed or decisive_primary) and cause_phrase:
         line = _build_reason_line_from_phrase(pct_move=mover.pct_move, phrase=cause_phrase)
     else:
         line = FALLBACK_CAUSE_LINE

@@ -40,6 +40,14 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- MD is now tuned for decisive “primary reason” output:
+  - when one high-quality source clearly dominates cluster evidence, MD states the reason directly instead of defaulting to uncertainty
+  - generic wrapper blocking remains enforced to prevent tautological headlines
+  - fallback line is still used only for genuinely weak/ambiguous evidence
+  - env controls:
+    - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_ENABLED=1`
+    - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_SCORE=0.64`
+    - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_MARGIN=0.06`
 - MD specific-cause enforcement for selloffs is now implemented (NET/CRWD Anthropic miss class):
   - final catalyst lines can name a specific event only when corroborated by:
     - >=2 independent sources
