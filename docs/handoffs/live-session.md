@@ -3,6 +3,39 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-23, headline truncation guardrails)
+- Implemented headline truncation fix for X chart posts by removing hard character clipping from headline generation and shifting to layout-based fitting in render paths.
+- Headline policy is now a complete sentence (terminal punctuation + action verb), with locked finance term integrity checks (for example `market cap`, `enterprise value`, `free cash flow`).
+- Renderers now fit headlines with wrap + font-size adaptation (up to 3 lines) and perform one semantic rewrite pass before marking overflow unpublishable.
+- Added explicit title override support for URL-post flows:
+  - CLI: `run-post-url <url> --title "<full sentence>"`
+  - Slack compound URL flow: supports `title: ...`
+- Added/updated diagnostics and review checks in chart run outputs:
+  - `copy_rewrite_applied`
+  - `copy_rewrite_reason`
+  - `candidate_fallback_used`
+  - `headline_complete_sentence`
+  - `headline_wrapped_line_count`
+  - `headline_complete_phrase` retained for backward compatibility.
+- Quality gates now reject incomplete headline sentences and missing locked terms before publishing.
+
+### Validation (this session)
+- Targeted tests:
+  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_x_chart_daily.py /opt/coatue-claw/tests/test_slack_x_chart_intent.py`
+  - Result: `70 passed`.
+- Full suite smoke:
+  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q`
+  - Result: `3` pre-existing failures in Spencer change tracker modules:
+    - `tests/test_spencer_change_digest.py::test_run_once_dry_run_includes_carson_label`
+    - `tests/test_spencer_change_log.py::test_is_spencer_user_defaults`
+    - `tests/test_spencer_change_log.py::test_requester_label_defaults`
+  - These failures are outside the X chart files touched in this patch.
+
+### Next Steps
+1. Run a live Slack post test in `#charting` with a known long headline containing locked terms (`market cap`) and confirm no truncation.
+2. Run explicit URL post with `title:` override in Slack and verify override passes/fails deterministically under sentence + locked-term validation.
+3. If desired, normalize Spencer change-tracker defaults in a separate patch to restore full-suite green.
+
 ## Current Status (2026-02-23)
 - OpenAI model policy updated to premium defaults (no frugal mode):
   - `COATUE_CLAW_BOARD_SEAT_MODEL` default -> `gpt-5.2-chat-latest`

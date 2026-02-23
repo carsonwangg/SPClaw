@@ -276,6 +276,111 @@ TRAILING_QUALIFIERS = {
     "final",
 }
 
+HEADLINE_LOCKED_TERMS: tuple[tuple[str, ...], ...] = (
+    ("market", "cap"),
+    ("enterprise", "value"),
+    ("free", "cash", "flow"),
+    ("operating", "margin"),
+    ("gross", "margin"),
+    ("net", "income"),
+    ("record", "low"),
+    ("record", "high"),
+)
+
+HEADLINE_MIN_WORDS = 4
+HEADLINE_MAX_RENDER_LINES = 3
+HEADLINE_MIN_FONT_SIZE = 17.0
+HEADLINE_ACTION_TOKENS = {
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "being",
+    "been",
+    "has",
+    "have",
+    "had",
+    "will",
+    "would",
+    "can",
+    "could",
+    "should",
+    "may",
+    "might",
+    "must",
+    "do",
+    "does",
+    "did",
+    "surges",
+    "surged",
+    "surging",
+    "rises",
+    "rose",
+    "rising",
+    "jumps",
+    "jumped",
+    "jumping",
+    "climbs",
+    "climbed",
+    "climbing",
+    "rebounds",
+    "rebounded",
+    "rebounding",
+    "accelerates",
+    "accelerated",
+    "accelerating",
+    "increases",
+    "increased",
+    "increasing",
+    "grows",
+    "grew",
+    "growing",
+    "falls",
+    "fell",
+    "falling",
+    "drops",
+    "dropped",
+    "dropping",
+    "declines",
+    "declined",
+    "declining",
+    "slows",
+    "slowed",
+    "slowing",
+    "rolls",
+    "rolled",
+    "rolling",
+    "sinks",
+    "sank",
+    "sinking",
+    "contracts",
+    "contracted",
+    "contracting",
+    "decelerates",
+    "decelerated",
+    "decelerating",
+    "hits",
+    "hit",
+    "reaches",
+    "reached",
+    "stands",
+    "standing",
+    "trends",
+    "trending",
+    "moves",
+    "moving",
+    "opens",
+    "opened",
+    "open",
+    "erases",
+    "erased",
+    "erase",
+    "outnumber",
+    "outnumbers",
+    "outnumbered",
+}
+
 LOW_SIGNAL_COPY_VALUES = {
     "u.s",
     "u.s.",
@@ -623,6 +728,36 @@ def _tail_tokens(text: str) -> list[str]:
     return [token for token in re.findall(r"[a-z0-9']+", _normalize_render_text(text).lower()) if token]
 
 
+def _contains_phrase_tokens(tokens: list[str], phrase: tuple[str, ...]) -> bool:
+    n = len(phrase)
+    if n == 0 or len(tokens) < n:
+        return False
+    for idx in range(0, len(tokens) - n + 1):
+        if tuple(tokens[idx : idx + n]) == phrase:
+            return True
+    return False
+
+
+def _headline_locked_terms_preserved(headline_text: str, *, source_text: str = "") -> bool:
+    source_tokens = _tail_tokens(source_text)
+    headline_tokens = _tail_tokens(headline_text)
+    if not source_tokens:
+        return True
+    for phrase in HEADLINE_LOCKED_TERMS:
+        if not _contains_phrase_tokens(source_tokens, phrase):
+            continue
+        if not _contains_phrase_tokens(headline_tokens, phrase):
+            return False
+    return True
+
+
+def _headline_has_action_verb(text: str) -> bool:
+    tokens = _tail_tokens(text)
+    if not tokens:
+        return False
+    return any(token in HEADLINE_ACTION_TOKENS for token in tokens)
+
+
 def _has_fragment_tail(words: list[str]) -> bool:
     if not words:
         return True
@@ -640,6 +775,48 @@ def _has_fragment_tail(words: list[str]) -> bool:
 
 def _tail_complete(text: str) -> bool:
     return not _has_fragment_tail(_tail_tokens(text))
+
+
+def _normalize_headline_seed(text: str) -> str:
+    cleaned = _normalize_render_text(text)
+    cleaned = re.sub(r"^@\w+:\s*", "", cleaned, flags=re.IGNORECASE).strip()
+    cleaned = _strip_news_prefix(cleaned)
+    if not cleaned:
+        return ""
+    cleaned = _extract_first_sentence(cleaned)
+    cleaned = _trim_trailing_stopwords(cleaned)
+    cleaned = _strip_trailing_headline_dangling_endings(cleaned)
+    return cleaned.strip()
+
+
+def _is_complete_headline_sentence(text: str, *, source_text: str = "") -> bool:
+    cleaned = _normalize_render_text(text).strip()
+    if not cleaned:
+        return False
+    if cleaned[-1] not in ".!?":
+        return False
+    core = cleaned.rstrip(".!?").strip()
+    if not core:
+        return False
+    words = [w for w in re.split(r"\s+", core) if w]
+    if len(words) < HEADLINE_MIN_WORDS:
+        return False
+    if not _headline_has_action_verb(core):
+        return False
+    if not _is_complete_headline_phrase(core):
+        return False
+    if not _headline_locked_terms_preserved(core, source_text=source_text):
+        return False
+    return True
+
+
+def _finalize_headline_sentence(text: str, *, source_text: str = "") -> str:
+    cleaned = _normalize_headline_seed(text)
+    if not cleaned:
+        return ""
+    if cleaned[-1] not in ".!?":
+        cleaned = f"{cleaned}."
+    return cleaned if _is_complete_headline_sentence(cleaned, source_text=source_text) else ""
 
 
 def _is_complete_headline_phrase(text: str) -> bool:
@@ -707,65 +884,68 @@ def _finalize_headline_phrase(text: str, *, max_chars: int) -> str:
 
 
 def _rewrite_headline_from_candidate(candidate: Candidate) -> tuple[str, str]:
-    source_sentence = re.sub(r"^@\w+:\s*", "", _strip_news_prefix(candidate.text or candidate.title), flags=re.IGNORECASE).strip()
-    parts = re.split(r"(?<=[.!?])\s+", source_sentence)
-    if len(parts) > 1 and len(parts[0].split()) >= 3:
-        source_sentence = parts[0].strip()
+    source_sentence = _normalize_headline_seed(candidate.text or candidate.title)
+    if not source_sentence:
+        source_sentence = _normalize_headline_seed(candidate.title)
+    if not source_sentence:
+        return "", "headline_unrecoverable"
+    if _is_degenerate_copy_value(source_sentence):
+        return "", "headline_unrecoverable"
     source_has_fragment_tail = not _tail_complete(source_sentence)
     subject, verb = _extract_subject_and_verb(source_sentence)
     subject_core = _clean_subject_for_headline(subject=subject, sentence=source_sentence)
     lower = source_sentence.lower()
+    rewrite_candidates: list[tuple[str, str]] = [(source_sentence, "headline_sentence_rewritten")]
     if source_has_fragment_tail and subject_core:
         copula = "are" if _subject_is_plural(subject_core) else "is"
         rewrite = ""
         if "record low" in lower or "lowest" in lower:
-            rewrite = f"{subject_core} {copula} at a record low"
+            rewrite = f"{subject_core} {copula} at a record low."
         elif "record high" in lower or "highest" in lower:
-            rewrite = f"{subject_core} {copula} at a record high"
+            rewrite = f"{subject_core} {copula} at a record high."
         elif "up" in lower or "higher" in lower:
-            rewrite = f"{subject_core} {copula} trending higher"
+            rewrite = f"{subject_core} {copula} trending higher."
         elif "down" in lower or "lower" in lower:
-            rewrite = f"{subject_core} {copula} trending lower"
+            rewrite = f"{subject_core} {copula} trending lower."
         else:
-            rewrite = f"{subject_core} {copula} inflecting lower"
-        finalized = _finalize_headline_phrase(rewrite, max_chars=48)
-        if finalized:
-            return finalized, "headline_tail_fragment_rewritten"
+            rewrite = f"{subject_core} {copula} moving lower."
+        rewrite_candidates.append((rewrite, "headline_tail_fragment_rewritten"))
 
     narrative = _synthesize_narrative_title(subject=subject, verb=verb, sentence=source_sentence)
-    finalized = _finalize_headline_phrase(narrative, max_chars=48)
-    if finalized:
-        return finalized, "headline_rewritten"
+    if narrative:
+        rewrite_candidates.append((narrative, "headline_sentence_rewritten"))
 
     if subject_core:
-        compact_subject = _shorten_without_ellipsis(subject_core, max_chars=26)
+        compact_subject = _shorten_without_ellipsis(subject_core, max_chars=36)
         if len(compact_subject.split()) < 2:
             if "housing" in lower:
                 compact_subject = "US housing activity"
             elif "sales" in lower:
                 compact_subject = "US sales trend"
             else:
-                compact_subject = _shorten_without_ellipsis(
-                    _entity_hint_from_text(sentence=source_sentence, fallback=candidate.title),
-                    max_chars=24,
-                )
+                compact_subject = _entity_hint_from_text(sentence=source_sentence, fallback=candidate.title)
         copula = "are" if _subject_is_plural(compact_subject) else "is"
         rewrite = ""
         if "record low" in lower or "lowest" in lower:
-            rewrite = f"{compact_subject} {copula} at a record low"
+            rewrite = f"{compact_subject} {copula} at a record low."
         elif "record high" in lower or "highest" in lower:
-            rewrite = f"{compact_subject} {copula} at a record high"
+            rewrite = f"{compact_subject} {copula} at a record high."
         elif verb.lower() in POSITIVE_MOVE_VERBS:
-            rewrite = f"{compact_subject} {copula} inflecting higher"
+            rewrite = f"{compact_subject} {copula} inflecting higher."
         elif verb.lower() in NEGATIVE_MOVE_VERBS:
-            rewrite = f"{compact_subject} {copula} rolling over"
+            rewrite = f"{compact_subject} {copula} rolling over."
         elif "up" in lower or "higher" in lower:
-            rewrite = f"{compact_subject} {copula} trending higher"
+            rewrite = f"{compact_subject} {copula} trending higher."
         elif "down" in lower or "lower" in lower:
-            rewrite = f"{compact_subject} {copula} trending lower"
-        finalized = _finalize_headline_phrase(rewrite, max_chars=48)
+            rewrite = f"{compact_subject} {copula} trending lower."
+        else:
+            rewrite = f"{compact_subject} {copula} moving sharply."
+        rewrite_candidates.append((rewrite, "headline_sentence_rewritten"))
+
+    for rewrite, reason in rewrite_candidates:
+        finalized = _finalize_headline_sentence(rewrite, source_text=source_sentence)
         if finalized:
-            return finalized, "headline_rewritten"
+            return finalized, reason
 
     return "", "headline_unrecoverable"
 
@@ -1244,14 +1424,14 @@ def _style_copy_quality_errors(style_draft: StyleDraft) -> list[str]:
     errors: list[str] = []
     if "..." in style_draft.headline or "..." in style_draft.chart_label or "..." in style_draft.takeaway:
         errors.append("style copy contains ellipsis")
-    if len(_normalize_render_text(style_draft.headline)) > 58:
-        errors.append("headline too long")
     if len(_normalize_render_text(style_draft.chart_label)) > 62:
         errors.append("chart label too long")
     if len(_normalize_render_text(style_draft.takeaway)) > 68:
         errors.append("takeaway too long")
     if not _is_complete_headline_phrase(style_draft.headline):
         errors.append("headline incomplete phrase")
+    if not _is_complete_headline_sentence(style_draft.headline):
+        errors.append("headline incomplete sentence")
     if not _is_complete_sentence(style_draft.takeaway):
         errors.append("takeaway incomplete sentence")
     if not _tail_complete(style_draft.headline):
@@ -1285,9 +1465,18 @@ def _post_publish_checklist(
         "trend_explicit": bool(style_draft.checks.get("trend_explicit", False)),
         "plain_language": bool(style_draft.checks.get("plain_language", False)),
         "no_ellipsis": ("..." not in headline and "..." not in chart_label and "..." not in takeaway),
-        "headline_len_ok": (0 < len(headline) <= 58),
+        "headline_len_ok": (0 < len(headline)),
         "headline_complete_phrase": _is_complete_headline_phrase(headline),
+        "headline_complete_sentence": _is_complete_headline_sentence(
+            headline,
+            source_text=_extract_first_sentence(candidate.text or candidate.title),
+        ),
         "headline_tail_complete": _tail_complete(headline),
+        "headline_locked_terms_ok": _headline_locked_terms_preserved(
+            headline,
+            source_text=_extract_first_sentence(candidate.text or candidate.title),
+        ),
+        "headline_wrapped_line_count": int(render_qa.get("headline_wrapped_line_count", 1)),
         "chart_label_len_ok": (0 < len(chart_label) <= 62),
         "takeaway_len_ok": (0 < len(takeaway) <= 68),
         "takeaway_complete_sentence": _is_complete_sentence(takeaway),
@@ -1565,8 +1754,8 @@ def _synthesize_narrative_title(*, subject: str, verb: str, sentence: str) -> st
     if "employees" in sentence_lower and "robots" in sentence_lower:
         entity = _entity_hint_from_text(sentence=sentence, fallback=subject_core)
         if "ratio" in sentence_lower or "replacing humans" in sentence_lower:
-            return _shorten_without_ellipsis(f"{entity} is increasing automation intensity", max_chars=56)
-        return _shorten_without_ellipsis(f"{entity} is scaling robots faster than headcount", max_chars=56)
+            return f"{entity} is increasing automation intensity"
+        return f"{entity} is scaling robots faster than headcount"
     if (
         "institutional" in sentence_lower
         and ("net sellers" in sentence_lower or "sold a net" in sentence_lower or "biggest net sellers" in sentence_lower)
@@ -1588,12 +1777,12 @@ def _synthesize_narrative_title(*, subject: str, verb: str, sentence: str) -> st
         if v_lower in POSITIVE_MOVE_VERBS:
             return "Consumer confidence is improving"
     if v_lower in POSITIVE_MOVE_VERBS:
-        return _shorten_without_ellipsis(f"{subject_core} {copula} inflecting higher", max_chars=56)
+        return f"{subject_core} {copula} inflecting higher"
     if v_lower in NEGATIVE_MOVE_VERBS:
-        return _shorten_without_ellipsis(f"{subject_core} {copula} rolling over", max_chars=56)
+        return f"{subject_core} {copula} rolling over"
     if "record" in sentence.lower() or v_lower in NEUTRAL_MOVE_VERBS:
-        return _shorten_without_ellipsis(f"{subject_core} {copula} at an extreme", max_chars=56)
-    return _shorten_without_ellipsis(_strip_news_prefix(sentence), max_chars=56)
+        return f"{subject_core} {copula} at an extreme"
+    return _strip_news_prefix(sentence)
 
 
 def _trim_trailing_stopwords(text: str) -> str:
@@ -1744,25 +1933,26 @@ def _sanitize_style_copy(
     if override is not None:
         headline, chart_label, takeaway = override
 
-    headline = _trim_trailing_stopwords(_shorten_without_ellipsis(headline, max_chars=48))
+    headline = _normalize_headline_seed(headline)
     chart_label = _trim_trailing_stopwords(_shorten_without_ellipsis(chart_label, max_chars=56))
     takeaway = _trim_trailing_stopwords(_shorten_without_ellipsis(takeaway, max_chars=62))
 
     source_text = _normalize_render_text(candidate.text or candidate.title)
     source_text = re.sub(r"^@\w+:\s*", "", _strip_news_prefix(source_text), flags=re.IGNORECASE).strip()
+    source_sentence = _extract_first_sentence(source_text or candidate.title)
     need_hint = _is_low_signal_phrase(headline) or _is_low_signal_phrase(chart_label) or _is_low_signal_phrase(takeaway)
     chart_hint = _extract_chart_title_hint_via_vision(candidate) if need_hint else None
     merged_hint = _normalize_render_text(f"{chart_hint or ''} {source_text}").lower()
 
     if _is_low_signal_phrase(headline):
-        subject = _shorten_without_ellipsis(source_text, max_chars=36)
+        subject = _normalize_headline_seed(source_text)
         if "tariff" in merged_hint or "customs" in merged_hint or "duties" in merged_hint:
-            headline = "US tariff receipts are surging"
+            headline = "US tariff receipts are surging."
         elif chart_hint:
-            headline = _shorten_without_ellipsis(_strip_news_prefix(chart_hint), max_chars=48)
+            headline = _normalize_headline_seed(chart_hint)
         else:
-            headline = _shorten_without_ellipsis(f"{subject} trend is accelerating", max_chars=48) if subject else "US trend is inflecting"
-        headline = _trim_trailing_stopwords(headline)
+            headline = f"{subject} trend is accelerating." if subject else "US trend is inflecting."
+        headline = _normalize_headline_seed(headline)
 
     if _is_low_signal_phrase(chart_label):
         if "tariff" in merged_hint or "customs" in merged_hint or "duties" in merged_hint:
@@ -1783,38 +1973,41 @@ def _sanitize_style_copy(
     if _has_incoherent_headline(headline):
         merged_context = _normalize_render_text(f"{source_text} {chart_hint or ''}").lower()
         if "institutional" in merged_context and ("seller" in merged_context or "sold" in merged_context):
-            headline = "Institutional selling is at an extreme"
+            headline = "Institutional selling is at an extreme."
         elif "institutional" in merged_context and ("buyer" in merged_context or "bought" in merged_context):
-            headline = "Institutional buying is accelerating"
+            headline = "Institutional buying is accelerating."
         elif "seller" in merged_context or "sold" in merged_context:
-            headline = "Selling pressure is at an extreme"
+            headline = "Selling pressure is at an extreme."
         elif "buyer" in merged_context or "bought" in merged_context:
-            headline = "Buying pressure is accelerating"
+            headline = "Buying pressure is accelerating."
         elif chart_hint:
-            headline = _shorten_without_ellipsis(_strip_news_prefix(chart_hint), max_chars=48)
+            headline = _normalize_headline_seed(chart_hint)
         else:
-            headline = "US trend is at an extreme"
-        headline = _trim_trailing_stopwords(_shorten_without_ellipsis(headline, max_chars=48))
+            headline = "US trend is at an extreme."
+        headline = _normalize_headline_seed(headline)
 
     subject, verb = _extract_subject_and_verb(_extract_first_sentence(source_text or candidate.title))
     mode_hint = _mode_hint_from_text(candidate)
     headline_tail_fragment = not _tail_complete(headline)
     takeaway_tail_fragment = not _tail_complete(takeaway)
+    headline_locked_terms_ok = _headline_locked_terms_preserved(headline, source_text=source_sentence)
 
-    finalized_headline = _finalize_headline_phrase(headline, max_chars=48)
+    finalized_headline = _finalize_headline_sentence(headline, source_text=source_sentence)
     if not finalized_headline:
         rewrite_applied = True
         rewritten_headline, reason = _rewrite_headline_from_candidate(candidate)
-        finalized_headline = _finalize_headline_phrase(rewritten_headline, max_chars=48)
+        finalized_headline = _finalize_headline_sentence(rewritten_headline, source_text=source_sentence)
         if finalized_headline:
             if headline_tail_fragment:
                 rewrite_reason = "headline_tail_fragment_rewritten"
+            elif not headline_locked_terms_ok:
+                rewrite_reason = "headline_sentence_rewritten"
             else:
                 rewrite_reason = reason
             headline = finalized_headline
         else:
             rewrite_reason = "headline_unrecoverable"
-            headline = _shorten_without_ellipsis(_normalize_render_text(headline), max_chars=48)
+            headline = _normalize_headline_seed(headline)
     else:
         headline = finalized_headline
 
@@ -1888,7 +2081,7 @@ def _synthesize_style_via_llm(candidate: Candidate) -> dict[str, str] | None:
         "Create Coatue-style chart copy from this X post.\n"
         "Return strict JSON with keys: headline, chart_label, takeaway.\n"
         "Rules:\n"
-        "- headline: <=56 chars, narrative/thematic takeaway.\n"
+        "- headline: a full grammatical sentence with terminal punctuation.\n"
         "- chart_label: <=62 chars, technical description of what chart shows.\n"
         "- takeaway: <=68 chars, plain language.\n"
         "- No @handles. No 'BREAKING'. No ellipsis. No emojis.\n"
@@ -1917,7 +2110,7 @@ def _synthesize_style_via_llm(candidate: Candidate) -> dict[str, str] | None:
         logger.debug("LLM style synthesis failed: %s", exc)
         return None
 
-    headline = _shorten_without_ellipsis(str(payload.get("headline") or ""), max_chars=56)
+    headline = _normalize_render_text(str(payload.get("headline") or ""))
     chart_label = _shorten_without_ellipsis(str(payload.get("chart_label") or ""), max_chars=62)
     takeaway = _shorten_without_ellipsis(str(payload.get("takeaway") or ""), max_chars=68)
     if not headline or not chart_label or not takeaway:
@@ -2944,21 +3137,21 @@ def _build_style_draft(candidate: Candidate, *, iteration: int) -> StyleDraft:
     llm_style = _synthesize_style_via_llm(candidate) if iteration == 1 else None
 
     if iteration == 1 and llm_style:
-        headline = _shorten_without_ellipsis(llm_style["headline"], max_chars=56)
+        headline = _normalize_headline_seed(llm_style["headline"])
         chart_label = _shorten_without_ellipsis(llm_style["chart_label"], max_chars=62)
         takeaway = _employees_robots_takeaway(first_core or body_text or title_text) if is_employee_robot else _shorten_without_ellipsis(llm_style["takeaway"], max_chars=68)
         why_now = "Narrative + technical label generated for feed readability."
     elif iteration == 1:
-        headline = _shorten_without_ellipsis(narrative, max_chars=56)
+        headline = _normalize_headline_seed(narrative)
         takeaway = _employees_robots_takeaway(first_core or body_text or title_text) if is_employee_robot else _truncate_words(body_text or title_core or title_text, max_words=9, max_chars=68)
         why_now = "Clear US trend; chart carries the story."
     elif iteration == 2:
-        headline = _shorten_without_ellipsis(_synthesize_narrative_title(subject=subject, verb="", sentence=title_core or first_core or title_text), max_chars=52)
+        headline = _normalize_headline_seed(_synthesize_narrative_title(subject=subject, verb="", sentence=title_core or first_core or title_text))
         takeaway = _truncate_words(first_core or body_text, max_words=8, max_chars=62)
         why_now = "Fast read in a feed."
     else:
-        anchor = _shorten_without_ellipsis(subject or first_core or title_core or title_text, max_chars=42)
-        headline = anchor or "US Trend Snapshot"
+        anchor = _normalize_headline_seed(subject or first_core or title_core or title_text)
+        headline = anchor or "US trend is shifting."
         takeaway = _truncate_words(body_text or title_core or title_text, max_words=7, max_chars=56)
         why_now = "Simple trend read."
 
@@ -2972,10 +3165,12 @@ def _build_style_draft(candidate: Candidate, *, iteration: int) -> StyleDraft:
     combined = " ".join([headline, takeaway, why_now]).strip()
     checks = {
         "us_relevant": _is_us_relevant_post(f"{candidate.title} {candidate.text}"),
-        "headline_short": bool(headline) and len(headline) <= 72,
+        "headline_short": bool(headline),
         "headline_grammar": not _has_incoherent_headline(headline),
         "headline_complete_phrase": _is_complete_headline_phrase(headline),
+        "headline_complete_sentence": _is_complete_headline_sentence(headline, source_text=first_core or title_core or title_text),
         "headline_tail_complete": _tail_complete(headline),
+        "headline_locked_terms_ok": _headline_locked_terms_preserved(headline, source_text=first_core or title_core or title_text),
         "takeaway_short": bool(takeaway) and len(takeaway) <= 68,
         "takeaway_complete_sentence": _is_complete_sentence(takeaway),
         "takeaway_tail_complete": _tail_complete(takeaway),
@@ -2988,7 +3183,7 @@ def _build_style_draft(candidate: Candidate, *, iteration: int) -> StyleDraft:
     }
     score = float(sum(1.0 for passed in checks.values() if passed))
     return StyleDraft(
-        headline=_shorten_without_ellipsis(headline or "US Trend Snapshot", max_chars=58),
+        headline=_normalize_render_text(headline or "US trend is shifting."),
         chart_label=_shorten_without_ellipsis(chart_label or "Chart Context", max_chars=62),
         takeaway=takeaway or "New US-facing data point with clear directional movement.",
         why_now=why_now,
@@ -3018,8 +3213,12 @@ def _style_copy_publish_issues(style_draft: StyleDraft) -> list[str]:
     issues: list[str] = []
     if not _is_complete_headline_phrase(style_draft.headline):
         issues.append("headline_incomplete_phrase")
+    if not _is_complete_headline_sentence(style_draft.headline):
+        issues.append("headline_incomplete_sentence")
     if not _tail_complete(style_draft.headline):
         issues.append("headline_tail_fragment")
+    if style_draft.checks.get("headline_locked_terms_ok") is False:
+        issues.append("headline_locked_term_missing")
     if not _is_complete_sentence(style_draft.takeaway):
         issues.append("takeaway_incomplete_sentence")
     if not _tail_complete(style_draft.takeaway):
@@ -3098,7 +3297,85 @@ def _write_source_chart_image(*, candidate: Candidate, slot_key: str) -> Path:
     return out_path
 
 
-def _render_source_snip_card(*, candidate: Candidate, slot_key: str, style_draft: StyleDraft, source_path: Path) -> Path:
+def _wrap_text_to_max_lines(text: str, *, max_lines: int) -> tuple[str, int]:
+    normalized = _normalize_render_text(text)
+    words = [w for w in normalized.split(" ") if w]
+    if not words:
+        return "", 1
+    if max_lines <= 1:
+        return normalized, 1
+    longest_word = max(len(w) for w in words)
+    lo = max(1, longest_word)
+    hi = max(lo, len(normalized))
+    best: list[str] | None = None
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        lines = textwrap.wrap(normalized, width=mid, break_long_words=False, break_on_hyphens=False)
+        if len(lines) <= max_lines:
+            best = lines
+            hi = mid - 1
+        else:
+            lo = mid + 1
+    if not best:
+        best = textwrap.wrap(normalized, width=max(lo, longest_word), break_long_words=False, break_on_hyphens=False)
+    if not best:
+        best = [normalized]
+    return "\n".join(best), len(best)
+
+
+def _fit_headline_text(
+    *,
+    fig,
+    headline_obj,
+    headline_text: str,
+    max_lines: int = HEADLINE_MAX_RENDER_LINES,
+    min_font_size: float = HEADLINE_MIN_FONT_SIZE,
+    max_width_ratio: float = 0.95,
+) -> tuple[str, int, bool]:
+    normalized = _normalize_render_text(headline_text)
+    if not normalized:
+        headline_obj.set_text("")
+        return "", 1, False
+    start_size = float(headline_obj.get_fontsize())
+    if start_size < min_font_size:
+        start_size = min_font_size
+    font_steps = max(0, int(round(start_size - min_font_size)))
+    font_sizes = [start_size - float(step) for step in range(font_steps + 1)]
+    if not font_sizes or abs(font_sizes[-1] - min_font_size) > 0.001:
+        font_sizes.append(min_font_size)
+
+    for font_size in font_sizes:
+        for line_cap in range(1, max_lines + 1):
+            wrapped, line_count = _wrap_text_to_max_lines(normalized, max_lines=line_cap)
+            headline_obj.set_fontsize(float(font_size))
+            headline_obj.set_text(wrapped)
+            fig.canvas.draw()
+            renderer = fig.canvas.get_renderer()
+            fig_bbox = fig.bbox
+            max_x = fig_bbox.x0 + (fig_bbox.width * max_width_ratio)
+            h_bb = headline_obj.get_window_extent(renderer=renderer)
+            if h_bb.x1 <= max_x:
+                return wrapped, line_count, True
+
+    wrapped, line_count = _wrap_text_to_max_lines(normalized, max_lines=max_lines)
+    headline_obj.set_fontsize(float(min_font_size))
+    headline_obj.set_text(wrapped)
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    fig_bbox = fig.bbox
+    max_x = fig_bbox.x0 + (fig_bbox.width * max_width_ratio)
+    h_bb = headline_obj.get_window_extent(renderer=renderer)
+    return wrapped, line_count, (h_bb.x1 <= max_x)
+
+
+def _render_source_snip_card(
+    *,
+    candidate: Candidate,
+    slot_key: str,
+    style_draft: StyleDraft,
+    source_path: Path,
+    qa_sink: dict[str, Any] | None = None,
+) -> tuple[Path, str]:
     try:
         import matplotlib.image as mpimg
         import matplotlib.pyplot as plt
@@ -3117,7 +3394,8 @@ def _render_source_snip_card(*, candidate: Candidate, slot_key: str, style_draft
     plt.rcParams["font.family"] = COATUE_FONT_FAMILY
     fig = plt.figure(figsize=(15, 8.4), facecolor="#DCDDDF")
 
-    headline_text = _shorten_without_ellipsis(_normalize_render_text(style_draft.headline), max_chars=56)
+    source_sentence = _extract_first_sentence(candidate.text or candidate.title)
+    headline_text = _normalize_render_text(style_draft.headline)
     takeaway_text = _shorten_without_ellipsis(_normalize_render_text(style_draft.takeaway), max_chars=68)
 
     headline_obj = fig.text(
@@ -3131,41 +3409,42 @@ def _render_source_snip_card(*, candidate: Candidate, slot_key: str, style_draft
         family=COATUE_FONT_FAMILY,
         weight="medium",
     )
-    fig.add_artist(Line2D([0.05, 0.95], [0.892, 0.892], transform=fig.transFigure, color="#2F3745", linewidth=1.1))
 
-    # Prevent clipped title by auto-fitting to available card width.
-    for _ in range(8):
-        fig.canvas.draw()
-        renderer = fig.canvas.get_renderer()
-        fig_bbox = fig.bbox
-        max_x = fig_bbox.x0 + (fig_bbox.width * 0.95)
+    _, headline_line_count, headline_fits = _fit_headline_text(
+        fig=fig,
+        headline_obj=headline_obj,
+        headline_text=headline_text,
+        max_lines=HEADLINE_MAX_RENDER_LINES,
+        min_font_size=HEADLINE_MIN_FONT_SIZE,
+    )
+    if not headline_fits:
+        rewritten_headline, _ = _rewrite_headline_from_candidate(candidate)
+        rewritten_final = _finalize_headline_sentence(rewritten_headline, source_text=source_sentence)
+        if rewritten_final:
+            headline_text = rewritten_final
+            _, headline_line_count, headline_fits = _fit_headline_text(
+                fig=fig,
+                headline_obj=headline_obj,
+                headline_text=headline_text,
+                max_lines=HEADLINE_MAX_RENDER_LINES,
+                min_font_size=HEADLINE_MIN_FONT_SIZE,
+            )
+    if not headline_fits:
+        raise XChartError("Headline layout overflow after 3-line wrap and rewrite.")
+    if qa_sink is not None:
+        qa_sink["headline_wrapped_line_count"] = int(headline_line_count)
 
-        h_bb = headline_obj.get_window_extent(renderer=renderer)
-        if h_bb.x1 > max_x:
-            current_size = float(headline_obj.get_fontsize())
-            if current_size > 22.0:
-                headline_obj.set_fontsize(current_size - 1.0)
-            headline_text = _shorten_without_ellipsis(headline_text, max_chars=max(28, len(headline_text) - 4))
-            headline_obj.set_text(headline_text)
-            continue
-        break
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    fig_bbox = fig.bbox
+    h_bb = headline_obj.get_window_extent(renderer=renderer)
+    divider_y = max(0.80, ((h_bb.y0 - fig_bbox.y0) / fig_bbox.height) - 0.012)
+    fig.add_artist(Line2D([0.05, 0.95], [divider_y, divider_y], transform=fig.transFigure, color="#2F3745", linewidth=1.1))
 
-    # Hard fail-safe: if still overflowing after iterative fitting, force concise one-line copy.
-    for _ in range(12):
-        fig.canvas.draw()
-        renderer = fig.canvas.get_renderer()
-        fig_bbox = fig.bbox
-        max_x = fig_bbox.x0 + (fig_bbox.width * 0.95)
-
-        h_bb = headline_obj.get_window_extent(renderer=renderer)
-        if h_bb.x1 > max_x:
-            headline_obj.set_fontsize(max(18.0, float(headline_obj.get_fontsize()) - 1.0))
-            headline_text = _shorten_without_ellipsis(headline_text, max_chars=max(22, len(headline_text) - 3))
-            headline_obj.set_text(headline_text)
-            continue
-        break
-
-    chart_ax = fig.add_axes([0.05, 0.19, 0.90, 0.68], facecolor="#F4F5F6")
+    chart_bottom = 0.19
+    chart_top = max(0.70, min(0.87, divider_y - 0.020))
+    chart_height = max(0.50, chart_top - chart_bottom)
+    chart_ax = fig.add_axes([0.05, chart_bottom, 0.90, chart_height], facecolor="#F4F5F6")
     chart_ax.imshow(image)
     chart_ax.set_xticks([])
     chart_ax.set_yticks([])
@@ -3194,7 +3473,7 @@ def _render_source_snip_card(*, candidate: Candidate, slot_key: str, style_draft
 
     fig.savefig(out_path, dpi=180, bbox_inches="tight")
     plt.close(fig)
-    return out_path
+    return out_path, _normalize_render_text(headline_text)
 
 
 def _safe_image_from_url(url: str | None):
@@ -3563,7 +3842,8 @@ def _render_chart_of_day_style(
     plt.rcParams["font.family"] = COATUE_FONT_FAMILY
 
     fig = plt.figure(figsize=(15, 8.4), facecolor="#DCDDDF")
-    headline_text = _shorten_without_ellipsis(_normalize_render_text(style_draft.headline), max_chars=52)
+    source_sentence = _extract_first_sentence(candidate.text or candidate.title)
+    headline_text = _normalize_render_text(style_draft.headline)
     headline_obj = fig.text(
         0.05,
         0.935,
@@ -3575,11 +3855,42 @@ def _render_chart_of_day_style(
         family=COATUE_FONT_FAMILY,
         weight="medium",
     )
-    fig.add_artist(Line2D([0.05, 0.95], [0.892, 0.892], transform=fig.transFigure, color="#2F3745", linewidth=1.1))
+    _, headline_line_count, headline_fits = _fit_headline_text(
+        fig=fig,
+        headline_obj=headline_obj,
+        headline_text=headline_text,
+        max_lines=HEADLINE_MAX_RENDER_LINES,
+        min_font_size=HEADLINE_MIN_FONT_SIZE,
+    )
+    if not headline_fits:
+        rewritten_headline, _ = _rewrite_headline_from_candidate(candidate)
+        rewritten_final = _finalize_headline_sentence(rewritten_headline, source_text=source_sentence)
+        if rewritten_final:
+            headline_text = rewritten_final
+            _, headline_line_count, headline_fits = _fit_headline_text(
+                fig=fig,
+                headline_obj=headline_obj,
+                headline_text=headline_text,
+                max_lines=HEADLINE_MAX_RENDER_LINES,
+                min_font_size=HEADLINE_MIN_FONT_SIZE,
+            )
+    if not headline_fits:
+        raise XChartError("Headline layout overflow after 3-line wrap and rewrite.")
+    if qa_sink is not None:
+        qa_sink["headline_wrapped_line_count"] = int(headline_line_count)
+
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    fig_bbox = fig.bbox
+    h_bb = headline_obj.get_window_extent(renderer=renderer)
+    divider_y = max(0.80, ((h_bb.y0 - fig_bbox.y0) / fig_bbox.height) - 0.012)
+    fig.add_artist(Line2D([0.05, 0.95], [divider_y, divider_y], transform=fig.transFigure, color="#2F3745", linewidth=1.1))
+
     chart_label_text = _shorten_without_ellipsis(_normalize_render_text(style_draft.chart_label), max_chars=62)
+    chart_label_y = max(0.74, divider_y - 0.028)
     chart_label_obj = fig.text(
         0.05,
-        0.876,
+        chart_label_y,
         chart_label_text,
         ha="left",
         va="center",
@@ -3588,7 +3899,9 @@ def _render_chart_of_day_style(
         family=COATUE_FONT_FAMILY,
     )
 
-    chart_ax = fig.add_axes([0.05, 0.20, 0.90, 0.64], facecolor="#F4F5F6")
+    chart_bottom = 0.20
+    chart_top = max(0.62, min(0.84, chart_label_y - 0.020))
+    chart_ax = fig.add_axes([0.05, chart_bottom, 0.90, max(0.42, chart_top - chart_bottom)], facecolor="#F4F5F6")
     chart_ax.set_xticks([])
     chart_ax.set_yticks([])
     for spine in chart_ax.spines.values():
@@ -3729,11 +4042,6 @@ def _render_chart_of_day_style(
         fig.canvas.draw()
         renderer = fig.canvas.get_renderer()
         fig_bbox = fig.bbox
-        if headline_obj.get_window_extent(renderer=renderer).x1 > fig_bbox.x0 + (fig_bbox.width * 0.95):
-            headline_text = _shorten_without_ellipsis(headline_text, max_chars=max(26, len(headline_text) - 6))
-            headline_obj.set_text(headline_text)
-            headline_obj.set_fontsize(max(21, float(headline_obj.get_fontsize()) - 1))
-            continue
         if chart_label_obj.get_window_extent(renderer=renderer).x1 > fig_bbox.x0 + (fig_bbox.width * 0.95):
             chart_label_text = _shorten_without_ellipsis(chart_label_text, max_chars=max(28, len(chart_label_text) - 8))
             chart_label_obj.set_text(chart_label_text)
@@ -3780,25 +4088,57 @@ def _post_winner_to_slack(
     source_path = _write_source_chart_image(candidate=candidate, slot_key=slot_key)
     artifact_path = source_path
     render_mode = "source-snip"
+    render_qa: dict[str, Any] = {"render_mode": render_mode, "headline_wrapped_line_count": 1}
     try:
-        artifact_path = _render_source_snip_card(
+        render_result = _render_source_snip_card(
             candidate=candidate,
             slot_key=slot_key,
             style_draft=style_draft,
             source_path=source_path,
+            qa_sink=render_qa,
         )
+        if isinstance(render_result, tuple):
+            artifact_path, rendered_headline = render_result
+            if rendered_headline and rendered_headline != style_draft.headline:
+                updated_checks = dict(style_draft.checks)
+                source_sentence = _extract_first_sentence(candidate.text or candidate.title)
+                updated_checks["headline_complete_phrase"] = _is_complete_headline_phrase(rendered_headline)
+                updated_checks["headline_complete_sentence"] = _is_complete_headline_sentence(
+                    rendered_headline,
+                    source_text=source_sentence,
+                )
+                updated_checks["headline_tail_complete"] = _tail_complete(rendered_headline)
+                updated_checks["headline_locked_terms_ok"] = _headline_locked_terms_preserved(
+                    rendered_headline,
+                    source_text=source_sentence,
+                )
+                updated_checks["headline_non_degenerate"] = not _is_degenerate_copy_value(rendered_headline)
+                style_draft = replace(
+                    style_draft,
+                    headline=rendered_headline,
+                    checks=updated_checks,
+                    score=float(sum(1.0 for passed in updated_checks.values() if passed)),
+                )
+        else:
+            artifact_path = render_result
         render_mode = "source-snip-card"
+        render_qa["render_mode"] = render_mode
     except Exception as exc:
         logger.warning("source snip card render failed, falling back to raw snip: %s", exc)
         artifact_path = source_path
         render_mode = "source-snip"
+        render_qa = {"render_mode": render_mode, "headline_wrapped_line_count": 1}
     file_size = artifact_path.stat().st_size if artifact_path.exists() else 0
+    source_sentence = _extract_first_sentence(candidate.text or candidate.title)
     review_checks = {
         "source_image_available": file_size > 0,
         "artifact_nonempty": file_size > 0,
         "render_mode_source_snip": render_mode in {"source-snip", "source-snip-card"},
         "headline_complete_phrase": _is_complete_headline_phrase(style_draft.headline),
+        "headline_complete_sentence": _is_complete_headline_sentence(style_draft.headline, source_text=source_sentence),
         "headline_tail_complete": _tail_complete(style_draft.headline),
+        "headline_locked_terms_ok": _headline_locked_terms_preserved(style_draft.headline, source_text=source_sentence),
+        "headline_wrapped_line_count": int(render_qa.get("headline_wrapped_line_count", 1)),
         "takeaway_complete_sentence": _is_complete_sentence(style_draft.takeaway),
         "takeaway_tail_complete": _tail_complete(style_draft.takeaway),
         "headline_non_degenerate": not _is_degenerate_copy_value(style_draft.headline),
@@ -3811,7 +4151,7 @@ def _post_winner_to_slack(
         "checks": review_checks,
         "style_score": float(style_draft.score),
         "style_iteration": int(style_draft.iteration),
-        "render_qa": {"render_mode": render_mode},
+        "render_qa": render_qa,
         "artifact_path": str(artifact_path),
         "artifact_size_bytes": int(file_size),
     }
@@ -4110,6 +4450,7 @@ def run_chart_for_post_url(
     *,
     post_url: str,
     channel_override: str | None = None,
+    title_override: str | None = None,
 ) -> dict[str, Any]:
     parsed = _parse_x_post_url(post_url)
     if parsed is None:
@@ -4140,6 +4481,31 @@ def run_chart_for_post_url(
                 raise XChartError("No chart candidate found in that X post (missing image or inaccessible tweet).")
 
     style_draft = _select_style_draft(winner)
+    if title_override and str(title_override).strip():
+        source_sentence = _extract_first_sentence(winner.text or winner.title)
+        overridden_headline = _finalize_headline_sentence(str(title_override), source_text=source_sentence)
+        if not overridden_headline:
+            raise XChartError("Provided title override failed headline sentence validation.")
+        checks = dict(style_draft.checks)
+        checks["headline_complete_phrase"] = _is_complete_headline_phrase(overridden_headline)
+        checks["headline_complete_sentence"] = _is_complete_headline_sentence(
+            overridden_headline,
+            source_text=source_sentence,
+        )
+        checks["headline_tail_complete"] = _tail_complete(overridden_headline)
+        checks["headline_locked_terms_ok"] = _headline_locked_terms_preserved(
+            overridden_headline,
+            source_text=source_sentence,
+        )
+        checks["headline_non_degenerate"] = not _is_degenerate_copy_value(overridden_headline)
+        style_draft = replace(
+            style_draft,
+            headline=overridden_headline,
+            checks=checks,
+            score=float(sum(1.0 for passed in checks.values() if passed)),
+            copy_rewrite_applied=True,
+            copy_rewrite_reason="headline_override_applied",
+        )
     copy_rewrite_applied = bool(style_draft.copy_rewrite_applied)
     copy_rewrite_reason = style_draft.copy_rewrite_reason
     copy_issues = _style_copy_publish_issues(style_draft)
@@ -4239,6 +4605,7 @@ def main() -> None:
     rpu = sub.add_parser("run-post-url")
     rpu.add_argument("post_url")
     rpu.add_argument("--channel", default="", help="Override Slack channel id for posting")
+    rpu.add_argument("--title", default="", help="Optional explicit headline sentence override")
 
     args = parser.parse_args()
     if args.cmd == "run-once":
@@ -4251,6 +4618,7 @@ def main() -> None:
         result = run_chart_for_post_url(
             post_url=str(args.post_url).strip(),
             channel_override=(str(args.channel).strip() or None),
+            title_override=(str(args.title).strip() or None),
         )
     else:
         result = add_source(args.handle, priority=float(args.priority))

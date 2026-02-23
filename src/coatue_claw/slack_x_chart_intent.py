@@ -12,6 +12,7 @@ class XChartPostIntent:
     add_source: bool
     run_chart: bool
     priority: float | None = None
+    title_override: str | None = None
 
 
 def _strip_slack_mentions(text: str) -> str:
@@ -42,6 +43,8 @@ def _looks_like_add_source_intent(lower: str) -> bool:
 
 
 def _looks_like_chart_request(lower: str) -> bool:
+    if "x chart" in lower:
+        return True
     if "chart of the day" in lower:
         return True
     if "chart from this post" in lower:
@@ -51,6 +54,16 @@ def _looks_like_chart_request(lower: str) -> bool:
     if re.search(r"\b(chart|graph)\b.*\b(from|using)\b.*\bpost\b", lower):
         return True
     return False
+
+
+def _extract_title_override(text: str) -> str | None:
+    m = re.search(r"\btitle\s*:\s*(.+)$", text, re.IGNORECASE | re.DOTALL)
+    if not m:
+        return None
+    raw = re.sub(r"\s+", " ", m.group(1) or "").strip()
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in {"'", '"'}:
+        raw = raw[1:-1].strip()
+    return raw or None
 
 
 def parse_x_chart_post_intent(text: str) -> XChartPostIntent | None:
@@ -75,6 +88,7 @@ def parse_x_chart_post_intent(text: str) -> XChartPostIntent | None:
             priority = float(m.group(1))
         except Exception:
             priority = None
+    title_override = _extract_title_override(stripped)
 
     return XChartPostIntent(
         post_url=post_url,
@@ -83,5 +97,5 @@ def parse_x_chart_post_intent(text: str) -> XChartPostIntent | None:
         add_source=add_source,
         run_chart=run_chart,
         priority=priority,
+        title_override=title_override,
     )
-

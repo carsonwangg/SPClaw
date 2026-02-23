@@ -225,6 +225,7 @@ def _format_chart_usage() -> str:
         "- `x digest <topic|ticker|handle> [last 24h] [limit 50]`\n"
         "- `x chart now` (run chart-scout winner now)\n"
         "- `x chart sources` / `x chart add @handle priority 1.2`\n"
+        "- URL post: `x chart from https://x.com/<handle>/status/<id> title: <full sentence>`\n"
         "- `graph ev ltm growth SNOW,MDB,DDOG`\n"
         "- natural language: `plot EV/Revenue multiples vs revenue growth for SNOW,MDB,DDOG`\n"
         "- create universe: `create universe defense with PLTR,LMT,RTX,NOC,GD,LDOS`\n"
@@ -1078,7 +1079,8 @@ def _handle_x_chart_command(*, text: str, channel: str | None, thread_ts: str, s
                 "- `x chart now`\n"
                 "- `x chart status`\n"
                 "- `x chart sources`\n"
-                "- `x chart add @fiscal_AI priority 1.6`"
+                "- `x chart add @fiscal_AI priority 1.6`\n"
+                "- `x chart from https://x.com/<handle>/status/<id> title: <full sentence>`"
             ),
             thread_ts=thread_ts,
         )
@@ -1189,13 +1191,19 @@ def _handle_x_post_compound_command(*, text: str, channel: str | None, thread_ts
 
     if intent.run_chart:
         try:
-            result = run_chart_for_post_url(post_url=intent.post_url, channel_override=channel)
+            result = run_chart_for_post_url(
+                post_url=intent.post_url,
+                channel_override=channel,
+                title_override=intent.title_override,
+            )
             winner = result.get("winner") or {}
             lines.append(
                 "- Posted Coatue-style chart from linked post:\n"
                 f"  - source: `{winner.get('source')}`\n"
                 f"  - url: {winner.get('url')}"
             )
+            if intent.title_override:
+                lines.append(f"- Title override applied: `{intent.title_override}`")
         except XChartError as exc:
             lines.append(f"- Chart generation failed: `{exc}`")
         except Exception:

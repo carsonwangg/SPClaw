@@ -18,11 +18,12 @@ from coatue_claw.x_chart_daily import (
     _extract_rebuilt_bars_via_vision,
     _extract_rebuilt_bars,
     _extract_rebuilt_series,
-    _finalize_headline_phrase,
+    _finalize_headline_sentence,
     _finalize_takeaway_sentence,
     _infer_bar_labels_from_text,
     _infer_chart_mode,
     _is_complete_headline_phrase,
+    _is_complete_headline_sentence,
     _is_complete_sentence,
     _is_us_relevant_post,
     _normalize_render_text,
@@ -272,6 +273,10 @@ def test_run_chart_scout_falls_back_when_top_candidate_copy_is_bad(tmp_path: Pat
     monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
     monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
     monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [bad_top, good_second])
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._rewrite_headline_from_candidate",
+        lambda candidate: ("", "headline_unrecoverable") if candidate.candidate_key == "x:bad-top" else ("US pending home sales are at a record low.", "headline_sentence_rewritten"),
+    )
 
     captured: dict[str, object] = {}
 
@@ -372,6 +377,7 @@ def test_run_chart_scout_falls_back_when_top_candidate_headline_is_incomplete(tm
     assert result["candidate_fallback_used"] is True
     assert captured["candidate_url"] == "https://x.com/fiscal_AI/status/good-headline"
     assert _is_complete_headline_phrase(str(captured["headline"])) is True
+    assert _is_complete_headline_sentence(str(captured["headline"])) is True
 
 
 def test_run_chart_scout_falls_back_when_top_candidate_has_fragment_tail(tmp_path: Path, monkeypatch) -> None:
@@ -458,6 +464,7 @@ def test_run_chart_scout_falls_back_when_top_candidate_has_fragment_tail(tmp_pat
     assert result["candidate_fallback_used"] is True
     assert captured["candidate_url"] == "https://x.com/fiscal_AI/status/fragment-good"
     assert _is_complete_headline_phrase(str(captured["headline"])) is True
+    assert _is_complete_headline_sentence(str(captured["headline"])) is True
     assert _is_complete_sentence(str(captured["takeaway"])) is True
 
 
@@ -511,7 +518,7 @@ def test_run_chart_scout_returns_non_post_when_no_publishable_candidate(tmp_path
     result = run_chart_scout_once(manual=False, dry_run=False, channel_override="C123")
     assert result["posted"] is False
     assert result["reason"] == "no_publishable_candidate_available"
-    assert "headline_incomplete_phrase" in result["publish_issues"]
+    assert "headline_incomplete_sentence" in result["publish_issues"]
     assert result["copy_rewrite_reason"] == "headline_unrecoverable"
 
 
@@ -619,9 +626,15 @@ def test_pick_winner_keeps_top_when_alternative_too_low(monkeypatch) -> None:
 def test_cli_run_post_url_command(monkeypatch, capsys) -> None:
     called: dict[str, object] = {}
 
-    def _fake_run(*, post_url: str, channel_override: str | None = None) -> dict[str, object]:
+    def _fake_run(
+        *,
+        post_url: str,
+        channel_override: str | None = None,
+        title_override: str | None = None,
+    ) -> dict[str, object]:
         called["post_url"] = post_url
         called["channel_override"] = channel_override
+        called["title_override"] = title_override
         return {"ok": True, "posted": True, "winner": {"url": post_url}, "channel": channel_override or "default"}
 
     monkeypatch.setattr("coatue_claw.x_chart_daily.run_chart_for_post_url", _fake_run)
@@ -642,6 +655,43 @@ def test_cli_run_post_url_command(monkeypatch, capsys) -> None:
     assert payload["ok"] is True
     assert called["post_url"] == "https://x.com/oguzerkan/status/2024447368137994460"
     assert called["channel_override"] == "C123"
+    assert called["title_override"] is None
+
+
+def test_cli_run_post_url_command_with_title_override(monkeypatch, capsys) -> None:
+    called: dict[str, object] = {}
+
+    def _fake_run(
+        *,
+        post_url: str,
+        channel_override: str | None = None,
+        title_override: str | None = None,
+    ) -> dict[str, object]:
+        called["post_url"] = post_url
+        called["channel_override"] = channel_override
+        called["title_override"] = title_override
+        return {"ok": True, "posted": True, "winner": {"url": post_url}, "channel": channel_override or "default"}
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily.run_chart_for_post_url", _fake_run)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "coatue-claw-x-chart-daily",
+            "run-post-url",
+            "https://x.com/KobeissiLetter/status/2026040229535047769",
+            "--channel",
+            "C123",
+            "--title",
+            "US stocks erase nearly $800 billion in market cap.",
+        ],
+    )
+    main()
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert called["post_url"] == "https://x.com/KobeissiLetter/status/2026040229535047769"
+    assert called["channel_override"] == "C123"
+    assert called["title_override"] == "US stocks erase nearly $800 billion in market cap."
 
 
 def test_slack_token_falls_back_to_openclaw_config(tmp_path: Path, monkeypatch) -> None:
@@ -769,7 +819,7 @@ def test_style_draft_prefers_simple_feed_like_copy() -> None:
     assert draft.checks["graph_first_copy"] is True
     assert "breaking" not in draft.headline.lower()
     assert draft.chart_label
-    assert len(draft.headline) <= 72
+    assert _is_complete_headline_sentence(draft.headline) is True
     assert len(draft.takeaway) <= 68
     assert draft.score >= 6.0
 
@@ -838,19 +888,38 @@ def test_headline_phrase_validator_rejects_fragment_home_sellers_now_is() -> Non
     assert _is_complete_headline_phrase("U.S. housing sellers are at a record high") is True
 
 
+def test_headline_sentence_validator_requires_action_verb() -> None:
+    assert _is_complete_headline_sentence("U.S. Housing Market Home Sellers.") is False
+    assert _is_complete_headline_sentence("U.S. housing sellers are at a record high.") is True
+
+
 def test_headline_validator_rejects_trailing_possessive_fragment() -> None:
     assert _is_complete_headline_phrase("US stock market futures open lower in their") is False
     assert _is_complete_headline_phrase("US stock market futures open lower in early trade") is True
 
 
 def test_headline_phrase_finalizer_returns_empty_for_dangling_copula() -> None:
-    finalized = _finalize_headline_phrase("U.S. Housing Market Home Sellers now is", max_chars=48)
+    finalized = _finalize_headline_sentence(
+        "U.S. Housing Market Home Sellers now is",
+        source_text="U.S. Housing Market Home Sellers now is",
+    )
     assert finalized == ""
 
 
 def test_headline_finalizer_returns_empty_for_clipped_their_fragment() -> None:
-    finalized = _finalize_headline_phrase("US stock market futures open lower in their initial session", max_chars=48)
+    finalized = _finalize_headline_sentence(
+        "US stock market futures open lower in their initial",
+        source_text="US stock market futures open lower in their initial",
+    )
     assert finalized == ""
+
+
+def test_headline_finalizer_preserves_market_cap_phrase() -> None:
+    finalized = _finalize_headline_sentence(
+        "US stocks erase nearly $800 billion in market cap",
+        source_text="US stocks erase nearly $800 billion in market cap",
+    )
+    assert finalized == "US stocks erase nearly $800 billion in market cap."
 
 
 def test_takeaway_sentence_validator_rejects_fragment_fell_to_lowest() -> None:
@@ -1332,9 +1401,14 @@ def test_run_chart_for_post_url_rewrites_takeaway_but_keeps_requested_url(monkey
     assert result["posted"] is True
     assert result["candidate_fallback_used"] is False
     assert result["copy_rewrite_applied"] is True
-    assert result["copy_rewrite_reason"] in {"headline_tail_fragment_rewritten", "takeaway_tail_fragment_rewritten"}
+    assert result["copy_rewrite_reason"] in {
+        "headline_tail_fragment_rewritten",
+        "headline_sentence_rewritten",
+        "takeaway_tail_fragment_rewritten",
+    }
     assert captured["candidate_url"] == "https://x.com/Barchart/status/2025715989384663396"
     assert _is_complete_headline_phrase(str(captured["headline"])) is True
+    assert _is_complete_headline_sentence(str(captured["headline"])) is True
     assert _is_complete_sentence(str(captured["takeaway"])) is True
 
 
@@ -1388,7 +1462,88 @@ def test_run_chart_for_post_url_errors_when_headline_unrecoverable(monkeypatch, 
             post_url="https://x.com/Barchart/status/2026003310256533863",
             channel_override="C123",
         )
-    assert "headline_incomplete_phrase" in str(exc.value)
+    assert "headline_incomplete_sentence" in str(exc.value)
+    assert posted["called"] is False
+
+
+def test_run_chart_for_post_url_applies_title_override(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
+    monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
+
+    payload = {
+        "data": [
+            {
+                "id": "2026040229535047769",
+                "author_id": "u1",
+                "text": "US stocks erase nearly $800 billion in market cap as futures slide.",
+                "created_at": "2026-02-23T00:00:00Z",
+                "public_metrics": {"like_count": 10, "retweet_count": 5, "reply_count": 2, "quote_count": 1},
+                "attachments": {"media_keys": ["m1"]},
+            }
+        ],
+        "includes": {
+            "users": [{"id": "u1", "username": "KobeissiLetter"}],
+            "media": [{"media_key": "m1", "type": "photo", "url": "https://example.com/chart.png"}],
+        },
+    }
+    monkeypatch.setattr("coatue_claw.x_chart_daily._http_json", lambda **kwargs: payload)
+    captured: dict[str, object] = {"called": False}
+
+    def _fake_post(**kwargs):
+        captured["called"] = True
+        captured["headline"] = kwargs["style_draft"].headline
+        captured["candidate_url"] = kwargs["candidate"].url
+        return {"ok": True, "channel": kwargs["channel"], "styled_artifact": str(tmp_path / "styled.png")}
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
+    result = run_chart_for_post_url(
+        post_url="https://x.com/KobeissiLetter/status/2026040229535047769",
+        channel_override="C123",
+        title_override="US stocks erase nearly $800 billion in market cap.",
+    )
+    assert result["ok"] is True
+    assert result["posted"] is True
+    assert result["copy_rewrite_reason"] == "headline_override_applied"
+    assert captured["called"] is True
+    assert captured["headline"] == "US stocks erase nearly $800 billion in market cap."
+    assert captured["candidate_url"] == "https://x.com/KobeissiLetter/status/2026040229535047769"
+
+
+def test_run_chart_for_post_url_invalid_title_override_raises(monkeypatch, tmp_path: Path) -> None:
+    import pytest
+
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
+    monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
+
+    payload = {
+        "data": [
+            {
+                "id": "2026040229535047769",
+                "author_id": "u1",
+                "text": "US stocks erase nearly $800 billion in market cap as futures slide.",
+                "created_at": "2026-02-23T00:00:00Z",
+                "public_metrics": {"like_count": 10, "retweet_count": 5, "reply_count": 2, "quote_count": 1},
+                "attachments": {"media_keys": ["m1"]},
+            }
+        ],
+        "includes": {
+            "users": [{"id": "u1", "username": "KobeissiLetter"}],
+            "media": [{"media_key": "m1", "type": "photo", "url": "https://example.com/chart.png"}],
+        },
+    }
+    monkeypatch.setattr("coatue_claw.x_chart_daily._http_json", lambda **kwargs: payload)
+    posted = {"called": False}
+    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", lambda **kwargs: posted.__setitem__("called", True))
+
+    with pytest.raises(XChartError) as exc:
+        run_chart_for_post_url(
+            post_url="https://x.com/KobeissiLetter/status/2026040229535047769",
+            channel_override="C123",
+            title_override="US stocks erase nearly $800 billion in market.",
+        )
+    assert "title override failed" in str(exc.value).lower()
     assert posted["called"] is False
 
 
@@ -1685,7 +1840,7 @@ def test_style_draft_rewrites_low_signal_tariff_title() -> None:
     assert "it's official" not in draft.headline.lower()
     assert "anticipated rulings" not in draft.headline.lower()
     assert draft.headline.lower().startswith("us tariff")
-    assert len(draft.headline) <= 48
+    assert _is_complete_headline_sentence(draft.headline) is True
     assert draft.headline.split(" ")[-1].lower() not in {"in", "of", "the", "to"}
 
 
@@ -1709,7 +1864,7 @@ def test_style_draft_uses_chart_hint_for_low_signal_copy(monkeypatch) -> None:
         lambda _candidate: "The US Tariff Take Has Surged",
     )
     draft = _select_style_draft(candidate)
-    assert draft.headline == "US tariff receipts are surging"
+    assert draft.headline == "US tariff receipts are surging."
     assert draft.chart_label == "Monthly US customs duties (US$B)"
     assert draft.takeaway == "US customs-duty collections just hit a new high."
 
@@ -1742,7 +1897,7 @@ def test_style_draft_rewrites_low_signal_takeaway_even_if_headline_is_good(monke
         lambda _candidate: "The US Tariff Take Has Surged",
     )
     draft = _select_style_draft(candidate)
-    assert draft.headline == "US tariff receipts are surging"
+    assert draft.headline == "US tariff receipts are surging."
     assert draft.takeaway == "US customs-duty collections just hit a new high."
 
 
@@ -1801,7 +1956,7 @@ def test_style_draft_rewrites_incoherent_institutional_selling_headline(monkeypa
         },
     )
     draft = _select_style_draft(candidate)
-    assert draft.headline == "Institutional selling is at an extreme"
+    assert draft.headline == "Institutional selling is at an extreme."
     assert "sold a are" not in draft.headline.lower()
     assert draft.checks["headline_grammar"] is True
 
@@ -1831,11 +1986,13 @@ def test_style_draft_rewrites_broken_headline_phrase(monkeypatch) -> None:
     )
     draft = _select_style_draft(candidate)
     assert _is_complete_headline_phrase(draft.headline) is True
+    assert _is_complete_headline_sentence(draft.headline) is True
     assert draft.headline.lower().endswith("now is") is False
     assert draft.checks["headline_complete_phrase"] is True
+    assert draft.checks["headline_complete_sentence"] is True
     assert draft.checks["headline_tail_complete"] is True
     assert draft.copy_rewrite_applied is True
-    assert draft.copy_rewrite_reason == "headline_rewritten"
+    assert draft.copy_rewrite_reason in {"headline_tail_fragment_rewritten", "headline_sentence_rewritten"}
 
 
 def test_style_draft_rewrites_degenerate_fields_and_fragment_takeaway(monkeypatch) -> None:
@@ -1897,6 +2054,7 @@ def test_style_draft_rewrites_fragmented_kobeissi_copy(monkeypatch) -> None:
     )
     draft = _select_style_draft(candidate)
     assert _is_complete_headline_phrase(draft.headline) is True
+    assert _is_complete_headline_sentence(draft.headline) is True
     assert _is_complete_sentence(draft.takeaway) is True
     assert draft.headline.lower().endswith("in their") is False
     assert draft.takeaway.lower().endswith("their initial.") is False
