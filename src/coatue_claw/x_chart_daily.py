@@ -236,6 +236,35 @@ TRAILING_STOPWORDS = {
     "with",
 }
 
+LOW_SIGNAL_COPY_VALUES = {
+    "u.s",
+    "u.s.",
+    "us",
+    "usa",
+    "chart context",
+    "trend snapshot",
+    "chart",
+    "data",
+    "trend",
+}
+
+TAKEAWAY_DANGLING_ENDINGS = {
+    "to",
+    "for",
+    "of",
+    "in",
+    "on",
+    "at",
+    "with",
+    "from",
+    "by",
+    "as",
+    "lowest",
+    "highest",
+    "most",
+    "least",
+}
+
 SUBJECT_TRAILING_ACTION_VERBS = (
     "sold",
     "bought",
@@ -298,6 +327,8 @@ class StyleDraft:
     iteration: int
     checks: dict[str, bool]
     score: float
+    copy_rewrite_applied: bool = False
+    copy_rewrite_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -488,6 +519,141 @@ def _shorten_without_ellipsis(text: str, *, max_chars: int) -> str:
     if out:
         return " ".join(out).strip(". ")
     return cleaned[:max_chars].rstrip(". ")
+
+
+def _is_degenerate_copy_value(text: str) -> bool:
+    cleaned = _normalize_render_text(text)
+    if not cleaned:
+        return True
+    if cleaned.lower() in LOW_SIGNAL_COPY_VALUES:
+        return True
+    words = [w for w in re.split(r"\s+", cleaned) if w]
+    if len(words) < 2:
+        return True
+    alnum = re.sub(r"[^A-Za-z0-9]+", "", cleaned)
+    return len(alnum) < 6
+
+
+def _strip_trailing_dangling_endings(text: str) -> str:
+    words = [w for w in _normalize_render_text(text).split(" ") if w]
+    while words:
+        tail = words[-1].strip(".,;:!?").lower()
+        if tail not in TAKEAWAY_DANGLING_ENDINGS and tail not in TRAILING_STOPWORDS:
+            break
+        words.pop()
+    return " ".join(words).strip()
+
+
+def _is_complete_sentence(text: str) -> bool:
+    cleaned = _normalize_render_text(text)
+    if not cleaned:
+        return False
+    words = [w for w in re.split(r"\s+", cleaned) if w]
+    if len(words) < 4:
+        return False
+    if cleaned[-1] not in ".!?":
+        return False
+    stripped = _strip_trailing_dangling_endings(cleaned.rstrip(".!?"))
+    if not stripped:
+        return False
+    stripped_words = [w for w in stripped.split(" ") if w]
+    if len(stripped_words) < 4:
+        return False
+    tail = stripped_words[-1].strip(".,;:!?").lower()
+    if tail in TAKEAWAY_DANGLING_ENDINGS:
+        return False
+    return True
+
+
+def _finalize_takeaway_sentence(text: str, *, max_chars: int) -> str:
+    cleaned = _normalize_render_text(text)
+    cleaned = re.sub(r"^@\w+:\s*", "", cleaned, flags=re.IGNORECASE).strip()
+    if not cleaned:
+        return ""
+    parts = re.split(r"(?<=[.!?])\s+", cleaned)
+    if len(parts) > 1 and len(parts[0].split()) >= 3:
+        cleaned = parts[0].strip()
+    cleaned = _shorten_without_ellipsis(cleaned, max_chars=max_chars)
+    before_words = [w for w in _normalize_render_text(cleaned).split(" ") if w]
+    cleaned = _strip_trailing_dangling_endings(cleaned)
+    after_words = [w for w in _normalize_render_text(cleaned).split(" ") if w]
+    removed_words = max(0, len(before_words) - len(after_words))
+    if not cleaned:
+        return ""
+    if removed_words > 0 and after_words:
+        trailing_verb_like = {
+            "surged",
+            "rose",
+            "jumped",
+            "climbed",
+            "rebounded",
+            "accelerated",
+            "increased",
+            "grew",
+            "fell",
+            "dropped",
+            "declined",
+            "slowed",
+            "sank",
+            "contracted",
+            "decelerated",
+            "hit",
+            "reached",
+            "stands",
+            "standing",
+            "is",
+            "are",
+            "was",
+            "were",
+            "be",
+        }
+        if after_words[-1].strip(".,;:!?").lower() in trailing_verb_like:
+            return ""
+    if cleaned[-1] not in ".!?":
+        cleaned = f"{cleaned}."
+    if len(cleaned) > max_chars:
+        clipped = _shorten_without_ellipsis(cleaned.rstrip(".!?"), max_chars=max(8, max_chars - 1))
+        clipped = _strip_trailing_dangling_endings(clipped)
+        if not clipped:
+            return ""
+        cleaned = f"{clipped}."
+    if len(cleaned) > max_chars:
+        return ""
+    return cleaned if _is_complete_sentence(cleaned) else ""
+
+
+def _rewrite_takeaway_from_candidate(candidate: Candidate) -> tuple[str, str]:
+    source_sentence = re.sub(r"^@\w+:\s*", "", _strip_news_prefix(candidate.text or candidate.title), flags=re.IGNORECASE).strip()
+    parts = re.split(r"(?<=[.!?])\s+", source_sentence)
+    if len(parts) > 1 and len(parts[0].split()) >= 3:
+        source_sentence = parts[0].strip()
+    subject, verb = _extract_subject_and_verb(source_sentence)
+    subject_core = _clean_subject_for_headline(subject=subject, sentence=source_sentence)
+    if not subject_core:
+        subject_core = _entity_hint_from_text(sentence=source_sentence, fallback=candidate.title)
+    copula = "are" if _subject_is_plural(subject_core) else "is"
+    lower = source_sentence.lower()
+
+    rewritten = ""
+    if "record low" in lower or "lowest" in lower:
+        rewritten = f"{subject_core} {copula} at a record low."
+    elif "record high" in lower or "highest" in lower:
+        rewritten = f"{subject_core} {copula} at a record high."
+    elif verb.lower() in POSITIVE_MOVE_VERBS:
+        rewritten = f"{subject_core} {copula} moving higher."
+    elif verb.lower() in NEGATIVE_MOVE_VERBS:
+        rewritten = f"{subject_core} {copula} moving lower."
+    elif "up" in lower or "higher" in lower:
+        rewritten = f"{subject_core} {copula} trending higher."
+    elif "down" in lower or "lower" in lower:
+        rewritten = f"{subject_core} {copula} trending lower."
+    elif subject_core and len(subject_core.split()) >= 2:
+        rewritten = f"{subject_core} {copula} moving sharply."
+
+    finalized = _finalize_takeaway_sentence(rewritten or source_sentence, max_chars=68)
+    if finalized:
+        return finalized, "source_rewrite"
+    return "US trend is shifting quickly.", "safe_fallback"
 
 
 def _extract_first_sentence(text: str) -> str:
@@ -843,6 +1009,12 @@ def _style_copy_quality_errors(style_draft: StyleDraft) -> list[str]:
         errors.append("chart label too long")
     if len(_normalize_render_text(style_draft.takeaway)) > 68:
         errors.append("takeaway too long")
+    if not _is_complete_sentence(style_draft.takeaway):
+        errors.append("takeaway incomplete sentence")
+    if _is_degenerate_copy_value(style_draft.headline):
+        errors.append("headline degenerate")
+    if _is_degenerate_copy_value(style_draft.chart_label):
+        errors.append("chart label degenerate")
     if _has_incoherent_headline(style_draft.headline):
         errors.append("headline grammar invalid")
     return errors
@@ -869,6 +1041,9 @@ def _post_publish_checklist(
         "headline_len_ok": (0 < len(headline) <= 58),
         "chart_label_len_ok": (0 < len(chart_label) <= 62),
         "takeaway_len_ok": (0 < len(takeaway) <= 68),
+        "takeaway_complete_sentence": _is_complete_sentence(takeaway),
+        "headline_non_degenerate": not _is_degenerate_copy_value(headline),
+        "chart_label_non_degenerate": not _is_degenerate_copy_value(chart_label),
         "reconstruction_mode_ok": reconstruction_mode in {"bar", "line"},
         "x_axis_labels_present": bool(render_qa.get("x_axis_labels_present", False)),
         "y_axis_labels_present": bool(render_qa.get("y_axis_labels_present", False)),
@@ -1306,8 +1481,16 @@ def _extract_chart_title_hint_via_vision(candidate: Candidate) -> str | None:
     return hint or None
 
 
-def _sanitize_style_copy(*, candidate: Candidate, headline: str, chart_label: str, takeaway: str) -> tuple[str, str, str]:
+def _sanitize_style_copy(
+    *,
+    candidate: Candidate,
+    headline: str,
+    chart_label: str,
+    takeaway: str,
+) -> tuple[str, str, str, bool, str | None]:
     override = _keyword_style_override(candidate)
+    rewrite_applied = False
+    rewrite_reason: str | None = None
     if override is not None:
         headline, chart_label, takeaway = override
 
@@ -1362,7 +1545,39 @@ def _sanitize_style_copy(*, candidate: Candidate, headline: str, chart_label: st
         else:
             headline = "US trend is at an extreme"
         headline = _trim_trailing_stopwords(_shorten_without_ellipsis(headline, max_chars=48))
-    return headline, chart_label, takeaway
+
+    subject, verb = _extract_subject_and_verb(_extract_first_sentence(source_text or candidate.title))
+    mode_hint = _mode_hint_from_text(candidate)
+    if _is_degenerate_copy_value(headline):
+        rewrite_applied = True
+        rewrite_reason = rewrite_reason or "headline_rewritten"
+        rebuilt = _synthesize_narrative_title(subject=subject, verb=verb, sentence=source_text or candidate.title)
+        headline = _trim_trailing_stopwords(_shorten_without_ellipsis(rebuilt, max_chars=48))
+        if _is_degenerate_copy_value(headline):
+            headline = "US trend is inflecting"
+
+    if _is_degenerate_copy_value(chart_label):
+        rewrite_applied = True
+        rewrite_reason = rewrite_reason or "chart_label_rewritten"
+        rebuilt_label = _synthesize_chart_label(subject=subject, sentence=source_text or candidate.title, mode_hint=mode_hint)
+        chart_label = _trim_trailing_stopwords(_shorten_without_ellipsis(rebuilt_label, max_chars=56))
+        if _is_degenerate_copy_value(chart_label):
+            chart_label = "US trend metric over time"
+
+    finalized_takeaway = _finalize_takeaway_sentence(takeaway, max_chars=68)
+    if not finalized_takeaway:
+        rewrite_applied = True
+        rewritten_takeaway, reason = _rewrite_takeaway_from_candidate(candidate)
+        finalized_takeaway = _finalize_takeaway_sentence(rewritten_takeaway, max_chars=68)
+        if finalized_takeaway:
+            rewrite_reason = reason
+        else:
+            finalized_takeaway = "US trend is shifting quickly."
+            rewrite_reason = "safe_fallback"
+    takeaway = finalized_takeaway
+    if rewrite_applied and rewrite_reason is None:
+        rewrite_reason = "copy_rewrite"
+    return headline, chart_label, takeaway, rewrite_applied, rewrite_reason
 
 
 def _employees_robots_takeaway(sentence: str) -> str:
@@ -2480,7 +2695,7 @@ def _build_style_draft(candidate: Candidate, *, iteration: int) -> StyleDraft:
         takeaway = _truncate_words(body_text or title_core or title_text, max_words=7, max_chars=56)
         why_now = "Simple trend read."
 
-    headline, chart_label, takeaway = _sanitize_style_copy(
+    headline, chart_label, takeaway, rewrite_applied, rewrite_reason = _sanitize_style_copy(
         candidate=candidate,
         headline=headline or "US Trend Snapshot",
         chart_label=chart_label or "Chart Context",
@@ -2493,6 +2708,9 @@ def _build_style_draft(candidate: Candidate, *, iteration: int) -> StyleDraft:
         "headline_short": bool(headline) and len(headline) <= 72,
         "headline_grammar": not _has_incoherent_headline(headline),
         "takeaway_short": bool(takeaway) and len(takeaway) <= 68,
+        "takeaway_complete_sentence": _is_complete_sentence(takeaway),
+        "headline_non_degenerate": not _is_degenerate_copy_value(headline),
+        "chart_label_non_degenerate": not _is_degenerate_copy_value(chart_label),
         "trend_explicit": _contains_trend_signal(f"{candidate.title} {candidate.text}"),
         "plain_language": not any(term in combined.lower() for term in SLIDE_JARGON_KEYWORDS),
         "clean_characters": "\ufffd" not in combined and "??" not in combined and "  " not in combined,
@@ -2507,6 +2725,8 @@ def _build_style_draft(candidate: Candidate, *, iteration: int) -> StyleDraft:
         iteration=iteration,
         checks=checks,
         score=score,
+        copy_rewrite_applied=rewrite_applied,
+        copy_rewrite_reason=rewrite_reason,
     )
 
 
@@ -2522,6 +2742,26 @@ def _select_style_draft(candidate: Candidate, *, max_iterations: int = 3) -> Sty
         if draft.score >= target_score and draft.checks.get("us_relevant", False):
             return draft
     return best
+
+
+def _style_copy_publish_issues(style_draft: StyleDraft) -> list[str]:
+    issues: list[str] = []
+    if not _is_complete_sentence(style_draft.takeaway):
+        issues.append("takeaway_incomplete_sentence")
+    if _is_degenerate_copy_value(style_draft.headline):
+        issues.append("headline_degenerate")
+    if _is_degenerate_copy_value(style_draft.chart_label):
+        issues.append("chart_label_degenerate")
+    return issues
+
+
+def _candidate_pool_for_post(*, store: XChartStore, candidates: list[Candidate]) -> list[Candidate]:
+    pool: list[Candidate] = []
+    for item in sorted(candidates, key=lambda c: float(c.score), reverse=True):
+        if store.was_item_posted_recently(item.candidate_key, days=30):
+            continue
+        pool.append(item)
+    return pool
 
 
 def _has_reconstructable_chart_data(candidate: Candidate) -> bool:
@@ -3277,14 +3517,19 @@ def _post_winner_to_slack(
         artifact_path = source_path
         render_mode = "source-snip"
     file_size = artifact_path.stat().st_size if artifact_path.exists() else 0
+    review_checks = {
+        "source_image_available": file_size > 0,
+        "artifact_nonempty": file_size > 0,
+        "render_mode_source_snip": render_mode in {"source-snip", "source-snip-card"},
+        "takeaway_complete_sentence": _is_complete_sentence(style_draft.takeaway),
+        "headline_non_degenerate": not _is_degenerate_copy_value(style_draft.headline),
+        "chart_label_non_degenerate": not _is_degenerate_copy_value(style_draft.chart_label),
+    }
+    review_failed = [name for name, passed in review_checks.items() if not passed]
     review = {
-        "passed": file_size > 0,
-        "failed": ([] if file_size > 0 else ["source_image_missing"]),
-        "checks": {
-            "source_image_available": file_size > 0,
-            "artifact_nonempty": file_size > 0,
-            "render_mode_source_snip": render_mode in {"source-snip", "source-snip-card"},
-        },
+        "passed": len(review_failed) == 0,
+        "failed": review_failed,
+        "checks": review_checks,
         "style_score": float(style_draft.score),
         "style_iteration": int(style_draft.iteration),
         "render_qa": {"render_mode": render_mode},
@@ -3334,6 +3579,8 @@ def _post_winner_to_slack(
                     "iteration": style_draft.iteration,
                     "score": style_draft.score,
                     "checks": style_draft.checks,
+                    "copy_rewrite_applied": bool(style_draft.copy_rewrite_applied),
+                    "copy_rewrite_reason": style_draft.copy_rewrite_reason,
                 },
                 "post_publish_review": review,
             }
@@ -3385,6 +3632,9 @@ def run_chart_scout_once(
             "ok": True,
             "posted": False,
             "reason": "scouted_pool_updated",
+            "copy_rewrite_applied": False,
+            "copy_rewrite_reason": None,
+            "candidate_fallback_used": False,
             "now_local": now_local.isoformat(),
             "windows": windows_text,
             "candidates_scanned": len(all_candidates),
@@ -3398,6 +3648,9 @@ def run_chart_scout_once(
             "posted": False,
             "reason": "slot_already_posted",
             "slot_key": slot_key,
+            "copy_rewrite_applied": False,
+            "copy_rewrite_reason": None,
+            "candidate_fallback_used": False,
             "candidates_scanned": len(all_candidates),
             "candidates_observed": observed_count,
             "pool_pruned": pruned_count,
@@ -3408,20 +3661,53 @@ def run_chart_scout_once(
     pool_candidates = store.observed_candidates_since(since_utc=since_utc, limit=pool_limit)
     ranking_pool = _dedupe_candidates(pool_candidates) if pool_candidates else all_candidates
 
-    winner = _pick_winner(store=store, candidates=ranking_pool)
-    if winner is None:
+    candidate_pool = _candidate_pool_for_post(store=store, candidates=ranking_pool)
+    if not candidate_pool:
         return {
             "ok": True,
             "posted": False,
             "reason": "no_candidate_available",
             "slot_key": slot_key,
+            "copy_rewrite_applied": False,
+            "copy_rewrite_reason": None,
+            "candidate_fallback_used": False,
             "candidates_scanned": len(all_candidates),
             "candidates_observed": observed_count,
             "pool_candidates": len(ranking_pool),
             "since_utc": since_utc,
             "pool_pruned": pruned_count,
         }
-    style_draft = _select_style_draft(winner)
+    top_choice = _pick_winner(store=store, candidates=candidate_pool) or candidate_pool[0]
+    candidate_order = [top_choice] + [c for c in candidate_pool if c.candidate_key != top_choice.candidate_key]
+
+    winner: Candidate | None = None
+    style_draft: StyleDraft | None = None
+    candidate_fallback_used = False
+    copy_rewrite_applied = False
+    copy_rewrite_reason: str | None = None
+
+    for idx, candidate in enumerate(candidate_order):
+        draft = _select_style_draft(candidate)
+        issues = _style_copy_publish_issues(draft)
+        low_signal_rewrite = draft.copy_rewrite_reason == "safe_fallback"
+        if issues:
+            continue
+        if idx == 0 and low_signal_rewrite and len(candidate_order) > 1:
+            continue
+        winner = candidate
+        style_draft = draft
+        candidate_fallback_used = idx > 0
+        copy_rewrite_applied = bool(draft.copy_rewrite_applied)
+        copy_rewrite_reason = draft.copy_rewrite_reason
+        break
+
+    if winner is None or style_draft is None:
+        winner = top_choice
+        style_draft = _select_style_draft(winner)
+        copy_rewrite_applied = bool(style_draft.copy_rewrite_applied)
+        copy_rewrite_reason = style_draft.copy_rewrite_reason
+        candidate_fallback_used = False
+
     convention_name = _convention_name(slot_key=slot_key, now_local=now_local, windows=windows)
 
     output_dir = _output_dir()
@@ -3438,10 +3724,13 @@ def run_chart_scout_once(
                 f"- source: `{winner.source_type}:{winner.source_id}`",
                 f"- author: `{winner.author}`",
                 f"- score: `{winner.score:.2f}`",
+                f"- candidate_fallback_used: `{candidate_fallback_used}`",
                 f"- url: {winner.url}",
                 f"- image_url: {winner.image_url or 'n/a'}",
                 f"- style_iteration: `{style_draft.iteration}`",
                 f"- style_score: `{style_draft.score:.1f}/7`",
+                f"- copy_rewrite_applied: `{copy_rewrite_applied}`",
+                f"- copy_rewrite_reason: `{copy_rewrite_reason or 'none'}`",
                 "",
                 "## Notes",
                 _normalize_render_text(winner.text),
@@ -3464,6 +3753,9 @@ def run_chart_scout_once(
             "reason": "dry_run",
             "slot_key": slot_key,
             "convention": convention_name,
+            "copy_rewrite_applied": copy_rewrite_applied,
+            "copy_rewrite_reason": copy_rewrite_reason,
+            "candidate_fallback_used": candidate_fallback_used,
             "winner": {
                 "source": f"{winner.source_type}:{winner.source_id}",
                 "author": winner.author,
@@ -3495,6 +3787,9 @@ def run_chart_scout_once(
         "slot_key": slot_key,
         "convention": convention_name,
         "channel": channel,
+        "copy_rewrite_applied": copy_rewrite_applied,
+        "copy_rewrite_reason": copy_rewrite_reason,
+        "candidate_fallback_used": candidate_fallback_used,
         "post": post,
         "winner": {
             "source": f"{winner.source_type}:{winner.source_id}",
@@ -3545,6 +3840,14 @@ def run_chart_for_post_url(
                 raise XChartError("No chart candidate found in that X post (missing image or inaccessible tweet).")
 
     style_draft = _select_style_draft(winner)
+    copy_rewrite_applied = bool(style_draft.copy_rewrite_applied)
+    copy_rewrite_reason = style_draft.copy_rewrite_reason
+    copy_issues = _style_copy_publish_issues(style_draft)
+    if copy_issues:
+        raise XChartError(
+            "Requested X post did not produce publishable copy: "
+            + ", ".join(copy_issues)
+        )
     channel = (channel_override or "").strip() or _slack_channel()
     now_local = datetime.now(UTC).astimezone(_timezone())
     slot_key = f"manual-url-{now_local.strftime('%Y%m%d-%H%M%S')}"
@@ -3567,6 +3870,9 @@ def run_chart_for_post_url(
         "slot_key": slot_key,
         "convention": convention_name,
         "channel": channel,
+        "copy_rewrite_applied": copy_rewrite_applied,
+        "copy_rewrite_reason": copy_rewrite_reason,
+        "candidate_fallback_used": False,
         "post": post,
         "winner": {
             "source": f"{winner.source_type}:{winner.source_id}",

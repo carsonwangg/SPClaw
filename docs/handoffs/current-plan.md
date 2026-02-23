@@ -538,3 +538,39 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 1. Confirm `md debug APP` resolves to `selected_cluster=regulatory_probe` with a specific line.
 2. Monitor next 3 MD posts and verify fallback usage rate declines for clearly news-driven selloffs.
 3. If generic fallback still appears for obvious cases, expand quality-domain allowlist and cluster keywords for the miss pattern.
+
+## 2026-02-23 Plan Update - X Chart Copy Quality Hardening
+
+### Completed
+- Enforced complete-sentence takeaway output in `src/coatue_claw/x_chart_daily.py` using deterministic validators/finalizers.
+- Added fallback copy rewrite path from candidate context when synthesized takeaway is clipped or low quality.
+- Added degenerate-copy guards for headline/chart label (for example single-token `U.S` outputs).
+- Added scout-run candidate fallback selection:
+  - if top-ranked candidate fails copy quality, system now chooses next valid candidate.
+- Preserved strict explicit-URL behavior:
+  - no candidate swap in `run_chart_for_post_url`;
+  - requested URL is retained and copy is rewritten if needed.
+- Added diagnostics to `run_chart_scout_once` and `run_chart_for_post_url` results:
+  - `copy_rewrite_applied`
+  - `copy_rewrite_reason`
+  - `candidate_fallback_used`
+- Expanded post-review checks with:
+  - `takeaway_complete_sentence`
+  - `headline_non_degenerate`
+  - `chart_label_non_degenerate`
+- Added regression coverage in `tests/test_x_chart_daily.py` for:
+  - fragment rejection + sentence finalization
+  - degenerate field rewrites
+  - scout candidate fallback
+  - explicit URL no-swap behavior with rewrite.
+- Validation:
+  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_x_chart_daily.py` -> `49 passed`.
+
+### In Progress
+- Runtime verification on Mac mini after pull/restart to confirm live Slack output quality for both `x chart now` and explicit URL requests.
+
+### Next
+1. Deploy latest `main` on Mac mini and restart OpenClaw runtime.
+2. Validate one scout post and one explicit URL post in `#charting` for sentence completeness and source URL retention.
+3. Review next scheduled chart window for any residual low-signal rewrites (`copy_rewrite_reason=safe_fallback`) and tune synthesis prompts only if needed.
+4. Handle unrelated full-suite failing tests (`tests/test_spencer_change_digest.py`, `tests/test_spencer_change_log.py`) in a separate patch.

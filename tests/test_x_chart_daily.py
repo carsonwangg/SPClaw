@@ -18,8 +18,10 @@ from coatue_claw.x_chart_daily import (
     _extract_rebuilt_bars_via_vision,
     _extract_rebuilt_bars,
     _extract_rebuilt_series,
+    _finalize_takeaway_sentence,
     _infer_bar_labels_from_text,
     _infer_chart_mode,
+    _is_complete_sentence,
     _is_us_relevant_post,
     _normalize_render_text,
     _parse_windows,
@@ -218,6 +220,71 @@ def test_run_chart_scout_window_uses_hourly_pool_since_last_slot(tmp_path: Path,
     assert second["posted"] is True
     assert posted["candidate_url"] == "https://x.com/fiscal_AI/status/high"
     assert second["convention"] == "Coatue Chart of the Afternoon"
+
+
+def test_run_chart_scout_falls_back_when_top_candidate_copy_is_bad(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
+
+    bad_top = Candidate(
+        candidate_key="x:bad-top",
+        source_type="x",
+        source_id="badsource",
+        author="@badsource",
+        title="U.S.",
+        text="U.S.",
+        url="https://x.com/badsource/status/top",
+        image_url="https://example.com/top.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=900,
+        source_priority=1.2,
+        score=99.0,
+    )
+    good_second = Candidate(
+        candidate_key="x:good-second",
+        source_type="x",
+        source_id="fiscal_AI",
+        author="@fiscal_AI",
+        title="U.S. Housing Market Pending Home Sales hit a record low.",
+        text="U.S. Housing Market Pending Home Sales hit a record low.",
+        url="https://x.com/fiscal_AI/status/good",
+        image_url="https://example.com/good.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=500,
+        source_priority=1.3,
+        score=92.0,
+    )
+
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = datetime(2026, 2, 19, 12, 0, 0, tzinfo=UTC)
+            if tz is None:
+                return base
+            return base.astimezone(tz)
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
+    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [bad_top, good_second])
+
+    captured: dict[str, object] = {}
+
+    def _fake_post(**kwargs):
+        captured["candidate_url"] = kwargs["candidate"].url
+        captured["takeaway"] = kwargs["style_draft"].takeaway
+        return {"ok": True, "channel": kwargs["channel"], "file_id": "FTEST"}
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
+
+    result = run_chart_scout_once(manual=False, dry_run=False, channel_override="C123")
+    assert result["posted"] is True
+    assert result["candidate_fallback_used"] is True
+    assert captured["candidate_url"] == "https://x.com/fiscal_AI/status/good"
+    assert _is_complete_sentence(str(captured["takeaway"])) is True
 
 
 def test_convention_name_uses_morning_afternoon_evening_windows() -> None:
@@ -536,6 +603,22 @@ def test_shorten_without_ellipsis_removes_three_dots() -> None:
     shortened = _shorten_without_ellipsis(text, max_chars=58)
     assert "..." not in shortened
     assert len(shortened) <= 58
+
+
+def test_takeaway_sentence_validator_rejects_fragment_fell_to_lowest() -> None:
+    assert _is_complete_sentence("U.S. Housing Market Pending Home Sales fell to lowest") is False
+    assert _is_complete_sentence("U.S. Housing Market Pending Home Sales hit a record low.") is True
+
+
+def test_takeaway_sentence_finalizer_returns_complete_sentence() -> None:
+    finalized = _finalize_takeaway_sentence("U.S. Housing Market Pending Home Sales fell to lowest", max_chars=68)
+    assert finalized == ""
+    finalized_good = _finalize_takeaway_sentence(
+        "U.S. Housing Market Pending Home Sales hit a record low.",
+        max_chars=68,
+    )
+    assert finalized_good.endswith(".")
+    assert _is_complete_sentence(finalized_good) is True
 
 
 def test_compute_y_ticks_non_normalized_has_multiple_ticks() -> None:
@@ -926,6 +1009,70 @@ def test_run_chart_for_post_url_posts_specific_tweet(monkeypatch, tmp_path: Path
     assert result["posted"] is True
     assert captured["candidate_url"] == "https://x.com/KobeissiLetter/status/2024543034734768600"
     assert captured["channel"] == "C123"
+
+
+def test_run_chart_for_post_url_rewrites_takeaway_but_keeps_requested_url(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
+    monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
+
+    payload = {
+        "data": [
+            {
+                "id": "2025715989384663396",
+                "author_id": "u1",
+                "text": "BREAKING : U.S. Housing Market Pending Home Sales fell to lowest level ever recorded",
+                "created_at": "2026-02-23T00:00:00Z",
+                "public_metrics": {"like_count": 10, "retweet_count": 5, "reply_count": 2, "quote_count": 1},
+                "attachments": {"media_keys": ["m1"]},
+            }
+        ],
+        "includes": {
+            "users": [{"id": "u1", "username": "Barchart"}],
+            "media": [{"media_key": "m1", "type": "photo", "url": "https://example.com/chart.png"}],
+        },
+    }
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily._http_json", lambda **kwargs: payload)
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._synthesize_style_via_llm",
+        lambda _candidate: {
+            "headline": "U.S",
+            "chart_label": "U.S",
+            "takeaway": "U.S. Housing Market Pending Home Sales fell to lowest",
+        },
+    )
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._extract_rebuilt_bars_via_vision",
+        lambda **kwargs: RebuiltBars(
+            labels=["2023", "2024", "2025", "2026"],
+            values=[120.0, 110.0, 95.0, 80.0],
+            color="#2F6ABF",
+            y_label="Index",
+            normalized=False,
+            source="vision",
+            confidence=0.9,
+        ),
+    )
+
+    captured: dict[str, object] = {}
+
+    def _fake_post(**kwargs):
+        captured["candidate_url"] = kwargs["candidate"].url
+        captured["takeaway"] = kwargs["style_draft"].takeaway
+        return {"ok": True, "channel": kwargs["channel"], "styled_artifact": str(tmp_path / "styled.png")}
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
+    result = run_chart_for_post_url(
+        post_url="https://x.com/Barchart/status/2025715989384663396",
+        channel_override="C123",
+    )
+    assert result["ok"] is True
+    assert result["posted"] is True
+    assert result["candidate_fallback_used"] is False
+    assert result["copy_rewrite_applied"] is True
+    assert captured["candidate_url"] == "https://x.com/Barchart/status/2025715989384663396"
+    assert _is_complete_sentence(str(captured["takeaway"])) is True
 
 
 def test_run_chart_for_post_url_uses_vxtwitter_fallback(monkeypatch, tmp_path: Path) -> None:
@@ -1340,3 +1487,37 @@ def test_style_draft_rewrites_incoherent_institutional_selling_headline(monkeypa
     assert draft.headline == "Institutional selling is at an extreme"
     assert "sold a are" not in draft.headline.lower()
     assert draft.checks["headline_grammar"] is True
+
+
+def test_style_draft_rewrites_degenerate_fields_and_fragment_takeaway(monkeypatch) -> None:
+    candidate = Candidate(
+        candidate_key="x:pending-home-fragment",
+        source_type="x",
+        source_id="Barchart",
+        author="@Barchart",
+        title="@Barchart: BREAKING : U.S. Housing Market Pending Home Sales fell to lowest level ever recorded",
+        text="BREAKING : U.S. Housing Market Pending Home Sales fell to lowest level ever recorded",
+        url="https://x.com/Barchart/status/2025715989384663396",
+        image_url="https://pbs.twimg.com/media/HBzJ0A6bkAAtKi-.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=700,
+        source_priority=1.2,
+        score=91.0,
+    )
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._synthesize_style_via_llm",
+        lambda _candidate: {
+            "headline": "U.S",
+            "chart_label": "U.S",
+            "takeaway": "U.S. Housing Market Pending Home Sales fell to lowest",
+        },
+    )
+    draft = _select_style_draft(candidate)
+    assert draft.headline != "U.S"
+    assert draft.chart_label != "U.S"
+    assert _is_complete_sentence(draft.takeaway) is True
+    assert "fell to lowest" not in draft.takeaway.lower()
+    assert draft.checks["headline_non_degenerate"] is True
+    assert draft.checks["chart_label_non_degenerate"] is True
+    assert draft.checks["takeaway_complete_sentence"] is True
+    assert draft.copy_rewrite_applied is True

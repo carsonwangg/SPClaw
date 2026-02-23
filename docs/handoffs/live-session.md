@@ -948,3 +948,53 @@ Then confirm bot returns:
 1. Pull latest `main` on Mac mini and restart runtime (`make openclaw-restart`).
 2. Run `md debug APP` (or CLI `claw market-daily debug-catalyst APP --slot open`) and confirm selected cluster `regulatory_probe`.
 3. Run `md now --force` in Slack and verify APP reason line explicitly names SEC-probe overhang when corroborated evidence is present.
+
+## 2026-02-23 - X Chart Takeaway Sentence Completeness + Candidate Fallback
+- Issue fixed: X chart posts could emit incomplete takeaway fragments (example class: `...fell to lowest`) due to hard clipping without sentence validation.
+- Root cause:
+  - takeaway text was length-constrained but not validated for sentence completeness;
+  - degenerate one-token LLM outputs (`U.S`) could survive as headline/chart label;
+  - scout winner selection did not switch candidates when top copy quality was poor.
+- Code updates in `/opt/coatue-claw/src/coatue_claw/x_chart_daily.py`:
+  - added deterministic copy-quality helpers:
+    - `_is_complete_sentence`
+    - `_finalize_takeaway_sentence`
+    - `_rewrite_takeaway_from_candidate`
+    - `_is_degenerate_copy_value`
+  - upgraded `_sanitize_style_copy(...)` to:
+    - enforce complete takeaway sentences;
+    - rewrite low-quality/fragment takeaways from candidate context;
+    - rebuild degenerate headline/chart-label values;
+    - return rewrite diagnostics (`copy_rewrite_applied`, `copy_rewrite_reason`).
+  - added style checks:
+    - `takeaway_complete_sentence`
+    - `headline_non_degenerate`
+    - `chart_label_non_degenerate`
+  - added scout fallback selection in `run_chart_scout_once(...)`:
+    - evaluates candidate pool in score order;
+    - skips top candidate when copy quality fails and picks next valid candidate;
+    - returns `candidate_fallback_used` + rewrite diagnostics in result payload.
+  - kept explicit URL behavior strict in `run_chart_for_post_url(...)`:
+    - preserves requested URL;
+    - rewrites copy as needed;
+    - returns diagnostics (`copy_rewrite_applied`, `copy_rewrite_reason`, `candidate_fallback_used=false`).
+  - expanded post-publish review checklist and persisted these checks in review payload.
+- Tests added in `/opt/coatue-claw/tests/test_x_chart_daily.py`:
+  - `test_takeaway_sentence_validator_rejects_fragment_fell_to_lowest`
+  - `test_takeaway_sentence_finalizer_returns_complete_sentence`
+  - `test_style_draft_rewrites_degenerate_fields_and_fragment_takeaway`
+  - `test_run_chart_scout_falls_back_when_top_candidate_copy_is_bad`
+  - `test_run_chart_for_post_url_rewrites_takeaway_but_keeps_requested_url`
+- Validation:
+  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_x_chart_daily.py` -> `49 passed`.
+  - full suite smoke: `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q` -> 3 pre-existing unrelated failures in `test_spencer_change_digest` / `test_spencer_change_log`.
+- Runtime smoke checks completed:
+  - `make -C /opt/coatue-claw openclaw-x-chart-run-once`
+  - `/opt/coatue-claw/.venv/bin/python -m coatue_claw.x_chart_daily run-post-url https://x.com/Barchart/status/2025715989384663396`
+  - both posted successfully and emitted rewrite diagnostics; review checks reported complete-sentence and non-degenerate copy.
+
+### Immediate Next Steps
+1. Pull latest `main` on Mac mini runtime and restart (`make openclaw-restart`).
+2. In Slack `#charting`, run `@Coatue Claw x chart now` and confirm takeaway is a complete sentence with no clipped ending.
+3. Run one explicit URL request and confirm posted source URL is unchanged while takeaway is rewritten when needed.
+4. Triage unrelated full-suite failures in `tests/test_spencer_change_digest.py` and `tests/test_spencer_change_log.py` separately from X-chart pipeline.
