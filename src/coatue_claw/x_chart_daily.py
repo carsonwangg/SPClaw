@@ -290,6 +290,8 @@ HEADLINE_LOCKED_TERMS: tuple[tuple[str, ...], ...] = (
 HEADLINE_MIN_WORDS = 4
 HEADLINE_MAX_RENDER_LINES = 3
 HEADLINE_MIN_FONT_SIZE = 17.0
+TAKEAWAY_MAX_RENDER_LINES = 2
+TAKEAWAY_MIN_FONT_SIZE = 8.4
 HEADLINE_ACTION_TOKENS = {
     "is",
     "are",
@@ -954,6 +956,9 @@ def _is_complete_sentence(text: str) -> bool:
     cleaned = _normalize_render_text(text)
     if not cleaned:
         return False
+    lower = cleaned.lower()
+    if re.search(r"\bto\s+(lowest|highest)\b", lower):
+        return False
     words = [w for w in re.split(r"\s+", cleaned) if w]
     if len(words) < 4:
         return False
@@ -973,15 +978,24 @@ def _is_complete_sentence(text: str) -> bool:
     return True
 
 
-def _finalize_takeaway_sentence(text: str, *, max_chars: int) -> str:
+def _is_single_sentence_takeaway(text: str) -> bool:
+    cleaned = _normalize_render_text(text)
+    if not cleaned:
+        return False
+    first = _extract_first_sentence(cleaned)
+    if not first:
+        return False
+    if _normalize_render_text(first) != cleaned:
+        return False
+    return _is_complete_sentence(cleaned)
+
+
+def _normalize_takeaway_seed(text: str) -> str:
     cleaned = _normalize_render_text(text)
     cleaned = re.sub(r"^@\w+:\s*", "", cleaned, flags=re.IGNORECASE).strip()
     if not cleaned:
         return ""
-    parts = re.split(r"(?<=[.!?])\s+", cleaned)
-    if len(parts) > 1 and len(parts[0].split()) >= 3:
-        cleaned = parts[0].strip()
-    cleaned = _shorten_without_ellipsis(cleaned, max_chars=max_chars)
+    cleaned = _extract_first_sentence(cleaned).strip()
     before_words = [w for w in _normalize_render_text(cleaned).split(" ") if w]
     cleaned = _strip_trailing_dangling_endings(cleaned)
     after_words = [w for w in _normalize_render_text(cleaned).split(" ") if w]
@@ -1019,19 +1033,49 @@ def _finalize_takeaway_sentence(text: str, *, max_chars: int) -> str:
             return ""
     if not _tail_complete(cleaned):
         return ""
+    return cleaned
+
+
+def _semantic_shorten_sentence(text: str, *, max_words: int = 18) -> str:
+    cleaned = _normalize_render_text(text).strip()
+    if not cleaned:
+        return ""
+    core = cleaned.rstrip(".!?").strip()
+    if not core:
+        return ""
+    lower = core.lower()
+    split_markers = (" while ", " amid ", " as ", " after ", " and ", ", ")
+    for marker in split_markers:
+        idx = lower.find(marker)
+        if idx <= 0:
+            continue
+        candidate = core[:idx].strip()
+        candidate = _strip_trailing_dangling_endings(candidate)
+        if len(candidate.split()) >= 4:
+            return f"{candidate}."
+    words = [w for w in core.split(" ") if w]
+    if len(words) > max_words:
+        candidate = " ".join(words[:max_words]).strip()
+        candidate = _strip_trailing_dangling_endings(candidate)
+        if len(candidate.split()) >= 4:
+            return f"{candidate}."
+    return ""
+
+
+def _finalize_takeaway_sentence(text: str, *, max_chars: int | None = None) -> str:
+    cleaned = _normalize_takeaway_seed(text)
+    if not cleaned:
+        return ""
     if cleaned[-1] not in ".!?":
         cleaned = f"{cleaned}."
-    if len(cleaned) > max_chars:
-        clipped = _shorten_without_ellipsis(cleaned.rstrip(".!?"), max_chars=max(8, max_chars - 1))
-        clipped = _strip_trailing_dangling_endings(clipped)
-        if not clipped:
+    if max_chars is not None and len(cleaned) > max_chars:
+        shortened = _semantic_shorten_sentence(cleaned, max_words=max(10, min(24, max_chars // 4)))
+        if not shortened:
             return ""
-        if not _tail_complete(clipped):
+        cleaned = shortened
+        if max_chars is not None and len(cleaned) > max_chars:
             return ""
-        cleaned = f"{clipped}."
-    if len(cleaned) > max_chars:
-        return ""
-    return cleaned if _is_complete_sentence(cleaned) else ""
+    return cleaned if _is_single_sentence_takeaway(cleaned) else ""
 
 
 def _rewrite_takeaway_from_candidate(candidate: Candidate) -> tuple[str, str]:
@@ -1065,12 +1109,84 @@ def _rewrite_takeaway_from_candidate(candidate: Candidate) -> tuple[str, str]:
     if source_has_fragment_tail and not rewritten and subject_core:
         rewritten = f"{subject_core} {copula} moved lower in early trading."
 
-    finalized = _finalize_takeaway_sentence(rewritten or source_sentence, max_chars=68)
+    finalized = _finalize_takeaway_sentence(rewritten or source_sentence)
     if finalized:
         if source_has_fragment_tail:
             return finalized, "takeaway_tail_fragment_rewritten"
         return finalized, "source_rewrite"
     return "US trend is shifting quickly.", "safe_fallback"
+
+
+def _title_takeaway_role_ok(*, headline: str, takeaway: str) -> bool:
+    h = _normalize_render_text(headline)
+    t = _normalize_render_text(takeaway)
+    if not h or not t:
+        return False
+    return len(h) < len(t)
+
+
+def _compact_headline_sentence(text: str, *, source_sentence: str) -> str:
+    cleaned = _normalize_render_text(text).strip()
+    if not cleaned:
+        return ""
+    core = cleaned.rstrip(".!?").strip()
+    for phrase_tokens in HEADLINE_LOCKED_TERMS:
+        phrase = " ".join(phrase_tokens)
+        m = re.search(rf"\b{re.escape(phrase)}\b", core, flags=re.IGNORECASE)
+        if not m:
+            continue
+        if m.end() >= len(core):
+            continue
+        candidate = core[: m.end()].strip()
+        finalized = _finalize_headline_sentence(candidate, source_text=source_sentence)
+        if finalized:
+            return finalized
+    return _finalize_headline_sentence(
+        _semantic_shorten_sentence(cleaned, max_words=6),
+        source_text=source_sentence,
+    )
+
+
+def _enforce_title_takeaway_roles(
+    *,
+    headline: str,
+    takeaway: str,
+    source_sentence: str,
+) -> tuple[str, str, bool]:
+    normalized_headline = _normalize_render_text(headline)
+    normalized_takeaway = _normalize_render_text(takeaway)
+    if not normalized_headline or not normalized_takeaway:
+        return normalized_headline, normalized_takeaway, False
+
+    finalized_headline = _finalize_headline_sentence(normalized_headline, source_text=source_sentence)
+    finalized_takeaway = _finalize_takeaway_sentence(normalized_takeaway)
+    if not finalized_headline or not finalized_takeaway:
+        return normalized_headline, normalized_takeaway, False
+
+    if _title_takeaway_role_ok(headline=finalized_headline, takeaway=finalized_takeaway):
+        return finalized_headline, finalized_takeaway, False
+
+    swapped_headline = _finalize_headline_sentence(finalized_takeaway, source_text=source_sentence)
+    swapped_takeaway = _finalize_takeaway_sentence(finalized_headline)
+    source_takeaway = _finalize_takeaway_sentence(source_sentence)
+    compact_headline = _compact_headline_sentence(finalized_headline, source_sentence=source_sentence)
+    if not swapped_headline or not swapped_takeaway:
+        if compact_headline and _title_takeaway_role_ok(headline=compact_headline, takeaway=finalized_takeaway):
+            return compact_headline, finalized_takeaway, True
+        if source_takeaway and _title_takeaway_role_ok(headline=finalized_headline, takeaway=source_takeaway):
+            return finalized_headline, source_takeaway, True
+        if compact_headline and source_takeaway and _title_takeaway_role_ok(headline=compact_headline, takeaway=source_takeaway):
+            return compact_headline, source_takeaway, True
+        return finalized_headline, finalized_takeaway, False
+    if not _title_takeaway_role_ok(headline=swapped_headline, takeaway=swapped_takeaway):
+        if compact_headline and _title_takeaway_role_ok(headline=compact_headline, takeaway=finalized_takeaway):
+            return compact_headline, finalized_takeaway, True
+        if source_takeaway and _title_takeaway_role_ok(headline=finalized_headline, takeaway=source_takeaway):
+            return finalized_headline, source_takeaway, True
+        if compact_headline and source_takeaway and _title_takeaway_role_ok(headline=compact_headline, takeaway=source_takeaway):
+            return compact_headline, source_takeaway, True
+        return finalized_headline, finalized_takeaway, False
+    return swapped_headline, swapped_takeaway, True
 
 
 def _extract_first_sentence(text: str) -> str:
@@ -1426,14 +1542,16 @@ def _style_copy_quality_errors(style_draft: StyleDraft) -> list[str]:
         errors.append("style copy contains ellipsis")
     if len(_normalize_render_text(style_draft.chart_label)) > 62:
         errors.append("chart label too long")
-    if len(_normalize_render_text(style_draft.takeaway)) > 68:
-        errors.append("takeaway too long")
     if not _is_complete_headline_phrase(style_draft.headline):
         errors.append("headline incomplete phrase")
     if not _is_complete_headline_sentence(style_draft.headline):
         errors.append("headline incomplete sentence")
     if not _is_complete_sentence(style_draft.takeaway):
         errors.append("takeaway incomplete sentence")
+    if not _is_single_sentence_takeaway(style_draft.takeaway):
+        errors.append("takeaway not single sentence")
+    if not _title_takeaway_role_ok(headline=style_draft.headline, takeaway=style_draft.takeaway):
+        errors.append("title/takeaway role order invalid")
     if not _tail_complete(style_draft.headline):
         errors.append("headline tail fragment")
     if not _tail_complete(style_draft.takeaway):
@@ -1478,11 +1596,14 @@ def _post_publish_checklist(
         ),
         "headline_wrapped_line_count": int(render_qa.get("headline_wrapped_line_count", 1)),
         "chart_label_len_ok": (0 < len(chart_label) <= 62),
-        "takeaway_len_ok": (0 < len(takeaway) <= 68),
+        "takeaway_len_ok": (0 < len(takeaway)),
         "takeaway_complete_sentence": _is_complete_sentence(takeaway),
+        "takeaway_single_sentence": _is_single_sentence_takeaway(takeaway),
         "takeaway_tail_complete": _tail_complete(takeaway),
+        "takeaway_wrapped_line_count": int(render_qa.get("takeaway_wrapped_line_count", 1)),
         "headline_non_degenerate": not _is_degenerate_copy_value(headline),
         "chart_label_non_degenerate": not _is_degenerate_copy_value(chart_label),
+        "title_takeaway_role_ok": _title_takeaway_role_ok(headline=headline, takeaway=takeaway),
         "reconstruction_mode_ok": reconstruction_mode in {"bar", "line"},
         "x_axis_labels_present": bool(render_qa.get("x_axis_labels_present", False)),
         "y_axis_labels_present": bool(render_qa.get("y_axis_labels_present", False)),
@@ -1926,16 +2047,17 @@ def _sanitize_style_copy(
     headline: str,
     chart_label: str,
     takeaway: str,
-) -> tuple[str, str, str, bool, str | None]:
+) -> tuple[str, str, str, bool, str | None, bool]:
     override = _keyword_style_override(candidate)
     rewrite_applied = False
     rewrite_reason: str | None = None
     if override is not None:
         headline, chart_label, takeaway = override
 
+    title_takeaway_role_swapped = False
     headline = _normalize_headline_seed(headline)
     chart_label = _trim_trailing_stopwords(_shorten_without_ellipsis(chart_label, max_chars=56))
-    takeaway = _trim_trailing_stopwords(_shorten_without_ellipsis(takeaway, max_chars=62))
+    takeaway = _normalize_takeaway_seed(takeaway)
 
     source_text = _normalize_render_text(candidate.text or candidate.title)
     source_text = re.sub(r"^@\w+:\s*", "", _strip_news_prefix(source_text), flags=re.IGNORECASE).strip()
@@ -1965,11 +2087,11 @@ def _sanitize_style_copy(
         if "tariff" in merged_context or "customs" in merged_context or "duties" in merged_context:
             takeaway = "US customs-duty collections just hit a new high."
         elif chart_hint:
-            takeaway = _shorten_without_ellipsis(_strip_news_prefix(chart_hint), max_chars=62)
+            takeaway = _normalize_takeaway_seed(_strip_news_prefix(chart_hint))
         else:
-            core = _shorten_without_ellipsis(source_text, max_chars=62)
+            core = _normalize_takeaway_seed(source_text)
             takeaway = core or "US data trend moved sharply higher."
-        takeaway = _trim_trailing_stopwords(takeaway)
+        takeaway = _normalize_takeaway_seed(takeaway)
     if _has_incoherent_headline(headline):
         merged_context = _normalize_render_text(f"{source_text} {chart_hint or ''}").lower()
         if "institutional" in merged_context and ("seller" in merged_context or "sold" in merged_context):
@@ -2019,11 +2141,11 @@ def _sanitize_style_copy(
         if _is_degenerate_copy_value(chart_label):
             chart_label = "US trend metric over time"
 
-    finalized_takeaway = _finalize_takeaway_sentence(takeaway, max_chars=68)
+    finalized_takeaway = _finalize_takeaway_sentence(takeaway)
     if not finalized_takeaway:
         rewrite_applied = True
         rewritten_takeaway, reason = _rewrite_takeaway_from_candidate(candidate)
-        finalized_takeaway = _finalize_takeaway_sentence(rewritten_takeaway, max_chars=68)
+        finalized_takeaway = _finalize_takeaway_sentence(rewritten_takeaway)
         if finalized_takeaway:
             if rewrite_reason is None:
                 if takeaway_tail_fragment:
@@ -2035,9 +2157,19 @@ def _sanitize_style_copy(
             if rewrite_reason is None:
                 rewrite_reason = "safe_fallback"
     takeaway = finalized_takeaway
+    role_headline, role_takeaway, title_takeaway_role_swapped = _enforce_title_takeaway_roles(
+        headline=headline,
+        takeaway=takeaway,
+        source_sentence=source_sentence,
+    )
+    headline = role_headline
+    takeaway = role_takeaway
+    if title_takeaway_role_swapped:
+        rewrite_applied = True
+        rewrite_reason = "title_takeaway_role_swapped"
     if rewrite_applied and rewrite_reason is None:
         rewrite_reason = "copy_rewrite"
-    return headline, chart_label, takeaway, rewrite_applied, rewrite_reason
+    return headline, chart_label, takeaway, rewrite_applied, rewrite_reason, title_takeaway_role_swapped
 
 
 def _employees_robots_takeaway(sentence: str) -> str:
@@ -2083,7 +2215,7 @@ def _synthesize_style_via_llm(candidate: Candidate) -> dict[str, str] | None:
         "Rules:\n"
         "- headline: a full grammatical sentence with terminal punctuation.\n"
         "- chart_label: <=62 chars, technical description of what chart shows.\n"
-        "- takeaway: <=68 chars, plain language.\n"
+        "- takeaway: one complete sentence with terminal punctuation.\n"
         "- No @handles. No 'BREAKING'. No ellipsis. No emojis.\n"
         "- Avoid generic labels like 'Chart Context'.\n"
         f"Post title: {title}\n"
@@ -2112,7 +2244,7 @@ def _synthesize_style_via_llm(candidate: Candidate) -> dict[str, str] | None:
 
     headline = _normalize_render_text(str(payload.get("headline") or ""))
     chart_label = _shorten_without_ellipsis(str(payload.get("chart_label") or ""), max_chars=62)
-    takeaway = _shorten_without_ellipsis(str(payload.get("takeaway") or ""), max_chars=68)
+    takeaway = _normalize_render_text(str(payload.get("takeaway") or ""))
     if not headline or not chart_label or not takeaway:
         return None
     if "@" in headline or "@" in chart_label or "@" in takeaway:
@@ -2749,6 +2881,93 @@ def _parse_x_candidates(payload: dict[str, Any], *, priority_by_handle: dict[str
     return out
 
 
+def _candidate_from_explicit_post_payload(
+    *,
+    payload: dict[str, Any],
+    handle_hint: str,
+    tweet_id: str,
+) -> Candidate | None:
+    includes = payload.get("includes") if isinstance(payload.get("includes"), dict) else {}
+    users_by_id: dict[str, dict[str, Any]] = {}
+    for user in includes.get("users", []) if isinstance(includes.get("users"), list) else []:
+        if not isinstance(user, dict):
+            continue
+        uid = str(user.get("id") or "").strip()
+        if uid:
+            users_by_id[uid] = user
+    media_by_key: dict[str, dict[str, Any]] = {}
+    for media in includes.get("media", []) if isinstance(includes.get("media"), list) else []:
+        if not isinstance(media, dict):
+            continue
+        key = str(media.get("media_key") or "").strip()
+        if key:
+            media_by_key[key] = media
+
+    rows = payload.get("data")
+    if not isinstance(rows, list):
+        return None
+    row = next((r for r in rows if isinstance(r, dict) and str(r.get("id") or "").strip() == tweet_id), None)
+    if not isinstance(row, dict):
+        return None
+    text = str(row.get("text") or "").strip()
+    if not text:
+        return None
+    author_id = str(row.get("author_id") or "").strip()
+    user = users_by_id.get(author_id, {})
+    handle = _canonical_handle(str(user.get("username") or "")) or _canonical_handle(handle_hint)
+    if not handle:
+        return None
+
+    media_url: str | None = None
+    attachments = row.get("attachments")
+    media_keys: list[str] = []
+    if isinstance(attachments, dict) and isinstance(attachments.get("media_keys"), list):
+        media_keys = [str(x) for x in attachments.get("media_keys") if str(x).strip()]
+    for mk in media_keys:
+        media = media_by_key.get(mk) or {}
+        mtype = str(media.get("type") or "")
+        if mtype != "photo":
+            continue
+        media_url = str(media.get("url") or media.get("preview_image_url") or "").strip() or None
+        if media_url:
+            break
+    if not media_url:
+        return None
+
+    metrics = row.get("public_metrics") if isinstance(row.get("public_metrics"), dict) else {}
+    engagement = 0
+    for key in ("like_count", "retweet_count", "reply_count", "quote_count"):
+        try:
+            engagement += int(metrics.get(key, 0) or 0)
+        except (TypeError, ValueError):
+            pass
+    created_at = str(row.get("created_at")) if row.get("created_at") else None
+    title = _build_x_title(handle=handle, text=text)
+    priority = 1.0
+    score = _score_candidate(
+        title=title,
+        text=text,
+        engagement=engagement,
+        source_priority=priority,
+        created_at=created_at,
+        has_image=True,
+    )
+    return Candidate(
+        candidate_key=f"x:{tweet_id}",
+        source_type="x",
+        source_id=handle,
+        author=f"@{handle}",
+        title=title,
+        text=text,
+        url=f"https://x.com/{handle}/status/{tweet_id}",
+        image_url=media_url,
+        created_at=created_at,
+        engagement=engagement,
+        source_priority=priority,
+        score=score,
+    )
+
+
 def _parse_x_post_url(post_url: str) -> tuple[str, str] | None:
     m = re.search(
         r"https?://(?:www\.)?(?:x\.com|twitter\.com)/([A-Za-z0-9_]+)/status/(\d+)",
@@ -3139,23 +3358,23 @@ def _build_style_draft(candidate: Candidate, *, iteration: int) -> StyleDraft:
     if iteration == 1 and llm_style:
         headline = _normalize_headline_seed(llm_style["headline"])
         chart_label = _shorten_without_ellipsis(llm_style["chart_label"], max_chars=62)
-        takeaway = _employees_robots_takeaway(first_core or body_text or title_text) if is_employee_robot else _shorten_without_ellipsis(llm_style["takeaway"], max_chars=68)
+        takeaway = _employees_robots_takeaway(first_core or body_text or title_text) if is_employee_robot else _normalize_takeaway_seed(llm_style["takeaway"])
         why_now = "Narrative + technical label generated for feed readability."
     elif iteration == 1:
         headline = _normalize_headline_seed(narrative)
-        takeaway = _employees_robots_takeaway(first_core or body_text or title_text) if is_employee_robot else _truncate_words(body_text or title_core or title_text, max_words=9, max_chars=68)
+        takeaway = _employees_robots_takeaway(first_core or body_text or title_text) if is_employee_robot else _normalize_takeaway_seed(first_core or body_text or title_core or title_text)
         why_now = "Clear US trend; chart carries the story."
     elif iteration == 2:
         headline = _normalize_headline_seed(_synthesize_narrative_title(subject=subject, verb="", sentence=title_core or first_core or title_text))
-        takeaway = _truncate_words(first_core or body_text, max_words=8, max_chars=62)
+        takeaway = _normalize_takeaway_seed(first_core or body_text or title_core or title_text)
         why_now = "Fast read in a feed."
     else:
         anchor = _normalize_headline_seed(subject or first_core or title_core or title_text)
         headline = anchor or "US trend is shifting."
-        takeaway = _truncate_words(body_text or title_core or title_text, max_words=7, max_chars=56)
+        takeaway = _normalize_takeaway_seed(first_core or body_text or title_core or title_text)
         why_now = "Simple trend read."
 
-    headline, chart_label, takeaway, rewrite_applied, rewrite_reason = _sanitize_style_copy(
+    headline, chart_label, takeaway, rewrite_applied, rewrite_reason, role_swapped = _sanitize_style_copy(
         candidate=candidate,
         headline=headline or "US Trend Snapshot",
         chart_label=chart_label or "Chart Context",
@@ -3171,9 +3390,12 @@ def _build_style_draft(candidate: Candidate, *, iteration: int) -> StyleDraft:
         "headline_complete_sentence": _is_complete_headline_sentence(headline, source_text=first_core or title_core or title_text),
         "headline_tail_complete": _tail_complete(headline),
         "headline_locked_terms_ok": _headline_locked_terms_preserved(headline, source_text=first_core or title_core or title_text),
-        "takeaway_short": bool(takeaway) and len(takeaway) <= 68,
+        "takeaway_short": bool(takeaway),
         "takeaway_complete_sentence": _is_complete_sentence(takeaway),
+        "takeaway_single_sentence": _is_single_sentence_takeaway(takeaway),
         "takeaway_tail_complete": _tail_complete(takeaway),
+        "title_takeaway_role_ok": _title_takeaway_role_ok(headline=headline, takeaway=takeaway),
+        "title_takeaway_role_swapped": bool(role_swapped),
         "headline_non_degenerate": not _is_degenerate_copy_value(headline),
         "chart_label_non_degenerate": not _is_degenerate_copy_value(chart_label),
         "trend_explicit": _contains_trend_signal(f"{candidate.title} {candidate.text}"),
@@ -3221,8 +3443,12 @@ def _style_copy_publish_issues(style_draft: StyleDraft) -> list[str]:
         issues.append("headline_locked_term_missing")
     if not _is_complete_sentence(style_draft.takeaway):
         issues.append("takeaway_incomplete_sentence")
+    if not _is_single_sentence_takeaway(style_draft.takeaway):
+        issues.append("takeaway_not_single_sentence")
     if not _tail_complete(style_draft.takeaway):
         issues.append("takeaway_tail_fragment")
+    if not _title_takeaway_role_ok(headline=style_draft.headline, takeaway=style_draft.takeaway):
+        issues.append("title_takeaway_role_invalid")
     if _is_degenerate_copy_value(style_draft.headline):
         issues.append("headline_degenerate")
     if _is_degenerate_copy_value(style_draft.chart_label):
@@ -3368,6 +3594,51 @@ def _fit_headline_text(
     return wrapped, line_count, (h_bb.x1 <= max_x)
 
 
+def _fit_takeaway_text(
+    *,
+    fig,
+    takeaway_obj,
+    takeaway_text: str,
+    max_lines: int = TAKEAWAY_MAX_RENDER_LINES,
+    min_font_size: float = TAKEAWAY_MIN_FONT_SIZE,
+    max_width_ratio: float = 0.95,
+) -> tuple[str, int, bool]:
+    normalized = _normalize_render_text(takeaway_text)
+    if not normalized:
+        takeaway_obj.set_text("")
+        return "", 1, False
+    start_size = float(takeaway_obj.get_fontsize())
+    if start_size < min_font_size:
+        start_size = min_font_size
+    font_steps = max(0, int(round(start_size - min_font_size)))
+    font_sizes = [start_size - float(step) for step in range(font_steps + 1)]
+    if not font_sizes or abs(font_sizes[-1] - min_font_size) > 0.001:
+        font_sizes.append(min_font_size)
+
+    for font_size in font_sizes:
+        for line_cap in range(1, max_lines + 1):
+            wrapped, line_count = _wrap_text_to_max_lines(normalized, max_lines=line_cap)
+            takeaway_obj.set_fontsize(float(font_size))
+            takeaway_obj.set_text(f"Takeaway: {wrapped}")
+            fig.canvas.draw()
+            renderer = fig.canvas.get_renderer()
+            fig_bbox = fig.bbox
+            max_x = fig_bbox.x0 + (fig_bbox.width * max_width_ratio)
+            bb = takeaway_obj.get_window_extent(renderer=renderer)
+            if bb.x1 <= max_x:
+                return wrapped, line_count, True
+
+    wrapped, line_count = _wrap_text_to_max_lines(normalized, max_lines=max_lines)
+    takeaway_obj.set_fontsize(float(min_font_size))
+    takeaway_obj.set_text(f"Takeaway: {wrapped}")
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    fig_bbox = fig.bbox
+    max_x = fig_bbox.x0 + (fig_bbox.width * max_width_ratio)
+    bb = takeaway_obj.get_window_extent(renderer=renderer)
+    return wrapped, line_count, (bb.x1 <= max_x)
+
+
 def _render_source_snip_card(
     *,
     candidate: Candidate,
@@ -3396,7 +3667,7 @@ def _render_source_snip_card(
 
     source_sentence = _extract_first_sentence(candidate.text or candidate.title)
     headline_text = _normalize_render_text(style_draft.headline)
-    takeaway_text = _shorten_without_ellipsis(_normalize_render_text(style_draft.takeaway), max_chars=68)
+    takeaway_text = _finalize_takeaway_sentence(style_draft.takeaway) or _normalize_render_text(style_draft.takeaway)
 
     headline_obj = fig.text(
         0.05,
@@ -3452,7 +3723,7 @@ def _render_source_snip_card(
         spine.set_color("#E1E4EA")
         spine.set_linewidth(1.2)
 
-    fig.text(
+    takeaway_obj = fig.text(
         0.05,
         0.115,
         f"Takeaway: {takeaway_text}",
@@ -3462,6 +3733,29 @@ def _render_source_snip_card(
         weight="bold",
         va="top",
     )
+    _, takeaway_line_count, takeaway_fits = _fit_takeaway_text(
+        fig=fig,
+        takeaway_obj=takeaway_obj,
+        takeaway_text=takeaway_text,
+        max_lines=TAKEAWAY_MAX_RENDER_LINES,
+        min_font_size=TAKEAWAY_MIN_FONT_SIZE,
+    )
+    if not takeaway_fits:
+        shortened_takeaway = _semantic_shorten_sentence(takeaway_text, max_words=14)
+        if shortened_takeaway:
+            takeaway_text = shortened_takeaway
+            _, takeaway_line_count, takeaway_fits = _fit_takeaway_text(
+                fig=fig,
+                takeaway_obj=takeaway_obj,
+                takeaway_text=takeaway_text,
+                max_lines=TAKEAWAY_MAX_RENDER_LINES,
+                min_font_size=TAKEAWAY_MIN_FONT_SIZE,
+            )
+    if not takeaway_fits:
+        raise XChartError("Takeaway layout overflow after 2-line wrap and rewrite.")
+    if qa_sink is not None:
+        qa_sink["takeaway_wrapped_line_count"] = int(takeaway_line_count)
+
     fig.text(
         0.05,
         0.045,
@@ -4032,9 +4326,30 @@ def _render_chart_of_day_style(
             qa_sink["x_axis_labels_present"] = len(x_non_empty) >= 4
             qa_sink["y_axis_labels_present"] = len(y_non_empty) >= 3
 
-    takeaway_text = _shorten_without_ellipsis(_normalize_render_text(style_draft.takeaway), max_chars=68)
-    takeaway_lines = "\n".join(textwrap.wrap(f"Takeaway: {takeaway_text}", width=90)[:1])
-    takeaway_obj = fig.text(0.05, 0.118, takeaway_lines, fontsize=10.6, color="#1F2430", family=COATUE_FONT_FAMILY, weight="bold", va="top")
+    takeaway_text = _finalize_takeaway_sentence(style_draft.takeaway) or _normalize_render_text(style_draft.takeaway)
+    takeaway_obj = fig.text(0.05, 0.118, f"Takeaway: {takeaway_text}", fontsize=10.6, color="#1F2430", family=COATUE_FONT_FAMILY, weight="bold", va="top")
+    _, takeaway_line_count, takeaway_fits = _fit_takeaway_text(
+        fig=fig,
+        takeaway_obj=takeaway_obj,
+        takeaway_text=takeaway_text,
+        max_lines=TAKEAWAY_MAX_RENDER_LINES,
+        min_font_size=TAKEAWAY_MIN_FONT_SIZE,
+    )
+    if not takeaway_fits:
+        shortened_takeaway = _semantic_shorten_sentence(takeaway_text, max_words=14)
+        if shortened_takeaway:
+            takeaway_text = shortened_takeaway
+            _, takeaway_line_count, takeaway_fits = _fit_takeaway_text(
+                fig=fig,
+                takeaway_obj=takeaway_obj,
+                takeaway_text=takeaway_text,
+                max_lines=TAKEAWAY_MAX_RENDER_LINES,
+                min_font_size=TAKEAWAY_MIN_FONT_SIZE,
+            )
+    if not takeaway_fits:
+        raise XChartError("Takeaway layout overflow after 2-line wrap and rewrite.")
+    if qa_sink is not None:
+        qa_sink["takeaway_wrapped_line_count"] = int(takeaway_line_count)
     source_obj = fig.text(0.05, 0.045, f"Source: {candidate.url}", fontsize=9, color="#4B5563", family=COATUE_FONT_FAMILY)
 
     # Prevent overlapping labels by shrinking header/plot region if needed.
@@ -4088,7 +4403,11 @@ def _post_winner_to_slack(
     source_path = _write_source_chart_image(candidate=candidate, slot_key=slot_key)
     artifact_path = source_path
     render_mode = "source-snip"
-    render_qa: dict[str, Any] = {"render_mode": render_mode, "headline_wrapped_line_count": 1}
+    render_qa: dict[str, Any] = {
+        "render_mode": render_mode,
+        "headline_wrapped_line_count": 1,
+        "takeaway_wrapped_line_count": 1,
+    }
     try:
         render_result = _render_source_snip_card(
             candidate=candidate,
@@ -4113,6 +4432,11 @@ def _post_winner_to_slack(
                     source_text=source_sentence,
                 )
                 updated_checks["headline_non_degenerate"] = not _is_degenerate_copy_value(rendered_headline)
+                updated_checks["takeaway_single_sentence"] = _is_single_sentence_takeaway(style_draft.takeaway)
+                updated_checks["title_takeaway_role_ok"] = _title_takeaway_role_ok(
+                    headline=rendered_headline,
+                    takeaway=style_draft.takeaway,
+                )
                 style_draft = replace(
                     style_draft,
                     headline=rendered_headline,
@@ -4127,7 +4451,11 @@ def _post_winner_to_slack(
         logger.warning("source snip card render failed, falling back to raw snip: %s", exc)
         artifact_path = source_path
         render_mode = "source-snip"
-        render_qa = {"render_mode": render_mode, "headline_wrapped_line_count": 1}
+        render_qa = {
+            "render_mode": render_mode,
+            "headline_wrapped_line_count": 1,
+            "takeaway_wrapped_line_count": 1,
+        }
     file_size = artifact_path.stat().st_size if artifact_path.exists() else 0
     source_sentence = _extract_first_sentence(candidate.text or candidate.title)
     review_checks = {
@@ -4140,7 +4468,10 @@ def _post_winner_to_slack(
         "headline_locked_terms_ok": _headline_locked_terms_preserved(style_draft.headline, source_text=source_sentence),
         "headline_wrapped_line_count": int(render_qa.get("headline_wrapped_line_count", 1)),
         "takeaway_complete_sentence": _is_complete_sentence(style_draft.takeaway),
+        "takeaway_single_sentence": _is_single_sentence_takeaway(style_draft.takeaway),
         "takeaway_tail_complete": _tail_complete(style_draft.takeaway),
+        "takeaway_wrapped_line_count": int(render_qa.get("takeaway_wrapped_line_count", 1)),
+        "title_takeaway_role_ok": _title_takeaway_role_ok(headline=style_draft.headline, takeaway=style_draft.takeaway),
         "headline_non_degenerate": not _is_degenerate_copy_value(style_draft.headline),
         "chart_label_non_degenerate": not _is_degenerate_copy_value(style_draft.chart_label),
     }
@@ -4156,7 +4487,7 @@ def _post_winner_to_slack(
         "artifact_size_bytes": int(file_size),
     }
     clean_author = _normalize_render_text(candidate.author)
-    clean_takeaway = _shorten_without_ellipsis(_normalize_render_text(style_draft.takeaway), max_chars=68)
+    clean_takeaway = _normalize_render_text(style_draft.takeaway)
     title_text = _normalize_render_text(convention_name or "Coatue Chart")
     text_lines = [
         f"*{title_text}*",
@@ -4200,6 +4531,7 @@ def _post_winner_to_slack(
                     "checks": style_draft.checks,
                     "copy_rewrite_applied": bool(style_draft.copy_rewrite_applied),
                     "copy_rewrite_reason": style_draft.copy_rewrite_reason,
+                    "title_takeaway_role_swapped": bool(style_draft.checks.get("title_takeaway_role_swapped", False)),
                 },
                 "post_publish_review": review,
             }
@@ -4254,6 +4586,7 @@ def run_chart_scout_once(
             "copy_rewrite_applied": False,
             "copy_rewrite_reason": None,
             "candidate_fallback_used": False,
+            "title_takeaway_role_swapped": False,
             "now_local": now_local.isoformat(),
             "windows": windows_text,
             "candidates_scanned": len(all_candidates),
@@ -4270,6 +4603,7 @@ def run_chart_scout_once(
             "copy_rewrite_applied": False,
             "copy_rewrite_reason": None,
             "candidate_fallback_used": False,
+            "title_takeaway_role_swapped": False,
             "candidates_scanned": len(all_candidates),
             "candidates_observed": observed_count,
             "pool_pruned": pruned_count,
@@ -4290,6 +4624,7 @@ def run_chart_scout_once(
             "copy_rewrite_applied": False,
             "copy_rewrite_reason": None,
             "candidate_fallback_used": False,
+            "title_takeaway_role_swapped": False,
             "candidates_scanned": len(all_candidates),
             "candidates_observed": observed_count,
             "pool_candidates": len(ranking_pool),
@@ -4304,6 +4639,7 @@ def run_chart_scout_once(
     candidate_fallback_used = False
     copy_rewrite_applied = False
     copy_rewrite_reason: str | None = None
+    title_takeaway_role_swapped = False
 
     for idx, candidate in enumerate(candidate_order):
         draft = _select_style_draft(candidate)
@@ -4318,6 +4654,7 @@ def run_chart_scout_once(
         candidate_fallback_used = idx > 0
         copy_rewrite_applied = bool(draft.copy_rewrite_applied)
         copy_rewrite_reason = draft.copy_rewrite_reason
+        title_takeaway_role_swapped = bool(draft.checks.get("title_takeaway_role_swapped", False))
         break
 
     if winner is None or style_draft is None:
@@ -4331,6 +4668,7 @@ def run_chart_scout_once(
             "copy_rewrite_applied": bool(top_draft.copy_rewrite_applied),
             "copy_rewrite_reason": top_draft.copy_rewrite_reason or "headline_unrecoverable",
             "candidate_fallback_used": False,
+            "title_takeaway_role_swapped": bool(top_draft.checks.get("title_takeaway_role_swapped", False)),
             "publish_issues": top_issues,
             "top_candidate": {
                 "source": f"{top_choice.source_type}:{top_choice.source_id}",
@@ -4371,6 +4709,7 @@ def run_chart_scout_once(
                 f"- style_score: `{style_draft.score:.1f}/7`",
                 f"- copy_rewrite_applied: `{copy_rewrite_applied}`",
                 f"- copy_rewrite_reason: `{copy_rewrite_reason or 'none'}`",
+                f"- title_takeaway_role_swapped: `{title_takeaway_role_swapped}`",
                 "",
                 "## Notes",
                 _normalize_render_text(winner.text),
@@ -4396,6 +4735,7 @@ def run_chart_scout_once(
             "copy_rewrite_applied": copy_rewrite_applied,
             "copy_rewrite_reason": copy_rewrite_reason,
             "candidate_fallback_used": candidate_fallback_used,
+            "title_takeaway_role_swapped": title_takeaway_role_swapped,
             "winner": {
                 "source": f"{winner.source_type}:{winner.source_id}",
                 "author": winner.author,
@@ -4430,6 +4770,7 @@ def run_chart_scout_once(
         "copy_rewrite_applied": copy_rewrite_applied,
         "copy_rewrite_reason": copy_rewrite_reason,
         "candidate_fallback_used": candidate_fallback_used,
+        "title_takeaway_role_swapped": title_takeaway_role_swapped,
         "post": post,
         "winner": {
             "source": f"{winner.source_type}:{winner.source_id}",
@@ -4476,7 +4817,13 @@ def run_chart_for_post_url(
         if candidates:
             winner = candidates[0]
         else:
-            winner = _fetch_vxtwitter_post_candidate(handle=handle, tweet_id=tweet_id)
+            winner = _candidate_from_explicit_post_payload(
+                payload=payload,
+                handle_hint=handle,
+                tweet_id=tweet_id,
+            )
+            if winner is None:
+                winner = _fetch_vxtwitter_post_candidate(handle=handle, tweet_id=tweet_id)
             if winner is None:
                 raise XChartError("No chart candidate found in that X post (missing image or inaccessible tweet).")
 
@@ -4498,6 +4845,11 @@ def run_chart_for_post_url(
             source_text=source_sentence,
         )
         checks["headline_non_degenerate"] = not _is_degenerate_copy_value(overridden_headline)
+        checks["title_takeaway_role_ok"] = _title_takeaway_role_ok(
+            headline=overridden_headline,
+            takeaway=style_draft.takeaway,
+        )
+        checks["title_takeaway_role_swapped"] = bool(checks.get("title_takeaway_role_swapped", False))
         style_draft = replace(
             style_draft,
             headline=overridden_headline,
@@ -4508,6 +4860,7 @@ def run_chart_for_post_url(
         )
     copy_rewrite_applied = bool(style_draft.copy_rewrite_applied)
     copy_rewrite_reason = style_draft.copy_rewrite_reason
+    title_takeaway_role_swapped = bool(style_draft.checks.get("title_takeaway_role_swapped", False))
     copy_issues = _style_copy_publish_issues(style_draft)
     if copy_issues:
         raise XChartError(
@@ -4539,6 +4892,7 @@ def run_chart_for_post_url(
         "copy_rewrite_applied": copy_rewrite_applied,
         "copy_rewrite_reason": copy_rewrite_reason,
         "candidate_fallback_used": False,
+        "title_takeaway_role_swapped": title_takeaway_role_swapped,
         "post": post,
         "winner": {
             "source": f"{winner.source_type}:{winner.source_id}",

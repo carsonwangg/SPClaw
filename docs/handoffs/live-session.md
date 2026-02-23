@@ -3,6 +3,41 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-23, title/takeaway role + sentence integrity)
+- Fixed title/takeaway inversion class in X chart posts:
+  - title is now enforced as the concise sentence
+  - takeaway is enforced as the fuller contextual sentence
+  - deterministic role correction added (`title_takeaway_role_swapped`)
+- Removed post/render-time takeaway clipping that was stripping punctuation and causing fragments.
+- Added single-sentence takeaway guardrails:
+  - new validator check for one complete sentence (`takeaway_single_sentence`)
+  - malformed comparative fragments (`to lowest`/`to highest`) are rejected and rewritten
+- Added renderer takeaway fit behavior:
+  - wrap up to 2 lines
+  - shrink font to floor
+  - one semantic shorten pass if needed
+  - fail publish if still not fit
+- Added diagnostics in outputs/reviews:
+  - `title_takeaway_role_swapped`
+  - `takeaway_single_sentence`
+  - `takeaway_wrapped_line_count`
+- Explicit URL flow improved:
+  - if strict candidate parse filters out the post, fallback now builds a candidate directly from the fetched tweet payload before using vxtwitter fallback
+
+### Validation (this session)
+- Targeted tests:
+  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_x_chart_daily.py /opt/coatue-claw/tests/test_slack_x_chart_intent.py`
+  - Result: `74 passed`
+- Live post check:
+  - `run-post-url https://x.com/KobeissiLetter/status/2026040229535047769`
+  - posted successfully with `copy_rewrite_reason=title_takeaway_role_swapped` and review checks passed (`takeaway_single_sentence=true`, `title_takeaway_role_ok=true`)
+- Full suite smoke:
+  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q`
+  - Result: `3` pre-existing Spencer change-tracker failures (unchanged):
+    - `tests/test_spencer_change_digest.py::test_run_once_dry_run_includes_carson_label`
+    - `tests/test_spencer_change_log.py::test_is_spencer_user_defaults`
+    - `tests/test_spencer_change_log.py::test_requester_label_defaults`
+
 ## Update (2026-02-23, headline truncation guardrails)
 - Implemented headline truncation fix for X chart posts by removing hard character clipping from headline generation and shifting to layout-based fitting in render paths.
 - Headline policy is now a complete sentence (terminal punctuation + action verb), with locked finance term integrity checks (for example `market cap`, `enterprise value`, `free cash flow`).

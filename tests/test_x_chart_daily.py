@@ -9,6 +9,7 @@ import types
 from coatue_claw.x_chart_daily import (
     Candidate,
     RebuiltBars,
+    StyleDraft,
     XChartStore,
     XChartError,
     _build_x_title,
@@ -25,6 +26,7 @@ from coatue_claw.x_chart_daily import (
     _is_complete_headline_phrase,
     _is_complete_headline_sentence,
     _is_complete_sentence,
+    _is_single_sentence_takeaway,
     _is_us_relevant_post,
     _normalize_render_text,
     _parse_windows,
@@ -33,6 +35,7 @@ from coatue_claw.x_chart_daily import (
     _post_publish_checklist,
     _post_winner_to_slack,
     _render_chart_of_day_style,
+    _render_source_snip_card,
     _select_style_draft,
     _shorten_without_ellipsis,
     _slack_tokens,
@@ -161,8 +164,8 @@ def test_run_chart_scout_window_uses_hourly_pool_since_last_slot(tmp_path: Path,
         source_type="x",
         source_id="fiscal_AI",
         author="@fiscal_AI",
-        title="High score trend",
-        text="High score trend",
+        title="US software demand is accelerating as enterprise budgets rebound.",
+        text="US software demand is accelerating as enterprise budgets rebound.",
         url="https://x.com/fiscal_AI/status/high",
         image_url="https://example.com/high.png",
         created_at=datetime.now(UTC).isoformat(),
@@ -175,8 +178,8 @@ def test_run_chart_scout_window_uses_hourly_pool_since_last_slot(tmp_path: Path,
         source_type="x",
         source_id="KobeissiLetter",
         author="@KobeissiLetter",
-        title="Lower score trend",
-        text="Lower score trend",
+        title="US credit conditions are tightening as risk appetite cools.",
+        text="US credit conditions are tightening as risk appetite cools.",
         url="https://x.com/KobeissiLetter/status/low",
         image_url="https://example.com/low.png",
         created_at=datetime.now(UTC).isoformat(),
@@ -345,19 +348,19 @@ def test_run_chart_scout_falls_back_when_top_candidate_headline_is_incomplete(tm
     monkeypatch.setattr(
         "coatue_claw.x_chart_daily._synthesize_style_via_llm",
         lambda candidate: (
-            {
-                "headline": "U.S. Housing Market Home Sellers now is",
-                "chart_label": "U.S. housing sellers versus buyers",
-                "takeaway": "US housing sellers now outnumber buyers.",
-            }
-            if candidate.candidate_key == "x:bad-headline"
-            else {
-                "headline": "US housing sellers now outnumber buyers",
-                "chart_label": "U.S. housing sellers versus buyers",
-                "takeaway": "US housing sellers now outnumber buyers.",
-            }
-        ),
-    )
+                {
+                    "headline": "U.S. Housing Market Home Sellers now is",
+                    "chart_label": "U.S. housing sellers versus buyers",
+                    "takeaway": "US housing sellers now outnumber buyers.",
+                }
+                if candidate.candidate_key == "x:bad-headline"
+                else {
+                    "headline": "US housing sellers now outnumber buyers",
+                    "chart_label": "U.S. housing sellers versus buyers",
+                    "takeaway": "US housing sellers now outnumber buyers as buyer demand cools.",
+                }
+            ),
+        )
     monkeypatch.setattr(
         "coatue_claw.x_chart_daily._rewrite_headline_from_candidate",
         lambda candidate: ("", "headline_unrecoverable") if candidate.candidate_key == "x:bad-headline" else ("US housing sellers outnumber buyers", "headline_rewritten"),
@@ -820,7 +823,7 @@ def test_style_draft_prefers_simple_feed_like_copy() -> None:
     assert "breaking" not in draft.headline.lower()
     assert draft.chart_label
     assert _is_complete_headline_sentence(draft.headline) is True
-    assert len(draft.takeaway) <= 68
+    assert _is_single_sentence_takeaway(draft.takeaway) is True
     assert draft.score >= 6.0
 
 
@@ -874,6 +877,70 @@ def test_post_winner_uploads_file_in_initial_message(monkeypatch, tmp_path: Path
     assert "Chart label:" not in str(upload_calls[0]["initial_comment"])
     assert "thread_ts" not in upload_calls[0]
     assert "post_publish_review" in result
+
+
+def test_post_winner_preserves_takeaway_punctuation_in_slack_comment(monkeypatch, tmp_path: Path) -> None:
+    candidate = Candidate(
+        candidate_key="x:takeaway-punct",
+        source_type="x",
+        source_id="KobeissiLetter",
+        author="@KobeissiLetter",
+        title="US stocks erase nearly -$800 billion in market cap",
+        text="US stocks erase nearly -$800 billion in market cap and trade war headlines return.",
+        url="https://x.com/KobeissiLetter/status/2026040229535047769",
+        image_url="https://example.com/chart.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=450,
+        source_priority=1.6,
+        score=98.0,
+    )
+    styled = tmp_path / "styled.png"
+    styled.write_bytes(b"fake")
+
+    upload_calls: list[dict[str, object]] = []
+
+    class FakeWebClient:
+        def __init__(self, token: str) -> None:
+            self.token = token
+
+        def files_upload_v2(self, **kwargs):
+            upload_calls.append(kwargs)
+            return {"ok": True, "file": {"id": "F123"}}
+
+    class FakeSlackApiError(Exception):
+        def __init__(self, error: str) -> None:
+            self.response = {"error": error}
+            super().__init__(error)
+
+    monkeypatch.setitem(sys.modules, "slack_sdk", types.SimpleNamespace(WebClient=FakeWebClient))
+    monkeypatch.setitem(sys.modules, "slack_sdk.errors", types.SimpleNamespace(SlackApiError=FakeSlackApiError))
+    monkeypatch.setattr("coatue_claw.x_chart_daily._slack_tokens", lambda: ["xoxb-test"])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._write_source_chart_image", lambda **kwargs: styled)
+    monkeypatch.setattr("coatue_claw.x_chart_daily._render_source_snip_card", lambda **kwargs: styled)
+
+    style_draft = StyleDraft(
+        headline="US stocks erase nearly -$800 billion in market cap.",
+        chart_label="US equities heatmap snapshot",
+        takeaway="US stocks erase nearly -$800 billion in market cap and trade war headlines return.",
+        why_now="Clear US trend; chart carries the story.",
+        iteration=1,
+        checks={
+            "title_takeaway_role_ok": True,
+            "title_takeaway_role_swapped": True,
+            "takeaway_single_sentence": True,
+        },
+        score=9.0,
+    )
+    _post_winner_to_slack(
+        candidate=candidate,
+        channel="C123",
+        slot_key="manual-comment-punct",
+        windows_text="09:00,12:00,18:00",
+        style_draft=style_draft,
+    )
+    assert len(upload_calls) == 1
+    initial_comment = str(upload_calls[0]["initial_comment"])
+    assert "- Key takeaway: US stocks erase nearly -$800 billion in market cap and trade war headlines return." in initial_comment
 
 
 def test_shorten_without_ellipsis_removes_three_dots() -> None:
@@ -943,6 +1010,14 @@ def test_takeaway_sentence_finalizer_returns_complete_sentence() -> None:
     assert _is_complete_sentence(finalized_good) is True
 
 
+def test_takeaway_sentence_finalizer_normalizes_multi_sentence_to_one_sentence() -> None:
+    finalized = _finalize_takeaway_sentence(
+        "US stocks erase nearly -$800 billion in market cap and futures slide. Trade war headlines return.",
+    )
+    assert finalized == "US stocks erase nearly -$800 billion in market cap and futures slide."
+    assert _is_single_sentence_takeaway(finalized) is True
+
+
 def test_takeaway_finalizer_returns_empty_for_clipped_initial_fragment() -> None:
     finalized = _finalize_takeaway_sentence("US stock market futures open lower in their initial setup", max_chars=52)
     assert finalized == ""
@@ -982,12 +1057,15 @@ def test_post_publish_checklist_passes_for_clean_rebuilt_chart(tmp_path: Path) -
             "x_axis_labels_present": True,
             "y_axis_labels_present": True,
             "grouped_two_series": False,
+            "takeaway_wrapped_line_count": 1,
         },
     )
     assert review["passed"] is True
     assert review["failed"] == []
     assert review["checks"]["headline_tail_complete"] is True
     assert review["checks"]["takeaway_tail_complete"] is True
+    assert review["checks"]["takeaway_single_sentence"] is True
+    assert review["checks"]["title_takeaway_role_ok"] is True
 
 
 def test_review_feedback_penalizes_failing_source(tmp_path: Path, monkeypatch) -> None:
@@ -1405,11 +1483,45 @@ def test_run_chart_for_post_url_rewrites_takeaway_but_keeps_requested_url(monkey
         "headline_tail_fragment_rewritten",
         "headline_sentence_rewritten",
         "takeaway_tail_fragment_rewritten",
+        "title_takeaway_role_swapped",
     }
     assert captured["candidate_url"] == "https://x.com/Barchart/status/2025715989384663396"
     assert _is_complete_headline_phrase(str(captured["headline"])) is True
     assert _is_complete_headline_sentence(str(captured["headline"])) is True
     assert _is_complete_sentence(str(captured["takeaway"])) is True
+    assert _is_single_sentence_takeaway(str(captured["takeaway"])) is True
+
+
+def test_style_draft_swaps_title_and_takeaway_roles_for_market_cap_copy(monkeypatch) -> None:
+    candidate = Candidate(
+        candidate_key="x:role-swap-market-cap",
+        source_type="x",
+        source_id="KobeissiLetter",
+        author="@KobeissiLetter",
+        title="@KobeissiLetter: US stocks erase nearly -$800 billion in market cap AI disruption fears spread and trade war headlines return.",
+        text="US stocks erase nearly -$800 billion in market cap AI disruption fears spread and trade war headlines return.",
+        url="https://x.com/KobeissiLetter/status/2026040229535047769",
+        image_url="https://example.com/chart.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=500,
+        source_priority=1.2,
+        score=90.0,
+    )
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._synthesize_style_via_llm",
+        lambda _candidate: {
+            "headline": "US stocks erase nearly -$800 billion in market cap AI disruption fears spread and trade war headlines return.",
+            "chart_label": "US equities sector heatmap snapshot",
+            "takeaway": "US stocks erase nearly -$800 billion in market cap",
+        },
+    )
+    draft = _select_style_draft(candidate)
+    assert draft.headline == "US stocks erase nearly -$800 billion in market cap."
+    assert draft.takeaway == "US stocks erase nearly -$800 billion in market cap AI disruption fears spread and trade war headlines return."
+    assert draft.checks["title_takeaway_role_ok"] is True
+    assert draft.checks["title_takeaway_role_swapped"] is True
+    assert _is_single_sentence_takeaway(draft.takeaway) is True
+    assert draft.copy_rewrite_reason == "title_takeaway_role_swapped"
 
 
 def test_run_chart_for_post_url_errors_when_headline_unrecoverable(monkeypatch, tmp_path: Path) -> None:
@@ -1644,6 +1756,53 @@ def test_post_winner_does_not_require_rebuild(monkeypatch, tmp_path: Path) -> No
     assert result["ok"] is True
     assert result["file_id"] == "F111"
     assert len(upload_calls) == 1
+
+
+def test_render_source_snip_card_wraps_takeaway_to_two_lines(monkeypatch, tmp_path: Path) -> None:
+    try:
+        import numpy as np
+        import matplotlib.pyplot as plt
+    except Exception:
+        return
+
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    source_path = tmp_path / "source.png"
+    plt.imsave(str(source_path), np.ones((240, 420, 3), dtype=float))
+
+    candidate = Candidate(
+        candidate_key="x:takeaway-wrap",
+        source_type="x",
+        source_id="KobeissiLetter",
+        author="@KobeissiLetter",
+        title="US stocks erase nearly -$800 billion in market cap.",
+        text="US stocks erase nearly -$800 billion in market cap and trade war headlines return.",
+        url="https://x.com/KobeissiLetter/status/2026040229535047769",
+        image_url="https://example.com/chart.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=300,
+        source_priority=1.2,
+        score=90.0,
+    )
+    style_draft = StyleDraft(
+        headline="US stocks erase nearly -$800 billion in market cap.",
+        chart_label="US equities heatmap snapshot",
+        takeaway="US stocks erase nearly -$800 billion in market cap and trade war headlines return as AI disruption fears spread.",
+        why_now="Clear US trend.",
+        iteration=1,
+        checks={"takeaway_single_sentence": True, "title_takeaway_role_ok": True},
+        score=8.0,
+    )
+    qa: dict[str, object] = {}
+    out_path, _ = _render_source_snip_card(
+        candidate=candidate,
+        slot_key="manual-takeaway-wrap",
+        style_draft=style_draft,
+        source_path=source_path,
+        qa_sink=qa,
+    )
+    assert out_path.exists()
+    assert int(qa.get("takeaway_wrapped_line_count", 0)) >= 1
+    assert int(qa.get("takeaway_wrapped_line_count", 0)) <= 2
 
 
 def test_render_chart_rejects_screenshot_fallback_even_if_env_disabled(monkeypatch, tmp_path: Path) -> None:
