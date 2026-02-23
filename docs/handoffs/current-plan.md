@@ -51,6 +51,11 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
     - CLI `claw market-daily debug-catalyst <TICKER> [--slot open|close]`
     - Slack `md debug <TICKER> [open|close]`
   - tests updated (`tests/test_market_daily.py`) and passing
+- Post-fix tuning added:
+  - web fallback now also triggers when directional evidence is weak or source diversity is narrow
+  - catalyst ranking now applies move-direction bonuses (up/down-aware)
+  - final one-line reason now prefers the selected evidence source path
+  - regression tests added for negative-move selection and fallback trigger behavior
 - MD output copy contract refined:
   - no universe line in Slack post
   - slot copy says `3 biggest movers this morning/afternoon`

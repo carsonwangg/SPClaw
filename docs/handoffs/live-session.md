@@ -31,6 +31,12 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `PYTHONPATH=src pytest -q tests/test_market_daily.py tests/test_launchd_runtime.py tests/test_slack_channel_access.py tests/test_slack_pipeline.py tests/test_slack_routing.py`
     - `26 passed`
   - local dry-run to `/opt/coatue-claw-data` cannot execute from laptop sandbox due path permission; runtime verification is required on Mac mini.
+- Follow-on MD tuning shipped after initial reliability patch:
+  - fallback now triggers on weak directional signal and low source diversity (not only low score)
+  - catalyst selection now applies move-direction-aware ranking (down movers prefer down-cause evidence)
+  - reason-line fallback now respects the chosen evidence source instead of blindly preferring Yahoo headline order
+  - added regression tests for direction-aware fallback and negative-move evidence selection
+  - full suite validation after tuning: `PYTHONPATH=src pytest -q` => `149 passed`
 
 ## Current Status (2026-02-20)
 - MD Slack output style tightened for readability and user-facing copy:
