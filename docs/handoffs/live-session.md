@@ -923,3 +923,28 @@ Then confirm bot returns:
 ### Immediate Next Steps
 1. Deploy/restart on mini and run one `run-post-url` smoke test.
 2. Confirm Slack output in `#charting` includes title + takeaway + source link, with no chart-label line.
+
+## 2026-02-23 - MD Catalyst Fix For APP SEC-Probe Attribution
+- Issue observed: APP mover line defaulted to generic/fallback wording and missed clear SEC-probe narrative visible in top web coverage.
+- Root cause:
+  - no dedicated `regulatory/probe` cause cluster;
+  - Barron's (`barrons.com`) was not treated as a quality cause domain;
+  - APP-specific web retrieval queries were too generic.
+- Code updates in `/Users/carsonwang/CoatueClaw/src/coatue_claw/market_daily.py`:
+  - added APP alias overrides (`AppLovin`, `AppLovin Corporation`, `AppLovin Corp`);
+  - added `regulatory_probe` driver cluster + event phrase (`reports of an active SEC probe.`);
+  - added cluster priority bonus for `regulatory_probe`;
+  - added `barrons.com` to both domain weights and quality-domain allowlist;
+  - expanded APP web queries (`sec probe`, `regulatory probe`, `short seller report`);
+  - boosted directional/decisive recognition for probe/investigation/regulatory wording.
+- Tests added in `/Users/carsonwang/CoatueClaw/tests/test_market_daily.py`:
+  - `test_regulatory_probe_cluster_extraction_maps_keywords`
+  - `test_barrons_domain_counts_as_quality_source`
+  - `test_app_regulatory_probe_cluster_outputs_specific_reason`
+- Validation run:
+  - `PYTHONPATH=src python3 -m pytest tests/test_market_daily.py` -> `31 passed`.
+
+### Immediate Next Steps
+1. Pull latest `main` on Mac mini and restart runtime (`make openclaw-restart`).
+2. Run `md debug APP` (or CLI `claw market-daily debug-catalyst APP --slot open`) and confirm selected cluster `regulatory_probe`.
+3. Run `md now --force` in Slack and verify APP reason line explicitly names SEC-probe overhang when corroborated evidence is present.

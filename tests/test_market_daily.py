@@ -542,6 +542,19 @@ def test_anthropic_cluster_extraction_maps_keywords() -> None:
     assert "anthropic_claude_cyber" in keys
 
 
+def test_regulatory_probe_cluster_extraction_maps_keywords() -> None:
+    from coatue_claw import market_daily as md
+
+    keys = md._extract_driver_keywords("AppLovin shares slid after reports of an active SEC probe and ongoing investigation")
+    assert "regulatory_probe" in keys
+
+
+def test_barrons_domain_counts_as_quality_source() -> None:
+    from coatue_claw import market_daily as md
+
+    assert md._is_quality_domain("https://www.barrons.com/articles/applovin-stock-drops-probe-report-9e76d74f")
+
+
 def test_corroboration_gate_requires_two_independent_sources() -> None:
     from coatue_claw import market_daily as md
 
@@ -656,6 +669,48 @@ def test_single_source_only_uses_uncertainty_fallback(monkeypatch) -> None:
     movers = [QuoteSnapshot("NET", 100.0, 92.0, 100.0, -0.08, "2026-02-20T12:00:00+00:00")]
     _, lines = md._build_catalyst_rows(movers=movers, slot_name="open")
     assert lines[0] == "Likely positioning/flow; no single confirmed catalyst."
+
+
+def test_app_regulatory_probe_cluster_outputs_specific_reason(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    def _fake_collect(ticker, aliases, since_utc, pct_move=None):
+        return (
+            [
+                md._EvidenceCandidate(
+                    source_type="web",
+                    text="AppLovin stock drops after report says SEC probe into ad practices remains active.",
+                    url="https://www.barrons.com/articles/applovin-stock-drops-probe-report-9e76d74f",
+                    published_at_utc=None,
+                    score=0.93,
+                    driver_keywords=("regulatory_probe",),
+                    canonical_url="https://www.barrons.com/articles/applovin-stock-drops-probe-report-9e76d74f",
+                    domain="barrons.com",
+                    backend="google_serp",
+                ),
+                md._EvidenceCandidate(
+                    source_type="yahoo_news",
+                    text="AppLovin shares fall as SEC investigation overhang weighs on sentiment.",
+                    url="https://finance.yahoo.com/news/applovin-shares-fall-sec-investigation-overhang-140000000.html",
+                    published_at_utc=datetime(2026, 2, 23, 14, 0, 0, tzinfo=UTC),
+                    score=0.89,
+                    driver_keywords=("regulatory_probe",),
+                    canonical_url="https://finance.yahoo.com/news/applovin-shares-fall-sec-investigation-overhang-140000000.html",
+                    domain="finance.yahoo.com",
+                ),
+            ],
+            [],
+            "google_serp",
+        )
+
+    monkeypatch.setattr("coatue_claw.market_daily._collect_evidence_for_ticker", _fake_collect)
+    monkeypatch.setattr("coatue_claw.market_daily._company_aliases", lambda ticker: ["AppLovin"])
+    monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 23, 0, 0, 0, tzinfo=UTC))
+
+    movers = [QuoteSnapshot("APP", 100.0, 92.5, 100.0, -0.075, "2026-02-23T15:00:00+00:00")]
+    rows, lines = md._build_catalyst_rows(movers=movers, slot_name="open")
+    assert rows[0].confirmed_cluster == "regulatory_probe"
+    assert "sec probe" in lines[0].lower()
 
 
 def test_single_strong_quality_source_can_drive_decisive_primary_reason(monkeypatch) -> None:

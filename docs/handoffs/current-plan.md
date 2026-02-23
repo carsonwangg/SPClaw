@@ -520,3 +520,21 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 ### Next
 1. Verify live `run-post-url` post in `#charting` has no chart-label line.
 2. Continue monitoring title coherence + truncation in scheduled posts.
+
+## 2026-02-23 Plan Update - MD APP Cause Specificity
+
+### Completed
+- Added explicit `regulatory_probe` cause cluster in Market Daily so SEC/probe selloffs can be named directly.
+- Added APP alias coverage and APP-specific web query expansion for `SEC probe` / `short seller report` narratives.
+- Promoted `barrons.com` to MD quality-source set and domain-weight map so Barron's evidence can satisfy corroboration/decisive gates.
+- Expanded directional and decisive event-term matching for `probe` / `investigation` / `regulatory`.
+- Added APP regression coverage in `tests/test_market_daily.py`.
+- Validation: `PYTHONPATH=src python3 -m pytest tests/test_market_daily.py` (`31 passed`).
+
+### In Progress
+- Deploying this patch to Mac mini runtime and verifying live `md now` output for APP-like selloff cases.
+
+### Next
+1. Confirm `md debug APP` resolves to `selected_cluster=regulatory_probe` with a specific line.
+2. Monitor next 3 MD posts and verify fallback usage rate declines for clearly news-driven selloffs.
+3. If generic fallback still appears for obvious cases, expand quality-domain allowlist and cluster keywords for the miss pattern.

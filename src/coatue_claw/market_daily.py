@@ -1108,6 +1108,7 @@ _COMPANY_ALIAS_OVERRIDES: dict[str, list[str]] = {
     "PANW": ["Palo Alto Networks"],
     "ORCL": ["Oracle"],
     "BKNG": ["Booking Holdings", "Booking.com", "online travel agency", "OTA"],
+    "APP": ["AppLovin", "AppLovin Corporation", "AppLovin Corp"],
 }
 
 _DRIVER_KEYWORDS: dict[str, tuple[str, ...]] = {
@@ -1137,6 +1138,18 @@ _DRIVER_KEYWORDS: dict[str, tuple[str, ...]] = {
         "demand slowdown",
         "ota industry",
     ),
+    "regulatory_probe": (
+        "sec probe",
+        "sec investigation",
+        "federal probe",
+        "regulatory probe",
+        "under investigation",
+        "ongoing probe",
+        "probe report",
+        "short report",
+        "short seller report",
+        "legal overhang",
+    ),
     "earnings_guidance": ("earnings", "guidance", "forecast", "outlook"),
     "macro_rates": ("rate cut", "rates", "treasury", "yield"),
     "deal_contract": ("deal", "contract", "partnership"),
@@ -1150,6 +1163,7 @@ _CLUSTER_EVENT_PHRASES: dict[str, str] = {
     "cybersecurity_competition": "new security tooling intensified competitive pressure.",
     "ota_ai_disruption": "AI-agent disruption fears pressured online travel stocks.",
     "travel_demand_outlook": "forward outlook concerns pressured travel demand expectations.",
+    "regulatory_probe": "reports of an active SEC probe.",
     "earnings_guidance": "earnings and guidance reset expectations.",
     "macro_rates": "rates and macro signals shifted risk appetite.",
     "product_launch": "a product launch reset expectations.",
@@ -1160,6 +1174,7 @@ _CLUSTER_PRIORITY_BONUS: dict[str, float] = {
     "anthropic_claude_cyber": 0.35,
     "anthropic_claude": 0.2,
     "ota_ai_disruption": 0.22,
+    "regulatory_probe": 0.25,
 }
 
 _CLUSTER_REUSE_ALLOWLIST: set[str] = {"anthropic_claude_cyber", "anthropic_claude"}
@@ -1169,6 +1184,7 @@ _DOMAIN_WEIGHTS: dict[str, float] = {
     "investing.com": 0.9,
     "stocktwits.com": 0.88,
     "marketwatch.com": 0.88,
+    "barrons.com": 0.9,
     "bloomberg.com": 0.92,
     "reuters.com": 0.9,
     "wsj.com": 0.86,
@@ -1184,6 +1200,7 @@ _QUALITY_CAUSE_DOMAINS: set[str] = {
     "reuters.com",
     "bloomberg.com",
     "wsj.com",
+    "barrons.com",
     "marketwatch.com",
     "investing.com",
     "stocktwits.com",
@@ -1515,6 +1532,9 @@ def _compute_evidence_score(
             "ai panic",
             "ota disruption",
             "travel demand slowdown",
+            "sec probe",
+            "sec investigation",
+            "regulatory probe",
         )
     ):
         causal_bonus += 0.06
@@ -1803,6 +1823,15 @@ def _web_queries_for_ticker(*, ticker: str, aliases: list[str], pct_move: float 
                 "BKNG AI threat travel OTA",
             ]
         )
+    if ticker.upper() == "APP":
+        queries.extend(
+            [
+                "why is APP stock down sec probe",
+                "AppLovin SEC probe report",
+                "AppLovin short seller report SEC investigation",
+                "AppLovin regulatory probe stock move",
+            ]
+        )
     uniq: list[str] = []
     seen: set[str] = set()
     for q in queries:
@@ -2066,7 +2095,25 @@ def _directional_bonus(*, text: str, pct_move: float | None) -> float:
         return 0.0
     lower = text.lower()
     up_terms = ("surge", "rises", "rose", "gains", "jumps", "up ", "beats", "upgrades", "partnership", "announces", "announce")
-    down_terms = ("drops", "drop", "fell", "falls", "slides", "selloff", "sold off", "down ", "misses", "downgrade", "weighed", "pressured", "under pressure")
+    down_terms = (
+        "drops",
+        "drop",
+        "fell",
+        "falls",
+        "slides",
+        "selloff",
+        "sold off",
+        "down ",
+        "misses",
+        "downgrade",
+        "weighed",
+        "pressured",
+        "under pressure",
+        "probe",
+        "investigation",
+        "regulatory",
+        "sec",
+    )
     if pct_move < 0:
         if any(term in lower for term in down_terms):
             return 0.14
@@ -2193,6 +2240,9 @@ def _can_use_decisive_primary_reason(
             "downgrade",
             "upgrade",
             "investigation",
+            "probe",
+            "regulatory",
+            "sec",
             "acquisition",
             "contract",
             "partnership",
