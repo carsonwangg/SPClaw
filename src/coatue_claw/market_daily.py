@@ -1696,10 +1696,14 @@ def _ensure_reason_like_line(text: str, *, evidence: CatalystEvidence) -> str:
     lower = cleaned.lower()
     causal = (" after ", " on ", " as ", " amid ", " due to ", " because ", " following ")
     if not any(marker in f" {lower} " for marker in causal):
-        if evidence.news_title:
-            cleaned = f"After {(_strip_non_md_artifacts(evidence.news_title)).rstrip('.')}"
-        elif evidence.web_title:
-            cleaned = f"After {(_strip_non_md_artifacts(evidence.web_title)).rstrip('.')}"
+        preferred = _strip_non_md_artifacts(_preferred_evidence_text(evidence))
+        if preferred:
+            preferred = re.split(r"\s[-|]\s", preferred, maxsplit=1)[0].strip()
+            preferred = re.sub(r"(?i)^why\s+", "", preferred).strip()
+            if (not evidence.news_title and not evidence.web_title) and (not _looks_like_specific_catalyst(preferred)):
+                cleaned = "No clear single catalyst; likely positioning/flow."
+            else:
+                cleaned = f"After {preferred.rstrip('.')}"
         elif evidence.x_text:
             x_clean = re.split(r"[.!?;]", _strip_non_md_artifacts(evidence.x_text), maxsplit=1)[0].strip()
             if _looks_like_specific_catalyst(x_clean):
