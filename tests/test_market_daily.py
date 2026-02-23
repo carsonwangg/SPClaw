@@ -366,9 +366,52 @@ def test_negative_mover_prefers_negative_driver_language(monkeypatch) -> None:
 
     monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 20, 0, 0, 0, tzinfo=UTC))
     monkeypatch.setattr("coatue_claw.market_daily._company_aliases", lambda ticker: ["Cloudflare"])
-    monkeypatch.setattr("coatue_claw.market_daily._collect_evidence_for_ticker", lambda ticker, aliases, since_utc: (candidates, []))
+    monkeypatch.setattr("coatue_claw.market_daily._collect_evidence_for_ticker", lambda ticker, aliases, since_utc, pct_move=None: (candidates, []))
 
     mover = QuoteSnapshot("NET", 100.0, 92.0, 100.0, -0.08, "2026-02-20T12:00:00+00:00")
     rows, lines = md._build_catalyst_rows(movers=[mover], slot_name="open")
     assert "anthropic" in (rows[0].news_title or "").lower()
     assert ("after" in lines[0].lower()) or (" as " in lines[0].lower())
+
+
+def test_collect_evidence_triggers_web_when_directional_signal_missing(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    x_candidates = [
+        md._EvidenceCandidate(
+            source_type="x",
+            text="Cloudflare partnership update for enterprise security",
+            url="https://x.com/i/web/status/1",
+            published_at_utc=datetime(2026, 2, 20, 10, 0, 0, tzinfo=UTC),
+            score=0.92,
+            driver_keywords=("cybersecurity_competition",),
+        )
+    ]
+    web_candidates = [
+        md._EvidenceCandidate(
+            source_type="web",
+            text="Why did CRWD OKTA NET PANW cyber security stocks fall today",
+            url="https://stocktwits.com/news/example",
+            published_at_utc=None,
+            score=0.7,
+            driver_keywords=("anthropic_claude", "cybersecurity_competition"),
+        )
+    ]
+    calls = {"web": 0}
+
+    monkeypatch.setattr("coatue_claw.market_daily._fetch_x_evidence_candidates", lambda ticker, aliases, since_utc: x_candidates)
+    monkeypatch.setattr("coatue_claw.market_daily._fetch_yahoo_news_candidates", lambda ticker, aliases, since_utc: [])
+
+    def _fake_web(ticker, aliases, since_utc, pct_move=None):
+        calls["web"] += 1
+        return web_candidates
+
+    monkeypatch.setattr("coatue_claw.market_daily._fetch_web_evidence_ddg", _fake_web)
+    rows, _ = md._collect_evidence_for_ticker(
+        ticker="NET",
+        aliases=["Cloudflare"],
+        since_utc=datetime(2026, 2, 20, 0, 0, 0, tzinfo=UTC),
+        pct_move=-0.05,
+    )
+    assert calls["web"] == 1
+    assert any(r.source_type == "web" for r in rows)

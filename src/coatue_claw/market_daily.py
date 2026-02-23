@@ -1477,11 +1477,13 @@ def _ddg_resolve_url(raw_url: str) -> str:
     return decoded
 
 
-def _fetch_web_evidence_ddg(*, ticker: str, aliases: list[str], since_utc: datetime) -> list[_EvidenceCandidate]:
+def _fetch_web_evidence_ddg(*, ticker: str, aliases: list[str], since_utc: datetime, pct_move: float | None = None) -> list[_EvidenceCandidate]:
     if (not _web_search_enabled()) or _web_search_backend() != "ddg_html":
         return []
     primary = aliases[0] if aliases else ticker
+    down_or_up = "fall today why" if (pct_move or 0.0) < 0 else "rise today why"
     queries = [
+        f"{ticker} {primary} stock {down_or_up}",
         f"{ticker} {primary} stock move today why",
         f"{ticker} {primary} cybersecurity anthropic claude",
     ]
@@ -1581,7 +1583,13 @@ def _driver_cluster_scores(candidates: list[_EvidenceCandidate]) -> dict[str, fl
     return totals
 
 
-def _collect_evidence_for_ticker(*, ticker: str, aliases: list[str], since_utc: datetime) -> tuple[list[_EvidenceCandidate], list[str]]:
+def _collect_evidence_for_ticker(
+    *,
+    ticker: str,
+    aliases: list[str],
+    since_utc: datetime,
+    pct_move: float | None = None,
+) -> tuple[list[_EvidenceCandidate], list[str]]:
     rejected: list[str] = []
     x_candidates = _fetch_x_evidence_candidates(ticker=ticker, aliases=aliases, since_utc=since_utc)
     if not x_candidates:
@@ -1592,9 +1600,11 @@ def _collect_evidence_for_ticker(*, ticker: str, aliases: list[str], since_utc: 
 
     combined = x_candidates + yahoo_candidates
     x_y_best = max((c.score for c in combined), default=0.0)
-    needs_web = x_y_best < _min_evidence_confidence()
+    source_diversity = len({c.source_type for c in combined})
+    directional_hits = any(_directional_bonus(text=c.text, pct_move=pct_move) > 0 for c in combined)
+    needs_web = (x_y_best < _min_evidence_confidence()) or (source_diversity < 2) or (not directional_hits)
     if needs_web:
-        web_candidates = _fetch_web_evidence_ddg(ticker=ticker, aliases=aliases, since_utc=since_utc)
+        web_candidates = _fetch_web_evidence_ddg(ticker=ticker, aliases=aliases, since_utc=since_utc, pct_move=pct_move)
         if web_candidates:
             combined.extend(web_candidates)
         else:
@@ -1920,7 +1930,12 @@ def _post_to_slack(*, channel_ref: str, text: str) -> tuple[str | None, str | No
 
 def _build_catalyst_for_mover(*, mover: QuoteSnapshot, slot_name: str, since_utc: datetime) -> tuple[CatalystEvidence, str]:
     aliases = _company_aliases(mover.ticker)
-    candidates, rejected = _collect_evidence_for_ticker(ticker=mover.ticker, aliases=aliases, since_utc=since_utc)
+    candidates, rejected = _collect_evidence_for_ticker(
+        ticker=mover.ticker,
+        aliases=aliases,
+        since_utc=since_utc,
+        pct_move=mover.pct_move,
+    )
     ranked = sorted(
         candidates,
         key=lambda c: (-_effective_candidate_score(candidate=c, pct_move=mover.pct_move), _source_rank(c.source_type)),
