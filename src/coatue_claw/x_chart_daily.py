@@ -292,6 +292,50 @@ HEADLINE_MAX_RENDER_LINES = 3
 HEADLINE_MIN_FONT_SIZE = 17.0
 TAKEAWAY_MAX_RENDER_LINES = 2
 TAKEAWAY_MIN_FONT_SIZE = 8.4
+TAKEAWAY_CONNECTOR_TOKENS = {
+    "while",
+    "as",
+    "amid",
+    "after",
+    "because",
+    "and",
+    "but",
+}
+TAKEAWAY_AUXILIARY_TOKENS = {
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "being",
+    "been",
+    "has",
+    "have",
+    "had",
+    "will",
+    "would",
+    "can",
+    "could",
+    "should",
+    "may",
+    "might",
+    "must",
+    "do",
+    "does",
+    "did",
+}
+TAKEAWAY_EXTRA_PREDICATE_TOKENS = {
+    "return",
+    "returns",
+    "returning",
+    "spread",
+    "spreads",
+    "spreading",
+    "remain",
+    "remains",
+    "holding",
+    "hold",
+}
 HEADLINE_ACTION_TOKENS = {
     "is",
     "are",
@@ -382,6 +426,7 @@ HEADLINE_ACTION_TOKENS = {
     "outnumbers",
     "outnumbered",
 }
+TAKEAWAY_PREDICATE_TOKENS = HEADLINE_ACTION_TOKENS | TAKEAWAY_EXTRA_PREDICATE_TOKENS
 
 LOW_SIGNAL_COPY_VALUES = {
     "u.s",
@@ -779,6 +824,126 @@ def _tail_complete(text: str) -> bool:
     return not _has_fragment_tail(_tail_tokens(text))
 
 
+def _tokenize_clause_words(text: str) -> tuple[list[str], list[str]]:
+    words: list[str] = []
+    lower_words: list[str] = []
+    for raw in [w for w in _normalize_render_text(text).split(" ") if w]:
+        cleaned = raw.strip(".,;:!?()[]{}\"")
+        if not cleaned:
+            continue
+        lowered = re.sub(r"[^a-z0-9']+", "", cleaned.lower())
+        if not lowered:
+            continue
+        words.append(cleaned)
+        lower_words.append(lowered)
+    return words, lower_words
+
+
+def _first_unjoined_clause_boundary_index(text: str) -> int | None:
+    words, lower_words = _tokenize_clause_words(text)
+    if len(lower_words) < 6:
+        return None
+    n = len(lower_words)
+
+    for phrase in HEADLINE_LOCKED_TERMS:
+        size = len(phrase)
+        if size == 0:
+            continue
+        for idx in range(0, n - size):
+            if tuple(lower_words[idx : idx + size]) != phrase:
+                continue
+            boundary = idx + size
+            if boundary >= n:
+                continue
+            next_token = lower_words[boundary]
+            if next_token in TAKEAWAY_CONNECTOR_TOKENS or next_token in TRAILING_STOPWORDS:
+                continue
+            if next_token in TAKEAWAY_PREDICATE_TOKENS:
+                continue
+            lookahead = lower_words[boundary : min(n, boundary + 7)]
+            predicate_idx: int | None = None
+            for offset, token in enumerate(lookahead):
+                if token in TAKEAWAY_PREDICATE_TOKENS:
+                    predicate_idx = boundary + offset
+                    break
+            if predicate_idx is None:
+                continue
+            if predicate_idx > boundary and lower_words[predicate_idx - 1] in TAKEAWAY_AUXILIARY_TOKENS:
+                continue
+            if n - boundary >= 3:
+                return boundary
+
+    predicate_indices = [idx for idx, token in enumerate(lower_words) if token in TAKEAWAY_PREDICATE_TOKENS]
+    if len(predicate_indices) < 2:
+        return None
+
+    first_predicate = predicate_indices[0]
+    for predicate_idx in predicate_indices[1:]:
+        if predicate_idx <= first_predicate + 1:
+            continue
+        prev = lower_words[predicate_idx - 1]
+        if prev in TAKEAWAY_AUXILIARY_TOKENS or prev == "to":
+            continue
+        left = max(first_predicate + 1, predicate_idx - 6)
+        bridge = lower_words[left:predicate_idx]
+        if any(token in TAKEAWAY_CONNECTOR_TOKENS for token in bridge):
+            continue
+        boundary = max(first_predicate + 1, predicate_idx - 4)
+        while boundary < predicate_idx and lower_words[boundary] in TRAILING_STOPWORDS:
+            boundary += 1
+        if boundary >= predicate_idx or boundary < 2:
+            continue
+        subject_tokens = lower_words[boundary:predicate_idx]
+        if not subject_tokens:
+            continue
+        if not any(
+            token in TRAILING_DETERMINERS
+            or token.endswith("s")
+            or token in {"ai", "us", "trade", "tariff", "war", "market", "markets"}
+            for token in subject_tokens
+        ):
+            continue
+        if len(words) - boundary < 3:
+            continue
+        return boundary
+    return None
+
+
+def _has_unjoined_clause_boundary(text: str) -> bool:
+    core = _normalize_render_text(text).rstrip(".!?").strip()
+    if not core:
+        return False
+    return _first_unjoined_clause_boundary_index(core) is not None
+
+
+def _repair_takeaway_clause_boundary(text: str) -> str:
+    core = _normalize_render_text(text).rstrip(".!?").strip()
+    if not core:
+        return ""
+    words, _ = _tokenize_clause_words(core)
+    boundary = _first_unjoined_clause_boundary_index(core)
+    if boundary is None:
+        return ""
+    if boundary < 3 or len(words) - boundary < 3:
+        return ""
+    clause1 = _strip_trailing_dangling_endings(" ".join(words[:boundary]).strip())
+    clause2 = _strip_trailing_dangling_endings(" ".join(words[boundary:]).strip())
+    if len(clause1.split()) < 4 or len(clause2.split()) < 3:
+        return ""
+    if clause2.lower().split(" ")[0] in TAKEAWAY_CONNECTOR_TOKENS:
+        rebuilt = f"{clause1} {clause2}".strip()
+    else:
+        rebuilt = f"{clause1} while {clause2}".strip()
+    rebuilt = _normalize_render_text(rebuilt)
+    if not rebuilt:
+        return ""
+    if rebuilt[-1] not in ".!?":
+        rebuilt = f"{rebuilt}."
+    if _has_unjoined_clause_boundary(rebuilt):
+        return ""
+    return rebuilt if _is_complete_sentence(rebuilt) else ""
+
+
 def _normalize_headline_seed(text: str) -> str:
     cleaned = _normalize_render_text(text)
     cleaned = re.sub(r"^@\w+:\s*", "", cleaned, flags=re.IGNORECASE).strip()
@@ -982,6 +1147,8 @@ def _is_single_sentence_takeaway(text: str) -> bool:
     cleaned = _normalize_render_text(text)
     if not cleaned:
         return False
+    if _has_unjoined_clause_boundary(cleaned):
+        return False
     first = _extract_first_sentence(cleaned)
     if not first:
         return False
@@ -1068,6 +1235,11 @@ def _finalize_takeaway_sentence(text: str, *, max_chars: int | None = None) -> s
         return ""
     if cleaned[-1] not in ".!?":
         cleaned = f"{cleaned}."
+    if _has_unjoined_clause_boundary(cleaned):
+        repaired = _repair_takeaway_clause_boundary(cleaned)
+        if not repaired:
+            return ""
+        cleaned = repaired
     if max_chars is not None and len(cleaned) > max_chars:
         shortened = _semantic_shorten_sentence(cleaned, max_words=max(10, min(24, max_chars // 4)))
         if not shortened:
@@ -1075,6 +1247,13 @@ def _finalize_takeaway_sentence(text: str, *, max_chars: int | None = None) -> s
         cleaned = shortened
         if max_chars is not None and len(cleaned) > max_chars:
             return ""
+        if _has_unjoined_clause_boundary(cleaned):
+            repaired = _repair_takeaway_clause_boundary(cleaned)
+            if not repaired:
+                return ""
+            cleaned = repaired
+            if max_chars is not None and len(cleaned) > max_chars:
+                return ""
     return cleaned if _is_single_sentence_takeaway(cleaned) else ""
 
 
@@ -1164,6 +1343,10 @@ def _enforce_title_takeaway_roles(
         return normalized_headline, normalized_takeaway, False
 
     if _title_takeaway_role_ok(headline=finalized_headline, takeaway=finalized_takeaway):
+        if _has_unjoined_clause_boundary(finalized_headline):
+            compact_headline = _compact_headline_sentence(finalized_headline, source_sentence=source_sentence)
+            if compact_headline and _title_takeaway_role_ok(headline=compact_headline, takeaway=finalized_takeaway):
+                return compact_headline, finalized_takeaway, False
         return finalized_headline, finalized_takeaway, False
 
     swapped_headline = _finalize_headline_sentence(finalized_takeaway, source_text=source_sentence)
@@ -1550,6 +1733,8 @@ def _style_copy_quality_errors(style_draft: StyleDraft) -> list[str]:
         errors.append("takeaway incomplete sentence")
     if not _is_single_sentence_takeaway(style_draft.takeaway):
         errors.append("takeaway not single sentence")
+    if _has_unjoined_clause_boundary(style_draft.takeaway):
+        errors.append("takeaway clause boundary invalid")
     if not _title_takeaway_role_ok(headline=style_draft.headline, takeaway=style_draft.takeaway):
         errors.append("title/takeaway role order invalid")
     if not _tail_complete(style_draft.headline):
@@ -1599,6 +1784,7 @@ def _post_publish_checklist(
         "takeaway_len_ok": (0 < len(takeaway)),
         "takeaway_complete_sentence": _is_complete_sentence(takeaway),
         "takeaway_single_sentence": _is_single_sentence_takeaway(takeaway),
+        "takeaway_clause_boundary_ok": not _has_unjoined_clause_boundary(takeaway),
         "takeaway_tail_complete": _tail_complete(takeaway),
         "takeaway_wrapped_line_count": int(render_qa.get("takeaway_wrapped_line_count", 1)),
         "headline_non_degenerate": not _is_degenerate_copy_value(headline),
@@ -2112,6 +2298,7 @@ def _sanitize_style_copy(
     mode_hint = _mode_hint_from_text(candidate)
     headline_tail_fragment = not _tail_complete(headline)
     takeaway_tail_fragment = not _tail_complete(takeaway)
+    takeaway_clause_fragment = _has_unjoined_clause_boundary(takeaway)
     headline_locked_terms_ok = _headline_locked_terms_preserved(headline, source_text=source_sentence)
 
     finalized_headline = _finalize_headline_sentence(headline, source_text=source_sentence)
@@ -2156,6 +2343,9 @@ def _sanitize_style_copy(
             finalized_takeaway = "US trend is shifting quickly."
             if rewrite_reason is None:
                 rewrite_reason = "safe_fallback"
+    elif takeaway_clause_fragment and rewrite_reason is None:
+        rewrite_applied = True
+        rewrite_reason = "takeaway_clause_rewritten"
     takeaway = finalized_takeaway
     role_headline, role_takeaway, title_takeaway_role_swapped = _enforce_title_takeaway_roles(
         headline=headline,
@@ -3393,6 +3583,7 @@ def _build_style_draft(candidate: Candidate, *, iteration: int) -> StyleDraft:
         "takeaway_short": bool(takeaway),
         "takeaway_complete_sentence": _is_complete_sentence(takeaway),
         "takeaway_single_sentence": _is_single_sentence_takeaway(takeaway),
+        "takeaway_clause_boundary_ok": not _has_unjoined_clause_boundary(takeaway),
         "takeaway_tail_complete": _tail_complete(takeaway),
         "title_takeaway_role_ok": _title_takeaway_role_ok(headline=headline, takeaway=takeaway),
         "title_takeaway_role_swapped": bool(role_swapped),
@@ -3445,6 +3636,8 @@ def _style_copy_publish_issues(style_draft: StyleDraft) -> list[str]:
         issues.append("takeaway_incomplete_sentence")
     if not _is_single_sentence_takeaway(style_draft.takeaway):
         issues.append("takeaway_not_single_sentence")
+    if _has_unjoined_clause_boundary(style_draft.takeaway):
+        issues.append("takeaway_clause_boundary_invalid")
     if not _tail_complete(style_draft.takeaway):
         issues.append("takeaway_tail_fragment")
     if not _title_takeaway_role_ok(headline=style_draft.headline, takeaway=style_draft.takeaway):
@@ -4469,6 +4662,7 @@ def _post_winner_to_slack(
         "headline_wrapped_line_count": int(render_qa.get("headline_wrapped_line_count", 1)),
         "takeaway_complete_sentence": _is_complete_sentence(style_draft.takeaway),
         "takeaway_single_sentence": _is_single_sentence_takeaway(style_draft.takeaway),
+        "takeaway_clause_boundary_ok": not _has_unjoined_clause_boundary(style_draft.takeaway),
         "takeaway_tail_complete": _tail_complete(style_draft.takeaway),
         "takeaway_wrapped_line_count": int(render_qa.get("takeaway_wrapped_line_count", 1)),
         "title_takeaway_role_ok": _title_takeaway_role_ok(headline=style_draft.headline, takeaway=style_draft.takeaway),

@@ -1210,3 +1210,54 @@ Then confirm bot returns:
 1. Pull latest `main` on the Mac mini and restart runtime (`make openclaw-restart`).
 2. Trigger `x chart now` in Slack and confirm title/takeaway no longer end in clipped tails.
 3. Trigger one explicit URL post for a fragment-prone source and confirm URL is preserved with rewritten coherent copy.
+
+## 2026-02-23 - X Chart Run-On Clause Fix (Takeaway + Role Stability)
+- Runtime module updated: `/opt/coatue-claw/src/coatue_claw/x_chart_daily.py`
+  - added deterministic unjoined-clause detection for takeaway copy:
+    - `_has_unjoined_clause_boundary(text)`
+    - `_first_unjoined_clause_boundary_index(text)`
+    - `_tokenize_clause_words(text)`
+  - added deterministic repair path:
+    - `_repair_takeaway_clause_boundary(text)` rewrites run-ons into one coherent sentence with connector (`while`) and re-validates.
+  - takeaway validation/finalization tightened:
+    - `_is_single_sentence_takeaway(...)` now rejects unjoined clause boundaries.
+    - `_finalize_takeaway_sentence(...)` now repairs run-on clause boundaries before accepting.
+  - sanitize flow updated:
+    - `_sanitize_style_copy(...)` marks rewrite diagnostic `takeaway_clause_rewritten` when this recovery path is applied.
+  - publish gates tightened:
+    - `_style_copy_quality_errors(...)` now adds `takeaway clause boundary invalid`.
+    - `_style_copy_publish_issues(...)` now adds `takeaway_clause_boundary_invalid`.
+  - review/style checks expanded:
+    - `takeaway_clause_boundary_ok` added to style/review check payloads.
+  - role-stability hardening:
+    - `_enforce_title_takeaway_roles(...)` now compacts run-on headlines to concise locked-term-safe core sentence when role order is otherwise valid.
+- Tests updated in `/opt/coatue-claw/tests/test_x_chart_daily.py`:
+  - `test_takeaway_validator_rejects_market_cap_ai_runon`
+  - `test_takeaway_finalizer_repairs_unjoined_clause_boundary`
+  - `test_role_enforcement_compacts_runon_headline_when_role_order_is_valid`
+  - updated Kobeissi regression expected takeaway to coherent one-sentence form:
+    - `US stocks erase nearly -$800 billion in market cap while AI disruption fears spread and trade war headlines return.`
+- Validation:
+  - targeted:
+    - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_x_chart_daily.py /opt/coatue-claw/tests/test_slack_x_chart_intent.py` -> `77 passed`
+  - full smoke:
+    - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q` -> unchanged unrelated failures:
+      - `tests/test_spencer_change_digest.py::test_run_once_dry_run_includes_carson_label`
+      - `tests/test_spencer_change_log.py::test_is_spencer_user_defaults`
+      - `tests/test_spencer_change_log.py::test_requester_label_defaults`
+- Live validation:
+  - explicit URL reposted:
+    - `https://x.com/KobeissiLetter/status/2026040229535047769`
+  - result payload showed:
+    - `copy_rewrite_reason = takeaway_clause_rewritten`
+    - `takeaway_clause_boundary_ok = true`
+    - `takeaway_single_sentence = true`
+    - `title_takeaway_role_ok = true`
+    - all post-review checks passed.
+
+### Immediate Next Steps
+1. In Slack `#charting`, visually confirm the latest Kobeissi repost shows:
+   - concise title ending with `market cap.`
+   - one-sentence takeaway using connector (`while`) and terminal punctuation.
+2. Monitor the next 3 manual `run-post-url` uses for `takeaway_clause_rewritten` rate; if frequent, add pre-LLM prompt guidance to avoid unjoined clause patterns earlier.
+3. Keep Spencer-change identity failures out of this charting branch and patch separately.

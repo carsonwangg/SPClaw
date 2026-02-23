@@ -15,12 +15,14 @@ from coatue_claw.x_chart_daily import (
     _build_x_title,
     _compute_y_ticks,
     _convention_name,
+    _enforce_title_takeaway_roles,
     _fallback_bar_labels,
     _extract_rebuilt_bars_via_vision,
     _extract_rebuilt_bars,
     _extract_rebuilt_series,
     _finalize_headline_sentence,
     _finalize_takeaway_sentence,
+    _has_unjoined_clause_boundary,
     _infer_bar_labels_from_text,
     _infer_chart_mode,
     _is_complete_headline_phrase,
@@ -999,6 +1001,12 @@ def test_takeaway_validator_rejects_trailing_possessive_fragment() -> None:
     assert _is_complete_sentence("US stock market futures open lower in early trade.") is True
 
 
+def test_takeaway_validator_rejects_market_cap_ai_runon() -> None:
+    text = "US stocks erase nearly -$800 billion in market cap AI disruption fears spread and trade war headlines return."
+    assert _has_unjoined_clause_boundary(text) is True
+    assert _is_single_sentence_takeaway(text) is False
+
+
 def test_takeaway_sentence_finalizer_returns_complete_sentence() -> None:
     finalized = _finalize_takeaway_sentence("U.S. Housing Market Pending Home Sales fell to lowest", max_chars=68)
     assert finalized == ""
@@ -1021,6 +1029,26 @@ def test_takeaway_sentence_finalizer_normalizes_multi_sentence_to_one_sentence()
 def test_takeaway_finalizer_returns_empty_for_clipped_initial_fragment() -> None:
     finalized = _finalize_takeaway_sentence("US stock market futures open lower in their initial setup", max_chars=52)
     assert finalized == ""
+
+
+def test_takeaway_finalizer_repairs_unjoined_clause_boundary() -> None:
+    finalized = _finalize_takeaway_sentence(
+        "US stocks erase nearly -$800 billion in market cap AI disruption fears spread and trade war headlines return.",
+    )
+    assert finalized == "US stocks erase nearly -$800 billion in market cap while AI disruption fears spread and trade war headlines return."
+    assert _is_single_sentence_takeaway(finalized) is True
+    assert _has_unjoined_clause_boundary(finalized) is False
+
+
+def test_role_enforcement_compacts_runon_headline_when_role_order_is_valid() -> None:
+    headline, takeaway, swapped = _enforce_title_takeaway_roles(
+        headline="US stocks erase nearly -$800 billion in market cap AI disruption fears spread and trade war headlines return.",
+        takeaway="US stocks erase nearly -$800 billion in market cap while AI disruption fears spread and trade war headlines return.",
+        source_sentence="US stocks erase nearly -$800 billion in market cap AI disruption fears spread and trade war headlines return.",
+    )
+    assert headline == "US stocks erase nearly -$800 billion in market cap."
+    assert takeaway == "US stocks erase nearly -$800 billion in market cap while AI disruption fears spread and trade war headlines return."
+    assert swapped is False
 
 
 def test_compute_y_ticks_non_normalized_has_multiple_ticks() -> None:
@@ -1517,7 +1545,7 @@ def test_style_draft_swaps_title_and_takeaway_roles_for_market_cap_copy(monkeypa
     )
     draft = _select_style_draft(candidate)
     assert draft.headline == "US stocks erase nearly -$800 billion in market cap."
-    assert draft.takeaway == "US stocks erase nearly -$800 billion in market cap AI disruption fears spread and trade war headlines return."
+    assert draft.takeaway == "US stocks erase nearly -$800 billion in market cap while AI disruption fears spread and trade war headlines return."
     assert draft.checks["title_takeaway_role_ok"] is True
     assert draft.checks["title_takeaway_role_swapped"] is True
     assert _is_single_sentence_takeaway(draft.takeaway) is True
