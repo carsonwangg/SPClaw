@@ -1050,3 +1050,47 @@ Then confirm bot returns:
    - URL is unchanged
    - title is either repaired or request fails with publish-copy error (no invalid title post).
 4. Triage the unrelated Spencer-change identity defaults failures in a separate patch.
+
+## 2026-02-23 - Board Seat Non-Repeat Guardrail (Anduril)
+- User signal captured from `#anduril`: Spencer explicitly flagged repeated investment pitches (example callout: repeated Epirus idea) and requested net-new ideas unless material change.
+- Runtime module updated: `/opt/coatue-claw/src/coatue_claw/board_seat_daily.py`
+  - added persistent pitch-history store table: `board_seat_pitches` in `/opt/coatue-claw-data/db/board_seat_daily.sqlite`
+  - pitch-history schema stores:
+    - company/channel metadata
+    - message text + extracted investment text
+    - investment signature/hash
+    - context signature/snippets
+    - significant-change flag
+  - existing `board_seat_runs` rows are auto-seeded into `board_seat_pitches` on startup (`legacy_run_seed`) to bootstrap historical memory.
+  - added best-effort Slack history backfill path for each channel (`slack_history_backfill`) when history scope is available.
+  - added deterministic repeat detection:
+    - exact hash repeat block
+    - high signal-line similarity repeat block
+    - special repeat block for repeated “no high signal updates” theme
+  - added significant-change gating:
+    - allows prior idea only when context changed materially (token novelty/event-term or numeric delta)
+  - if repeated idea detected without significant change:
+    - tries one net-new fallback rewrite
+    - if still repeated, skips posting with explicit reason `repeat_investment_without_significant_change`
+  - LLM prompt now receives prior investment theses and is instructed not to repeat absent clear context change.
+  - status payload now includes `pitch_counts` by company.
+- Tests added/updated in `/opt/coatue-claw/tests/test_board_seat_daily.py`:
+  - extraction test for structured investment text
+  - repeat-without-change skip behavior
+  - allow-post when significant change exists
+  - history-backfill parsing test
+- Validation:
+  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_board_seat_daily.py` -> `9 passed`
+  - full smoke remains unchanged with 3 unrelated pre-existing failures in Spencer-change tests.
+- Live runtime verification:
+  - forced dry-run for Anduril now returns skip reason `repeat_investment_without_significant_change`
+  - forced live run also skipped repeat post (no duplicate idea pushed)
+  - current seeded Anduril pitch history count: `3`
+- Slack history scope note:
+  - direct `conversations_history` backfill for `#anduril` currently scans `0` messages under present bot scopes/token permissions.
+  - existing historical posts are still captured via `legacy_run_seed` from `board_seat_runs`.
+
+### Immediate Next Steps
+1. Add/confirm Slack scopes for deep backfill (`channels:history` and private-channel equivalent as needed), reinstall app, then re-run history backfill.
+2. Re-run board-seat force run in `#anduril` after new Anduril signals appear and confirm post is allowed only when significant change is detected.
+3. Expand repeat detector from textual similarity to named-investment entity tracking (e.g., Epirus/Shield AI/Saronic) if repeated-name risk remains high.

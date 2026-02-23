@@ -609,3 +609,28 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 2. Validate one scout run and one explicit URL run in `#charting` for title completeness and strict URL behavior.
 3. Track occurrences of `copy_rewrite_reason=headline_unrecoverable`; if frequent for specific source families, add targeted synthesis heuristics.
 4. Resolve unrelated Spencer-change identity default test failures in a dedicated patch.
+
+## 2026-02-23 Plan Update - Board Seat Idea De-dup + History Memory
+
+### Completed
+- Implemented persistent board-seat pitch memory in `src/coatue_claw/board_seat_daily.py` (`board_seat_pitches` table).
+- Added automatic migration seed from historical `board_seat_runs` into pitch memory (`legacy_run_seed`) so prior posts are included immediately.
+- Added repeat-idea guardrail for each portco:
+  - blocks repeated investment theses unless significant context change is detected.
+- Added significant-change detector based on context novelty/event tokens/numeric deltas.
+- Added one-pass novel rewrite fallback; if still repeated and no significant change, post is skipped with explicit reason.
+- Added best-effort Slack channel-history backfill routine for pitch memory ingestion.
+- Extended status output with pitch-memory counts by company.
+- Added board-seat tests for extraction, dedupe skip, significant-change allow, and backfill parsing.
+- Validation:
+  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_board_seat_daily.py` -> `9 passed`.
+  - full smoke unchanged except pre-existing Spencer-change identity failures.
+
+### In Progress
+- Deep historical Slack message backfill for `#anduril` is scope-limited under current Slack token permissions (`conversations_history` returns empty under present configuration).
+
+### Next
+1. Enable Slack history scopes for bot/app in production workspace and reinstall app.
+2. Re-run board-seat history backfill for `#anduril` and confirm `board_seat_pitches` contains all legacy channel posts (not only run-table seed).
+3. Add explicit named-investment entity extraction (e.g., Epirus) to strengthen semantic repeat blocking beyond lexical similarity.
+4. Continue monitoring skip reasons in runtime logs to tune novelty thresholds without suppressing truly new ideas.
