@@ -1890,7 +1890,25 @@ def _can_use_decisive_primary_reason(
         return False
     margin = top_cluster_score - second_cluster_score
     if margin < _decisive_primary_reason_min_margin():
-        return False
+        strong_terms = (
+            "lawsuit",
+            "sues",
+            "sued",
+            "launch",
+            "launched",
+            "earnings",
+            "guidance",
+            "downgrade",
+            "upgrade",
+            "investigation",
+            "acquisition",
+            "contract",
+            "partnership",
+            "financing",
+        )
+        text = (cluster_candidate.text or "").lower()
+        if not (eff >= 0.9 and any(term in text for term in strong_terms)):
+            return False
     return True
 
 

@@ -53,6 +53,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - directional ranking now penalizes positive partnership-only headlines on down moves
   - removed generic `deal_contract` canned phrase; MD now uses concrete event text for ORCL-like contract/financing/litigation moves
   - fixed Yahoo evidence relevance bug by requiring ticker/alias mention in headlines before scoring
+  - decisive-primary override now permits strong explicit event headlines even when cluster score margin is narrow
 - MD specific-cause enforcement for selloffs is now implemented (NET/CRWD Anthropic miss class):
   - final catalyst lines can name a specific event only when corroborated by:
     - >=2 independent sources

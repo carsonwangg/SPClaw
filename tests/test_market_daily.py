@@ -617,6 +617,27 @@ def test_single_strong_quality_source_can_drive_decisive_primary_reason(monkeypa
     assert lines[0] == "Shares fell after Anthropic launched Claude Code Security, pressuring cybersecurity stocks."
 
 
+def test_decisive_primary_reason_allows_strong_event_even_with_small_margin() -> None:
+    from coatue_claw import market_daily as md
+
+    candidate = md._EvidenceCandidate(
+        source_type="yahoo_news",
+        text="Oracle Faces AI Lawsuits As Federal Cloud Contracts Expand",
+        url="https://finance.yahoo.com/news/oracle-faces-ai-lawsuits-federal-231206167.html",
+        published_at_utc=datetime(2026, 2, 20, 10, 0, 0, tzinfo=UTC),
+        score=0.95,
+        driver_keywords=("deal_contract",),
+        canonical_url="https://finance.yahoo.com/news/oracle-faces-ai-lawsuits-federal-231206167.html",
+        domain="finance.yahoo.com",
+    )
+    assert md._can_use_decisive_primary_reason(
+        cluster_candidate=candidate,
+        top_cluster_score=1.0,
+        second_cluster_score=0.997,
+        pct_move=-0.05,
+    )
+
+
 def test_cyber_basket_carries_anthropic_cause_to_net(monkeypatch) -> None:
     from coatue_claw import market_daily as md
 
