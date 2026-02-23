@@ -54,6 +54,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - removed generic `deal_contract` canned phrase; MD now uses concrete event text for ORCL-like contract/financing/litigation moves
   - fixed Yahoo evidence relevance bug by requiring ticker/alias mention in headlines before scoring
   - decisive-primary override now permits strong explicit event headlines even when cluster score margin is narrow
+  - fixed cluster-reuse scope: only high-specific clusters are reusable; generic `deal_contract` phrases no longer bleed across tickers
 - MD specific-cause enforcement for selloffs is now implemented (NET/CRWD Anthropic miss class):
   - final catalyst lines can name a specific event only when corroborated by:
     - >=2 independent sources

@@ -25,6 +25,9 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - deal/contract lines now use the concrete selected headline event text
   - Yahoo headline relevance filter now requires ticker/alias mention, preventing unrelated cross-company headlines in ORCL/NET lines
   - decisive-primary logic now allows strong explicit event headlines (for example lawsuits) even when the top-vs-second cluster score gap is small
+  - fixed cross-mover phrase contamination bug:
+    - generic clusters like `deal_contract` no longer reuse phrases across movers
+    - cluster reuse is now limited to high-specific clusters (for example `anthropic_claude_cyber`)
   - expanded wrapper blocklist for weak templates like:
     - `why ... shares ... today`
     - `shares ... trading lower today`

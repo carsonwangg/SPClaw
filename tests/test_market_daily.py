@@ -688,3 +688,55 @@ def test_cyber_basket_carries_anthropic_cause_to_net(monkeypatch) -> None:
     assert rows[0].confirmed_cluster == "anthropic_claude_cyber"
     assert "anthropic launched claude code security" in lines[0].lower()
     assert lines[0] == lines[1]
+
+
+def test_generic_deal_contract_cluster_is_not_reused_across_movers(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    def _fake_build(mover, slot_name, since_utc):
+        if mover.ticker == "NET":
+            ev = CatalystEvidence(
+                ticker="NET",
+                x_text=None,
+                x_url=None,
+                x_engagement=0,
+                news_title="Mastercard Partnerships With Ericsson And Cloudflare Reshape Digital Finance Role",
+                news_url="https://finance.yahoo.com/news/mastercard-partnerships-ericsson-cloudflare-031333933.html",
+                web_title=None,
+                web_url=None,
+                confidence=0.8,
+                chosen_source="yahoo_news",
+                driver_keywords=("deal_contract",),
+                confirmed_cluster="deal_contract",
+                confirmed_cause_phrase="Mastercard Partnerships With Ericsson And Cloudflare Reshape Digital Finance Role.",
+            )
+            return ev, "Shares fell after Mastercard Partnerships With Ericsson And Cloudflare Reshape Digital Finance Role."
+        ev = CatalystEvidence(
+            ticker="ORCL",
+            x_text=None,
+            x_url=None,
+            x_engagement=0,
+            news_title="Oracle Faces AI Lawsuits As Federal Cloud Contracts Expand",
+            news_url="https://finance.yahoo.com/news/oracle-faces-ai-lawsuits-federal-231206167.html",
+            web_title=None,
+            web_url=None,
+            confidence=0.9,
+            chosen_source="yahoo_news",
+            driver_keywords=("deal_contract",),
+            confirmed_cluster="deal_contract",
+            confirmed_cause_phrase="Oracle Faces AI Lawsuits As Federal Cloud Contracts Expand.",
+        )
+        return ev, "Shares fell after Oracle Faces AI Lawsuits As Federal Cloud Contracts Expand."
+
+    monkeypatch.setattr("coatue_claw.market_daily._build_catalyst_for_mover", _fake_build)
+    monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 20, 0, 0, 0, tzinfo=UTC))
+
+    movers = [
+        QuoteSnapshot("NET", 100.0, 92.0, 100.0, -0.08, "2026-02-20T12:00:00+00:00"),
+        QuoteSnapshot("ORCL", 100.0, 94.6, 100.0, -0.054, "2026-02-20T12:00:00+00:00"),
+    ]
+    rows, lines = md._build_catalyst_rows(movers=movers, slot_name="close")
+    assert rows[0].confirmed_cluster == "deal_contract"
+    assert rows[1].confirmed_cluster == "deal_contract"
+    assert "mastercard partnerships" in lines[0].lower()
+    assert "oracle faces ai lawsuits" in lines[1].lower()

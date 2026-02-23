@@ -1127,6 +1127,8 @@ _CLUSTER_PRIORITY_BONUS: dict[str, float] = {
     "anthropic_claude": 0.2,
 }
 
+_CLUSTER_REUSE_ALLOWLIST: set[str] = {"anthropic_claude_cyber", "anthropic_claude"}
+
 _DOMAIN_WEIGHTS: dict[str, float] = {
     "finance.yahoo.com": 0.95,
     "investing.com": 0.9,
@@ -2375,6 +2377,8 @@ def _build_catalyst_rows(*, movers: list[QuoteSnapshot], slot_name: str) -> tupl
             cluster_phrase.setdefault(row.confirmed_cluster, row.confirmed_cause_phrase)
         for cluster, idxs in cluster_to_idx.items():
             if len(idxs) < 2:
+                continue
+            if cluster not in _CLUSTER_REUSE_ALLOWLIST:
                 continue
             phrase = cluster_phrase.get(cluster)
             for idx in idxs:
