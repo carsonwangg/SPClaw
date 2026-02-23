@@ -4,6 +4,13 @@
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Current Status (2026-02-23)
+- OpenAI model policy updated to premium defaults (no frugal mode):
+  - `COATUE_CLAW_BOARD_SEAT_MODEL` default -> `gpt-5.2-chat-latest`
+  - `COATUE_CLAW_X_CHART_TITLE_MODEL` default -> `gpt-5.2-chat-latest`
+  - `COATUE_CLAW_X_CHART_VISION_MODEL` default -> `gpt-4.1`
+  - `COATUE_CLAW_MEMORY_EMBED_MODEL` default -> `text-embedding-3-large`
+  - `COATUE_CLAW_MD_MODEL` default -> `gpt-5.2-chat-latest`
+  - Mac mini `.env.prod` set to these premium runtime values and OpenClaw restarted.
 - MD BKNG catalyst miss fix is now shipped with Google-first evidence:
   - web retrieval is now `google_serp` primary with `ddg_html` fallback (instead of DDG-only)
   - Google payload parsing now includes `organic_results`, `news_results`, and `answer_box` snippets

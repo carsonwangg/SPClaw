@@ -40,6 +40,13 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Premium model policy is now defaulted for all OpenAI-backed tasks:
+  - board-seat synthesis default: `gpt-5.2-chat-latest`
+  - x-chart title/copy synthesis default: `gpt-5.2-chat-latest`
+  - x-chart vision extraction default: `gpt-4.1` (high-quality multimodal compatibility on chat endpoint)
+  - memory embeddings default: `text-embedding-3-large`
+  - market-daily model default upgraded to `gpt-5.2-chat-latest`
+  - runtime on Mac mini now pinned to premium model env values (same as above)
 - MD BKNG/Google-visible cause reliability fix shipped:
   - web evidence path is now `google_serp` primary with automatic `ddg_html` fallback
   - Google evidence ingestion now parses title + snippet + answer-box text (not title-only)

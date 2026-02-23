@@ -317,7 +317,7 @@ def _llm_message(*, company: str, snippets: list[str]) -> str | None:
         return None
     if not snippets:
         return None
-    model = (os.environ.get("COATUE_CLAW_BOARD_SEAT_MODEL", "gpt-5-mini") or "gpt-5-mini").strip()
+    model = (os.environ.get("COATUE_CLAW_BOARD_SEAT_MODEL", "gpt-5.2-chat-latest") or "gpt-5.2-chat-latest").strip()
     client = OpenAI(api_key=api_key)
     joined = "\n".join(f"- {line}" for line in snippets[:10])
     prompt = (

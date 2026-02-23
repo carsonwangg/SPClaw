@@ -957,7 +957,7 @@ def _extract_rebuilt_bars_via_vision(*, candidate: Candidate) -> RebuiltBars | N
 
     try:
         client = OpenAI(api_key=api_key)
-        model = os.environ.get("COATUE_CLAW_X_CHART_VISION_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+        model = os.environ.get("COATUE_CLAW_X_CHART_VISION_MODEL", "gpt-4.1").strip() or "gpt-4.1"
         force_grouped = _is_employees_robots_chart(candidate)
         prompt = (
             "Extract bar-chart data from this image.\n"
@@ -1269,7 +1269,7 @@ def _extract_chart_title_hint_via_vision(candidate: Candidate) -> str | None:
         return None
     try:
         client = OpenAI(api_key=api_key)
-        model = os.environ.get("COATUE_CLAW_X_CHART_TITLE_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+        model = os.environ.get("COATUE_CLAW_X_CHART_TITLE_MODEL", "gpt-5.2-chat-latest").strip() or "gpt-5.2-chat-latest"
         b64 = base64.b64encode(payload).decode("ascii")
         data_url = f"data:{mime};base64,{b64}"
         response = client.chat.completions.create(
@@ -1401,7 +1401,7 @@ def _synthesize_style_via_llm(candidate: Candidate) -> dict[str, str] | None:
     title = _normalize_render_text(candidate.title)
     if not (text or title):
         return None
-    model = os.environ.get("COATUE_CLAW_X_CHART_TITLE_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+    model = os.environ.get("COATUE_CLAW_X_CHART_TITLE_MODEL", "gpt-5.2-chat-latest").strip() or "gpt-5.2-chat-latest"
     prompt = (
         "Create Coatue-style chart copy from this X post.\n"
         "Return strict JSON with keys: headline, chart_label, takeaway.\n"

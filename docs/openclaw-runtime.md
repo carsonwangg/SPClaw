@@ -192,7 +192,7 @@ Pipeline environment controls:
 Memory environment controls:
 - `COATUE_CLAW_MEMORY_DB_PATH`: optional SQLite memory DB path
 - `COATUE_CLAW_MEMORY_VECTOR_DIR`: optional LanceDB directory path
-- `COATUE_CLAW_MEMORY_EMBED_MODEL`: optional embedding model (default `text-embedding-3-small`)
+- `COATUE_CLAW_MEMORY_EMBED_MODEL`: optional embedding model (default `text-embedding-3-large`)
 - `OPENAI_API_KEY`: required only for semantic memory fallback
 
 File ingest environment controls:
@@ -225,7 +225,7 @@ MD (Market Daily) environment controls:
 - `COATUE_CLAW_MD_ARTIFACT_DIR`: markdown artifact output dir (default `/opt/coatue-claw-data/artifacts/market-daily`)
 - `COATUE_CLAW_MD_COATUE_CIK`: Coatue CIK for auto 13F refresh
 - `COATUE_CLAW_MD_OPENFIGI_API_KEY`: optional OpenFIGI key for stronger CUSIP->ticker resolution
-- `COATUE_CLAW_MD_MODEL`: optional catalyst summarizer model (default `gpt-5-mini`)
+- `COATUE_CLAW_MD_MODEL`: optional catalyst summarizer model (default `gpt-5.2-chat-latest`)
 - `COATUE_CLAW_MD_MAX_LOOKBACK_HOURS`: max evidence lookback cap for session windows (default `96`)
 - `COATUE_CLAW_MD_X_MAX_RESULTS`: X search depth for catalyst retrieval (default `50`)
 - `COATUE_CLAW_MD_WEB_SEARCH_ENABLED`: enable web fallback retrieval (`1`/`0`, default `1`)
@@ -252,7 +252,7 @@ Board Seat daily environment controls:
 - `COATUE_CLAW_BOARD_SEAT_LOOKBACK_HOURS`: Slack history window used for context (default `24`)
 - `COATUE_CLAW_BOARD_SEAT_MAX_MESSAGES`: max context messages fetched per channel (default `160`)
 - `COATUE_CLAW_BOARD_SEAT_DB_PATH`: optional SQLite path for daily run ledger
-- `COATUE_CLAW_BOARD_SEAT_MODEL`: optional LLM model for synthesis (default `gpt-5-mini`)
+- `COATUE_CLAW_BOARD_SEAT_MODEL`: optional LLM model for synthesis (default `gpt-5.2-chat-latest`)
 
 Spencer change-digest environment controls:
 - `COATUE_CLAW_CHANGE_TRACKER_USERS`: optional comma-separated `user_id:label` mappings for tracked requesters (example: `U0AGD28QSQG:Carson Wang,U0AFJ5RS31C:Spencer Peterson`)

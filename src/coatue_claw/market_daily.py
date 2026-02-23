@@ -44,7 +44,7 @@ DEFAULT_TOP_K = 40
 DEFAULT_CHANNEL = "general"
 DEFAULT_DATA_ROOT = "/opt/coatue-claw-data"
 DEFAULT_SEED_PATH = "/opt/coatue-claw/config/md_tmt_seed_universe.csv"
-DEFAULT_MODEL = "gpt-5-mini"
+DEFAULT_MODEL = "gpt-5.2-chat-latest"
 US_MARKET_TZ = "America/New_York"
 FALLBACK_CAUSE_LINE = "Likely positioning/flow; no single confirmed catalyst."
 

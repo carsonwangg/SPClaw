@@ -54,7 +54,7 @@ class SemanticMemoryIndex:
             uri = os.environ.get("COATUE_CLAW_MEMORY_VECTOR_DIR", f"{data_root}/db/lancedb")
             self._db = lancedb.connect(uri)
             self._client = OpenAI(api_key=api_key)
-            self._model = os.environ.get("COATUE_CLAW_MEMORY_EMBED_MODEL", "text-embedding-3-small")
+            self._model = os.environ.get("COATUE_CLAW_MEMORY_EMBED_MODEL", "text-embedding-3-large")
 
             tables = set(self._db.table_names())
             if "memory_facts" in tables:
