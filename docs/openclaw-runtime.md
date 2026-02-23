@@ -232,6 +232,12 @@ MD (Market Daily) environment controls:
 - `COATUE_CLAW_MD_WEB_SEARCH_BACKEND`: web fallback backend (default `ddg_html`)
 - `COATUE_CLAW_MD_WEB_MAX_RESULTS`: max web evidence links per ticker (default `8`)
 - `COATUE_CLAW_MD_MIN_EVIDENCE_CONFIDENCE`: confidence threshold before fallback reason line (default `0.55`)
+- `COATUE_CLAW_MD_MIN_CAUSE_SOURCES`: minimum independent corroborating sources required to name a specific cause (default `2`)
+- `COATUE_CLAW_MD_MIN_CAUSE_DOMAINS`: minimum distinct corroborating domains required to name a specific cause (default `2`)
+- `COATUE_CLAW_MD_ENABLE_CAUSE_CLUSTER_REUSE`: reuse one confirmed basket cause phrase across multiple movers in the same run (`1`/`0`, default `1`)
+- `COATUE_CLAW_MD_GENERIC_HEADLINE_BLOCKLIST_ENABLED`: block generic wrappers (for example "stock is down today") from final catalyst lines (`1`/`0`, default `1`)
+- `COATUE_CLAW_MD_REASON_MODE`: catalyst reasoning mode (default `best_effort`)
+- MD fallback line (when corroboration gate fails): `Likely positioning/flow; no single confirmed catalyst.`
 
 Board Seat daily environment controls:
 - `COATUE_CLAW_BOARD_SEAT_PORTCOS`: comma-separated `Company:channel` mappings (default includes anduril/anthropic/cursor/neuralink/openai/physical-intelligence/ramp/spacex/stripe/sunday-robotics)

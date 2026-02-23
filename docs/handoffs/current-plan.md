@@ -40,6 +40,25 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- MD specific-cause enforcement for selloffs is now implemented (NET/CRWD Anthropic miss class):
+  - final catalyst lines can name a specific event only when corroborated by:
+    - >=2 independent sources
+    - >=2 distinct domains
+    - >=1 quality domain
+  - evidence normalization/dedupe added:
+    - canonical URL normalization + DDG redirect unwrap
+    - de-duplication by canonical URL/title fingerprint
+  - generic wrappers are blocked from final reasons:
+    - `why ... stock down today`, `news today`, and ticker-only wrappers
+  - new explicit cause cluster:
+    - `anthropic_claude_cyber` -> `Anthropic launched Claude Code Security.`
+  - final line contract is deterministic:
+    - `Shares fell after <specific event>.` / `Shares rose after <specific event>.`
+    - fallback: `Likely positioning/flow; no single confirmed catalyst.`
+  - cross-mover cluster reuse now keeps basket-event lines consistent across affected movers in one run
+  - debug output includes corroboration fields and confirmed cluster metadata
+  - tests updated and passing:
+    - `PYTHONPATH=src pytest -q` => `155 passed`
 - MD catalyst reliability fix (NET / Anthropic miss class) is now implemented:
   - evidence stack upgraded from X+Yahoo to X + Yahoo + DDG fallback (`COATUE_CLAW_MD_WEB_SEARCH_ENABLED=1`)
   - Yahoo ingestion now supports both legacy and nested yfinance schemas

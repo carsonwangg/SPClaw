@@ -249,7 +249,7 @@ def test_reason_line_uses_generic_fallback_for_vague_x_only_text() -> None:
         news_url=None,
     )
     line = _ensure_reason_like_line("3 Under-the-Radar Earnings Surprises Could Signal a New Trend", evidence=evidence)
-    assert "No clear single catalyst" in line
+    assert "no single confirmed catalyst" in line.lower()
 
 
 def test_fetch_yahoo_news_parses_nested_schema(monkeypatch) -> None:
@@ -313,6 +313,15 @@ def test_ddg_web_fallback_parses_result_links(monkeypatch) -> None:
     assert rows[0].url == "https://stocktwits.com/news/anthropic-net-drop"
 
 
+def test_ddg_resolve_handles_absolute_redirect_url() -> None:
+    from coatue_claw import market_daily as md
+
+    resolved = md._ddg_resolve_url(
+        "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fstocktwits.com%2Fnews%2Fanthropic-net-drop"
+    )
+    assert resolved == "https://stocktwits.com/news/anthropic-net-drop"
+
+
 def test_debug_catalyst_returns_expected_shape(monkeypatch) -> None:
     evidence = CatalystEvidence(
         ticker="NET",
@@ -347,20 +356,24 @@ def test_negative_mover_prefers_negative_driver_language(monkeypatch) -> None:
 
     candidates = [
         md._EvidenceCandidate(
-            source_type="yahoo_news",
-            text="Cloudflare and Mastercard announce strategic cybersecurity partnership",
-            url="https://finance.yahoo.com/news/partnership",
+            source_type="web",
+            text="Cloudflare and CrowdStrike sink after Anthropic unveils Claude Code Security",
+            url="https://coincentral.com/cloudflare-net-stock-mastercard-partnership-and-market-selloff-explained/",
             published_at_utc=datetime(2026, 2, 20, 10, 0, 0, tzinfo=UTC),
             score=0.9,
-            driver_keywords=("cybersecurity_competition",),
+            driver_keywords=("anthropic_claude_cyber", "anthropic_claude"),
+            canonical_url="https://coincentral.com/cloudflare-net-stock-mastercard-partnership-and-market-selloff-explained/",
+            domain="coincentral.com",
         ),
         md._EvidenceCandidate(
             source_type="yahoo_news",
             text="Cybersecurity stocks drop as Anthropic launches Claude Code Security tool",
-            url="https://finance.yahoo.com/news/anthropic",
+            url="https://stocktwits.com/news/anthropic",
             published_at_utc=datetime(2026, 2, 20, 10, 30, 0, tzinfo=UTC),
             score=0.9,
-            driver_keywords=("anthropic_claude", "cybersecurity_competition"),
+            driver_keywords=("anthropic_claude_cyber", "anthropic_claude"),
+            canonical_url="https://stocktwits.com/news/anthropic",
+            domain="stocktwits.com",
         ),
     ]
 
@@ -370,8 +383,8 @@ def test_negative_mover_prefers_negative_driver_language(monkeypatch) -> None:
 
     mover = QuoteSnapshot("NET", 100.0, 92.0, 100.0, -0.08, "2026-02-20T12:00:00+00:00")
     rows, lines = md._build_catalyst_rows(movers=[mover], slot_name="open")
-    assert "anthropic" in (rows[0].news_title or "").lower()
-    assert ("after" in lines[0].lower()) or (" as " in lines[0].lower())
+    assert rows[0].confirmed_cluster == "anthropic_claude_cyber"
+    assert "anthropic launched claude code security" in lines[0].lower()
 
 
 def test_collect_evidence_triggers_web_when_directional_signal_missing(monkeypatch) -> None:
@@ -415,3 +428,137 @@ def test_collect_evidence_triggers_web_when_directional_signal_missing(monkeypat
     )
     assert calls["web"] == 1
     assert any(r.source_type == "web" for r in rows)
+
+
+def test_generic_wrapper_detection_blocks_tautologies() -> None:
+    from coatue_claw import market_daily as md
+
+    assert md._is_generic_headline_wrapper(
+        text="Why NET stock is down today",
+        ticker="NET",
+        aliases=["Cloudflare"],
+    )
+    assert md._contains_disallowed_reason_phrasing("After NET stock is down today.")
+
+
+def test_anthropic_cluster_extraction_maps_keywords() -> None:
+    from coatue_claw import market_daily as md
+
+    keys = md._extract_driver_keywords("Cybersecurity stocks fell after Anthropic launched Claude Code Security tool")
+    assert "anthropic_claude_cyber" in keys
+
+
+def test_corroboration_gate_requires_two_independent_sources() -> None:
+    from coatue_claw import market_daily as md
+
+    one_source = [
+        md._EvidenceCandidate(
+            source_type="yahoo_news",
+            text="Cybersecurity stocks fell after Anthropic launched Claude Code Security.",
+            url="https://finance.yahoo.com/news/a",
+            published_at_utc=datetime(2026, 2, 20, 10, 0, 0, tzinfo=UTC),
+            score=0.9,
+            driver_keywords=("anthropic_claude_cyber",),
+            canonical_url="https://finance.yahoo.com/news/a",
+            domain="finance.yahoo.com",
+        )
+    ]
+    two_sources = one_source + [
+        md._EvidenceCandidate(
+            source_type="web",
+            text="Cloudflare and CrowdStrike slide as Anthropic unveils Claude Code Security",
+            url="https://stocktwits.com/news/b",
+            published_at_utc=None,
+            score=0.8,
+            driver_keywords=("anthropic_claude_cyber",),
+            canonical_url="https://stocktwits.com/news/b",
+            domain="stocktwits.com",
+        )
+    ]
+    assert not md._cluster_is_corroborated(one_source)
+    assert md._cluster_is_corroborated(two_sources)
+
+
+def test_net_crwd_shared_cluster_uses_specific_anthropic_reason(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    def _fake_collect(ticker, aliases, since_utc, pct_move=None):
+        return (
+            [
+                md._EvidenceCandidate(
+                    source_type="yahoo_news",
+                    text="Cybersecurity stocks fell after Anthropic launched Claude Code Security tool",
+                    url="https://finance.yahoo.com/news/anthropic-cyber",
+                    published_at_utc=datetime(2026, 2, 20, 10, 0, 0, tzinfo=UTC),
+                    score=0.9,
+                    driver_keywords=("anthropic_claude_cyber", "anthropic_claude"),
+                    canonical_url="https://finance.yahoo.com/news/anthropic-cyber",
+                    domain="finance.yahoo.com",
+                ),
+                md._EvidenceCandidate(
+                    source_type="web",
+                    text="Cloudflare and CrowdStrike drop after Anthropic Claude Code Security release",
+                    url="https://stocktwits.com/news/anthropic-cyber-drop",
+                    published_at_utc=None,
+                    score=0.78,
+                    driver_keywords=("anthropic_claude_cyber",),
+                    canonical_url="https://stocktwits.com/news/anthropic-cyber-drop",
+                    domain="stocktwits.com",
+                ),
+                md._EvidenceCandidate(
+                    source_type="web",
+                    text="Why NET stock is down today",
+                    url="https://example.com/wrapper",
+                    published_at_utc=None,
+                    score=0.95,
+                    driver_keywords=("anthropic_claude_cyber",),
+                    reject_reason="generic_wrapper",
+                    canonical_url="https://example.com/wrapper",
+                    domain="example.com",
+                ),
+            ],
+            [],
+        )
+
+    monkeypatch.setattr("coatue_claw.market_daily._collect_evidence_for_ticker", _fake_collect)
+    monkeypatch.setattr("coatue_claw.market_daily._company_aliases", lambda ticker: [ticker])
+    monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 20, 0, 0, 0, tzinfo=UTC))
+
+    movers = [
+        QuoteSnapshot("NET", 100.0, 92.0, 100.0, -0.08, "2026-02-20T12:00:00+00:00"),
+        QuoteSnapshot("CRWD", 100.0, 92.1, 100.0, -0.079, "2026-02-20T12:00:00+00:00"),
+    ]
+    rows, lines = md._build_catalyst_rows(movers=movers, slot_name="close")
+    assert rows[0].confirmed_cluster == "anthropic_claude_cyber"
+    assert rows[1].confirmed_cluster == "anthropic_claude_cyber"
+    assert lines[0] == lines[1]
+    assert "anthropic launched claude code security" in lines[0].lower()
+
+
+def test_single_source_only_uses_uncertainty_fallback(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    def _fake_collect(ticker, aliases, since_utc, pct_move=None):
+        return (
+            [
+                md._EvidenceCandidate(
+                    source_type="yahoo_news",
+                    text="Cloudflare stock is down today after mixed sentiment",
+                    url="https://finance.yahoo.com/news/net-down",
+                    published_at_utc=datetime(2026, 2, 20, 10, 0, 0, tzinfo=UTC),
+                    score=0.9,
+                    driver_keywords=("anthropic_claude_cyber",),
+                    canonical_url="https://finance.yahoo.com/news/net-down",
+                    domain="finance.yahoo.com",
+                )
+            ],
+            [],
+        )
+
+    monkeypatch.setattr("coatue_claw.market_daily._collect_evidence_for_ticker", _fake_collect)
+    monkeypatch.setattr("coatue_claw.market_daily._company_aliases", lambda ticker: [ticker])
+    monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 20, 0, 0, 0, tzinfo=UTC))
+
+    movers = [QuoteSnapshot("NET", 100.0, 92.0, 100.0, -0.08, "2026-02-20T12:00:00+00:00")]
+    _, lines = md._build_catalyst_rows(movers=movers, slot_name="open")
+    assert lines[0] == "Likely positioning/flow; no single confirmed catalyst."

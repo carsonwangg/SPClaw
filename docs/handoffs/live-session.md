@@ -4,6 +4,28 @@
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Current Status (2026-02-23)
+- MD specific-cause enforcement is now shipped for selloffs (NET/CRWD Anthropic case class):
+  - cause naming now requires corroboration gate: at least 2 independent sources + 2 distinct domains + at least one quality domain
+  - evidence is now normalized/deduped by canonical URL + title fingerprint, including DDG absolute redirect unwrapping
+  - generic wrappers are blocked from final lines (`why ... stock down today`, `news today`, ticker-only fragments)
+  - added explicit cause cluster `anthropic_claude_cyber` with deterministic event phrase:
+    - `Anthropic launched Claude Code Security.`
+  - final reason lines now use deterministic template when corroborated:
+    - negative: `Shares fell after <event>.`
+    - positive: `Shares rose after <event>.`
+  - when corroboration fails, fallback is now:
+    - `Likely positioning/flow; no single confirmed catalyst.`
+  - shared basket-event reuse is enabled across movers in the same run (for example NET + CRWD share the same Anthropic cause phrase)
+  - debug payload now includes:
+    - `confirmed_cluster`, `confirmed_cause_phrase`, `corroborated_sources`, `corroborated_domains`
+  - tests added/updated in `tests/test_market_daily.py`:
+    - generic wrapper blocking
+    - Anthropic cluster extraction mapping
+    - corroboration gate behavior
+    - NET/CRWD shared-cluster reason reuse
+    - single-source fallback behavior
+  - local validation:
+    - `PYTHONPATH=src pytest -q` => `155 passed`
 - MD catalyst reliability fix for NET/Anthropic-class misses is now implemented in repo:
   - source coverage expanded from X+Yahoo-only to X + Yahoo + DDG web fallback (when confidence is weak)
   - Yahoo parser now supports both legacy yfinance fields and nested `content.*` schema (`pubDate`, `title`, `clickThroughUrl.url`/`canonicalUrl.url`)
@@ -14,7 +36,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - X retrieval now uses richer ticker+alias query and configurable depth (`COATUE_CLAW_MD_X_MAX_RESULTS`, default `50`)
   - evidence scoring now includes source quality, recency, mention strength, driver keywords, and directional move-aware ranking
   - fallback reason line now uses concise default:
-    - `No clear single catalyst; likely positioning/flow.`
+    - `Likely positioning/flow; no single confirmed catalyst.`
   - Slack output style remains unchanged (📈/📉 + concise reason + source links), with optional `[Web]` link when web fallback is used
   - markdown artifact now includes evidence diagnostics per mover:
     - confidence, chosen source, driver keywords, top evidence considered, and reject reasons

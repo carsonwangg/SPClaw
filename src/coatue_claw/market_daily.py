@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from html import unescape
 import json
@@ -12,7 +12,7 @@ import re
 import sqlite3
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, unquote, urlencode, urlparse
+from urllib.parse import parse_qs, unquote, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
@@ -46,6 +46,7 @@ DEFAULT_DATA_ROOT = "/opt/coatue-claw-data"
 DEFAULT_SEED_PATH = "/opt/coatue-claw/config/md_tmt_seed_universe.csv"
 DEFAULT_MODEL = "gpt-5-mini"
 US_MARKET_TZ = "America/New_York"
+FALLBACK_CAUSE_LINE = "Likely positioning/flow; no single confirmed catalyst."
 
 
 class MarketDailyError(RuntimeError):
@@ -78,6 +79,10 @@ class CatalystEvidence:
     top_evidence: tuple[str, ...] = ()
     rejected_reasons: tuple[str, ...] = ()
     since_utc: str | None = None
+    confirmed_cluster: str | None = None
+    confirmed_cause_phrase: str | None = None
+    corroborated_sources: int = 0
+    corroborated_domains: int = 0
 
 
 def _utc_now_iso() -> str:
@@ -201,6 +206,39 @@ def _min_evidence_confidence() -> float:
     except Exception:
         val = 0.55
     return max(0.1, min(0.95, val))
+
+
+def _min_cause_sources() -> int:
+    raw = (os.environ.get("COATUE_CLAW_MD_MIN_CAUSE_SOURCES", "2") or "2").strip()
+    try:
+        val = int(raw)
+    except Exception:
+        val = 2
+    return max(1, min(5, val))
+
+
+def _min_cause_domains() -> int:
+    raw = (os.environ.get("COATUE_CLAW_MD_MIN_CAUSE_DOMAINS", "2") or "2").strip()
+    try:
+        val = int(raw)
+    except Exception:
+        val = 2
+    return max(1, min(5, val))
+
+
+def _enable_cause_cluster_reuse() -> bool:
+    raw = (os.environ.get("COATUE_CLAW_MD_ENABLE_CAUSE_CLUSTER_REUSE", "1") or "1").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _generic_headline_blocklist_enabled() -> bool:
+    raw = (os.environ.get("COATUE_CLAW_MD_GENERIC_HEADLINE_BLOCKLIST_ENABLED", "1") or "1").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _reason_mode() -> str:
+    mode = (os.environ.get("COATUE_CLAW_MD_REASON_MODE", "best_effort") or "best_effort").strip().lower()
+    return mode if mode in {"best_effort"} else "best_effort"
 
 
 def _x_api_base() -> str:
@@ -1034,6 +1072,14 @@ _COMPANY_ALIAS_OVERRIDES: dict[str, list[str]] = {
 }
 
 _DRIVER_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "anthropic_claude_cyber": (
+        "anthropic",
+        "claude code security",
+        "claude code",
+        "security tool",
+        "cybersecurity stocks fell",
+        "cybersecurity stocks drop",
+    ),
     "anthropic_claude": ("anthropic", "claude", "code security"),
     "cybersecurity_competition": ("cybersecurity", "security tool", "threat detection", "vulnerability"),
     "earnings_guidance": ("earnings", "guidance", "forecast", "outlook"),
@@ -1041,6 +1087,22 @@ _DRIVER_KEYWORDS: dict[str, tuple[str, ...]] = {
     "deal_contract": ("deal", "contract", "partnership"),
     "product_launch": ("launch", "rollout", "release"),
     "analyst_move": ("upgrade", "downgrade", "price target"),
+}
+
+_CLUSTER_EVENT_PHRASES: dict[str, str] = {
+    "anthropic_claude_cyber": "Anthropic launched Claude Code Security.",
+    "anthropic_claude": "Anthropic launched new Claude security capabilities.",
+    "cybersecurity_competition": "new security tooling intensified competitive pressure.",
+    "earnings_guidance": "earnings and guidance reset expectations.",
+    "macro_rates": "rates and macro signals shifted risk appetite.",
+    "deal_contract": "a major deal or contract update changed sentiment.",
+    "product_launch": "a product launch reset expectations.",
+    "analyst_move": "analyst rating changes moved expectations.",
+}
+
+_CLUSTER_PRIORITY_BONUS: dict[str, float] = {
+    "anthropic_claude_cyber": 0.35,
+    "anthropic_claude": 0.2,
 }
 
 _DOMAIN_WEIGHTS: dict[str, float] = {
@@ -1055,6 +1117,23 @@ _DOMAIN_WEIGHTS: dict[str, float] = {
     "coincentral.com": 0.75,
 }
 
+_QUALITY_CAUSE_DOMAINS: set[str] = {
+    "finance.yahoo.com",
+    "reuters.com",
+    "bloomberg.com",
+    "wsj.com",
+    "marketwatch.com",
+    "investing.com",
+    "stocktwits.com",
+}
+
+_GENERIC_WRAPPER_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\bwhy\b.*\bstock\b.*\bdown today\b", flags=re.IGNORECASE),
+    re.compile(r"\bnews today\b", flags=re.IGNORECASE),
+    re.compile(r"\bstock is down today\b", flags=re.IGNORECASE),
+    re.compile(r"\bstock down today\b", flags=re.IGNORECASE),
+)
+
 
 @dataclass(frozen=True)
 class _EvidenceCandidate:
@@ -1066,6 +1145,8 @@ class _EvidenceCandidate:
     engagement: int = 0
     driver_keywords: tuple[str, ...] = ()
     reject_reason: str | None = None
+    canonical_url: str | None = None
+    domain: str | None = None
 
 
 def _company_aliases(ticker: str) -> list[str]:
@@ -1188,12 +1269,112 @@ def _domain_weight(url: str | None) -> float:
     return 0.6
 
 
+def _domain_from_url(url: str | None) -> str:
+    if not url:
+        return ""
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except Exception:
+        host = ""
+    if host.startswith("www."):
+        host = host[4:]
+    return host
+
+
+def _is_quality_domain(url_or_domain: str | None) -> bool:
+    domain = _domain_from_url(url_or_domain)
+    if not domain:
+        domain = (url_or_domain or "").strip().lower()
+    if not domain:
+        return False
+    return any(domain == d or domain.endswith("." + d) for d in _QUALITY_CAUSE_DOMAINS)
+
+
+def _title_fingerprint(text: str) -> str:
+    normalized = _normalize_whitespace(text).lower()
+    normalized = re.sub(r"https?://\S+", " ", normalized)
+    normalized = re.sub(r"[^a-z0-9 ]+", " ", normalized)
+    tokens = [tok for tok in normalized.split() if tok not in {"the", "a", "an", "and", "for", "to", "of", "is", "are"}]
+    return " ".join(tokens[:18])
+
+
+def _canonicalize_url(url: str | None) -> str | None:
+    raw = _ddg_resolve_url(url or "")
+    if not raw:
+        return None
+    try:
+        parsed = urlparse(raw)
+    except Exception:
+        return raw
+    if not parsed.scheme:
+        return raw
+    filtered_q = []
+    for k, vals in parse_qs(parsed.query, keep_blank_values=False).items():
+        key = k.lower()
+        if key.startswith("utm_") or key in {"guccounter", "guce_referrer", "guce_referrer_sig"}:
+            continue
+        for v in vals:
+            filtered_q.append((k, v))
+    filtered_query = urlencode(filtered_q)
+    cleaned = parsed._replace(query=filtered_query, fragment="")
+    return urlunparse(cleaned)
+
+
+def _is_generic_headline_wrapper(*, text: str, ticker: str, aliases: list[str]) -> bool:
+    if not _generic_headline_blocklist_enabled():
+        return False
+    cleaned = _normalize_whitespace(text)
+    if not cleaned:
+        return True
+    lower = cleaned.lower()
+    for pattern in _GENERIC_WRAPPER_PATTERNS:
+        if pattern.search(lower):
+            return True
+    tokenized = re.sub(r"[^a-z0-9$ ]+", " ", lower)
+    words = [w for w in tokenized.split() if w]
+    ticker_mentions = ticker.lower() in words or f"${ticker.lower()}" in words or any(a.lower() in lower for a in aliases)
+    if ticker_mentions and len(words) <= 6:
+        if not any(term in lower for term in ("after", "amid", "due to", "because", "launch", "earnings", "guidance", "deal", "downgrade", "upgrade", "lawsuit", "security")):
+            return True
+    return False
+
+
+def _normalize_evidence_candidates(*, candidates: list[_EvidenceCandidate], ticker: str, aliases: list[str]) -> list[_EvidenceCandidate]:
+    deduped: list[_EvidenceCandidate] = []
+    seen_urls: set[str] = set()
+    seen_titles: set[str] = set()
+    for item in candidates:
+        canonical_url = _canonicalize_url(item.url)
+        domain = _domain_from_url(canonical_url or item.url)
+        fingerprint = _title_fingerprint(item.text)
+        if canonical_url and canonical_url in seen_urls:
+            continue
+        if fingerprint and fingerprint in seen_titles:
+            continue
+        if canonical_url:
+            seen_urls.add(canonical_url)
+        if fingerprint:
+            seen_titles.add(fingerprint)
+        deduped.append(
+            replace(
+                item,
+                url=canonical_url or item.url,
+                canonical_url=canonical_url or item.url,
+                domain=domain,
+                reject_reason=("generic_wrapper" if _is_generic_headline_wrapper(text=item.text, ticker=ticker, aliases=aliases) else item.reject_reason),
+            )
+        )
+    return deduped
+
+
 def _extract_driver_keywords(text: str) -> tuple[str, ...]:
     lower = _normalize_whitespace(text).lower()
     out: list[str] = []
     for cluster, keywords in _DRIVER_KEYWORDS.items():
         if any(k in lower for k in keywords):
             out.append(cluster)
+    if "anthropic_claude_cyber" in out and "cybersecurity_competition" in out:
+        out = [x for x in out if x != "cybersecurity_competition"]
     return tuple(out)
 
 
@@ -1466,7 +1647,7 @@ def _ddg_resolve_url(raw_url: str) -> str:
     decoded = unescape(raw_url)
     if decoded.startswith("//"):
         decoded = "https:" + decoded
-    if decoded.startswith("/l/?"):
+    if decoded.startswith("/l/?") or decoded.startswith("https://duckduckgo.com/l/?") or decoded.startswith("http://duckduckgo.com/l/?"):
         try:
             query = parse_qs(urlparse(decoded).query)
             uddg = query.get("uddg", [""])[0]
@@ -1550,7 +1731,7 @@ def _directional_bonus(*, text: str, pct_move: float | None) -> float:
         return 0.0
     lower = text.lower()
     up_terms = ("surge", "rises", "rose", "gains", "jumps", "up ", "beats", "upgrades")
-    down_terms = ("drops", "drop", "fell", "falls", "slides", "selloff", "down ", "misses", "downgrade")
+    down_terms = ("drops", "drop", "fell", "falls", "slides", "selloff", "sold off", "down ", "misses", "downgrade", "weighed", "pressured", "under pressure")
     if pct_move < 0:
         if any(term in lower for term in down_terms):
             return 0.14
@@ -1565,7 +1746,10 @@ def _directional_bonus(*, text: str, pct_move: float | None) -> float:
 
 
 def _effective_candidate_score(*, candidate: _EvidenceCandidate, pct_move: float | None) -> float:
-    return max(0.0, min(1.0, candidate.score + _directional_bonus(text=candidate.text, pct_move=pct_move)))
+    value = candidate.score + _directional_bonus(text=candidate.text, pct_move=pct_move)
+    if candidate.reject_reason == "generic_wrapper" and _generic_headline_blocklist_enabled():
+        value -= 0.45
+    return max(0.0, min(1.0, value))
 
 
 def _pick_best_by_source(candidates: list[_EvidenceCandidate], source_type: str, *, pct_move: float | None) -> _EvidenceCandidate | None:
@@ -1583,6 +1767,79 @@ def _driver_cluster_scores(candidates: list[_EvidenceCandidate]) -> dict[str, fl
     return totals
 
 
+def _cluster_members(candidates: list[_EvidenceCandidate], cluster: str) -> list[_EvidenceCandidate]:
+    return [c for c in candidates if cluster in c.driver_keywords]
+
+
+def _cluster_independent_sources(candidates: list[_EvidenceCandidate]) -> int:
+    source_types: set[str] = set()
+    domains: set[str] = set()
+    for item in candidates:
+        source_types.add(item.source_type)
+        if item.domain:
+            domains.add(item.domain)
+    if domains:
+        return max(len(source_types), len(domains))
+    return len(source_types)
+
+
+def _cluster_domain_count(candidates: list[_EvidenceCandidate]) -> int:
+    return len({item.domain for item in candidates if item.domain})
+
+
+def _cluster_has_quality_domain(candidates: list[_EvidenceCandidate]) -> bool:
+    return any(_is_quality_domain(item.domain or item.url) for item in candidates)
+
+
+def _cluster_is_corroborated(candidates: list[_EvidenceCandidate]) -> bool:
+    return (
+        _cluster_independent_sources(candidates) >= _min_cause_sources()
+        and _cluster_domain_count(candidates) >= _min_cause_domains()
+        and _cluster_has_quality_domain(candidates)
+    )
+
+
+def _cluster_event_phrase(cluster: str, *, candidate: _EvidenceCandidate | None) -> str | None:
+    fixed = _CLUSTER_EVENT_PHRASES.get(cluster)
+    if fixed:
+        return fixed
+    if candidate is None:
+        return None
+    if candidate.reject_reason == "generic_wrapper":
+        return None
+    cleaned = _strip_non_md_artifacts(candidate.text)
+    cleaned = re.sub(r"(?i)^why\b.+?\b(today|now)\b", "", cleaned).strip()
+    if not cleaned:
+        return None
+    cleaned = _shorten(cleaned.rstrip(".") + ".", 95).rstrip(".") + "."
+    return cleaned
+
+
+def _build_reason_line_from_phrase(*, pct_move: float | None, phrase: str | None) -> str:
+    if not phrase:
+        return FALLBACK_CAUSE_LINE
+    cleaned_phrase = _shorten(_strip_non_md_artifacts(phrase).strip(), 90).rstrip(".")
+    if not cleaned_phrase:
+        return FALLBACK_CAUSE_LINE
+    if pct_move is not None and pct_move < 0:
+        line = f"Shares fell after {cleaned_phrase}."
+    elif pct_move is not None and pct_move > 0:
+        line = f"Shares rose after {cleaned_phrase}."
+    else:
+        line = f"Shares moved after {cleaned_phrase}."
+    line = _shorten(line, 110).rstrip(" .") + "."
+    if _contains_disallowed_reason_phrasing(line):
+        return FALLBACK_CAUSE_LINE
+    return line
+
+
+def _contains_disallowed_reason_phrasing(text: str) -> bool:
+    lower = _normalize_whitespace(text).lower()
+    if ("stock is down today" in lower) or ("news today" in lower):
+        return True
+    return any(pattern.search(lower) for pattern in _GENERIC_WRAPPER_PATTERNS)
+
+
 def _collect_evidence_for_ticker(
     *,
     ticker: str,
@@ -1598,20 +1855,24 @@ def _collect_evidence_for_ticker(
     if not yahoo_candidates:
         rejected.append("yahoo:no_recent_relevant_headlines")
 
-    combined = x_candidates + yahoo_candidates
+    combined = _normalize_evidence_candidates(candidates=(x_candidates + yahoo_candidates), ticker=ticker, aliases=aliases)
     x_y_best = max((c.score for c in combined), default=0.0)
     source_diversity = len({c.source_type for c in combined})
     directional_hits = any(_directional_bonus(text=c.text, pct_move=pct_move) > 0 for c in combined)
     needs_web = (x_y_best < _min_evidence_confidence()) or (source_diversity < 2) or (not directional_hits)
     if needs_web:
-        web_candidates = _fetch_web_evidence_ddg(ticker=ticker, aliases=aliases, since_utc=since_utc, pct_move=pct_move)
+        web_candidates = _normalize_evidence_candidates(
+            candidates=_fetch_web_evidence_ddg(ticker=ticker, aliases=aliases, since_utc=since_utc, pct_move=pct_move),
+            ticker=ticker,
+            aliases=aliases,
+        )
         if web_candidates:
-            combined.extend(web_candidates)
+            combined = _normalize_evidence_candidates(candidates=(combined + web_candidates), ticker=ticker, aliases=aliases)
         else:
             rejected.append("web:no_relevant_results")
     if not combined:
         rejected.append("all_sources:empty")
-    return (sorted(combined, key=lambda c: (-c.score, _source_rank(c.source_type))), rejected)
+    return (sorted(combined, key=lambda c: (-_effective_candidate_score(candidate=c, pct_move=pct_move), _source_rank(c.source_type))), rejected)
 
 
 def _preferred_evidence_text(evidence: CatalystEvidence) -> str:
@@ -1625,53 +1886,14 @@ def _preferred_evidence_text(evidence: CatalystEvidence) -> str:
 
 
 def _summarize_catalyst(*, ticker: str, slot_name: str, evidence: CatalystEvidence) -> str:
-    fallback = "No clear single catalyst; likely positioning/flow."
-    x_text = evidence.x_text or ""
-    news_title = evidence.news_title or ""
-    web_title = evidence.web_title or ""
-    if not x_text and not news_title and not web_title:
-        return fallback
-    if evidence.confidence < _min_evidence_confidence():
-        return fallback
-
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if OpenAI is None or not api_key:
-        base = _preferred_evidence_text(evidence)
-        return _ensure_reason_like_line(base or fallback, evidence=evidence)
-
-    prompt = (
-        "Write one plain-English catalyst line for a stock move.\n"
-        "Rules: <=110 chars; causal language; no emoji/hype; no hashtags/cashtags/handles/URLs.\n"
-        f"Slot: {slot_name}\n"
-        f"Ticker: {ticker}\n"
-        f"Chosen source: {evidence.chosen_source or 'none'}\n"
-        f"Driver keywords: {', '.join(evidence.driver_keywords)}\n"
-        f"X evidence: {x_text}\n"
-        f"News evidence: {news_title}\n"
-        f"Web evidence: {web_title}\n"
-        "Return only the catalyst line."
-    )
-    model = (os.environ.get("COATUE_CLAW_MD_MODEL", DEFAULT_MODEL) or DEFAULT_MODEL).strip()
-    try:
-        client = OpenAI(api_key=api_key)
-        response = client.chat.completions.create(
-            model=model,
-            temperature=0.1,
-            messages=[
-                {"role": "system", "content": "You write concise institutional market summaries."},
-                {"role": "user", "content": prompt},
-            ],
+    if _reason_mode() != "best_effort":
+        return FALLBACK_CAUSE_LINE
+    if evidence.confirmed_cause_phrase and evidence.confidence >= _min_evidence_confidence():
+        return _ensure_reason_like_line(
+            _build_reason_line_from_phrase(pct_move=None, phrase=evidence.confirmed_cause_phrase),
+            evidence=evidence,
         )
-        text = ""
-        if response.choices and response.choices[0].message:
-            text = str(response.choices[0].message.content or "").strip()
-        text = _normalize_whitespace(text)
-        if text:
-            return _ensure_reason_like_line(text, evidence=evidence)
-    except Exception:
-        pass
-
-    return _ensure_reason_like_line(_preferred_evidence_text(evidence) or fallback, evidence=evidence)
+    return FALLBACK_CAUSE_LINE
 
 
 def _strip_non_md_artifacts(text: str) -> str:
@@ -1689,31 +1911,25 @@ def _strip_non_md_artifacts(text: str) -> str:
 
 def _ensure_reason_like_line(text: str, *, evidence: CatalystEvidence) -> str:
     cleaned = _strip_non_md_artifacts(text)
-    cleaned = re.split(r"[.!?;]", cleaned, maxsplit=1)[0].strip()
+    cleaned = re.split(r"[!?;]", cleaned, maxsplit=1)[0].strip()
     if not cleaned:
-        cleaned = "No clear single catalyst; likely positioning/flow."
+        return FALLBACK_CAUSE_LINE
+    if _contains_disallowed_reason_phrasing(cleaned):
+        return FALLBACK_CAUSE_LINE
 
     lower = cleaned.lower()
-    causal = (" after ", " on ", " as ", " amid ", " due to ", " because ", " following ")
-    if not any(marker in f" {lower} " for marker in causal):
-        preferred = _strip_non_md_artifacts(_preferred_evidence_text(evidence))
-        if preferred:
-            preferred = re.split(r"\s[-|]\s", preferred, maxsplit=1)[0].strip()
-            preferred = re.sub(r"(?i)^why\s+", "", preferred).strip()
-            if (not evidence.news_title and not evidence.web_title) and (not _looks_like_specific_catalyst(preferred)):
-                cleaned = "No clear single catalyst; likely positioning/flow."
-            else:
-                cleaned = f"After {preferred.rstrip('.')}"
-        elif evidence.x_text:
-            x_clean = re.split(r"[.!?;]", _strip_non_md_artifacts(evidence.x_text), maxsplit=1)[0].strip()
-            if _looks_like_specific_catalyst(x_clean):
-                cleaned = f"Amid {x_clean.rstrip('.')}"
-            else:
-                cleaned = "No clear single catalyst; likely positioning/flow."
-        else:
-            cleaned = "No clear single catalyst; likely positioning/flow."
+    if "no single confirmed catalyst" in lower:
+        return FALLBACK_CAUSE_LINE
+    if "no clear single catalyst" in lower:
+        return FALLBACK_CAUSE_LINE
+
+    causal_markers = (" after ", " on ", " as ", " amid ", " due to ", " because ", " following ")
+    if not any(marker in f" {lower} " for marker in causal_markers):
+        return FALLBACK_CAUSE_LINE
 
     cleaned = _shorten(cleaned, 110)
+    if _contains_disallowed_reason_phrasing(cleaned):
+        return FALLBACK_CAUSE_LINE
     return cleaned.rstrip(" .") + "."
 
 
@@ -1833,7 +2049,7 @@ def _build_message(
             if idx < len(catalyst_rows)
             else CatalystEvidence(ticker=mover.ticker, x_text=None, x_url=None, x_engagement=0, news_title=None, news_url=None)
         )
-        cat = catalyst_lines[idx] if idx < len(catalyst_lines) else "No clear single catalyst; likely positioning/flow."
+        cat = catalyst_lines[idx] if idx < len(catalyst_lines) else FALLBACK_CAUSE_LINE
         cat = _ensure_reason_like_line(cat, evidence=ev)
         links: list[str] = []
         if ev.x_url:
@@ -1960,15 +2176,39 @@ def _build_catalyst_for_mover(*, mover: QuoteSnapshot, slot_name: str, since_utc
     )
     chosen = ranked[0] if ranked else None
 
-    cluster_scores = _driver_cluster_scores(ranked[:8])
+    ranked_specific = [c for c in ranked if c.reject_reason != "generic_wrapper"] or ranked
+    cluster_scores: dict[str, float] = {}
+    for item in ranked_specific[:12]:
+        for cluster in item.driver_keywords:
+            cluster_scores[cluster] = cluster_scores.get(cluster, 0.0) + _effective_candidate_score(candidate=item, pct_move=mover.pct_move)
+    for cluster, bonus in _CLUSTER_PRIORITY_BONUS.items():
+        if cluster in cluster_scores:
+            cluster_scores[cluster] += bonus
     top_cluster = sorted(cluster_scores.items(), key=lambda kv: kv[1], reverse=True)[0][0] if cluster_scores else None
-    source_hits = 0
-    if top_cluster:
-        source_hits = len({c.source_type for c in ranked if top_cluster in c.driver_keywords})
 
-    confidence = _effective_candidate_score(candidate=chosen, pct_move=mover.pct_move) if chosen else 0.0
-    if top_cluster and source_hits >= 2:
-        confidence = min(1.0, confidence + 0.08)
+    top_cluster_rows = _cluster_members(ranked_specific, top_cluster) if top_cluster else []
+    corroborated_sources = _cluster_independent_sources(top_cluster_rows) if top_cluster_rows else 0
+    corroborated_domains = _cluster_domain_count(top_cluster_rows) if top_cluster_rows else 0
+    top_cluster_confirmed = _cluster_is_corroborated(top_cluster_rows) if top_cluster_rows else False
+
+    cluster_candidate = None
+    if top_cluster_rows:
+        cluster_candidate = sorted(
+            top_cluster_rows,
+            key=lambda c: (
+                -_effective_candidate_score(candidate=c, pct_move=mover.pct_move),
+                -_directional_bonus(text=c.text, pct_move=mover.pct_move),
+                _source_rank(c.source_type),
+            ),
+        )[0]
+
+    confidence = _effective_candidate_score(candidate=cluster_candidate, pct_move=mover.pct_move) if cluster_candidate else 0.0
+    if top_cluster_confirmed:
+        confidence = max(_min_evidence_confidence(), min(1.0, confidence + 0.12))
+
+    cause_phrase = None
+    if top_cluster_confirmed:
+        cause_phrase = _cluster_event_phrase(top_cluster or "", candidate=cluster_candidate)
 
     best_x = _pick_best_by_source(ranked, "x", pct_move=mover.pct_move)
     best_news = _pick_best_by_source(ranked, "yahoo_news", pct_move=mover.pct_move)
@@ -1991,13 +2231,20 @@ def _build_catalyst_for_mover(*, mover: QuoteSnapshot, slot_name: str, since_utc
         web_title=best_web.text if best_web else None,
         web_url=best_web.url if best_web else None,
         confidence=confidence,
-        chosen_source=(chosen.source_type if chosen else None),
+        chosen_source=((cluster_candidate.source_type if cluster_candidate else (chosen.source_type if chosen else None))),
         driver_keywords=tuple([top_cluster] if top_cluster else ()),
         top_evidence=top_evidence,
         rejected_reasons=tuple(rejected),
         since_utc=since_utc.replace(microsecond=0).isoformat(),
+        confirmed_cluster=(top_cluster if top_cluster_confirmed else None),
+        confirmed_cause_phrase=(cause_phrase if top_cluster_confirmed else None),
+        corroborated_sources=corroborated_sources,
+        corroborated_domains=corroborated_domains,
     )
-    line = _summarize_catalyst(ticker=mover.ticker, slot_name=slot_name, evidence=evidence)
+    if top_cluster_confirmed and cause_phrase:
+        line = _build_reason_line_from_phrase(pct_move=mover.pct_move, phrase=cause_phrase)
+    else:
+        line = FALLBACK_CAUSE_LINE
     return evidence, line
 
 
@@ -2009,6 +2256,24 @@ def _build_catalyst_rows(*, movers: list[QuoteSnapshot], slot_name: str) -> tupl
         evidence, line = _build_catalyst_for_mover(mover=mover, slot_name=slot_name, since_utc=since_utc)
         rows.append(evidence)
         lines.append(line)
+
+    if _enable_cause_cluster_reuse():
+        cluster_to_idx: dict[str, list[int]] = {}
+        cluster_phrase: dict[str, str] = {}
+        for idx, row in enumerate(rows):
+            if not row.confirmed_cluster or not row.confirmed_cause_phrase:
+                continue
+            cluster_to_idx.setdefault(row.confirmed_cluster, []).append(idx)
+            cluster_phrase.setdefault(row.confirmed_cluster, row.confirmed_cause_phrase)
+        for cluster, idxs in cluster_to_idx.items():
+            if len(idxs) < 2:
+                continue
+            phrase = cluster_phrase.get(cluster)
+            for idx in idxs:
+                lines[idx] = _build_reason_line_from_phrase(
+                    pct_move=movers[idx].pct_move if idx < len(movers) else None,
+                    phrase=phrase,
+                )
     return rows, lines
 
 
@@ -2036,6 +2301,10 @@ def debug_catalyst(*, ticker: str, slot_name: str = "open") -> dict[str, Any]:
         "confidence": evidence.confidence,
         "chosen_source": evidence.chosen_source,
         "driver_keywords": list(evidence.driver_keywords),
+        "confirmed_cluster": evidence.confirmed_cluster,
+        "confirmed_cause_phrase": evidence.confirmed_cause_phrase,
+        "corroborated_sources": evidence.corroborated_sources,
+        "corroborated_domains": evidence.corroborated_domains,
         "line": line,
         "top_evidence": list(evidence.top_evidence),
         "rejected_reasons": list(evidence.rejected_reasons),
