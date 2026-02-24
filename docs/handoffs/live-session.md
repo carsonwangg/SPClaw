@@ -1509,3 +1509,22 @@ Then confirm bot returns:
 ### Immediate Next Steps
 1. Ask user to send one fresh message in `#openai` to confirm end-to-end reply behavior.
 2. If still no auto-reply, capture exact message text and timestamp, then inspect `openclaw channels logs --channel slack --lines 300` around that timestamp.
+
+## 2026-02-23 - Slack Bot Channel Join Sweep (All Visible Channels)
+- User request: join every channel with the bot.
+- Action taken:
+  - executed Slack membership sweep via bot token from `/Users/spclaw/.openclaw/openclaw.json`.
+  - listed all non-archived public/private channels visible to the bot and attempted `conversations.join` for non-member channels.
+- Result:
+  - `total_channels_seen: 15`
+  - `already_member: 5`
+  - `joined_now: 10`
+  - `failures: 0`
+  - post-check: `not_member_count: 0`
+- Operational note:
+  - this confirms the bot is now in every channel currently visible/listable to the token.
+  - if new channels are created later, either re-run the sweep or keep auto-join bootstrap enabled.
+
+### Immediate Next Steps
+1. Ask user to test in any previously non-responsive channel (for example `#openai`) and confirm response path is live.
+2. If a newly created channel is missed in the future, run another join sweep or verify `COATUE_CLAW_SLACK_AUTOJOIN_PUBLIC_CHANNELS=1`.
