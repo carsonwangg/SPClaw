@@ -15,6 +15,7 @@ load_dotenv("/opt/coatue-claw/.env.prod")
 
 EMAIL_LABEL = "com.coatueclaw.email-gateway"
 MEMORY_PRUNE_LABEL = "com.coatueclaw.memory-prune"
+MEMORY_RECONCILE_LABEL = "com.coatueclaw.memory-reconcile-export"
 X_CHART_LABEL = "com.coatueclaw.x-chart-daily"
 SPENCER_CHANGE_DIGEST_LABEL = "com.coatueclaw.spencer-change-digest"
 BOARD_SEAT_DAILY_LABEL = "com.coatueclaw.board-seat-daily"
@@ -56,6 +57,24 @@ def _x_chart_hourly_interval_seconds() -> int:
     except Exception:
         seconds = 3600
     return max(300, min(86400, seconds))
+
+
+def _memory_reconcile_interval_seconds() -> int:
+    raw = (os.environ.get("COATUE_CLAW_MEMORY_RECONCILE_INTERVAL_SECONDS", "900") or "900").strip()
+    try:
+        seconds = int(raw)
+    except Exception:
+        seconds = 900
+    return max(300, min(86400, seconds))
+
+
+def _memory_reconcile_limit() -> int:
+    raw = (os.environ.get("COATUE_CLAW_MEMORY_RECONCILE_EXPORT_LIMIT", "200") or "200").strip()
+    try:
+        limit = int(raw)
+    except Exception:
+        limit = 200
+    return max(1, min(1000, limit))
 
 
 def _spencer_digest_schedule() -> list[dict[str, int]]:
@@ -137,6 +156,26 @@ def _service_specs() -> dict[str, dict[str, Any]]:
         "EnvironmentVariables": _runtime_env(),
     }
 
+    memory_reconcile = {
+        "Label": MEMORY_RECONCILE_LABEL,
+        "ProgramArguments": [
+            python_bin,
+            "-m",
+            "coatue_claw.cli",
+            "memory",
+            "reconcile-export",
+            "--limit",
+            str(_memory_reconcile_limit()),
+        ],
+        "WorkingDirectory": str(repo),
+        "RunAtLoad": True,
+        "StartInterval": _memory_reconcile_interval_seconds(),
+        "ProcessType": "Background",
+        "StandardOutPath": str(logs_dir / "memory-reconcile.stdout.log"),
+        "StandardErrorPath": str(logs_dir / "memory-reconcile.stderr.log"),
+        "EnvironmentVariables": _runtime_env(),
+    }
+
     x_chart = {
         "Label": X_CHART_LABEL,
         "ProgramArguments": [python_bin, "-m", "coatue_claw.x_chart_daily", "run-once"],
@@ -188,6 +227,7 @@ def _service_specs() -> dict[str, dict[str, Any]]:
     return {
         EMAIL_LABEL: poller,
         MEMORY_PRUNE_LABEL: prune,
+        MEMORY_RECONCILE_LABEL: memory_reconcile,
         X_CHART_LABEL: x_chart,
         SPENCER_CHANGE_DIGEST_LABEL: spencer_digest,
         BOARD_SEAT_DAILY_LABEL: board_seat_daily,
@@ -313,6 +353,7 @@ def _resolve_services(raw: str) -> list[str]:
         return [
             EMAIL_LABEL,
             MEMORY_PRUNE_LABEL,
+            MEMORY_RECONCILE_LABEL,
             X_CHART_LABEL,
             SPENCER_CHANGE_DIGEST_LABEL,
             BOARD_SEAT_DAILY_LABEL,
@@ -322,6 +363,8 @@ def _resolve_services(raw: str) -> list[str]:
         return [EMAIL_LABEL]
     if value in {"memory", "memory-prune", "prune"}:
         return [MEMORY_PRUNE_LABEL]
+    if value in {"memoryreconcile", "memory-reconcile", "memory-export", "memory-git"}:
+        return [MEMORY_RECONCILE_LABEL]
     if value in {"x", "xchart", "chart", "x-chart"}:
         return [X_CHART_LABEL]
     if value in {"spencer", "spencer-digest", "changes"}:
@@ -342,7 +385,7 @@ def main() -> None:
         cmd.add_argument(
             "--service",
             default="all",
-            choices=["all", "email", "memory", "xchart", "spencer", "boardseat", "marketdaily"],
+            choices=["all", "email", "memory", "memoryreconcile", "xchart", "spencer", "boardseat", "marketdaily"],
         )  # simplified UX
         if name == "disable":
             cmd.add_argument("--remove-plists", action="store_true")

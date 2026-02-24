@@ -28,6 +28,19 @@ def test_service_specs_build_expected_commands(tmp_path: Path, monkeypatch) -> N
     assert prune["StartInterval"] == 1800
     assert prune["RunAtLoad"] is True
 
+    memory_reconcile = specs[launchd_runtime.MEMORY_RECONCILE_LABEL]
+    assert memory_reconcile["ProgramArguments"] == [
+        "/tmp/python",
+        "-m",
+        "coatue_claw.cli",
+        "memory",
+        "reconcile-export",
+        "--limit",
+        "200",
+    ]
+    assert memory_reconcile["StartInterval"] == 900
+    assert memory_reconcile["RunAtLoad"] is True
+
     x_chart = specs[launchd_runtime.X_CHART_LABEL]
     assert x_chart["ProgramArguments"] == ["/tmp/python", "-m", "coatue_claw.x_chart_daily", "run-once"]
     assert x_chart["RunAtLoad"] is True
@@ -74,6 +87,7 @@ def test_write_service_plists(tmp_path: Path, monkeypatch) -> None:
     assert set(written.keys()) == {
         launchd_runtime.EMAIL_LABEL,
         launchd_runtime.MEMORY_PRUNE_LABEL,
+        launchd_runtime.MEMORY_RECONCILE_LABEL,
         launchd_runtime.X_CHART_LABEL,
         launchd_runtime.SPENCER_CHANGE_DIGEST_LABEL,
         launchd_runtime.BOARD_SEAT_DAILY_LABEL,
@@ -91,6 +105,7 @@ def test_resolve_services() -> None:
     assert launchd_runtime._resolve_services("all") == [
         launchd_runtime.EMAIL_LABEL,
         launchd_runtime.MEMORY_PRUNE_LABEL,
+        launchd_runtime.MEMORY_RECONCILE_LABEL,
         launchd_runtime.X_CHART_LABEL,
         launchd_runtime.SPENCER_CHANGE_DIGEST_LABEL,
         launchd_runtime.BOARD_SEAT_DAILY_LABEL,
@@ -98,6 +113,7 @@ def test_resolve_services() -> None:
     ]
     assert launchd_runtime._resolve_services("email") == [launchd_runtime.EMAIL_LABEL]
     assert launchd_runtime._resolve_services("memory") == [launchd_runtime.MEMORY_PRUNE_LABEL]
+    assert launchd_runtime._resolve_services("memoryreconcile") == [launchd_runtime.MEMORY_RECONCILE_LABEL]
     assert launchd_runtime._resolve_services("xchart") == [launchd_runtime.X_CHART_LABEL]
     assert launchd_runtime._resolve_services("spencer") == [launchd_runtime.SPENCER_CHANGE_DIGEST_LABEL]
     assert launchd_runtime._resolve_services("boardseat") == [launchd_runtime.BOARD_SEAT_DAILY_LABEL]

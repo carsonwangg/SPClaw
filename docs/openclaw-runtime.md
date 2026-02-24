@@ -9,6 +9,7 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
 - Coatue 24/7 services:
   - `~/Library/LaunchAgents/com.coatueclaw.email-gateway.plist`
   - `~/Library/LaunchAgents/com.coatueclaw.memory-prune.plist`
+  - `~/Library/LaunchAgents/com.coatueclaw.memory-reconcile-export.plist`
   - `~/Library/LaunchAgents/com.coatueclaw.x-chart-daily.plist`
   - `~/Library/LaunchAgents/com.coatueclaw.board-seat-daily.plist`
   - `~/Library/LaunchAgents/com.coatueclaw.spencer-change-digest.plist`
@@ -44,6 +45,7 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
   - Weekly idea scan
 - Scheduled (wired):
   - Hourly memory prune via `launchd` (`com.coatueclaw.memory-prune`)
+  - Memory reconcile queue export via `launchd` (`com.coatueclaw.memory-reconcile-export`) every 15 minutes by default (`COATUE_CLAW_MEMORY_RECONCILE_INTERVAL_SECONDS=900`)
   - Chart scout via `launchd` (`com.coatueclaw.x-chart-daily`) every hour (`StartInterval=3600` default), with posting gated by `COATUE_CLAW_X_CHART_WINDOWS` (default `09:00,12:00,18:00`)
   - Board Seat daily post via `launchd` (`com.coatueclaw.board-seat-daily`) at `COATUE_CLAW_BOARD_SEAT_TIME` (default `08:30`)
   - Daily Spencer change-request digest DM via `launchd` (`com.coatueclaw.spencer-change-digest`) at `COATUE_CLAW_SPENCER_CHANGE_DIGEST_TIME` (default `18:00`)
@@ -96,6 +98,8 @@ Memory output contract:
   - `make openclaw-memory-status`
   - `make openclaw-memory-prune`
   - `make openclaw-memory-extract-daily DAYS=14`
+  - `make openclaw-memory-reconcile-status`
+  - `make openclaw-memory-reconcile-export LIMIT=200`
   - `make openclaw-files-init`
   - `make openclaw-files-status`
   - `make openclaw-files-sync-pull`
@@ -194,6 +198,8 @@ Memory environment controls:
 - `COATUE_CLAW_MEMORY_DB_PATH`: optional SQLite memory DB path
 - `COATUE_CLAW_MEMORY_VECTOR_DIR`: optional LanceDB directory path
 - `COATUE_CLAW_MEMORY_EMBED_MODEL`: optional embedding model (default `text-embedding-3-large`)
+- `COATUE_CLAW_MEMORY_RECONCILE_INTERVAL_SECONDS`: scheduler interval for memory queue export (default `900`, min `300`, max `86400`)
+- `COATUE_CLAW_MEMORY_RECONCILE_EXPORT_LIMIT`: queue export limit used by scheduler (default `200`, min `1`, max `1000`)
 - `OPENAI_API_KEY`: required only for semantic memory fallback
 
 File ingest environment controls:

@@ -1753,3 +1753,32 @@ Then confirm bot returns:
 1. Restart runtime and verify Slack probe healthy.
 2. Post one live `git-memory:` message in Slack and confirm ack + queue id.
 3. Run `spencer changes memory` and `claw memory reconcile-export --limit 200` to verify end-to-end queue visibility.
+
+## 2026-02-24 - Scheduled Memory Reconcile Export Enabled
+- User request: schedule memory-git queue export so laptop/git view stays fresh without manual steps.
+- Code shipped:
+  - `src/coatue_claw/launchd_runtime.py`
+    - added service `com.coatueclaw.memory-reconcile-export`
+    - runs `python -m coatue_claw.cli memory reconcile-export --limit <N>`
+    - default cadence: 15 minutes (`COATUE_CLAW_MEMORY_RECONCILE_INTERVAL_SECONDS=900`)
+    - queue limit env: `COATUE_CLAW_MEMORY_RECONCILE_EXPORT_LIMIT` (default `200`)
+    - new selector: `--service memoryreconcile`
+  - `Makefile`
+    - `openclaw-memory-reconcile-status`
+    - `openclaw-memory-reconcile-export`
+  - `docs/openclaw-runtime.md`
+    - documented new launchd plist + commands + env controls
+  - `tests/test_launchd_runtime.py`
+    - service spec / all-services / selector coverage updated.
+- Runtime action on Mac mini:
+  - enabled service directly:
+    - `/opt/coatue-claw/.venv/bin/python -m coatue_claw.launchd_runtime enable --service memoryreconcile`
+  - status now shows:
+    - `com.coatueclaw.memory-reconcile-export` loaded in `gui/501`, `last_exit_code=0`.
+  - manual checks passed:
+    - `make -C /opt/coatue-claw openclaw-memory-reconcile-status`
+    - `make -C /opt/coatue-claw openclaw-memory-reconcile-export`
+
+### Immediate Next Steps
+1. Send one `git-memory:` message in Slack and confirm queue file refreshes automatically within 15 minutes.
+2. If needed, tune interval by setting `COATUE_CLAW_MEMORY_RECONCILE_INTERVAL_SECONDS` in `.env.prod` and rerun `make openclaw-24x7-enable`.

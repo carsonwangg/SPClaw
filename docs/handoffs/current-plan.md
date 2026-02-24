@@ -748,3 +748,38 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 1. Post a live Slack message prefixed with `git-memory:` and confirm queue capture acknowledgment.
 2. Run `spencer changes memory` to verify filtered queue listing.
 3. Run `claw memory reconcile-export --limit 200` and confirm queue snapshot refresh in repo.
+
+## 2026-02-24 Plan Update - Scheduled Memory Reconcile Export
+
+### Completed
+- Added launchd scheduler service in `src/coatue_claw/launchd_runtime.py`:
+  - label: `com.coatueclaw.memory-reconcile-export`
+  - command: `python -m coatue_claw.cli memory reconcile-export --limit <N>`
+  - default interval: every 900 seconds (15 min)
+  - env knobs:
+    - `COATUE_CLAW_MEMORY_RECONCILE_INTERVAL_SECONDS` (default `900`, min `300`, max `86400`)
+    - `COATUE_CLAW_MEMORY_RECONCILE_EXPORT_LIMIT` (default `200`, min `1`, max `1000`)
+- Added explicit service selector support:
+  - `launchd_runtime enable|status|disable --service memoryreconcile`
+- Added operator Make targets:
+  - `openclaw-memory-reconcile-status`
+  - `openclaw-memory-reconcile-export`
+- Updated runtime docs and tests:
+  - `docs/openclaw-runtime.md`
+  - `tests/test_launchd_runtime.py`
+
+### Validation
+- Targeted tests:
+  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_launchd_runtime.py /opt/coatue-claw/tests/test_spencer_change_log.py` -> `14 passed`
+- Full suite:
+  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q` -> `222 passed`
+- Runtime:
+  - enabled new service: `python -m coatue_claw.launchd_runtime enable --service memoryreconcile`
+  - status confirms loaded: `com.coatueclaw.memory-reconcile-export` (`last_exit_code=0`)
+  - manual command checks:
+    - `make openclaw-memory-reconcile-status`
+    - `make openclaw-memory-reconcile-export`
+
+### Next
+1. Post one live `git-memory:` request in Slack and confirm queue snapshot updates within 15 minutes without manual export.
+2. If you want tighter cadence, set `COATUE_CLAW_MEMORY_RECONCILE_INTERVAL_SECONDS` in `/opt/coatue-claw/.env.prod`, then re-run `make openclaw-24x7-enable`.
