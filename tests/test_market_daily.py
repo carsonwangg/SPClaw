@@ -20,6 +20,7 @@ from coatue_claw.market_daily import (
     _is_relevant_ticker_post,
     _is_relevant_ticker_headline,
     _merge_universe,
+    _is_low_signal_x_post,
     _parse_times,
     _select_top_movers,
     _synthesize_earnings_bullets,
@@ -196,6 +197,8 @@ def test_build_message_format() -> None:
             x_engagement=20,
             news_title="NVIDIA signs new cloud deal",
             news_url="https://example.com/news",
+            confidence=0.8,
+            cause_mode="direct_evidence",
         )
     ]
     text = _build_message(
@@ -235,6 +238,60 @@ def test_build_message_includes_earnings_after_close_section() -> None:
     )
     assert "Earnings After Close Today:" in text
     assert "NVDA (NVIDIA)" in text
+
+
+def test_fallback_line_hides_x_link_but_keeps_quality_news_web() -> None:
+    now_local = datetime(2026, 2, 20, 14, 15, 0, tzinfo=UTC)
+    movers = [QuoteSnapshot("AMD", 1000.0, 88.0, 100.0, -0.12, "2026-02-20T14:15:00+00:00")]
+    text = _build_message(
+        slot_name="close",
+        now_local=now_local,
+        universe_count=40,
+        movers=movers,
+        catalyst_rows=[
+            CatalystEvidence(
+                ticker="AMD",
+                x_text="Join our discord for free signals $AMD $INTC",
+                x_url="https://x.com/i/web/status/10",
+                x_engagement=200,
+                news_title="AMD slips after cautious guidance",
+                news_url="https://finance.yahoo.com/news/amd-slips-after-cautious-guidance-120000000.html",
+                web_title="AMD drops on weak outlook",
+                web_url="https://www.reuters.com/world/us/amd-drops-on-weak-outlook-2026-02-20/",
+                confidence=0.2,
+                cause_mode="fallback",
+            )
+        ],
+        catalyst_lines=["Likely positioning/flow; no single confirmed catalyst."],
+    )
+    assert "[X]" not in text
+    assert "[News]" in text
+    assert "[Web]" in text
+
+
+def test_specific_line_can_include_relevant_x_link() -> None:
+    now_local = datetime(2026, 2, 20, 14, 15, 0, tzinfo=UTC)
+    movers = [QuoteSnapshot("BKNG", 1000.0, 105.0, 100.0, 0.05, "2026-02-20T14:15:00+00:00")]
+    text = _build_message(
+        slot_name="close",
+        now_local=now_local,
+        universe_count=40,
+        movers=movers,
+        catalyst_rows=[
+            CatalystEvidence(
+                ticker="BKNG",
+                x_text="BKNG shares rose after upbeat guidance and stronger bookings outlook.",
+                x_url="https://x.com/i/web/status/11",
+                x_engagement=80,
+                news_title="Booking shares rise on outlook boost",
+                news_url="https://finance.yahoo.com/news/booking-shares-rise-on-outlook-boost-120000000.html",
+                confidence=0.82,
+                cause_mode="direct_evidence",
+            )
+        ],
+        catalyst_lines=["Shares rose after upbeat guidance and stronger bookings outlook."],
+    )
+    assert "[X]" in text
 
 
 def test_catalyst_sanitization_removes_tags_urls_and_extra_emoji() -> None:
@@ -280,6 +337,11 @@ def test_relevant_ticker_headline_filters_unrelated_titles() -> None:
         ticker="ORCL",
         aliases=["Oracle"],
     )
+
+
+def test_x_promo_post_rejected_for_amd_like_spam() -> None:
+    spam = "Join our discord free room now $AMD $INTC $NVDA $TSLA $AAPL $MSFT $META link below"
+    assert _is_low_signal_x_post(spam)
 
 
 def test_reason_line_uses_generic_fallback_for_vague_x_only_text() -> None:
@@ -441,6 +503,37 @@ def test_bkng_dominant_ai_threat_cluster_outputs_specific_reason(monkeypatch) ->
     rows, lines = md._build_catalyst_rows(movers=[mover], slot_name="open")
     assert rows[0].confirmed_cluster == "ota_ai_disruption"
     assert "ai-agent disruption fears pressured online travel stocks" in lines[0].lower()
+
+
+def test_direct_evidence_fallback_uses_specific_news_without_cluster_match(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    def _fake_collect(ticker, aliases, since_utc, pct_move=None):
+        return (
+            [
+                md._EvidenceCandidate(
+                    source_type="yahoo_news",
+                    text="AMD shares fell after management issued softer-than-expected margin guidance for next quarter.",
+                    url="https://finance.yahoo.com/news/amd-shares-fell-after-management-issued-softer-guidance-120000000.html",
+                    published_at_utc=datetime(2026, 2, 23, 14, 0, 0, tzinfo=UTC),
+                    score=0.86,
+                    driver_keywords=(),
+                    canonical_url="https://finance.yahoo.com/news/amd-shares-fell-after-management-issued-softer-guidance-120000000.html",
+                    domain="finance.yahoo.com",
+                )
+            ],
+            [],
+            "google_serp",
+        )
+
+    monkeypatch.setattr("coatue_claw.market_daily._collect_evidence_for_ticker", _fake_collect)
+    monkeypatch.setattr("coatue_claw.market_daily._company_aliases", lambda ticker: ["AMD", "Advanced Micro Devices"])
+    monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 23, 0, 0, 0, tzinfo=UTC))
+    movers = [QuoteSnapshot("AMD", 100.0, 92.0, 100.0, -0.08, "2026-02-23T15:00:00+00:00")]
+    rows, lines = md._build_catalyst_rows(movers=movers, slot_name="close")
+    assert lines[0] != "Likely positioning/flow; no single confirmed catalyst."
+    assert "shares fell after" in lines[0].lower()
+    assert rows[0].cause_mode == "direct_evidence"
 
 
 def test_debug_catalyst_returns_expected_shape(monkeypatch) -> None:
