@@ -55,10 +55,10 @@ def _seed_prior_pitch(
     )
 
 
-def _v5_draft() -> board_seat_daily.BoardSeatDraft:
+def _v6_draft() -> board_seat_daily.BoardSeatDraft:
     return board_seat_daily.BoardSeatDraft(
         idea_line="Acquire Saronic to accelerate autonomous maritime deployment advantage.",
-        idea_confidence="Medium",
+        target_does="Builds enterprise software and automation infrastructure for production workflows.",
         why_now="Defense demand is accelerating and budgets are prioritizing autonomous systems now.",
         whats_different="Anduril can deploy integrated hardware-software stacks faster than incumbents in contested environments.",
         mos_risks="Key risks are procurement delay, hardware margin volatility, and integration complexity at scale.",
@@ -97,23 +97,23 @@ def test_parse_portcos_defaults_include_portco_list() -> None:
     assert "Sunday Robotics" in names
 
 
-def test_v5_message_structure_includes_explicit_idea_line() -> None:
-    message = board_seat_daily._render_board_seat_message(company="Anduril", draft=_v5_draft())
+def test_v6_message_structure_includes_target_does_line() -> None:
+    message = board_seat_daily._render_board_seat_message(company="Anduril", draft=_v6_draft())
     assert "*Board Seat as a Service — Anduril*" in message
     assert "*Thesis*" in message
     assert "*Idea:* Acquire Saronic to accelerate autonomous maritime deployment advantage." in message
-    assert "*Idea confidence:* Medium" in message
+    assert "*Target does:*" in message
     assert "*Anduril context*" in message
     assert "*Funding snapshot*" in message
     assert "*Sources*" in message
     assert "\n- " not in message
 
 
-def test_v5_rejects_non_acquisition_idea_line() -> None:
-    draft = _v5_draft()
+def test_v6_rejects_non_acquisition_idea_line() -> None:
+    draft = _v6_draft()
     draft = board_seat_daily.BoardSeatDraft(
         idea_line="Build an internal product layer for identity controls.",
-        idea_confidence=draft.idea_confidence,
+        target_does=draft.target_does,
         why_now=draft.why_now,
         whats_different=draft.whats_different,
         mos_risks=draft.mos_risks,
@@ -128,10 +128,10 @@ def test_v5_rejects_non_acquisition_idea_line() -> None:
     assert "idea_line_invalid" in errors
 
 
-def test_v5_best_effort_fallback_still_emits_acq_candidate() -> None:
+def test_v6_best_effort_fallback_still_emits_acq_candidate() -> None:
     draft = board_seat_daily.BoardSeatDraft(
         idea_line="Build it internally",
-        idea_confidence="Low",
+        target_does="Builds enterprise software and automation infrastructure for production workflows.",
         why_now="AI workflow demand is growing quickly.",
         whats_different="Cross-product data plane creates leverage.",
         mos_risks="Execution and integration risk remain.",
@@ -155,7 +155,7 @@ def test_v5_best_effort_fallback_still_emits_acq_candidate() -> None:
 def test_best_effort_idea_line_avoids_placeholder_no_target() -> None:
     line = board_seat_daily._best_effort_idea_line(
         company="OpenAI",
-        seed_text="No high-signal updates surfaced for OpenAI in the last 24 hours.",
+        seed_text="Over the past month, enterprise demand shifted toward agent reliability and governance.",
     )
     assert line.lower().startswith("acquire ")
     assert "acquire no " not in line.lower()
@@ -173,26 +173,67 @@ def test_best_effort_idea_line_rejects_stealth_placeholder_and_uses_named_compan
 
 
 def test_sources_render_named_title_lines_not_source_numbers() -> None:
-    message = board_seat_daily._render_board_seat_message(company="Anduril", draft=_v5_draft())
+    message = board_seat_daily._render_board_seat_message(company="Anduril", draft=_v6_draft())
     assert "*Reuters — Anduril explores defense acquisitions:* <https://www.reuters.com/markets/deals/example>" in message
     assert "*TechCrunch — Saronic raises new funding round:* <https://techcrunch.com/example>" in message
 
 
 def test_sources_never_emit_source_number_labels() -> None:
-    message = board_seat_daily._render_board_seat_message(company="Anduril", draft=_v5_draft())
+    message = board_seat_daily._render_board_seat_message(company="Anduril", draft=_v6_draft())
     assert "Source 1" not in message
     assert "Source 2" not in message
     assert "Source 3" not in message
 
 
 def test_extract_investment_text_parses_v5_idea_line() -> None:
-    message = board_seat_daily._render_board_seat_message(company="Anduril", draft=_v5_draft())
+    message = board_seat_daily._render_board_seat_message(company="Anduril", draft=_v6_draft())
     extracted = board_seat_daily._extract_investment_text(message)
     core = board_seat_daily._core_investment_text(message)
     assert "acquire saronic" in extracted.lower()
     assert "acquire saronic" in core.lower()
     assert "series f" in extracted.lower()
     assert "series f" not in core.lower()
+
+
+def test_validate_draft_rejects_24h_why_now_phrasing() -> None:
+    draft = _v6_draft()
+    bad = board_seat_daily.BoardSeatDraft(
+        idea_line=draft.idea_line,
+        target_does=draft.target_does,
+        why_now="No high-signal updates surfaced for OpenAI in the last 24 hours.",
+        whats_different=draft.whats_different,
+        mos_risks=draft.mos_risks,
+        bottom_line=draft.bottom_line,
+        context_current_efforts=draft.context_current_efforts,
+        context_domain_fit_gaps=draft.context_domain_fit_gaps,
+        funding_history=draft.funding_history,
+        funding_latest_round_backers=draft.funding_latest_round_backers,
+        source_refs=draft.source_refs,
+    )
+    errors = board_seat_daily._validate_draft(bad)
+    assert "why_now_24h_disallowed" in errors
+
+
+def test_render_board_seat_blocks_headers_are_bold_and_underlined() -> None:
+    blocks = board_seat_daily._render_board_seat_blocks(company="Anduril", draft=_v6_draft())
+    header_texts = {"Board Seat as a Service — Anduril", "Thesis", "Anduril context", "Funding snapshot", "Sources"}
+    seen: set[str] = set()
+    for block in blocks:
+        if block.get("type") != "rich_text":
+            continue
+        for element in block.get("elements", []):
+            if element.get("type") != "rich_text_section":
+                continue
+            for text_el in element.get("elements", []):
+                if text_el.get("type") != "text":
+                    continue
+                text = str(text_el.get("text") or "")
+                style = text_el.get("style") or {}
+                if text in header_texts:
+                    assert style.get("bold") is True
+                    assert style.get("underline") is True
+                    seen.add(text)
+    assert header_texts.issubset(seen)
 
 
 def test_extract_investment_text_parses_legacy_v2_and_old5() -> None:
@@ -230,7 +271,7 @@ def test_repeat_guardrail_v5_still_blocks_duplicate_without_significant_change(t
     monkeypatch.setattr(board_seat_daily, "_slack_tokens", lambda: ["xoxb-test"])
 
     store = board_seat_daily.BoardSeatStore()
-    prior_message = board_seat_daily._render_board_seat_message(company="Anduril", draft=_v5_draft())
+    prior_message = board_seat_daily._render_board_seat_message(company="Anduril", draft=_v6_draft())
     _seed_prior_pitch(
         store=store,
         message=prior_message,
@@ -252,15 +293,15 @@ def test_repeat_guardrail_v5_still_blocks_duplicate_without_significant_change(t
                 "response_metadata": {"next_cursor": ""},
             }
 
-        def chat_postMessage(self, channel: str, text: str):
+        def chat_postMessage(self, channel: str, text: str, **kwargs):
             raise AssertionError("Should not post repeated investment without significant change")
 
     monkeypatch.setattr(board_seat_daily, "WebClient", FakeWebClient)
     monkeypatch.setattr(board_seat_daily, "SlackApiError", Exception)
     monkeypatch.setattr(board_seat_daily, "_resolve_funding_snapshot", lambda **kwargs: _funding())
-    monkeypatch.setattr(board_seat_daily, "_llm_draft", lambda **kwargs: _v5_draft())
+    monkeypatch.setattr(board_seat_daily, "_llm_draft", lambda **kwargs: _v6_draft())
     monkeypatch.setattr(board_seat_daily, "_acquisition_search_rows", lambda **kwargs: [])
-    monkeypatch.setattr(board_seat_daily, "_build_novel_fallback_draft", lambda **kwargs: _v5_draft())
+    monkeypatch.setattr(board_seat_daily, "_build_novel_fallback_draft", lambda **kwargs: _v6_draft())
 
     payload = board_seat_daily.run_once(force=True, dry_run=False)
     assert payload["ok"] is True
@@ -278,7 +319,7 @@ def test_repeat_guardrail_v5_allows_with_significant_change(tmp_path: Path, monk
     monkeypatch.setattr(board_seat_daily, "_slack_tokens", lambda: ["xoxb-test"])
 
     store = board_seat_daily.BoardSeatStore()
-    prior_message = board_seat_daily._render_board_seat_message(company="Anduril", draft=_v5_draft())
+    prior_message = board_seat_daily._render_board_seat_message(company="Anduril", draft=_v6_draft())
     _seed_prior_pitch(
         store=store,
         message=prior_message,
@@ -302,14 +343,14 @@ def test_repeat_guardrail_v5_allows_with_significant_change(tmp_path: Path, monk
                 "response_metadata": {"next_cursor": ""},
             }
 
-        def chat_postMessage(self, channel: str, text: str):
-            sent.append({"channel": channel, "text": text})
+        def chat_postMessage(self, channel: str, text: str, **kwargs):
+            sent.append({"channel": channel, "text": text, "blocks": kwargs.get("blocks")})
             return {"ok": True, "ts": "1771600000.100000"}
 
     monkeypatch.setattr(board_seat_daily, "WebClient", FakeWebClient)
     monkeypatch.setattr(board_seat_daily, "SlackApiError", Exception)
     monkeypatch.setattr(board_seat_daily, "_resolve_funding_snapshot", lambda **kwargs: _funding())
-    monkeypatch.setattr(board_seat_daily, "_llm_draft", lambda **kwargs: _v5_draft())
+    monkeypatch.setattr(board_seat_daily, "_llm_draft", lambda **kwargs: _v6_draft())
     monkeypatch.setattr(board_seat_daily, "_acquisition_search_rows", lambda **kwargs: [])
 
     payload = board_seat_daily.run_once(force=True, dry_run=False)
@@ -331,7 +372,7 @@ def test_line_word_caps_enforced_for_v5_fields() -> None:
     very_long = " ".join(["word"] * 40)
     draft = board_seat_daily.BoardSeatDraft(
         idea_line=very_long,
-        idea_confidence="Low",
+        target_does="Builds enterprise software and automation infrastructure for production workflows.",
         why_now=very_long,
         whats_different=very_long,
         mos_risks=very_long,
@@ -382,7 +423,7 @@ def test_render_board_seat_message_uses_fallback_sources_when_missing() -> None:
         company="Anduril",
         draft=board_seat_daily.BoardSeatDraft(
             idea_line="Acquire Saronic to accelerate maritime autonomy programs.",
-            idea_confidence="Low",
+            target_does="Builds enterprise software and automation infrastructure for production workflows.",
             why_now="Defense demand is accelerating.",
             whats_different="Integrated autonomy stack deploys quickly.",
             mos_risks="Execution and procurement timing remain risks.",
@@ -431,7 +472,7 @@ def test_source_composer_v5_target_first_excludes_funding_links(monkeypatch) -> 
 
     draft = board_seat_daily.BoardSeatDraft(
         idea_line="Acquire Browserbase to harden enterprise browser-agent execution.",
-        idea_confidence="Low",
+        target_does="Builds enterprise software and automation infrastructure for production workflows.",
         why_now="Computer-use agents need reliable execution controls.",
         whats_different="Runtime and policy telemetry become a distribution moat.",
         mos_risks="Execution quality and platform bundling risk remain.",
@@ -511,7 +552,7 @@ def test_low_signal_candidate_mode_sets_low_confidence_without_parent_funding(mo
     monkeypatch.setattr(board_seat_daily, "_target_search_rows", lambda **kwargs: [])
     draft = board_seat_daily.BoardSeatDraft(
         idea_line="Acquire Browserbase to improve browser automation reliability.",
-        idea_confidence="Low",
+        target_does="Builds enterprise software and automation infrastructure for production workflows.",
         why_now="Need better runtime reliability for enterprise agents.",
         whats_different="Execution guardrails create defensibility.",
         mos_risks="Bundling risk from hyperscalers remains.",
@@ -533,6 +574,39 @@ def test_low_signal_candidate_mode_sets_low_confidence_without_parent_funding(mo
     assert selection.confidence == "Low"
     assert len(selection.refs) >= 1
     assert all("funding latest round backers" not in ref.title.lower() for ref in selection.refs)
+
+
+def test_resolve_funding_prefers_crunchbase_primary(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_CRUNCHBASE_ENABLED", "1")
+    monkeypatch.setenv("COATUE_CLAW_CRUNCHBASE_API_KEY", "test-key")
+    store = board_seat_daily.BoardSeatStore()
+    crunchbase = board_seat_daily.FundingSnapshot(
+        history="Browserbase has raised $21M.",
+        latest_round="Series A $21M",
+        latest_date="2024-10",
+        backers=[],
+        source_urls=["https://www.crunchbase.com/organization/browserbase"],
+        source_type="crunchbase_api",
+        as_of_utc=datetime.now(UTC).isoformat(),
+        confidence=0.7,
+    )
+    web = board_seat_daily.FundingSnapshot(
+        history="Browserbase funding referenced in web coverage.",
+        latest_round="Series A",
+        latest_date="2024",
+        backers=["Kleiner Perkins"],
+        source_urls=["https://example.com/browserbase-funding"],
+        source_type="web_refresh",
+        as_of_utc=datetime.now(UTC).isoformat(),
+        confidence=0.5,
+    )
+    monkeypatch.setattr(board_seat_daily, "_target_funding_from_crunchbase", lambda *_args, **_kwargs: crunchbase)
+    monkeypatch.setattr(board_seat_daily, "_refresh_funding_snapshot_from_web", lambda **_kwargs: web)
+    snapshot = board_seat_daily._resolve_funding_snapshot(store=store, company="Browserbase")
+    assert snapshot.source_type == "crunchbase_api"
+    assert "browserbase has raised" in snapshot.history.lower()
 
 
 def test_backfill_channel_pitches_parses_legacy_history(tmp_path: Path, monkeypatch) -> None:

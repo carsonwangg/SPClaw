@@ -256,15 +256,38 @@ Board Seat daily environment controls:
 - `COATUE_CLAW_BOARD_SEAT_PORTCOS`: comma-separated `Company:channel` mappings (default includes anduril/anthropic/cursor/neuralink/openai/physical-intelligence/ramp/spacex/stripe/sunday-robotics)
 - `COATUE_CLAW_BOARD_SEAT_TIME`: local daily runtime time (`HH:MM`, default `08:30`)
 - `COATUE_CLAW_BOARD_SEAT_TZ`: timezone for run date (default `America/Los_Angeles`)
-- `COATUE_CLAW_BOARD_SEAT_LOOKBACK_HOURS`: Slack history window used for context (default `24`)
+- `COATUE_CLAW_BOARD_SEAT_THEME_LOOKBACK_DAYS`: thematic context horizon used for monthly trend framing (default `30`)
+- `COATUE_CLAW_BOARD_SEAT_LOOKBACK_HOURS`: optional direct override of Slack history window; defaults to `theme_lookback_days * 24`
 - `COATUE_CLAW_BOARD_SEAT_MAX_MESSAGES`: max context messages fetched per channel (default `160`)
 - `COATUE_CLAW_BOARD_SEAT_DB_PATH`: optional SQLite path for daily run ledger
 - `COATUE_CLAW_BOARD_SEAT_MODEL`: optional LLM model for synthesis (default `gpt-5.2-chat-latest`)
+- `COATUE_CLAW_BOARD_SEAT_HEADER_STYLE`: Slack rendering style (`richtext` default; falls back to plaintext on block errors)
+- `COATUE_CLAW_BOARD_SEAT_SPECIFICITY_MODE`: draft specificity guard (`moderate` default)
+- `COATUE_CLAW_BOARD_SEAT_FUNDING_SCOPE`: funding entity scope (`target` default, `company` optional)
+- `COATUE_CLAW_BOARD_SEAT_CRUNCHBASE_ENABLED`: enable Crunchbase funding resolver (`1` default)
+- `COATUE_CLAW_CRUNCHBASE_API_KEY`: Crunchbase API key used for target funding lookup
+- `COATUE_CLAW_BOARD_SEAT_GOOGLE_SERP_API_KEY`: optional SERP API key for funding/source fallback retrieval (falls back to `SERPAPI_API_KEY`)
 - `COATUE_CLAW_BOARD_SEAT_TARGET_LOCK_DAYS`: hard target-memory lock window to prevent re-pitching same target (default `30`)
 - `COATUE_CLAW_BOARD_SEAT_ALLOW_REPEAT_TARGETS`: set `1` to bypass target lock (default `0`)
 - `COATUE_CLAW_BOARD_SEAT_LEDGER_DIR`: board-seat target ledger artifact directory (default `/opt/coatue-claw-data/artifacts/board-seat`)
 - `COATUE_CLAW_BOARD_SEAT_LEDGER_MIRROR_ENABLED`: mirror ledger to Google Drive local path (default `1`)
 - `COATUE_CLAW_BOARD_SEAT_LEDGER_MIRROR_PATH`: mirror destination path (default `/Users/spclaw/Documents/SPClaw Database/Companies/Board-Seat`)
+
+Board Seat V6 message contract:
+- plaintext canonical format remains persisted in DB/artifacts for memory/repeat-guard/backfill.
+- Slack rich-text headers are bold + underlined for:
+  - `Thesis`
+  - `{Company} context`
+  - `Funding snapshot`
+  - `Sources`
+- thesis lines:
+  - `Idea`
+  - `Target does`
+  - `Why now` (monthly trend; no last-24h phrasing)
+  - `What's different`
+  - `MOS/risks`
+  - `Bottom line`
+- `Idea confidence` is removed from rendered output.
 
 Spencer change-digest environment controls:
 - `COATUE_CLAW_CHANGE_TRACKER_USERS`: optional comma-separated `user_id:label` mappings for tracked requesters (example: `U0AGD28QSQG:Carson Wang,U0AFJ5RS31C:Spencer Peterson`)

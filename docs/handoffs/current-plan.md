@@ -48,38 +48,29 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
     - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `74 passed`
     - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `5 passed`
   - deployed on Mac mini (`/opt/coatue-claw`), restarted runtime, and validated live scheduled post for slot `2026-02-24-09:00` (`Coatue Chart of the Morning`)
-- Board Seat V6 target-memory enforcement + ledger tracking shipped:
-  - added `board_seat_target_memory` table and hard target lock window (`COATUE_CLAW_BOARD_SEAT_TARGET_LOCK_DAYS`, default 30 days)
-  - repeated targets (for example Epirus for Anduril) are now auto-retargeted or explicitly skipped with `repeat_target_within_lock_window`
-  - expanded backfill now ingests legacy numbered board-seat posts into memory
-  - new ledger artifacts on each run:
-    - `/opt/coatue-claw-data/artifacts/board-seat/board-seat-target-ledger.csv`
-    - `/opt/coatue-claw-data/artifacts/board-seat/board-seat-target-ledger.json`
-  - Google Drive mirror enabled by default at:
-    - `/Users/spclaw/Documents/SPClaw Database/Companies/Board-Seat`
-  - strict format guard added pre-post to block numbered/freeform board-seat output and enforce labeled hierarchy
-  - follow-up hardening blocks legacy header tokens (`board`, `boardseat`) from being persisted as target companies
-  - new board-seat CLI operations:
-    - `seed-target`, `target-memory`, `export-ledger`
+- Board Seat V6 formatting + content contract shipped (supersedes V5 output shape):
+  - `BOARD_SEAT_FORMAT_VERSION = v6_richtext_target_does_monthly_theme`
+  - thesis now requires:
+    - `Idea`
+    - `Target does` (new)
+    - `Why now` (past-month thematic framing; no 24h phrasing)
+    - `What's different`
+    - `MOS/risks`
+    - `Bottom line`
+  - removed `Idea confidence` line from rendered output.
+  - Slack post path now supports rich-text section headers with bold+underline styling and automatic plaintext fallback if blocks are rejected.
+  - specificity guardrails enabled (`COATUE_CLAW_BOARD_SEAT_SPECIFICITY_MODE=moderate`): at most one generic filler line across thesis/context core lines.
+  - funding scope now defaults to target company (`COATUE_CLAW_BOARD_SEAT_FUNDING_SCOPE=target`) with Crunchbase primary + web fallback.
+  - target memory + no-repeat lock remains active:
+    - table: `board_seat_target_memory`
+    - lock window: `COATUE_CLAW_BOARD_SEAT_TARGET_LOCK_DAYS` (default `30`)
+    - ledger artifacts:
+      - `/opt/coatue-claw-data/artifacts/board-seat/board-seat-target-ledger.csv`
+      - `/opt/coatue-claw-data/artifacts/board-seat/board-seat-target-ledger.json`
+    - mirror:
+      - `/Users/spclaw/Documents/SPClaw Database/Companies/Board-Seat`
   - validation:
-    - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `25 passed`
-    - `PYTHONPATH=src python3 -m pytest -q` -> `217 passed`
-- Board Seat V5 target-first sourcing is now implemented for all portco channels:
-  - `BOARD_SEAT_FORMAT_VERSION = v5_target_first_confidence_sources`
-  - source policy defaults to `target_first_3_1` (up to 3 target refs + 1 parent-context ref)
-  - parent funding links are excluded from `Sources` by default (`COATUE_CLAW_BOARD_SEAT_INCLUDE_FUNDING_LINKS=0`)
-  - deterministic `Idea confidence` line added to thesis (`High|Medium|Low`)
-  - low-signal mode now remains candidate-first with explicit confidence labeling
-  - LLM prompt + sanitizer updated so final source composition is deterministic and target-led
-  - validation: `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `19 passed`
-  - deployed to Mac mini runtime (`/opt/coatue-claw`) and verified:
-    - `make openclaw-restart`
-    - `make openclaw-slack-status` (`probe.ok=true`)
-    - `make openclaw-board-seat-status` (`format_version: v5_target_first_confidence_sources`)
-  - fallback target hardening shipped:
-    - low-signal idea line now always names a concrete company (no placeholder targets)
-    - OpenAI low-signal default target set to `Browserbase`
-    - placeholder/generic target extraction filters tightened (`stealth`, bare generic fragments)
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `28 passed`
 - Premium model policy is now defaulted for all OpenAI-backed tasks:
   - board-seat synthesis default: `gpt-5.2-chat-latest`
   - x-chart title/copy synthesis default: `gpt-5.2-chat-latest`

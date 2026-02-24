@@ -3,6 +3,52 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-24, Board Seat V6 structured headers + target funding reliability)
+- Implemented Board Seat V6 in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`.
+- Output contract changes now live:
+  - removed `Idea confidence` line from thesis.
+  - added required `*Target does:*` directly under `*Idea:*`.
+  - `Why now` is validated for monthly trend framing; explicit `last 24 hours` phrasing is rejected.
+- Slack delivery now supports section-header rich text:
+  - bold + underlined headers for:
+    - `Thesis`
+    - `{Company} context`
+    - `Funding snapshot`
+    - `Sources`
+  - plaintext message remains canonical for storage, memory parsing, repeat guard, and backfill.
+  - if Slack rejects rich-text blocks (`invalid_blocks`/`invalid_arguments`), posting auto-falls back to plaintext contract.
+- Funding reliability updates:
+  - default funding scope is target company (`COATUE_CLAW_BOARD_SEAT_FUNDING_SCOPE=target`).
+  - Crunchbase API is primary funding provider when key is set (`COATUE_CLAW_CRUNCHBASE_API_KEY`).
+  - web funding fallback merges Brave + Google SERP evidence when Crunchbase is unavailable or sparse.
+  - unknown funding fallback remains explicit:
+    - `Target funding data is limited; verify via Crunchbase/PitchBook before action.`
+- Additional guardrails:
+  - low-signal fallback phrasing updated to monthly trend language.
+  - target token stopwords expanded to avoid malformed target extraction from temporal words (for example `Over`).
+
+### Validation
+- `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `28 passed`
+- `python3 -m compileall -q src/coatue_claw/board_seat_daily.py` -> pass
+
+### Tests added/updated
+- rejects 24h `Why now` phrasing at draft validation.
+- verifies rich-text headers are bold + underlined.
+- verifies target line is required in message structure.
+- verifies funding resolution prefers Crunchbase primary when available.
+
+### Immediate runtime steps (Mac mini)
+1. `cd /opt/coatue-claw && git pull origin main`
+2. `make openclaw-restart`
+3. `make openclaw-slack-status`
+4. Dry-run one channel:
+   - `COATUE_CLAW_BOARD_SEAT_PORTCOS='OpenAI:openai' /opt/coatue-claw/.venv/bin/python -m coatue_claw.board_seat_daily run-once --force --dry-run`
+5. Live-post one channel and verify rendering:
+   - header styling visible
+   - `Target does` present
+   - no `Idea confidence`
+   - funding snapshot is target-scoped
+
 ## Update (2026-02-24, X-chart scheduled slot miss fix for Morning/Afternoon/Evening posts)
 - Root cause identified in `src/coatue_claw/x_chart_daily.py`:
   - launchd runs scout on `StartInterval=3600`, which drifts by minute offset from service load time.
