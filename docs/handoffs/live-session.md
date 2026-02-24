@@ -3,6 +3,40 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-24, Market Daily earnings preview + 7PM recap)
+- Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
+  - Morning `open` slot MD posts now append `Earnings After Close Today` using final MD universe members.
+  - Added nightly earnings recap runner:
+    - command: `python -m coatue_claw.market_daily run-earnings-recap`
+    - default schedule time: `19:00` local runtime (`COATUE_CLAW_MD_EARNINGS_RECAP_TIME`)
+    - recap selection: top 4 same-day reporters by absolute move since regular close
+    - output contract: 2-4 bullet recap per ticker with source links; deterministic fallback when LLM unavailable.
+- CLI wiring in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/cli.py`:
+  - `claw market-daily run-earnings-recap --manual|--force|--dry-run|--channel`
+- Slack wiring in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/slack_bot.py`:
+  - `md earnings now`
+  - `md earnings now force`
+- launchd/runtime wiring in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/launchd_runtime.py`:
+  - new service label: `com.coatueclaw.market-daily-earnings-recap`
+  - included in `marketdaily` service selector and `all` bundle.
+- ops/runbook updates:
+  - `Makefile`: `openclaw-market-daily-earnings-recap-run-once`
+  - `docs/openclaw-runtime.md`: command/scheduler/env additions
+  - `.env.example`: added recap-time env sample
+- validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_market_daily.py tests/test_launchd_runtime.py` -> `42 passed`
+
+### Immediate next steps
+1. Integrator merge this branch to `main`.
+2. On Mac mini, restart runtime and enable 24x7 services:
+   - `make openclaw-restart`
+   - `make openclaw-24x7-enable`
+   - `make openclaw-24x7-status`
+3. Smoke check:
+   - `make openclaw-market-daily-run-once DRY_RUN=1`
+   - `make openclaw-market-daily-earnings-recap-run-once DRY_RUN=1`
+   - Slack: `md status` should show `earnings_recap_time`.
+
 ## Update (2026-02-24, parallel Codex branch/worktree protocol + agent handoff docs)
 - Added parallel-branch operating protocol to `/Users/carsonwang/CoatueClaw/AGENTS.md`:
   - branch naming standard: `codex/agent-board-seat`, `codex/agent-chart-day`, `codex/agent-hf-analyst`, `codex/agent-market-daily`

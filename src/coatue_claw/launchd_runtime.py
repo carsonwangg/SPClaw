@@ -20,6 +20,7 @@ X_CHART_LABEL = "com.coatueclaw.x-chart-daily"
 SPENCER_CHANGE_DIGEST_LABEL = "com.coatueclaw.spencer-change-digest"
 BOARD_SEAT_DAILY_LABEL = "com.coatueclaw.board-seat-daily"
 MARKET_DAILY_LABEL = "com.coatueclaw.market-daily"
+MARKET_DAILY_EARNINGS_RECAP_LABEL = "com.coatueclaw.market-daily-earnings-recap"
 
 
 def _repo_root() -> Path:
@@ -123,6 +124,22 @@ def _market_daily_schedule() -> list[dict[str, int]]:
     return out
 
 
+def _market_daily_earnings_recap_schedule() -> list[dict[str, int]]:
+    raw = (os.environ.get("COATUE_CLAW_MD_EARNINGS_RECAP_TIME", "19:00") or "").strip()
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})", raw)
+    if not m:
+        hour, minute = 19, 0
+    else:
+        hour = int(m.group(1))
+        minute = int(m.group(2))
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            hour, minute = 19, 0
+    return [
+        {"Weekday": weekday, "Hour": hour, "Minute": minute}
+        for weekday in (1, 2, 3, 4, 5)
+    ]
+
+
 def _service_specs() -> dict[str, dict[str, Any]]:
     repo = _repo_root()
     data = _data_root()
@@ -224,6 +241,18 @@ def _service_specs() -> dict[str, dict[str, Any]]:
         "EnvironmentVariables": _runtime_env(),
     }
 
+    market_daily_earnings_recap = {
+        "Label": MARKET_DAILY_EARNINGS_RECAP_LABEL,
+        "ProgramArguments": [python_bin, "-m", "coatue_claw.market_daily", "run-earnings-recap"],
+        "WorkingDirectory": str(repo),
+        "RunAtLoad": False,
+        "StartCalendarInterval": _market_daily_earnings_recap_schedule(),
+        "ProcessType": "Background",
+        "StandardOutPath": str(logs_dir / "market-daily-earnings-recap.stdout.log"),
+        "StandardErrorPath": str(logs_dir / "market-daily-earnings-recap.stderr.log"),
+        "EnvironmentVariables": _runtime_env(),
+    }
+
     return {
         EMAIL_LABEL: poller,
         MEMORY_PRUNE_LABEL: prune,
@@ -232,6 +261,7 @@ def _service_specs() -> dict[str, dict[str, Any]]:
         SPENCER_CHANGE_DIGEST_LABEL: spencer_digest,
         BOARD_SEAT_DAILY_LABEL: board_seat_daily,
         MARKET_DAILY_LABEL: market_daily,
+        MARKET_DAILY_EARNINGS_RECAP_LABEL: market_daily_earnings_recap,
     }
 
 
@@ -358,6 +388,7 @@ def _resolve_services(raw: str) -> list[str]:
             SPENCER_CHANGE_DIGEST_LABEL,
             BOARD_SEAT_DAILY_LABEL,
             MARKET_DAILY_LABEL,
+            MARKET_DAILY_EARNINGS_RECAP_LABEL,
         ]
     if value == "email":
         return [EMAIL_LABEL]
@@ -372,7 +403,7 @@ def _resolve_services(raw: str) -> list[str]:
     if value in {"board", "boardseat", "board-seat"}:
         return [BOARD_SEAT_DAILY_LABEL]
     if value in {"marketdaily", "market-daily", "md"}:
-        return [MARKET_DAILY_LABEL]
+        return [MARKET_DAILY_LABEL, MARKET_DAILY_EARNINGS_RECAP_LABEL]
     raise ValueError(f"unknown service selector: {raw}")
 
 

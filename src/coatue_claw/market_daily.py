@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from html import unescape
 import json
 import logging
@@ -88,6 +88,32 @@ class CatalystEvidence:
     cluster_debug: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class EarningsPreviewItem:
+    ticker: str
+    company: str
+    earnings_date_et: str
+    expected_session: str
+
+
+@dataclass(frozen=True)
+class EarningsRecapRow:
+    ticker: str
+    company: str
+    earnings_date_et: str
+    inferred_session: str
+    market_cap: float | None
+    last_price: float | None
+    regular_close: float | None
+    since_close_pct: float | None
+    eps_estimate: float | None = None
+    reported_eps: float | None = None
+    surprise_pct: float | None = None
+    evidence: tuple[str, ...] = ()
+    source_links: tuple[str, ...] = ()
+    bullets: tuple[str, ...] = ()
+
+
 def _utc_now_iso() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat()
 
@@ -142,6 +168,22 @@ def _parse_times(raw: str | None = None) -> list[tuple[int, int]]:
         out = [(7, 0), (14, 15)]
     out = sorted(out)
     return out[:2]
+
+
+def _earnings_recap_time() -> tuple[int, int]:
+    raw = (os.environ.get("COATUE_CLAW_MD_EARNINGS_RECAP_TIME", "19:00") or "19:00").strip()
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})", raw)
+    if not m:
+        return (19, 0)
+    hh = int(m.group(1))
+    mm = int(m.group(2))
+    if not (0 <= hh <= 23 and 0 <= mm <= 59):
+        return (19, 0)
+    return (hh, mm)
+
+
+def _md_model() -> str:
+    return (os.environ.get("COATUE_CLAW_MD_MODEL", DEFAULT_MODEL) or DEFAULT_MODEL).strip() or DEFAULT_MODEL
 
 
 def _top_n() -> int:
@@ -513,6 +555,21 @@ class MarketDailyStore:
                 LIMIT ?
                 """,
                 (max(1, min(200, int(limit))),),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def latest_runs_for_slot(self, *, slot_name: str, limit: int = 10) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT run_id, run_date_local, slot_name, triggered_manual, status, reason,
+                       channel_ref, channel_id, message_ts, artifact_path, posted_at_utc, created_at_utc
+                FROM md_runs
+                WHERE slot_name = ?
+                ORDER BY created_at_utc DESC
+                LIMIT ?
+                """,
+                (slot_name, max(1, min(200, int(limit)))),
             ).fetchall()
         return [dict(row) for row in rows]
 
@@ -2483,6 +2540,7 @@ def _build_message(
     movers: list[QuoteSnapshot],
     catalyst_rows: list[CatalystEvidence],
     catalyst_lines: list[str],
+    earnings_after_close: list[EarningsPreviewItem] | None = None,
 ) -> str:
     slot_title = "MD — Market Open" if slot_name == "open" else "MD — Market Close+"
     as_of = now_local.strftime("%-I:%M %p PT")
@@ -2509,6 +2567,12 @@ def _build_message(
         emoji = "📈" if (mover.pct_move or 0.0) >= 0 else "📉"
         lines.append(f"- {emoji} {mover.ticker} {_format_pct(mover.pct_move)} — {cat}{link_text}")
 
+    if slot_name == "open" and earnings_after_close:
+        lines.append("")
+        lines.append("Earnings After Close Today:")
+        for item in earnings_after_close:
+            lines.append(f"- {item.ticker} ({item.company}) — {_session_human_label(item.expected_session)}")
+
     lines.append(f"Data UTC: {_utc_now_iso()} | Sources: Yahoo fast_info + X recent search + Yahoo news + web search")
     return "\n".join(lines)
 
@@ -2522,6 +2586,7 @@ def _write_artifact(
     catalyst_rows: list[CatalystEvidence],
     catalyst_lines: list[str],
     message_text: str,
+    earnings_after_close: list[EarningsPreviewItem] | None = None,
 ) -> Path:
     out_dir = _artifact_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -2577,6 +2642,17 @@ def _write_artifact(
             lines.append("    - none")
         if ev.rejected_reasons:
             lines.append(f"  - rejected: {', '.join(ev.rejected_reasons)}")
+
+    if earnings_after_close:
+        lines.append("")
+        lines.append("## Earnings After Close Today")
+        lines.append("")
+        lines.append("Data source: `yfinance calendar + historical earnings timestamp inference`")
+        lines.append("")
+        for item in earnings_after_close:
+            lines.append(
+                f"- `{item.ticker}` `{item.company}` | earnings_date_et=`{item.earnings_date_et}` | expected_session=`{item.expected_session}`"
+            )
 
     lines.append("")
     lines.append("## Final Universe")
@@ -2858,6 +2934,413 @@ def _rank_universe_snapshots(*, snapshots: list[QuoteSnapshot], tickers: list[st
     return sorted(selected, key=lambda s: (-float(s.market_cap or 0.0), s.ticker))
 
 
+def _safe_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    try:
+        to_py = getattr(value, "to_pydatetime", None)
+        if callable(to_py):
+            out = to_py()
+            if isinstance(out, datetime):
+                return out
+    except Exception:
+        return None
+    return None
+
+
+def _coerce_date_et(value: Any) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if isinstance(value, datetime):
+        dt = value if value.tzinfo else value.replace(tzinfo=ZoneInfo(US_MARKET_TZ))
+        return dt.astimezone(ZoneInfo(US_MARKET_TZ)).date()
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            found = _coerce_date_et(item)
+            if found is not None:
+                return found
+        return None
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00")).date()
+        except Exception:
+            return None
+    as_dt = _safe_datetime(value)
+    if as_dt is None:
+        return None
+    return _coerce_date_et(as_dt)
+
+
+def _calendar_earnings_date(payload: Any) -> date | None:
+    if not isinstance(payload, dict):
+        return None
+    return _coerce_date_et(payload.get("Earnings Date"))
+
+
+def _ticker_earnings_history(*, ticker_obj: Any, limit: int = 8) -> list[tuple[datetime, float | None, float | None, float | None]]:
+    try:
+        frame = ticker_obj.get_earnings_dates(limit=max(1, int(limit)))
+    except Exception:
+        return []
+    if frame is None:
+        return []
+    if bool(getattr(frame, "empty", False)):
+        return []
+
+    rows: list[tuple[datetime, float | None, float | None, float | None]] = []
+    try:
+        iterator = frame.iterrows()
+    except Exception:
+        return rows
+
+    for idx, row in iterator:
+        dt = _safe_datetime(idx)
+        if dt is None:
+            continue
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=ZoneInfo(US_MARKET_TZ))
+        dt_utc = dt.astimezone(UTC)
+        estimate = _safe_float(row.get("EPS Estimate")) if hasattr(row, "get") else None
+        reported = _safe_float(row.get("Reported EPS")) if hasattr(row, "get") else None
+        surprise = _safe_float(row.get("Surprise(%)")) if hasattr(row, "get") else None
+        rows.append((dt_utc, estimate, reported, surprise))
+    rows.sort(key=lambda x: x[0], reverse=True)
+    return rows[: max(1, int(limit))]
+
+
+def _infer_expected_session(*, earnings_history: list[tuple[datetime, float | None, float | None, float | None]]) -> str:
+    if not earnings_history:
+        return "unknown"
+    et = ZoneInfo(US_MARKET_TZ)
+    minutes: list[int] = []
+    for dt, _, _, _ in earnings_history[:5]:
+        loc = dt.astimezone(et)
+        minutes.append(loc.hour * 60 + loc.minute)
+    if not minutes:
+        return "unknown"
+    pick = sorted(minutes)[len(minutes) // 2]
+    if pick >= (16 * 60):
+        return "after_close"
+    if pick <= (10 * 60):
+        return "before_open"
+    return "unknown"
+
+
+def _session_human_label(session: str) -> str:
+    if session == "after_close":
+        return "after close"
+    if session == "before_open":
+        return "before open"
+    return "unknown"
+
+
+def _collect_after_close_earnings_preview(*, tickers: list[str], now_utc: datetime | None = None) -> list[EarningsPreviewItem]:
+    now = now_utc or datetime.now(UTC)
+    today_et = now.astimezone(ZoneInfo(US_MARKET_TZ)).date()
+    out: list[EarningsPreviewItem] = []
+    for ticker in sorted({t for t in tickers if _normalize_ticker(t)}):
+        norm = _normalize_ticker(ticker)
+        if not norm:
+            continue
+        try:
+            ticker_obj = yf.Ticker(norm)
+            calendar_payload = ticker_obj.calendar
+        except Exception:
+            continue
+        cal_date = _calendar_earnings_date(calendar_payload)
+        if cal_date != today_et:
+            continue
+        session = _infer_expected_session(earnings_history=_ticker_earnings_history(ticker_obj=ticker_obj, limit=8))
+        if session != "after_close":
+            continue
+        aliases = _company_aliases(norm)
+        company = aliases[0] if aliases else norm
+        out.append(
+            EarningsPreviewItem(
+                ticker=norm,
+                company=company,
+                earnings_date_et=today_et.isoformat(),
+                expected_session=session,
+            )
+        )
+    out.sort(key=lambda x: x.ticker)
+    return out
+
+
+def _build_final_universe(
+    *,
+    store: MarketDailyStore,
+    refresh_holdings: bool = True,
+) -> tuple[list[QuoteSnapshot], dict[str, str], set[str], set[str], dict[str, Any] | None]:
+    refresh_result: dict[str, Any] | None = None
+    if refresh_holdings:
+        refresh_result = _auto_refresh_holdings_if_stale(store)
+
+    seed = _load_seed_tickers()
+    seed_snaps = _fetch_quote_snapshots(seed)
+    top_seed = _build_top_k_universe(seed_snapshots=seed_snaps, top_k=_top_k())
+
+    include_overrides, exclude_overrides = store.read_override_sets()
+    merged_tickers, source_bucket = _merge_universe(
+        top_seed=top_seed,
+        coatue_tickers=store.coatue_tickers(),
+        include_overrides=include_overrides,
+        exclude_overrides=exclude_overrides,
+    )
+
+    known = {s.ticker for s in seed_snaps}
+    extras = [t for t in merged_tickers if t not in known]
+    extra_snaps = _fetch_quote_snapshots(extras)
+    all_snaps = seed_snaps + extra_snaps
+    final_universe = _rank_universe_snapshots(snapshots=all_snaps, tickers=merged_tickers)
+    return final_universe, source_bucket, include_overrides, exclude_overrides, refresh_result
+
+
+def _close_anchor_utc(*, now_utc: datetime) -> datetime:
+    et = ZoneInfo(US_MARKET_TZ)
+    day = now_utc.astimezone(et).date()
+    return datetime(day.year, day.month, day.day, 16, 0, 0, tzinfo=et).astimezone(UTC)
+
+
+def _collect_reported_today_rows(*, universe: list[QuoteSnapshot], now_utc: datetime | None = None) -> list[EarningsRecapRow]:
+    now = now_utc or datetime.now(UTC)
+    today_et = now.astimezone(ZoneInfo(US_MARKET_TZ)).date()
+    rows: list[EarningsRecapRow] = []
+    for snap in universe:
+        norm = _normalize_ticker(snap.ticker)
+        if not norm:
+            continue
+        try:
+            ticker_obj = yf.Ticker(norm)
+            calendar_payload = ticker_obj.calendar
+        except Exception:
+            continue
+        history = _ticker_earnings_history(ticker_obj=ticker_obj, limit=8)
+        latest = history[0] if history else None
+        latest_date_et = latest[0].astimezone(ZoneInfo(US_MARKET_TZ)).date() if latest else None
+        calendar_date = _calendar_earnings_date(calendar_payload)
+        reported_today = (latest_date_et == today_et) or (calendar_date == today_et)
+        if not reported_today:
+            continue
+
+        eps_estimate = latest[1] if (latest and latest_date_et == today_et) else None
+        reported_eps = latest[2] if (latest and latest_date_et == today_et) else None
+        surprise_pct = latest[3] if (latest and latest_date_et == today_et) else None
+        since_close_pct = None
+        if snap.last_price is not None and snap.previous_close and snap.previous_close > 0:
+            since_close_pct = (float(snap.last_price) - float(snap.previous_close)) / float(snap.previous_close)
+        session = _infer_expected_session(earnings_history=history)
+        aliases = _company_aliases(norm)
+        company = aliases[0] if aliases else norm
+        rows.append(
+            EarningsRecapRow(
+                ticker=norm,
+                company=company,
+                earnings_date_et=today_et.isoformat(),
+                inferred_session=session,
+                market_cap=snap.market_cap,
+                last_price=snap.last_price,
+                regular_close=snap.previous_close,
+                since_close_pct=since_close_pct,
+                eps_estimate=eps_estimate,
+                reported_eps=reported_eps,
+                surprise_pct=surprise_pct,
+            )
+        )
+    rows.sort(
+        key=lambda x: (
+            -abs(float(x.since_close_pct or 0.0)),
+            -float(x.market_cap or 0.0),
+            x.ticker,
+        )
+    )
+    return rows
+
+
+def _fallback_earnings_bullets(*, row: EarningsRecapRow) -> tuple[str, ...]:
+    bullets: list[str] = []
+    bullets.append(
+        f"Shares traded {_format_pct(row.since_close_pct)} vs regular close ({row.regular_close if row.regular_close is not None else 'n/a'} -> {row.last_price if row.last_price is not None else 'n/a'})."
+    )
+    if row.reported_eps is not None and row.eps_estimate is not None:
+        surprise = f"{row.surprise_pct:.1f}%" if row.surprise_pct is not None else "n/a"
+        bullets.append(
+            f"EPS print was {row.reported_eps:.2f} vs {row.eps_estimate:.2f} est (surprise {surprise})."
+        )
+    else:
+        bullets.append("Earnings are on deck today; full EPS details are still being digested in early coverage.")
+    if row.evidence:
+        bullets.append(f"Early sentiment reads: {_shorten(row.evidence[0], 150)} [S1].")
+    else:
+        bullets.append("Initial sentiment is mixed; monitor guidance and call commentary for confirmation.")
+    return tuple(bullets[:4])
+
+
+def _openai_client() -> Any | None:
+    if OpenAI is None:
+        return None
+    key = (os.environ.get("OPENAI_API_KEY", "") or "").strip()
+    if not key:
+        return None
+    try:
+        return OpenAI(api_key=key)
+    except Exception:
+        return None
+
+
+def _extract_bullets(text: str) -> list[str]:
+    out: list[str] = []
+    for raw in str(text or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith(("-", "*", "•")):
+            line = line[1:].strip()
+        if not line:
+            continue
+        out.append(line)
+    return out
+
+
+def _synthesize_earnings_bullets(*, client: Any | None, row: EarningsRecapRow) -> tuple[str, ...]:
+    if client is None:
+        return _fallback_earnings_bullets(row=row)
+    source_lines: list[str] = []
+    for idx, entry in enumerate(row.evidence, start=1):
+        url = row.source_links[idx - 1] if idx - 1 < len(row.source_links) else "n/a"
+        source_lines.append(f"[S{idx}] {entry} ({url})")
+    evidence_block = "\n".join(source_lines) if source_lines else "No external evidence candidates were found."
+    prompt = (
+        "Write 2-4 concise bullet points for an equity earnings recap.\n"
+        "Rules:\n"
+        "- Mention how the stock traded versus regular close.\n"
+        "- Mention key earnings/guidance takeaway when available.\n"
+        "- Mention investor sentiment or narrative.\n"
+        "- Keep each bullet <= 28 words.\n"
+        "- Include citations with [S1], [S2], ... where relevant.\n"
+        "- No fluff.\n\n"
+        f"Ticker: {row.ticker}\n"
+        f"Company: {row.company}\n"
+        f"Since close move: {_format_pct(row.since_close_pct)}\n"
+        f"Regular close: {row.regular_close}\n"
+        f"Last traded: {row.last_price}\n"
+        f"Earnings date ET: {row.earnings_date_et}\n"
+        f"Inferred session: {row.inferred_session}\n"
+        f"EPS estimate: {row.eps_estimate}\n"
+        f"Reported EPS: {row.reported_eps}\n"
+        f"Surprise(%): {row.surprise_pct}\n"
+        "Evidence:\n"
+        f"{evidence_block}\n"
+    )
+    try:
+        response = client.chat.completions.create(
+            model=_md_model(),
+            messages=[
+                {"role": "system", "content": "You write trader-facing earnings recaps with source-aware precision."},
+                {"role": "user", "content": prompt},
+            ],
+        )
+        text = str(response.choices[0].message.content or "").strip()  # type: ignore[index]
+    except Exception:
+        logger.exception("earnings recap LLM synthesis failed for %s", row.ticker)
+        return _fallback_earnings_bullets(row=row)
+    bullets = _extract_bullets(text)
+    if len(bullets) < 2:
+        return _fallback_earnings_bullets(row=row)
+    if len(bullets) > 4:
+        bullets = bullets[:4]
+    return tuple(bullets)
+
+
+def _hydrate_recap_row(*, row: EarningsRecapRow, since_utc: datetime, client: Any | None) -> EarningsRecapRow:
+    aliases = _company_aliases(row.ticker)
+    collected = _collect_evidence_for_ticker(
+        ticker=row.ticker,
+        aliases=aliases,
+        since_utc=since_utc,
+        pct_move=row.since_close_pct,
+    )
+    if len(collected) == 3:
+        candidates = collected[0]
+    else:
+        candidates = collected[0]  # type: ignore[index]
+    evidence_lines: list[str] = []
+    links: list[str] = []
+    for item in candidates[:4]:
+        evidence_lines.append(_shorten(f"{item.source_type}: {item.text}", 180))
+        if item.url:
+            links.append(item.url)
+    hydrated = replace(
+        row,
+        evidence=tuple(evidence_lines),
+        source_links=tuple(links),
+    )
+    bullets = _synthesize_earnings_bullets(client=client, row=hydrated)
+    return replace(hydrated, bullets=bullets)
+
+
+def _build_earnings_recap_message(*, rows: list[EarningsRecapRow], now_local: datetime) -> str:
+    as_of = now_local.strftime("%-I:%M %p PT")
+    lines: list[str] = [f"*MD — Earnings Recap | As of {as_of}*"]
+    lines.append("Top earnings names by move since regular close:")
+    for row in rows:
+        lines.append(f"*{row.ticker}* {_format_pct(row.since_close_pct)} vs close ({_session_human_label(row.inferred_session)})")
+        for bullet in row.bullets:
+            lines.append(f"- {bullet}")
+        if row.source_links:
+            refs = [f"<{url}|[S{idx}]>" for idx, url in enumerate(row.source_links, start=1)]
+            lines.append(f"Sources: {' '.join(refs)}")
+    lines.append(f"Data UTC: {_utc_now_iso()} | Sources: Yahoo earnings calendar/history + Yahoo fast_info + X/Yahoo/web evidence")
+    return "\n".join(lines)
+
+
+def _write_earnings_recap_artifact(*, now_local: datetime, rows: list[EarningsRecapRow], message_text: str) -> Path:
+    out_dir = _artifact_dir()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+    path = out_dir / f"md-earnings-recap-{ts}.md"
+
+    lines: list[str] = []
+    lines.append("# MD - Earnings Recap")
+    lines.append("")
+    lines.append(f"Generated local: `{now_local.isoformat()}`")
+    lines.append(f"Generated utc: `{_utc_now_iso()}`")
+    lines.append("")
+    lines.append("## Slack Post")
+    lines.append("")
+    lines.append(message_text)
+    lines.append("")
+    lines.append("## Recap Rows")
+    lines.append("")
+    for row in rows:
+        lines.append(f"- `{row.ticker}` since_close `{_format_pct(row.since_close_pct)}` market_cap `{row.market_cap}`")
+        lines.append(f"  - earnings_date_et: `{row.earnings_date_et}`")
+        lines.append(f"  - inferred_session: `{row.inferred_session}`")
+        lines.append(f"  - eps_estimate: `{row.eps_estimate}`")
+        lines.append(f"  - reported_eps: `{row.reported_eps}`")
+        lines.append(f"  - surprise_pct: `{row.surprise_pct}`")
+        lines.append("  - bullets:")
+        for bullet in row.bullets:
+            lines.append(f"    - {bullet}")
+        lines.append("  - evidence:")
+        if row.evidence:
+            for idx, entry in enumerate(row.evidence, start=1):
+                lines.append(f"    - [S{idx}] {entry}")
+        else:
+            lines.append("    - none")
+        if row.source_links:
+            lines.append("  - source_links:")
+            for idx, url in enumerate(row.source_links, start=1):
+                lines.append(f"    - [S{idx}] {url}")
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
 def run_once(
     *,
     manual: bool = False,
@@ -2909,25 +3392,7 @@ def run_once(
             "run_id": run_id,
         }
 
-    refresh_result = _auto_refresh_holdings_if_stale(store)
-
-    seed = _load_seed_tickers()
-    seed_snaps = _fetch_quote_snapshots(seed)
-    top_seed = _build_top_k_universe(seed_snapshots=seed_snaps, top_k=_top_k())
-
-    include_overrides, exclude_overrides = store.read_override_sets()
-    merged_tickers, source_bucket = _merge_universe(
-        top_seed=top_seed,
-        coatue_tickers=store.coatue_tickers(),
-        include_overrides=include_overrides,
-        exclude_overrides=exclude_overrides,
-    )
-
-    known = {s.ticker for s in seed_snaps}
-    extras = [t for t in merged_tickers if t not in known]
-    extra_snaps = _fetch_quote_snapshots(extras)
-    all_snaps = seed_snaps + extra_snaps
-    final_universe = _rank_universe_snapshots(snapshots=all_snaps, tickers=merged_tickers)
+    final_universe, source_bucket, include_overrides, exclude_overrides, refresh_result = _build_final_universe(store=store, refresh_holdings=True)
 
     movers = _select_top_movers(snapshots=final_universe, top_n=_top_n())
     if not movers:
@@ -2952,6 +3417,12 @@ def run_once(
         }
 
     catalyst_rows, catalyst_lines = _build_catalyst_rows(movers=movers, slot_name=slot)
+    earnings_after_close = (
+        _collect_after_close_earnings_preview(tickers=[x.ticker for x in final_universe], now_utc=datetime.now(UTC))
+        if slot == "open"
+        else []
+    )
+
     message = _build_message(
         slot_name=slot,
         now_local=now_local,
@@ -2959,6 +3430,7 @@ def run_once(
         movers=movers,
         catalyst_rows=catalyst_rows,
         catalyst_lines=catalyst_lines,
+        earnings_after_close=earnings_after_close,
     )
     artifact = _write_artifact(
         slot_name=slot,
@@ -2968,6 +3440,7 @@ def run_once(
         catalyst_rows=catalyst_rows,
         catalyst_lines=catalyst_lines,
         message_text=message,
+        earnings_after_close=earnings_after_close,
     )
 
     channel_ref = (channel_override or _channel_default()).strip() or _channel_default()
@@ -3020,17 +3493,143 @@ def run_once(
             "include": sorted(include_overrides),
             "exclude": sorted(exclude_overrides),
         },
+        "earnings_after_close": [
+            {
+                "ticker": item.ticker,
+                "company": item.company,
+                "earnings_date_et": item.earnings_date_et,
+                "expected_session": item.expected_session,
+            }
+            for item in earnings_after_close
+        ],
+    }
+
+
+def run_earnings_recap(
+    *,
+    manual: bool = False,
+    force: bool = False,
+    dry_run: bool = False,
+    channel_override: str | None = None,
+) -> dict[str, Any]:
+    store = MarketDailyStore()
+    now_utc = datetime.now(UTC)
+    now_local = now_utc.astimezone(_timezone())
+    recap_hh, recap_mm = _earnings_recap_time()
+    if not manual:
+        target = now_local.replace(hour=recap_hh, minute=recap_mm, second=0, microsecond=0)
+        if abs((now_local - target).total_seconds()) > (20 * 60):
+            return {
+                "ok": True,
+                "posted": False,
+                "reason": "outside_scheduled_window",
+                "now_local": now_local.isoformat(),
+                "recap_time": f"{recap_hh:02d}:{recap_mm:02d}",
+            }
+
+    slot = "earnings_recap"
+    date_key = now_local.strftime("%Y-%m-%d")
+    if (not force) and store.slot_already_recorded(run_date_local=date_key, slot_name=slot):
+        return {
+            "ok": True,
+            "posted": False,
+            "reason": "slot_already_posted",
+            "slot": slot,
+            "date": date_key,
+        }
+
+    final_universe, source_bucket, include_overrides, exclude_overrides, refresh_result = _build_final_universe(store=store, refresh_holdings=True)
+    candidates = _collect_reported_today_rows(universe=final_universe, now_utc=now_utc)
+    if not candidates:
+        run_id = store.record_run(
+            run_date_local=date_key,
+            slot_name=slot,
+            triggered_manual=manual,
+            status="skipped_no_reporters",
+            reason="no_reporters",
+            channel_ref=(channel_override or _channel_default()),
+            channel_id=None,
+            message_ts=None,
+            artifact_path=None,
+            posted_at_utc=None,
+        )
+        store.save_universe_snapshot(run_id=run_id, snapshots=final_universe, source_map=source_bucket)
+        return {
+            "ok": True,
+            "posted": False,
+            "reason": "no_reporters",
+            "slot": slot,
+            "run_id": run_id,
+            "reporters": 0,
+        }
+
+    selected = candidates[:4]
+    since_utc = _close_anchor_utc(now_utc=now_utc)
+    client = _openai_client()
+    hydrated = [_hydrate_recap_row(row=row, since_utc=since_utc, client=client) for row in selected]
+    message = _build_earnings_recap_message(rows=hydrated, now_local=now_local)
+    artifact = _write_earnings_recap_artifact(now_local=now_local, rows=hydrated, message_text=message)
+
+    channel_ref = (channel_override or _channel_default()).strip() or _channel_default()
+    channel_id: str | None = None
+    message_ts: str | None = None
+    posted = False
+    status = "dry_run"
+    if not dry_run:
+        channel_id, message_ts = _post_to_slack(channel_ref=channel_ref, text=message)
+        posted = True
+        status = "posted"
+
+    run_id = store.record_run(
+        run_date_local=date_key,
+        slot_name=slot,
+        triggered_manual=manual,
+        status=status,
+        reason=None,
+        channel_ref=channel_ref,
+        channel_id=channel_id,
+        message_ts=message_ts,
+        artifact_path=str(artifact),
+        posted_at_utc=(_utc_now_iso() if posted and (not dry_run) else None),
+    )
+    store.save_universe_snapshot(run_id=run_id, snapshots=final_universe, source_map=source_bucket)
+    return {
+        "ok": True,
+        "posted": posted,
+        "slot": slot,
+        "run_id": run_id,
+        "status": status,
+        "channel": channel_id or channel_ref,
+        "message_ts": message_ts,
+        "artifact_path": str(artifact),
+        "refresh_result": refresh_result,
+        "reporters": len(hydrated),
+        "movers": [
+            {
+                "ticker": row.ticker,
+                "since_close_pct": row.since_close_pct,
+                "market_cap": row.market_cap,
+            }
+            for row in hydrated
+        ],
+        "overrides": {
+            "include": sorted(include_overrides),
+            "exclude": sorted(exclude_overrides),
+        },
     }
 
 
 def status() -> dict[str, Any]:
     store = MarketDailyStore()
+    recap_hh, recap_mm = _earnings_recap_time()
     return {
         "ok": True,
         "db_path": str(store.db_path),
         "timezone": os.environ.get("COATUE_CLAW_MD_TZ", DEFAULT_TZ),
         "times": ",".join(f"{h:02d}:{m:02d}" for h, m in _parse_times()),
+        "earnings_recap_time": f"{recap_hh:02d}:{recap_mm:02d}",
         "channel": _channel_default(),
+        "model": _md_model(),
         "top_n": _top_n(),
         "top_k": _top_k(),
         "x_max_results": _x_max_results(),
@@ -3045,6 +3644,7 @@ def status() -> dict[str, Any]:
         "decisive_primary_reason_min_margin": _decisive_primary_reason_min_margin(),
         "seed_path": str(_seed_path()),
         "recent_runs": store.latest_runs(limit=10),
+        "recent_earnings_recap_runs": store.latest_runs_for_slot(slot_name="earnings_recap", limit=5),
         "holdings_count": store.coatue_holdings_count(),
         "overrides": store.list_overrides(),
     }
@@ -3085,6 +3685,12 @@ def _main() -> None:
     run.add_argument("--dry-run", action="store_true")
     run.add_argument("--channel", default="")
 
+    recap = sub.add_parser("run-earnings-recap")
+    recap.add_argument("--manual", action="store_true")
+    recap.add_argument("--force", action="store_true")
+    recap.add_argument("--dry-run", action="store_true")
+    recap.add_argument("--channel", default="")
+
     sub.add_parser("status")
     sub.add_parser("holdings")
     sub.add_parser("refresh-coatue-holdings")
@@ -3102,6 +3708,13 @@ def _main() -> None:
     args = parser.parse_args()
     if args.cmd == "run-once":
         result = run_once(
+            manual=bool(args.manual),
+            force=bool(args.force),
+            dry_run=bool(args.dry_run),
+            channel_override=(str(args.channel).strip() or None),
+        )
+    elif args.cmd == "run-earnings-recap":
+        result = run_earnings_recap(
             manual=bool(args.manual),
             force=bool(args.force),
             dry_run=bool(args.dry_run),

@@ -25,6 +25,7 @@ from coatue_claw.market_daily import MarketDailyError
 from coatue_claw.market_daily import debug_catalyst as market_daily_debug_catalyst
 from coatue_claw.market_daily import holdings as market_daily_holdings
 from coatue_claw.market_daily import refresh_coatue_holdings as market_daily_refresh_holdings
+from coatue_claw.market_daily import run_earnings_recap as run_market_daily_earnings_recap
 from coatue_claw.market_daily import run_once as run_market_daily_once
 from coatue_claw.market_daily import set_override as market_daily_set_override
 from coatue_claw.market_daily import status as market_daily_status
@@ -1095,6 +1096,8 @@ def _handle_market_daily_command(*, text: str, channel: str | None, thread_ts: s
                 "MD commands:\n"
                 "- `md now`\n"
                 "- `md now force`\n"
+                "- `md earnings now`\n"
+                "- `md earnings now force`\n"
                 "- `md status`\n"
                 "- `md holdings refresh`\n"
                 "- `md holdings show`\n"
@@ -1118,6 +1121,7 @@ def _handle_market_daily_command(*, text: str, channel: str | None, thread_ts: s
             f"- timezone: `{payload.get('timezone')}`",
             f"- times: `{payload.get('times')}`",
             f"- channel: `{payload.get('channel')}`",
+            f"- earnings_recap_time: `{payload.get('earnings_recap_time', '19:00')}`",
             f"- top_n: `{payload.get('top_n')}`",
             f"- top_k: `{payload.get('top_k')}`",
             f"- holdings_count: `{payload.get('holdings_count')}`",
@@ -1231,6 +1235,46 @@ def _handle_market_daily_command(*, text: str, channel: str | None, thread_ts: s
             text=(
                 f"Excluded `{payload.get('ticker')}` from MD universe overrides.\n"
                 f"- overrides_count: `{len(payload.get('overrides') or [])}`"
+            ),
+            thread_ts=thread_ts,
+        )
+        return True
+
+    earnings_now_match = re.fullmatch(r"md\s+earnings\s+now(\s+force)?", lower)
+    if earnings_now_match:
+        forced = "force" in lower
+        say(text=f"Running MD earnings recap now (force={forced})...", thread_ts=thread_ts)
+        try:
+            result = run_market_daily_earnings_recap(
+                manual=True,
+                force=forced,
+                dry_run=False,
+                channel_override=None,
+            )
+        except MarketDailyError as exc:
+            say(text=f"MD earnings recap failed: {exc}", thread_ts=thread_ts)
+            return True
+        except Exception:
+            logger.exception("Unexpected MD earnings recap failure")
+            say(text="MD earnings recap failed unexpectedly. Check logs.", thread_ts=thread_ts)
+            return True
+
+        if result.get("posted"):
+            say(
+                text=(
+                    "MD earnings recap posted.\n"
+                    f"- run_id: `{result.get('run_id')}`\n"
+                    f"- reporters: `{result.get('reporters', 0)}`\n"
+                    f"- artifact: `{result.get('artifact_path')}`"
+                ),
+                thread_ts=thread_ts,
+            )
+            return True
+        say(
+            text=(
+                "MD earnings recap did not post.\n"
+                f"- reason: `{result.get('reason', result.get('status', 'unknown'))}`\n"
+                f"- slot: `{result.get('slot', 'earnings_recap')}`"
             ),
             thread_ts=thread_ts,
         )
