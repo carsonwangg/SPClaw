@@ -1579,3 +1579,23 @@ Then confirm bot returns:
 ### Immediate Next Steps
 1. In `#openai`, send: `give me a new board seat idea` and verify first thesis line is `Idea: Acquire/Acquihire ...`.
 2. Confirm `Sources` now render as `Publisher — Article title: <link>` and never as numeric source labels.
+
+## 2026-02-23 - Board Seat V4 Fallback Target Hardening
+- Issue found during dry-run validation:
+  - low-signal fallback produced invalid placeholder target text (`Idea: Acquire No ...`) for `OpenAI`.
+- Fix shipped in `src/coatue_claw/board_seat_daily.py`:
+  - added `no` to acquisition placeholder target blocklist.
+  - tightened target candidate extraction to skip ultra-short candidates (`len < 3`).
+- Tests:
+  - added regression in `tests/test_board_seat_daily.py`:
+    - `test_best_effort_idea_line_avoids_placeholder_no_target`
+  - targeted suite:
+    - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_board_seat_daily.py` -> `16 passed`
+- Runtime validation:
+  - dry run now yields valid best-effort idea line:
+    - `Idea: Acquire Stealth AI Systems ...`
+  - restarted runtime and confirmed Slack probe `ok=true`.
+
+### Immediate Next Steps
+1. Live-test `#openai` with `give me a new board seat idea` and confirm no placeholder targets in `Idea`.
+2. If a fallback idea still looks weak, add a deterministic company-specific fallback target map before posting.

@@ -147,6 +147,16 @@ def test_v4_best_effort_fallback_still_emits_acq_candidate() -> None:
     assert board_seat_daily._is_valid_acquisition_idea_line(clean.idea_line) is True
 
 
+def test_best_effort_idea_line_avoids_placeholder_no_target() -> None:
+    line = board_seat_daily._best_effort_idea_line(
+        company="OpenAI",
+        seed_text="No high-signal updates surfaced for OpenAI in the last 24 hours.",
+    )
+    assert line.lower().startswith("acquire ")
+    assert "acquire no " not in line.lower()
+    assert board_seat_daily._is_valid_acquisition_idea_line(line) is True
+
+
 def test_sources_render_named_title_lines_not_source_numbers() -> None:
     message = board_seat_daily._render_board_seat_message(company="Anduril", draft=_v4_draft())
     assert "*Reuters — Anduril explores defense acquisitions:* <https://www.reuters.com/markets/deals/example>" in message

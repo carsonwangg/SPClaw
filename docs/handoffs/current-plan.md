@@ -659,3 +659,23 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
    - citations are named title lines (no `Source 1/2/3`).
 2. If any conversational path still emits generic/non-M&A framing, tighten that path’s prompt/routing rule in OpenClaw workspace config.
 3. Resolve unrelated Spencer identity default test failures in a dedicated patch.
+
+## 2026-02-23 Plan Update - V4 Placeholder Target Guardrail
+
+### Completed
+- Fixed low-signal fallback bug that produced placeholder target text (`Acquire No ...`) in board-seat idea lines.
+- Implementation in `src/coatue_claw/board_seat_daily.py`:
+  - `ACQ_PLACEHOLDER_TARGETS` extended to include `no`.
+  - `_target_candidates_from_seed(...)` now skips short candidate tokens (`len < 3`).
+- Added regression test:
+  - `tests/test_board_seat_daily.py::test_best_effort_idea_line_avoids_placeholder_no_target`.
+- Validation:
+  - targeted board-seat tests: `16 passed`.
+  - full suite: unchanged unrelated Spencer identity failures only.
+
+### In Progress
+- Live validation of V4 board-seat outputs in `#openai` after runtime restart.
+
+### Next
+1. Prompt in `#openai`: `give me a new board seat idea` and verify the `Idea` target is concrete and non-placeholder.
+2. If fallback quality is still weak in sparse-signal conditions, add deterministic company-specific fallback target maps.

@@ -106,7 +106,7 @@ WEB_SEARCH_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
 BRAVE_SEARCH_RESULTS = 5
 FUNDING_EXTRACT_MODEL = "gpt-5.2-chat-latest"
 ACQ_SEARCH_RESULTS = 6
-ACQ_PLACEHOLDER_TARGETS = {"tbd", "unknown", "none", "n/a", "startup", "company", "target"}
+ACQ_PLACEHOLDER_TARGETS = {"tbd", "unknown", "none", "n/a", "startup", "company", "target", "no"}
 ACQ_INVALID_TARGET_TERMS = {"startup team", "domain-adjacent", "internal", "in-house"}
 
 
@@ -990,6 +990,8 @@ def _target_candidates_from_seed(*, company: str, seed_text: str) -> list[str]:
     for item in matches:
         candidate = re.sub(r"\s+", " ", item).strip(" .,:;-")
         if not candidate:
+            continue
+        if len(candidate) < 3:
             continue
         key = _slug(candidate)
         if not key or key in seen:
