@@ -271,8 +271,10 @@ Board Seat daily environment controls:
 - `COATUE_CLAW_BOARD_SEAT_FUNDING_MIN_DOMAINS`: minimum corroborating domains required for `verified` funding status (default `2`)
 - `COATUE_CLAW_BOARD_SEAT_FUNDING_LOW_CONF_THRESHOLD`: confidence threshold below which funding is treated as `low` band (default `0.55`)
 - `COATUE_CLAW_BOARD_SEAT_FUNDING_WARNING_MODE`: include explicit low-confidence funding warning line in Board Seat output (`1` default)
-- `COATUE_CLAW_BOARD_SEAT_TARGET_LOCK_DAYS`: hard target-memory lock window to prevent re-pitching same target (default `30`)
-- `COATUE_CLAW_BOARD_SEAT_ALLOW_REPEAT_TARGETS`: set `1` to bypass target lock (default `0`)
+- `COATUE_CLAW_BOARD_SEAT_TARGET_LOCK_DAYS`: target-memory lock window (default `14`, minimum enforced `14`)
+- `COATUE_CLAW_BOARD_SEAT_ALLOW_REPEAT_TARGETS`: set `1` to bypass only the configurable lock window above 14 days; cannot bypass the hard 14-day no-repeat rule (default `0`)
+- `COATUE_CLAW_BOARD_SEAT_EVENT_TRACK_TARGETS_PER_COMPANY`: number of promising targets to track event flow for per company run (default `4`)
+- `COATUE_CLAW_BOARD_SEAT_EVENT_TRACK_ROWS_PER_TARGET`: max candidate event rows pulled per tracked target per run (default `8`)
 - `COATUE_CLAW_BOARD_SEAT_LEDGER_DIR`: board-seat target ledger artifact directory (default `/opt/coatue-claw-data/artifacts/board-seat`)
 - `COATUE_CLAW_BOARD_SEAT_LEDGER_MIRROR_ENABLED`: mirror ledger to Google Drive local path (default `1`)
 - `COATUE_CLAW_BOARD_SEAT_LEDGER_MIRROR_PATH`: mirror destination path (default `/Users/spclaw/Documents/SPClaw Database/Companies/Board-Seat`)
@@ -294,6 +296,11 @@ Board Seat V6 message contract:
 - `Idea confidence` is removed from rendered output.
 - low-confidence funding snapshots append:
   - `Warning: Funding data is low-confidence; verify before action.`
+- Re-pitch policy:
+  - same target cannot be re-pitched within 14 days (hard rule)
+  - after 14 days, resurfacing requires exceptional new evidence with explicit disclosure lines:
+    - `Repitch note`
+    - `New evidence`
 
 Spencer change-digest environment controls:
 - `COATUE_CLAW_CHANGE_TRACKER_USERS`: optional comma-separated `user_id:label` mappings for tracked requesters (example: `U0AGD28QSQG:Carson Wang,U0AFJ5RS31C:Spencer Peterson`)

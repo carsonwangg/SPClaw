@@ -3,6 +3,38 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-24, Board Seat hard 14-day no-repeat + strict repitch evidence gate)
+- Implemented strict repitch governance in `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/board_seat_daily.py`:
+  - hard no-repeat rule: same target cannot be re-pitched within `14` days (non-bypassable).
+  - default target lock updated to `14` days (`COATUE_CLAW_BOARD_SEAT_TARGET_LOCK_DAYS`, minimum enforced 14).
+  - `COATUE_CLAW_BOARD_SEAT_ALLOW_REPEAT_TARGETS=1` now only bypasses configurable lock window beyond 14 days; it cannot bypass the hard 14-day rule.
+- Added continuous promising-target event tracking:
+  - new DB table: `board_seat_target_events`
+  - each run tracks event flow for promising targets (current target + rotation + target memory) and stores normalized event rows with:
+    - `event_type`
+    - `impact_score`
+    - `evidence_quality`
+    - source metadata and timestamps
+- Added strict post-lock repitch assessment:
+  - new DB table: `board_seat_repitch_assessments`
+  - repeated ideas after lock window are only allowed when events meet exceptional thresholds (critical bias against repeats).
+  - rejected resurfacing is explicit with `repitch_not_significant_enough`.
+- Added explicit repitch disclosure when resurfacing is allowed:
+  - message includes:
+    - `Repitch note`
+    - `New evidence`
+  - pitch audit fields now persisted in `board_seat_pitches`:
+    - `is_repitch`
+    - `repitch_of_pitch_id`
+    - `repitch_prev_posted_at_utc`
+    - `repitch_similarity`
+    - `repitch_new_evidence_json`
+
+### Validation
+- `python3 -m compileall -q src/coatue_claw/board_seat_daily.py` -> pass
+- `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `37 passed`
+- `PYTHONPATH=src python3 -m pytest -q` -> `236 passed`
+
 ## Update (2026-02-24, Board Seat funding accuracy hardening: web-first + warning-mode)
 - Implemented funding accuracy hardening in `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/board_seat_daily.py`:
   - `FundingSnapshot` expanded with:

@@ -40,6 +40,20 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Board Seat repitch governance is now strict and Spencer-aligned:
+  - hard no-repeat rule for same target within 14 days (non-bypassable).
+  - default target lock is now 14 days, with minimum enforced at 14.
+  - repeated idea resurfacing after lock now requires exceptional, event-backed significance thresholds (critical bias against repeats).
+  - when resurfacing is allowed, outbound message must include explicit:
+    - `Repitch note`
+    - `New evidence`
+  - new audit/storage tables:
+    - `board_seat_target_events` (continuous promising-target event tracking)
+    - `board_seat_repitch_assessments` (allow/reject decisions + evidence snapshots)
+  - `board_seat_pitches` now persists repitch linkage metadata (`is_repitch`, prior pitch pointer, evidence summary).
+  - validation:
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `37 passed`
+    - `PYTHONPATH=src python3 -m pytest -q` -> `236 passed`
 - Board Seat funding accuracy hardening is now shipped on `codex/agent-board-seat` (web-first, warning-mode, all active portcos):
   - funding evidence model now normalizes/dedupes URLs, rejects low-signal rows, scores evidence, and persists metadata in `board_seat_funding_cache`:
     - `evidence_count`

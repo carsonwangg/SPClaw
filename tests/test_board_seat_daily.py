@@ -310,6 +310,34 @@ def test_repeat_guardrail_v5_still_blocks_duplicate_without_significant_change(t
     assert payload["skipped"][0]["reason"] == "repeat_investment_without_significant_change"
 
 
+def test_hard_14_day_target_lock_cannot_be_bypassed(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_TZ", "UTC")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_PORTCOS", "Anduril:anduril")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_ALLOW_REPEAT_TARGETS", "1")
+    monkeypatch.setattr(board_seat_daily, "WebClient", None)
+    monkeypatch.setattr(board_seat_daily, "_resolve_funding_snapshot", lambda **kwargs: _funding())
+    monkeypatch.setattr(board_seat_daily, "_llm_draft", lambda **kwargs: _v6_draft())
+    monkeypatch.setattr(board_seat_daily, "_best_effort_target", lambda **kwargs: "Saronic")
+
+    store = board_seat_daily.BoardSeatStore()
+    store.record_target(
+        company="Anduril",
+        target="Saronic",
+        channel_ref="anduril",
+        channel_id="C_ANDURIL",
+        source="seed",
+        posted_at_utc=datetime.now(UTC).isoformat(),
+        run_date_local="2026-02-24",
+        message_ts=None,
+    )
+    payload = board_seat_daily.run_once(force=True, dry_run=True)
+    assert payload["ok"] is True
+    assert payload["sent"] == []
+    assert payload["skipped"][0]["reason"] == "repeat_target_within_lock_window"
+
+
 def test_repeat_guardrail_v5_allows_with_significant_change(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
@@ -352,13 +380,108 @@ def test_repeat_guardrail_v5_allows_with_significant_change(tmp_path: Path, monk
     monkeypatch.setattr(board_seat_daily, "_resolve_funding_snapshot", lambda **kwargs: _funding())
     monkeypatch.setattr(board_seat_daily, "_llm_draft", lambda **kwargs: _v6_draft())
     monkeypatch.setattr(board_seat_daily, "_acquisition_search_rows", lambda **kwargs: [])
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_assess_repitch_significance",
+        lambda **_kwargs: {
+            "assessment_id": 1,
+            "allow": True,
+            "reason": "allow_repitch_exceptional_signal",
+            "top_events": [
+                {
+                    "title": "Anduril wins major international defense contract",
+                    "publisher": "Reuters",
+                    "url": "https://www.reuters.com/example",
+                    "event_at_utc": datetime.now(UTC).isoformat(),
+                    "event_type": "major_contract",
+                    "impact_score": 0.99,
+                    "evidence_quality": 1.0,
+                },
+                {
+                    "title": "Anduril announces acquisition discussions",
+                    "publisher": "Bloomberg",
+                    "url": "https://www.bloomberg.com/example",
+                    "event_at_utc": datetime.now(UTC).isoformat(),
+                    "event_type": "mna",
+                    "impact_score": 0.98,
+                    "evidence_quality": 1.0,
+                },
+            ],
+            "aggregate_score": 2.9,
+            "max_event_score": 0.99,
+            "distinct_domains": 2,
+        },
+    )
 
     payload = board_seat_daily.run_once(force=True, dry_run=False)
     assert payload["ok"] is True
     assert len(payload["sent"]) == 1
     assert payload["sent"][0]["significant_change"] is True
+    assert payload["sent"][0]["is_repitch"] is True
+    assert payload["sent"][0]["repitch_of_pitch_id"] is not None
     assert payload["sent"][0]["format_version"] == board_seat_daily.BOARD_SEAT_FORMAT_VERSION
     assert len(sent) == 1
+    assert "Repitch note:" in sent[0]["text"]
+    assert "New evidence:" in sent[0]["text"]
+
+
+def test_repeat_with_significant_change_rejected_when_assessment_not_exceptional(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_TZ", "UTC")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_PORTCOS", "Anduril:anduril")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_BACKFILL_ENABLED", "0")
+    monkeypatch.setattr(board_seat_daily, "_slack_tokens", lambda: ["xoxb-test"])
+
+    store = board_seat_daily.BoardSeatStore()
+    prior_message = board_seat_daily._render_board_seat_message(company="Anduril", draft=_v6_draft())
+    _seed_prior_pitch(
+        store=store,
+        message=prior_message,
+        context_snippets=["Anduril won a major DoD contract and backlog expanded."],
+    )
+
+    class FakeWebClient:
+        def __init__(self, token: str) -> None:
+            self.token = token
+
+        def conversations_list(self, **kwargs):
+            return {"channels": [{"id": "C_ANDURIL", "name": "anduril"}], "response_metadata": {"next_cursor": ""}}
+
+        def conversations_history(self, **kwargs):
+            return {
+                "messages": [
+                    {"text": "Anduril signed a new $1.2B multi-year international contract.", "user": "U1"},
+                ],
+                "response_metadata": {"next_cursor": ""},
+            }
+
+        def chat_postMessage(self, channel: str, text: str, **kwargs):
+            raise AssertionError("Should skip when repitch assessment is not exceptional")
+
+    monkeypatch.setattr(board_seat_daily, "WebClient", FakeWebClient)
+    monkeypatch.setattr(board_seat_daily, "SlackApiError", Exception)
+    monkeypatch.setattr(board_seat_daily, "_resolve_funding_snapshot", lambda **kwargs: _funding())
+    monkeypatch.setattr(board_seat_daily, "_llm_draft", lambda **kwargs: _v6_draft())
+    monkeypatch.setattr(board_seat_daily, "_acquisition_search_rows", lambda **kwargs: [])
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_assess_repitch_significance",
+        lambda **_kwargs: {
+            "assessment_id": 2,
+            "allow": False,
+            "reason": "reject_repitch_not_exceptional_enough",
+            "top_events": [],
+            "aggregate_score": 0.9,
+            "max_event_score": 0.5,
+            "distinct_domains": 1,
+        },
+    )
+
+    payload = board_seat_daily.run_once(force=True, dry_run=False)
+    assert payload["ok"] is True
+    assert payload["sent"] == []
+    assert payload["skipped"][0]["reason"] == "repitch_not_significant_enough"
 
 
 def test_unknown_funding_renders_two_explicit_unknown_labeled_lines() -> None:
