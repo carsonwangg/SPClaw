@@ -40,6 +40,26 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Board Seat funding accuracy hardening is now shipped on `codex/agent-board-seat` (web-first, warning-mode, all active portcos):
+  - funding evidence model now normalizes/dedupes URLs, rejects low-signal rows, scores evidence, and persists metadata in `board_seat_funding_cache`:
+    - `evidence_count`
+    - `distinct_domains`
+    - `conflict_flags`
+    - `verification_status`
+  - message contract keeps posting behavior unchanged while appending an explicit warning line for low-confidence funding:
+    - `Warning: Funding data is low-confidence; verify before action.`
+  - new controls:
+    - `COATUE_CLAW_BOARD_SEAT_FUNDING_MIN_DOMAINS` (default `2`)
+    - `COATUE_CLAW_BOARD_SEAT_FUNDING_LOW_CONF_THRESHOLD` (default `0.55`)
+    - `COATUE_CLAW_BOARD_SEAT_FUNDING_WARNING_MODE` (default `1`)
+  - operator tools added:
+    - `board_seat_daily refresh-funding --all-portcos`
+    - `board_seat_daily funding-quality-report --all-portcos`
+    - artifact: `funding-quality-report-YYYY-MM-DD.md`
+  - status telemetry expanded with `funding_verification_by_company` and aggregate `funding_quality_metrics` (`verified_pct`, `low_confidence_pct`, `oldest_cache_age_days`)
+  - validation:
+    - `python3 -m compileall -q src/coatue_claw/board_seat_daily.py` -> pass
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `35 passed`
 - Parallel Codex multi-agent branch model is now codified for this repo:
   - branch naming standard added in `AGENTS.md`:
     - `codex/agent-board-seat`

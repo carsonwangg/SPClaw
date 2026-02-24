@@ -37,7 +37,7 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
   - `claw x-digest "QUERY" --hours 24 --limit 50`
   - `claw x-chart run-once --manual`
   - `claw x-chart status|list-sources|add-source`
-  - `python -m coatue_claw.board_seat_daily run-once|status|target-memory|seed-target|export-ledger`
+  - `python -m coatue_claw.board_seat_daily run-once|status|target-memory|seed-target|export-ledger|refresh-funding|funding-quality-report`
   - `claw market-daily run-once --manual|--force|--dry-run`
   - `claw market-daily status|holdings|refresh-coatue-holdings|debug-catalyst`
   - `claw memory status|query|prune|extract-daily|checkpoint`
@@ -267,6 +267,10 @@ Board Seat daily environment controls:
 - `COATUE_CLAW_BOARD_SEAT_CRUNCHBASE_ENABLED`: enable Crunchbase funding resolver (`1` default)
 - `COATUE_CLAW_CRUNCHBASE_API_KEY`: Crunchbase API key used for target funding lookup
 - `COATUE_CLAW_BOARD_SEAT_GOOGLE_SERP_API_KEY`: optional SERP API key for funding/source fallback retrieval (falls back to `SERPAPI_API_KEY`)
+- `COATUE_CLAW_BOARD_SEAT_FUNDING_WEB_TOP_ROWS`: max normalized funding evidence rows retained before extraction (default `8`)
+- `COATUE_CLAW_BOARD_SEAT_FUNDING_MIN_DOMAINS`: minimum corroborating domains required for `verified` funding status (default `2`)
+- `COATUE_CLAW_BOARD_SEAT_FUNDING_LOW_CONF_THRESHOLD`: confidence threshold below which funding is treated as `low` band (default `0.55`)
+- `COATUE_CLAW_BOARD_SEAT_FUNDING_WARNING_MODE`: include explicit low-confidence funding warning line in Board Seat output (`1` default)
 - `COATUE_CLAW_BOARD_SEAT_TARGET_LOCK_DAYS`: hard target-memory lock window to prevent re-pitching same target (default `30`)
 - `COATUE_CLAW_BOARD_SEAT_ALLOW_REPEAT_TARGETS`: set `1` to bypass target lock (default `0`)
 - `COATUE_CLAW_BOARD_SEAT_LEDGER_DIR`: board-seat target ledger artifact directory (default `/opt/coatue-claw-data/artifacts/board-seat`)
@@ -288,6 +292,8 @@ Board Seat V6 message contract:
   - `MOS/risks`
   - `Bottom line`
 - `Idea confidence` is removed from rendered output.
+- low-confidence funding snapshots append:
+  - `Warning: Funding data is low-confidence; verify before action.`
 
 Spencer change-digest environment controls:
 - `COATUE_CLAW_CHANGE_TRACKER_USERS`: optional comma-separated `user_id:label` mappings for tracked requesters (example: `U0AGD28QSQG:Carson Wang,U0AFJ5RS31C:Spencer Peterson`)

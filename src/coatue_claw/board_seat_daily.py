@@ -11,7 +11,7 @@ from pathlib import Path
 import re
 import sqlite3
 from typing import Any
-from urllib.parse import urlencode, urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
@@ -104,9 +104,13 @@ CONTEXT_LABELS: tuple[str, ...] = ("Current efforts", "Domain fit/gaps")
 FUNDING_LABELS: tuple[str, ...] = ("History", "Latest round/backers")
 FUNDING_CACHE_TTL_DAYS_DEFAULT = 14
 UNKNOWN_FUNDING_TEXT = "Target funding data is limited; verify via Crunchbase/PitchBook before action."
+LOW_CONFIDENCE_FUNDING_WARNING_TEXT = "Funding data is low-confidence; verify before action."
 WEB_SEARCH_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
 BRAVE_SEARCH_RESULTS = 5
 FUNDING_EXTRACT_MODEL = "gpt-5.2-chat-latest"
+FUNDING_WEB_TOP_ROWS_DEFAULT = 8
+FUNDING_MIN_DOMAINS_DEFAULT = 2
+FUNDING_LOW_CONF_THRESHOLD_DEFAULT = 0.55
 ACQ_SEARCH_RESULTS = 6
 TARGET_SEARCH_RESULTS = 10
 ACQ_PLACEHOLDER_TARGETS = {
@@ -257,6 +261,25 @@ LEGACY_BOARD_SEAT_PATTERNS = (
     "4. strategic fit for",
     "5. value creation",
 )
+FUNDING_SIGNAL_TERMS = {
+    "funding",
+    "raised",
+    "raises",
+    "raising",
+    "round",
+    "series",
+    "backed",
+    "backers",
+    "investor",
+    "investors",
+    "valuation",
+    "seed",
+    "pre-seed",
+    "growth",
+}
+FUNDING_ROUND_RE = re.compile(r"\b(series\s+[a-z][\+\-]?|seed|pre-seed|growth|debt|ipo)\b", re.IGNORECASE)
+FUNDING_AMOUNT_RE = re.compile(r"\$?\d+(?:\.\d+)?\s?(?:m|b|million|billion)\b", re.IGNORECASE)
+FUNDING_YEAR_RE = re.compile(r"\b(20\d{2})\b")
 
 
 @dataclass(frozen=True)
@@ -269,6 +292,10 @@ class FundingSnapshot:
     source_type: str
     as_of_utc: str
     confidence: float = 0.0
+    evidence_count: int = 0
+    distinct_domains: int = 0
+    conflict_flags: list[str] = field(default_factory=list)
+    verification_status: str = "weak"
 
 
 @dataclass(frozen=True)
@@ -306,6 +333,7 @@ class BoardSeatDraft:
     context_domain_fit_gaps: str
     funding_history: str
     funding_latest_round_backers: str
+    funding_warning: str = ""
     source_refs: list[SourceRef] = field(default_factory=list)
     raw_model_output: str = ""
     rewrite_reasons: list[str] = field(default_factory=list)
@@ -386,6 +414,15 @@ def _funding_ttl_days() -> int:
     return max(1, min(90, value))
 
 
+def _funding_web_top_rows() -> int:
+    return _env_int(
+        "COATUE_CLAW_BOARD_SEAT_FUNDING_WEB_TOP_ROWS",
+        FUNDING_WEB_TOP_ROWS_DEFAULT,
+        minimum=3,
+        maximum=20,
+    )
+
+
 def _env_flag(name: str, default: bool) -> bool:
     raw = (os.environ.get(name, "1" if default else "0") or "").strip().lower()
     return raw not in {"0", "false", "off", "no"}
@@ -434,6 +471,34 @@ def _specificity_mode() -> str:
 
 def _funding_scope() -> str:
     return (os.environ.get("COATUE_CLAW_BOARD_SEAT_FUNDING_SCOPE", "target") or "target").strip().lower()
+
+
+def _funding_min_domains() -> int:
+    return _env_int(
+        "COATUE_CLAW_BOARD_SEAT_FUNDING_MIN_DOMAINS",
+        FUNDING_MIN_DOMAINS_DEFAULT,
+        minimum=1,
+        maximum=5,
+    )
+
+
+def _funding_low_conf_threshold() -> float:
+    raw = (
+        os.environ.get(
+            "COATUE_CLAW_BOARD_SEAT_FUNDING_LOW_CONF_THRESHOLD",
+            str(FUNDING_LOW_CONF_THRESHOLD_DEFAULT),
+        )
+        or str(FUNDING_LOW_CONF_THRESHOLD_DEFAULT)
+    ).strip()
+    try:
+        value = float(raw)
+    except Exception:
+        value = FUNDING_LOW_CONF_THRESHOLD_DEFAULT
+    return max(0.1, min(0.95, value))
+
+
+def _funding_warning_mode() -> bool:
+    return _env_flag("COATUE_CLAW_BOARD_SEAT_FUNDING_WARNING_MODE", True)
 
 
 def _crunchbase_enabled() -> bool:
@@ -546,6 +611,12 @@ def _load_manual_funding_seed() -> dict[str, FundingSnapshot]:
             source_type="manual_seed",
             as_of_utc=_utc_now_iso(),
             confidence=float(row.get("confidence") or 0.9),
+            evidence_count=int(row.get("evidence_count") or max(1, len(source_urls[:8]))),
+            distinct_domains=int(row.get("distinct_domains") or max(1, len({_domain_from_url(item) for item in source_urls if _domain_from_url(item)}))),
+            conflict_flags=[str(item).strip() for item in row.get("conflict_flags", []) if str(item).strip()]
+            if isinstance(row.get("conflict_flags"), list)
+            else [],
+            verification_status=str(row.get("verification_status") or "verified").strip().lower() or "verified",
         )
     return out
 
@@ -590,7 +661,39 @@ def _normalize_source_url(url: str) -> str:
     cleaned = cleaned.rstrip(".,;)")
     if not re.match(r"^https?://", cleaned, flags=re.IGNORECASE):
         return ""
-    return cleaned[:320]
+    return _canonicalize_url(cleaned)[:320]
+
+
+def _canonicalize_url(url: str) -> str:
+    parsed = urlparse(str(url or "").strip())
+    if parsed.scheme.lower() not in {"http", "https"}:
+        return ""
+    host = str(parsed.netloc or "").strip().lower()
+    if not host:
+        return ""
+    path = re.sub(r"/{2,}", "/", parsed.path or "/")
+    if len(path) > 1 and path.endswith("/"):
+        path = path[:-1]
+    ignored_params = {"ref", "source", "fbclid", "gclid", "mc_cid", "mc_eid"}
+    kept_params = []
+    for key, value in parse_qsl(parsed.query, keep_blank_values=False):
+        key_l = str(key or "").strip().lower()
+        if (not key_l) or key_l.startswith("utm_") or key_l in ignored_params:
+            continue
+        kept_params.append((key_l, value))
+    query = urlencode(sorted(kept_params))
+    return urlunparse((parsed.scheme.lower(), host, path or "/", "", query, ""))
+
+
+def _url_dedupe_key(url: str) -> str:
+    canonical = _canonicalize_url(url)
+    if not canonical:
+        return ""
+    parsed = urlparse(canonical)
+    host = str(parsed.netloc or "").strip().lower()
+    if host.startswith("www."):
+        host = host[4:]
+    return urlunparse((parsed.scheme.lower(), host, parsed.path, "", parsed.query, ""))
 
 
 def _publisher_from_url(url: str) -> str:
@@ -662,6 +765,10 @@ def _source_domain(url: str) -> str:
     return host
 
 
+def _domain_from_url(url: str) -> str:
+    return _source_domain(url)
+
+
 def _domain_matches(host: str, domain_suffixes: set[str]) -> bool:
     if not host:
         return False
@@ -676,6 +783,117 @@ def _is_quality_source(url: str) -> bool:
 def _is_low_quality_source(url: str) -> bool:
     host = _source_domain(url)
     return _domain_matches(host, SOURCE_LOW_QUALITY_DOMAIN_SUFFIXES)
+
+
+def _funding_row_signal_score(row: dict[str, str]) -> float:
+    text = f"{row.get('title', '')} {row.get('snippet', '')}".lower()
+    score = 0.0
+    if any(term in text for term in FUNDING_SIGNAL_TERMS):
+        score += 1.0
+    if FUNDING_ROUND_RE.search(text):
+        score += 1.3
+    if FUNDING_AMOUNT_RE.search(text):
+        score += 1.2
+    if re.search(r"\b(led by|backed by|investors include|participated)\b", text):
+        score += 0.8
+    url = str(row.get("url") or "")
+    if _is_quality_source(url):
+        score += 0.6
+    if _is_low_quality_source(url):
+        score -= 0.5
+    return score
+
+
+def _extract_published_date_hint(text: str) -> str:
+    value = str(text or "").strip()
+    if not value:
+        return ""
+    m = re.search(r"\b(20\d{2}-\d{2}-\d{2})\b", value)
+    if m:
+        return m.group(1)
+    m = re.search(r"\b(20\d{2}-\d{2})\b", value)
+    if m:
+        return m.group(1)
+    m = re.search(
+        r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(20\d{2})\b",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if m:
+        return m.group(1)
+    m = FUNDING_YEAR_RE.search(value)
+    if m:
+        return m.group(1)
+    return ""
+
+
+def _funding_evidence_conflicts(rows: list[dict[str, str]]) -> list[str]:
+    rounds: set[str] = set()
+    amounts: set[str] = set()
+    years: set[str] = set()
+    for row in rows:
+        text = f"{row.get('title', '')} {row.get('snippet', '')}".lower()
+        round_match = FUNDING_ROUND_RE.search(text)
+        if round_match:
+            rounds.add(round_match.group(1).strip().lower())
+        amount_match = FUNDING_AMOUNT_RE.search(text)
+        if amount_match:
+            amounts.add(amount_match.group(0).strip().lower())
+        for match in FUNDING_YEAR_RE.finditer(text):
+            years.add(match.group(1))
+    flags: list[str] = []
+    if len(rounds) > 1:
+        flags.append("major_round_mismatch")
+    if len(amounts) > 1:
+        flags.append("major_amount_mismatch")
+    if len(years) > 2:
+        flags.append("minor_date_variance")
+    return flags
+
+
+def _prepare_funding_evidence_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    normalized: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
+    for row in rows:
+        raw_url = str(row.get("url") or "")
+        url = _normalize_source_url(raw_url)
+        if not url:
+            continue
+        key = _url_dedupe_key(url) or url.lower()
+        if key in seen_urls:
+            continue
+        seen_urls.add(key)
+        title = _normalize_source_text(str(row.get("title") or ""), max_chars=180)
+        snippet = _normalize_text(str(row.get("snippet") or ""), max_chars=420)
+        publisher = _normalize_source_text(str(row.get("publisher") or ""), max_chars=64) or _publisher_from_url(url)
+        published_hint = _extract_published_date_hint(
+            " ".join(
+                str(row.get(item) or "")
+                for item in ("published", "date", "published_at", "age", "page_age", "snippet", "title")
+            )
+        )
+        candidate = {
+            "publisher": publisher,
+            "title": title or _normalize_source_text(snippet, max_chars=180) or "Reference",
+            "snippet": snippet,
+            "url": url,
+            "published_hint": published_hint,
+        }
+        signal_score = _funding_row_signal_score(candidate)
+        if signal_score < 1.2:
+            continue
+        candidate["signal_score"] = f"{signal_score:.3f}"
+        normalized.append(candidate)
+
+    normalized.sort(
+        key=lambda row: (
+            float(row.get("signal_score") or "0"),
+            row.get("published_hint") or "",
+            row.get("title") or "",
+        ),
+        reverse=True,
+    )
+    return normalized[: _funding_web_top_rows()]
 
 
 def _title_fingerprint(text: str) -> str:
@@ -994,13 +1212,33 @@ class BoardSeatStore:
                     source_urls_json TEXT NOT NULL,
                     source_type TEXT NOT NULL,
                     as_of_utc TEXT NOT NULL,
-                    confidence REAL NOT NULL DEFAULT 0.0
+                    confidence REAL NOT NULL DEFAULT 0.0,
+                    evidence_count INTEGER NOT NULL DEFAULT 0,
+                    distinct_domains INTEGER NOT NULL DEFAULT 0,
+                    conflict_flags_json TEXT NOT NULL DEFAULT '[]',
+                    verification_status TEXT NOT NULL DEFAULT 'weak'
                 );
                 """
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_board_seat_funding_cache_asof ON board_seat_funding_cache(as_of_utc DESC);"
             )
+            existing_cols = {
+                str(row["name"]).strip().lower()
+                for row in conn.execute("PRAGMA table_info(board_seat_funding_cache)").fetchall()
+            }
+            if "evidence_count" not in existing_cols:
+                conn.execute("ALTER TABLE board_seat_funding_cache ADD COLUMN evidence_count INTEGER NOT NULL DEFAULT 0;")
+            if "distinct_domains" not in existing_cols:
+                conn.execute("ALTER TABLE board_seat_funding_cache ADD COLUMN distinct_domains INTEGER NOT NULL DEFAULT 0;")
+            if "conflict_flags_json" not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE board_seat_funding_cache ADD COLUMN conflict_flags_json TEXT NOT NULL DEFAULT '[]';"
+                )
+            if "verification_status" not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE board_seat_funding_cache ADD COLUMN verification_status TEXT NOT NULL DEFAULT 'weak';"
+                )
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS board_seat_target_memory (
@@ -1344,7 +1582,20 @@ class BoardSeatStore:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT company, history, latest_round, latest_date, backers_json, source_urls_json, source_type, as_of_utc, confidence
+                SELECT
+                    company,
+                    history,
+                    latest_round,
+                    latest_date,
+                    backers_json,
+                    source_urls_json,
+                    source_type,
+                    as_of_utc,
+                    confidence,
+                    evidence_count,
+                    distinct_domains,
+                    conflict_flags_json,
+                    verification_status
                 FROM board_seat_funding_cache
                 WHERE company = ?
                 LIMIT 1
@@ -1365,6 +1616,12 @@ class BoardSeatStore:
                 source_urls = []
         except Exception:
             source_urls = []
+        try:
+            conflict_flags = json.loads(str(row["conflict_flags_json"] or "[]"))
+            if not isinstance(conflict_flags, list):
+                conflict_flags = []
+        except Exception:
+            conflict_flags = []
         return FundingSnapshot(
             history=str(row["history"] or ""),
             latest_round=str(row["latest_round"] or ""),
@@ -1374,6 +1631,10 @@ class BoardSeatStore:
             source_type=str(row["source_type"] or "unknown").strip() or "unknown",
             as_of_utc=str(row["as_of_utc"] or _utc_now_iso()),
             confidence=float(row["confidence"] if row["confidence"] is not None else 0.0),
+            evidence_count=int(row["evidence_count"] if row["evidence_count"] is not None else 0),
+            distinct_domains=int(row["distinct_domains"] if row["distinct_domains"] is not None else 0),
+            conflict_flags=[str(item).strip() for item in conflict_flags if str(item).strip()],
+            verification_status=str(row["verification_status"] or "weak").strip().lower() or "weak",
         )
 
     def upsert_funding_snapshot(self, *, company: str, snapshot: FundingSnapshot) -> None:
@@ -1381,8 +1642,9 @@ class BoardSeatStore:
             conn.execute(
                 """
                 INSERT INTO board_seat_funding_cache (
-                    company, history, latest_round, latest_date, backers_json, source_urls_json, source_type, as_of_utc, confidence
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    company, history, latest_round, latest_date, backers_json, source_urls_json, source_type, as_of_utc, confidence,
+                    evidence_count, distinct_domains, conflict_flags_json, verification_status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(company) DO UPDATE SET
                     history = excluded.history,
                     latest_round = excluded.latest_round,
@@ -1391,7 +1653,11 @@ class BoardSeatStore:
                     source_urls_json = excluded.source_urls_json,
                     source_type = excluded.source_type,
                     as_of_utc = excluded.as_of_utc,
-                    confidence = excluded.confidence
+                    confidence = excluded.confidence,
+                    evidence_count = excluded.evidence_count,
+                    distinct_domains = excluded.distinct_domains,
+                    conflict_flags_json = excluded.conflict_flags_json,
+                    verification_status = excluded.verification_status
                 """,
                 (
                     company,
@@ -1403,6 +1669,10 @@ class BoardSeatStore:
                     snapshot.source_type,
                     snapshot.as_of_utc,
                     float(snapshot.confidence),
+                    int(snapshot.evidence_count),
+                    int(snapshot.distinct_domains),
+                    json.dumps(snapshot.conflict_flags, ensure_ascii=False),
+                    str(snapshot.verification_status or "weak").strip().lower() or "weak",
                 ),
             )
 
@@ -1550,6 +1820,7 @@ def _render_board_seat_message(*, company: str, draft: BoardSeatDraft) -> str:
         "*Funding snapshot*",
         f"*History:* {draft.funding_history}",
         f"*Latest round/backers:* {draft.funding_latest_round_backers}",
+        *([f"*Warning:* {draft.funding_warning}"] if draft.funding_warning else []),
         "",
         "*Sources*",
         *[_format_source_ref_for_slack(ref) for ref in source_refs],
@@ -1603,6 +1874,8 @@ def _render_board_seat_blocks(*, company: str, draft: BoardSeatDraft) -> list[di
     blocks.extend(_rich_text_header_block("Funding snapshot"))
     blocks.append(_rich_text_labeled_line_block("History", draft.funding_history))
     blocks.append(_rich_text_labeled_line_block("Latest round/backers", draft.funding_latest_round_backers))
+    if draft.funding_warning:
+        blocks.append(_rich_text_labeled_line_block("Warning", draft.funding_warning))
     blocks.extend(_rich_text_header_block("Sources"))
     for ref in refs:
         blocks.append(
@@ -1991,6 +2264,7 @@ def _sanitize_draft(
     acquisition_rows: list[dict[str, str]] | None = None,
 ) -> BoardSeatDraft:
     funding_history, funding_latest_round_backers = _funding_lines_from_snapshot(funding)
+    funding_warning = _funding_warning_line(funding)
     acq_rows = acquisition_rows or []
     idea_line = _normalize_line(draft.idea_line)
     if not _is_valid_acquisition_idea_line(idea_line):
@@ -2025,6 +2299,7 @@ def _sanitize_draft(
         context_domain_fit_gaps=_normalize_line(draft.context_domain_fit_gaps) or _normalize_line(default_context_fit),
         funding_history=_normalize_line(draft.funding_history) or funding_history,
         funding_latest_round_backers=_normalize_line(draft.funding_latest_round_backers) or funding_latest_round_backers,
+        funding_warning=_normalize_line(draft.funding_warning) or funding_warning,
         source_refs=source_selection.refs,
         raw_model_output=draft.raw_model_output,
         rewrite_reasons=draft.rewrite_reasons,
@@ -2180,6 +2455,10 @@ def _empty_funding_snapshot(*, source_type: str = "unknown") -> FundingSnapshot:
         source_type=source_type,
         as_of_utc=_utc_now_iso(),
         confidence=0.0,
+        evidence_count=0,
+        distinct_domains=0,
+        conflict_flags=[],
+        verification_status="weak",
     )
 
 
@@ -2215,6 +2494,43 @@ def _funding_lines_from_snapshot(snapshot: FundingSnapshot) -> tuple[str, str]:
         latest_parts.append(f"backers: {backers}")
     latest_line = _normalize_line(" ".join(latest_parts)) if latest_parts else _normalize_line(UNKNOWN_FUNDING_TEXT)
     return (_normalize_line(history_line), _normalize_line(latest_line))
+
+
+def _funding_has_major_conflict(conflict_flags: list[str]) -> bool:
+    lowered = [str(item or "").strip().lower() for item in conflict_flags if str(item or "").strip()]
+    if not lowered:
+        return False
+    return any(item.startswith("major_") for item in lowered)
+
+
+def _funding_verification_status(snapshot: FundingSnapshot) -> str:
+    status = str(snapshot.verification_status or "").strip().lower()
+    if status in {"verified", "partial", "weak"}:
+        return status
+    if snapshot.distinct_domains >= _funding_min_domains() and (not _funding_has_major_conflict(snapshot.conflict_flags)):
+        return "verified"
+    if snapshot.evidence_count >= 1 and snapshot.distinct_domains >= 1:
+        return "partial"
+    return "weak"
+
+
+def _funding_confidence_band(snapshot: FundingSnapshot) -> str:
+    if _is_funding_snapshot_unknown(snapshot):
+        return "low"
+    status = _funding_verification_status(snapshot)
+    if snapshot.confidence < _funding_low_conf_threshold():
+        return "low"
+    if status == "verified":
+        return "high"
+    if status == "partial":
+        return "medium"
+    return "low"
+
+
+def _funding_warning_line(snapshot: FundingSnapshot) -> str:
+    if (not _funding_warning_mode()) or (_funding_confidence_band(snapshot) != "low"):
+        return ""
+    return _normalize_line(LOW_CONFIDENCE_FUNDING_WARNING_TEXT)
 
 
 def _funding_snapshot_fresh(*, snapshot: FundingSnapshot | None, ttl_days: int) -> bool:
@@ -2318,6 +2634,7 @@ def _target_funding_from_crunchbase(target_name: str) -> FundingSnapshot | None:
     source_urls: list[str] = []
     if permalink:
         source_urls.append(f"https://www.crunchbase.com/organization/{permalink}")
+    domain_count = len({_domain_from_url(item) for item in source_urls if _domain_from_url(item)})
     snapshot = FundingSnapshot(
         history=history,
         latest_round=latest,
@@ -2327,6 +2644,10 @@ def _target_funding_from_crunchbase(target_name: str) -> FundingSnapshot | None:
         source_type="crunchbase_api",
         as_of_utc=_utc_now_iso(),
         confidence=0.72 if latest else 0.58,
+        evidence_count=max(1, len(source_urls)),
+        distinct_domains=max(1, domain_count),
+        conflict_flags=[],
+        verification_status="partial",
     )
     if not snapshot.history and not snapshot.latest_round:
         return None
@@ -2353,6 +2674,24 @@ def _merge_funding_snapshots(primary: FundingSnapshot | None, secondary: Funding
             continue
         seen.add(key)
         urls.append(url)
+    merged_conflicts: list[str] = []
+    seen_flags: set[str] = set()
+    for item in [*primary.conflict_flags, *secondary.conflict_flags]:
+        flag = str(item or "").strip().lower()
+        if (not flag) or (flag in seen_flags):
+            continue
+        seen_flags.add(flag)
+        merged_conflicts.append(flag)
+    evidence_count = max(int(primary.evidence_count), int(secondary.evidence_count))
+    distinct_domains = max(int(primary.distinct_domains), int(secondary.distinct_domains))
+    verification = "weak"
+    for candidate in (primary.verification_status, secondary.verification_status):
+        key = str(candidate or "").strip().lower()
+        if key == "verified":
+            verification = "verified"
+            break
+        if key == "partial":
+            verification = "partial"
     return FundingSnapshot(
         history=history,
         latest_round=latest_round,
@@ -2362,6 +2701,10 @@ def _merge_funding_snapshots(primary: FundingSnapshot | None, secondary: Funding
         source_type=primary.source_type if primary.history or primary.latest_round else secondary.source_type,
         as_of_utc=_utc_now_iso(),
         confidence=max(float(primary.confidence), float(secondary.confidence)),
+        evidence_count=evidence_count,
+        distinct_domains=distinct_domains,
+        conflict_flags=merged_conflicts,
+        verification_status=verification,
     )
 
 
@@ -2396,12 +2739,13 @@ def _brave_search_rows(company: str) -> list[dict[str, str]]:
         for item in results:
             if not isinstance(item, dict):
                 continue
-            url = _normalize_text(str(item.get("url") or ""), max_chars=320)
+            url = _normalize_source_url(str(item.get("url") or ""))
             if not url or url in seen:
                 continue
             seen.add(url)
             rows.append(
                 {
+                    "publisher": _publisher_from_url(url),
                     "title": _normalize_text(str(item.get("title") or ""), max_chars=240),
                     "snippet": _normalize_text(str(item.get("description") or ""), max_chars=420),
                     "url": url,
@@ -2524,6 +2868,46 @@ def _google_serp_rows(query: str, *, max_results: int = 8) -> list[dict[str, str
     return rows
 
 
+def _funding_rows_metrics(rows: list[dict[str, str]]) -> tuple[int, int, list[str]]:
+    evidence_count = len(rows)
+    domains = {_domain_from_url(str(item.get("url") or "")) for item in rows}
+    domains = {item for item in domains if item}
+    return evidence_count, len(domains), _funding_evidence_conflicts(rows)
+
+
+def _build_funding_snapshot(
+    *,
+    history: str,
+    latest_round: str,
+    latest_date: str,
+    backers: list[str],
+    source_urls: list[str],
+    source_type: str,
+    confidence: float,
+    evidence_rows: list[dict[str, str]],
+) -> FundingSnapshot:
+    evidence_count, distinct_domains, conflict_flags = _funding_rows_metrics(evidence_rows)
+    status = "weak"
+    if (distinct_domains >= _funding_min_domains()) and (not _funding_has_major_conflict(conflict_flags)):
+        status = "verified"
+    elif evidence_count >= 1 and distinct_domains >= 1:
+        status = "partial"
+    return FundingSnapshot(
+        history=history,
+        latest_round=latest_round,
+        latest_date=latest_date,
+        backers=backers,
+        source_urls=source_urls,
+        source_type=source_type,
+        as_of_utc=_utc_now_iso(),
+        confidence=max(0.0, min(1.0, confidence)),
+        evidence_count=evidence_count,
+        distinct_domains=distinct_domains,
+        conflict_flags=conflict_flags,
+        verification_status=status,
+    )
+
+
 def _fetch_thematic_context(*, company: str, target: str, snippets: list[str]) -> list[str]:
     query_seed = " ".join(snippets[:2]).strip()
     queries = [
@@ -2599,15 +2983,16 @@ def _extract_funding_with_llm(*, company: str, rows: list[dict[str, str]]) -> Fu
     backers_raw = payload.get("backers")
     backers = [str(item).strip() for item in backers_raw if str(item).strip()] if isinstance(backers_raw, list) else []
     confidence = float(payload.get("confidence") or 0.0)
-    return FundingSnapshot(
+    source_urls = [str(item.get("url") or "").strip() for item in rows if str(item.get("url") or "").strip()]
+    return _build_funding_snapshot(
         history=history,
         latest_round=latest_round,
         latest_date=latest_date,
         backers=backers[:8],
-        source_urls=[item.get("url", "") for item in rows if item.get("url")][:8],
+        source_urls=source_urls[:8],
         source_type="web_refresh",
-        as_of_utc=_utc_now_iso(),
-        confidence=max(0.0, min(1.0, confidence)),
+        confidence=confidence,
+        evidence_rows=rows,
     )
 
 
@@ -2628,15 +3013,16 @@ def _extract_funding_with_regex(*, rows: list[dict[str, str]]) -> FundingSnapsho
             token = piece.strip(" .")
             if token and len(token.split()) <= 4:
                 backers.append(token)
-    snapshot = FundingSnapshot(
+    source_urls = [str(item.get("url") or "").strip() for item in rows if str(item.get("url") or "").strip()]
+    snapshot = _build_funding_snapshot(
         history=_normalize_text(history_match.group(1), max_chars=220) if history_match else "",
         latest_round=_normalize_text(round_match.group(1), max_chars=50) if round_match else "",
         latest_date=_normalize_text(date_match.group(0), max_chars=30) if date_match else "",
         backers=backers[:6],
-        source_urls=[item.get("url", "") for item in rows if item.get("url")][:8],
+        source_urls=source_urls[:8],
         source_type="web_refresh",
-        as_of_utc=_utc_now_iso(),
         confidence=0.45,
+        evidence_rows=rows,
     )
     if not snapshot.history and not snapshot.latest_round and not snapshot.latest_date and not snapshot.backers:
         return None
@@ -2644,7 +3030,8 @@ def _extract_funding_with_regex(*, rows: list[dict[str, str]]) -> FundingSnapsho
 
 
 def _refresh_funding_snapshot_from_web(*, company: str) -> FundingSnapshot | None:
-    rows = _funding_web_rows(company)
+    raw_rows = _funding_web_rows(company)
+    rows = _prepare_funding_evidence_rows(raw_rows)
     if not rows:
         return None
     llm_snapshot = _extract_funding_with_llm(company=company, rows=rows)
@@ -2653,14 +3040,14 @@ def _refresh_funding_snapshot_from_web(*, company: str) -> FundingSnapshot | Non
     return _extract_funding_with_regex(rows=rows)
 
 
-def _resolve_funding_snapshot(*, store: BoardSeatStore, company: str) -> FundingSnapshot:
+def _resolve_funding_snapshot(*, store: BoardSeatStore, company: str, force_refresh: bool = False) -> FundingSnapshot:
     manual = _load_manual_funding_seed()
     key = _slug_company(company)
     if key in manual:
         return manual[key]
 
     cached = store.get_funding_snapshot(company=company)
-    if _funding_snapshot_fresh(snapshot=cached, ttl_days=_funding_ttl_days()) and cached is not None:
+    if (not force_refresh) and _funding_snapshot_fresh(snapshot=cached, ttl_days=_funding_ttl_days()) and cached is not None:
         return FundingSnapshot(
             history=cached.history,
             latest_round=cached.latest_round,
@@ -2670,6 +3057,10 @@ def _resolve_funding_snapshot(*, store: BoardSeatStore, company: str) -> Funding
             source_type="cache",
             as_of_utc=cached.as_of_utc,
             confidence=cached.confidence,
+            evidence_count=cached.evidence_count,
+            distinct_domains=cached.distinct_domains,
+            conflict_flags=cached.conflict_flags,
+            verification_status=cached.verification_status,
         )
 
     refreshed_primary = _target_funding_from_crunchbase(company)
@@ -2689,6 +3080,10 @@ def _resolve_funding_snapshot(*, store: BoardSeatStore, company: str) -> Funding
             source_type="cache",
             as_of_utc=cached.as_of_utc,
             confidence=cached.confidence,
+            evidence_count=cached.evidence_count,
+            distinct_domains=cached.distinct_domains,
+            conflict_flags=cached.conflict_flags,
+            verification_status=cached.verification_status,
         )
 
     return _empty_funding_snapshot(source_type="unknown")
@@ -3230,6 +3625,106 @@ def _write_target_ledger(store: BoardSeatStore) -> dict[str, str]:
     }
 
 
+def _funding_refresh_entities(
+    *,
+    store: BoardSeatStore,
+    all_portcos: bool,
+    company: str = "",
+    include_recent_targets: bool = True,
+) -> list[str]:
+    entities: list[str] = []
+    seen: set[str] = set()
+    explicit_company = _normalize_source_text(company, max_chars=120)
+    if explicit_company:
+        entities.append(explicit_company)
+        seen.add(_target_key(explicit_company))
+    elif all_portcos:
+        for name, _channel_ref in _parse_portcos():
+            key = _target_key(name)
+            if key in seen:
+                continue
+            seen.add(key)
+            entities.append(name)
+    if include_recent_targets:
+        for row in store.target_ledger_rows(limit=5000):
+            target = _normalize_source_text(str(row.get("target") or ""), max_chars=120)
+            if not target:
+                continue
+            key = _target_key(target)
+            if key in seen:
+                continue
+            seen.add(key)
+            entities.append(target)
+    return entities
+
+
+def _refresh_funding_entities(
+    *,
+    store: BoardSeatStore,
+    entities: list[str],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for entity in entities:
+        snapshot = _resolve_funding_snapshot(store=store, company=entity, force_refresh=True)
+        rows.append(
+            {
+                "entity": entity,
+                "source_type": snapshot.source_type,
+                "verification_status": _funding_verification_status(snapshot),
+                "confidence_band": _funding_confidence_band(snapshot),
+                "confidence": round(float(snapshot.confidence), 4),
+                "evidence_count": int(snapshot.evidence_count),
+                "distinct_domains": int(snapshot.distinct_domains),
+                "conflict_flags": [str(flag) for flag in snapshot.conflict_flags],
+                "as_of_utc": snapshot.as_of_utc,
+                "unknown": _is_funding_snapshot_unknown(snapshot),
+            }
+        )
+    return rows
+
+
+def _build_funding_quality_report_markdown(rows: list[dict[str, Any]]) -> str:
+    total = len(rows)
+    verified = sum(1 for row in rows if str(row.get("verification_status") or "") == "verified")
+    low = sum(1 for row in rows if str(row.get("confidence_band") or "") == "low")
+    generated_at = _utc_now_iso()
+    lines = [
+        "# Board Seat Funding Quality Report",
+        "",
+        f"- Generated at (UTC): `{generated_at}`",
+        f"- Total entities: `{total}`",
+        f"- Verified: `{verified}` ({round((100.0 * verified / total), 1) if total else 0.0}%)",
+        f"- Low confidence: `{low}` ({round((100.0 * low / total), 1) if total else 0.0}%)",
+        "",
+        "| Entity | Source | Verification | Band | Confidence | Evidence | Domains | Conflicts | As Of (UTC) |",
+        "| --- | --- | --- | --- | ---: | ---: | ---: | --- | --- |",
+    ]
+    for row in rows:
+        conflicts = ",".join(str(item) for item in row.get("conflict_flags") or []) or "-"
+        lines.append(
+            "| {entity} | {source} | {status} | {band} | {confidence} | {evidence} | {domains} | {conflicts} | {as_of} |".format(
+                entity=str(row.get("entity") or ""),
+                source=str(row.get("source_type") or ""),
+                status=str(row.get("verification_status") or ""),
+                band=str(row.get("confidence_band") or ""),
+                confidence=str(row.get("confidence") or ""),
+                evidence=str(row.get("evidence_count") or 0),
+                domains=str(row.get("distinct_domains") or 0),
+                conflicts=conflicts,
+                as_of=str(row.get("as_of_utc") or ""),
+            )
+        )
+    return "\n".join(lines).strip() + "\n"
+
+
+def _write_funding_quality_report(rows: list[dict[str, Any]]) -> str:
+    out_dir = _ledger_dir()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    report_path = out_dir / f"funding-quality-report-{_today_key()}.md"
+    report_path.write_text(_build_funding_quality_report_markdown(rows), encoding="utf-8")
+    return str(report_path)
+
+
 def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
     store = BoardSeatStore()
     run_date = _today_key()
@@ -3321,6 +3816,9 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                     "funding_source_type": funding.source_type,
                     "funding_as_of_utc": funding.as_of_utc,
                     "funding_unknown": _is_funding_snapshot_unknown(funding),
+                    "funding_verification_status": _funding_verification_status(funding),
+                    "funding_confidence_band": _funding_confidence_band(funding),
+                    "funding_warning": _funding_warning_line(funding),
                     "target": _extract_acquisition_target(draft.idea_line),
                 }
             )
@@ -3501,6 +3999,9 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                             "funding_source_type": funding.source_type,
                             "funding_as_of_utc": funding.as_of_utc,
                             "funding_unknown": _is_funding_snapshot_unknown(funding),
+                            "funding_verification_status": _funding_verification_status(funding),
+                            "funding_confidence_band": _funding_confidence_band(funding),
+                            "funding_warning": _funding_warning_line(funding),
                         }
                     )
                     posted = True
@@ -3566,6 +4067,9 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                         "funding_source_type": funding.source_type,
                         "funding_as_of_utc": funding.as_of_utc,
                         "funding_unknown": _is_funding_snapshot_unknown(funding),
+                        "funding_verification_status": _funding_verification_status(funding),
+                        "funding_confidence_band": _funding_confidence_band(funding),
+                        "funding_warning": _funding_warning_line(funding),
                     }
                 )
                 posted = True
@@ -3598,16 +4102,54 @@ def status() -> dict[str, Any]:
     manual_seed = _load_manual_funding_seed()
     funding_age_days: dict[str, float | None] = {}
     funding_source_by_company: dict[str, str] = {}
+    funding_verification_by_company: dict[str, dict[str, Any]] = {}
+    verified_count = 0
+    low_conf_count = 0
+    oldest_cache_age_days = 0.0
+    total_companies = len(portcos)
     for item in portcos:
         company = item["company"]
         manual_snapshot = manual_seed.get(_slug_company(company))
+        snapshot: FundingSnapshot | None = manual_snapshot
         if manual_snapshot is not None:
             funding_age_days[company] = 0.0
             funding_source_by_company[company] = "manual_seed"
+        else:
+            funding_age_days[company] = store.funding_cache_age_days(company=company)
+            snapshot = store.get_funding_snapshot(company=company)
+            funding_source_by_company[company] = str(snapshot.source_type).strip() if snapshot is not None else "unknown"
+        age = funding_age_days[company]
+        if age is not None:
+            oldest_cache_age_days = max(oldest_cache_age_days, float(age))
+        if snapshot is None:
+            low_conf_count += 1
+            funding_verification_by_company[company] = {
+                "source_type": "unknown",
+                "verification_status": "weak",
+                "confidence_band": "low",
+                "confidence": 0.0,
+                "evidence_count": 0,
+                "distinct_domains": 0,
+                "conflict_flags": [],
+            }
             continue
-        funding_age_days[company] = store.funding_cache_age_days(company=company)
-        snapshot = store.get_funding_snapshot(company=company)
-        funding_source_by_company[company] = str(snapshot.source_type).strip() if snapshot is not None else "unknown"
+        verification_status = _funding_verification_status(snapshot)
+        confidence_band = _funding_confidence_band(snapshot)
+        if verification_status == "verified":
+            verified_count += 1
+        if confidence_band == "low":
+            low_conf_count += 1
+        funding_verification_by_company[company] = {
+            "source_type": str(snapshot.source_type or "unknown").strip() or "unknown",
+            "verification_status": verification_status,
+            "confidence_band": confidence_band,
+            "confidence": round(float(snapshot.confidence), 4),
+            "evidence_count": int(snapshot.evidence_count),
+            "distinct_domains": int(snapshot.distinct_domains),
+            "conflict_flags": [str(flag) for flag in snapshot.conflict_flags],
+        }
+    verified_pct = round((100.0 * verified_count / float(total_companies)), 1) if total_companies else 0.0
+    low_conf_pct = round((100.0 * low_conf_count / float(total_companies)), 1) if total_companies else 0.0
     return {
         "ok": True,
         "format_version": BOARD_SEAT_FORMAT_VERSION,
@@ -3632,6 +4174,15 @@ def status() -> dict[str, Any]:
         },
         "funding_cache_age_days_by_company": funding_age_days,
         "funding_data_source_by_company": funding_source_by_company,
+        "funding_verification_by_company": funding_verification_by_company,
+        "funding_quality_metrics": {
+            "total_companies": total_companies,
+            "verified_count": verified_count,
+            "verified_pct": verified_pct,
+            "low_confidence_count": low_conf_count,
+            "low_confidence_pct": low_conf_pct,
+            "oldest_cache_age_days": round(oldest_cache_age_days, 2),
+        },
         "ledger_paths": {
             "artifact_dir": str(_ledger_dir()),
             "mirror_dir": str(_ledger_mirror_path()) if _ledger_mirror_enabled() else "",
@@ -3659,6 +4210,16 @@ def main() -> None:
     memory = sub.add_parser("target-memory")
     memory.add_argument("--company", default="")
     memory.add_argument("--limit", type=int, default=200)
+
+    refresh = sub.add_parser("refresh-funding")
+    refresh.add_argument("--all-portcos", action="store_true")
+    refresh.add_argument("--company", default="")
+    refresh.add_argument("--include-recent-targets", action="store_true")
+
+    funding_report = sub.add_parser("funding-quality-report")
+    funding_report.add_argument("--all-portcos", action="store_true")
+    funding_report.add_argument("--company", default="")
+    funding_report.add_argument("--include-recent-targets", action="store_true")
 
     args = parser.parse_args()
     if args.command == "run-once":
@@ -3697,6 +4258,40 @@ def main() -> None:
             "rows": rows,
             "count": len(rows),
             "company_filter": args.company or "",
+        }
+    elif args.command == "refresh-funding":
+        store = BoardSeatStore()
+        include_targets = bool(args.include_recent_targets or args.all_portcos)
+        entities = _funding_refresh_entities(
+            store=store,
+            all_portcos=bool(args.all_portcos),
+            company=str(args.company or ""),
+            include_recent_targets=include_targets,
+        )
+        rows = _refresh_funding_entities(store=store, entities=entities)
+        payload = {
+            "ok": True,
+            "entities_refreshed": len(rows),
+            "entities": entities,
+            "rows": rows,
+        }
+    elif args.command == "funding-quality-report":
+        store = BoardSeatStore()
+        include_targets = bool(args.include_recent_targets or args.all_portcos)
+        entities = _funding_refresh_entities(
+            store=store,
+            all_portcos=bool(args.all_portcos),
+            company=str(args.company or ""),
+            include_recent_targets=include_targets,
+        )
+        rows = _refresh_funding_entities(store=store, entities=entities)
+        report_path = _write_funding_quality_report(rows)
+        payload = {
+            "ok": True,
+            "report_path": report_path,
+            "entities": entities,
+            "rows": rows,
+            "count": len(rows),
         }
     else:
         store = BoardSeatStore()
