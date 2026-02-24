@@ -95,7 +95,7 @@ SIGNIFICANT_CHANGE_TERMS = {
 }
 
 BOARD_SEAT_HEADER_RE = re.compile(r"board seat as a service\s*[—-]\s*(.+)$", re.IGNORECASE)
-BOARD_SEAT_FORMAT_VERSION = "v4_acq_acquihire_named_sources"
+BOARD_SEAT_FORMAT_VERSION = "v5_target_first_confidence_sources"
 MAX_LINE_WORDS = 18
 THESIS_LABELS: tuple[str, ...] = ("Idea", "Why now", "What's different", "MOS/risks", "Bottom line")
 CONTEXT_LABELS: tuple[str, ...] = ("Current efforts", "Domain fit/gaps")
@@ -106,8 +106,81 @@ WEB_SEARCH_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
 BRAVE_SEARCH_RESULTS = 5
 FUNDING_EXTRACT_MODEL = "gpt-5.2-chat-latest"
 ACQ_SEARCH_RESULTS = 6
+TARGET_SEARCH_RESULTS = 10
 ACQ_PLACEHOLDER_TARGETS = {"tbd", "unknown", "none", "n/a", "startup", "company", "target", "no"}
 ACQ_INVALID_TARGET_TERMS = {"startup team", "domain-adjacent", "internal", "in-house"}
+SOURCE_POLICY_DEFAULT = "target_first_3_1"
+LOW_SIGNAL_MODE_DEFAULT = "candidate_with_confidence"
+TARGET_CONFIDENCE_LEVELS = {"High", "Medium", "Low"}
+FUNDING_CONTEXT_TERMS = {
+    "funding",
+    "series ",
+    "valuation",
+    "backers",
+    "raised",
+    "round",
+    "investors",
+    "softbank",
+    "reuters",
+}
+TARGET_PROXY_TERMS = {
+    "browser",
+    "browser automation",
+    "agent",
+    "agentic",
+    "runtime",
+    "workflow",
+    "security",
+    "governance",
+    "compliance",
+    "telemetry",
+    "computer use",
+    "automation",
+    "enterprise",
+    "control plane",
+}
+SOURCE_QUALITY_DOMAIN_SUFFIXES = {
+    "openai.com",
+    "anthropic.com",
+    "browserbase.com",
+    "sec.gov",
+    "reuters.com",
+    "bloomberg.com",
+    "wsj.com",
+    "ft.com",
+    "marketwatch.com",
+    "finance.yahoo.com",
+    "techcrunch.com",
+    "theinformation.com",
+    "axios.com",
+    "investing.com",
+    "stocktwits.com",
+    "fool.com",
+    "seekingalpha.com",
+}
+SOURCE_LOW_QUALITY_DOMAIN_SUFFIXES = {
+    "reddit.com",
+    "wikipedia.org",
+    "medium.com",
+    "substack.com",
+    "x.com",
+    "twitter.com",
+    "youtube.com",
+    "tiktok.com",
+}
+TARGET_TOKEN_STOPWORDS = {
+    "inc",
+    "corp",
+    "corporation",
+    "company",
+    "holdings",
+    "technologies",
+    "technology",
+    "systems",
+    "group",
+    "llc",
+    "ltd",
+}
 
 
 @dataclass(frozen=True)
@@ -130,8 +203,24 @@ class SourceRef:
 
 
 @dataclass(frozen=True)
+class SourceCandidate:
+    ref: SourceRef
+    category: str
+    quality: int
+    score: float
+    text_blob: str
+
+
+@dataclass(frozen=True)
+class SourceSelection:
+    refs: list[SourceRef]
+    confidence: str
+
+
+@dataclass(frozen=True)
 class BoardSeatDraft:
     idea_line: str
+    idea_confidence: str
     why_now: str
     whats_different: str
     mos_risks: str
@@ -181,6 +270,40 @@ def _funding_ttl_days() -> int:
     except Exception:
         value = FUNDING_CACHE_TTL_DAYS_DEFAULT
     return max(1, min(90, value))
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = (os.environ.get(name, "1" if default else "0") or "").strip().lower()
+    return raw not in {"0", "false", "off", "no"}
+
+
+def _env_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    raw = (os.environ.get(name, str(default)) or "").strip()
+    try:
+        value = int(raw)
+    except Exception:
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+def _source_policy() -> str:
+    return (os.environ.get("COATUE_CLAW_BOARD_SEAT_SOURCE_POLICY", SOURCE_POLICY_DEFAULT) or SOURCE_POLICY_DEFAULT).strip()
+
+
+def _include_funding_links() -> bool:
+    return _env_flag("COATUE_CLAW_BOARD_SEAT_INCLUDE_FUNDING_LINKS", False)
+
+
+def _target_min_quality_sources() -> int:
+    return _env_int("COATUE_CLAW_BOARD_SEAT_TARGET_MIN_QUALITY_SOURCES", 1, minimum=1, maximum=4)
+
+
+def _target_min_total_sources() -> int:
+    return _env_int("COATUE_CLAW_BOARD_SEAT_TARGET_MIN_TOTAL_SOURCES", 2, minimum=1, maximum=4)
+
+
+def _low_signal_mode() -> str:
+    return (os.environ.get("COATUE_CLAW_BOARD_SEAT_LOW_SIGNAL_MODE", LOW_SIGNAL_MODE_DEFAULT) or LOW_SIGNAL_MODE_DEFAULT).strip()
 
 
 def _manual_funding_path() -> Path | None:
@@ -353,17 +476,168 @@ def _source_refs_from_urls(urls: list[str], *, title_hint: str) -> list[SourceRe
     return out
 
 
-def _fallback_source_refs(company: str) -> list[SourceRef]:
+def _source_domain(url: str) -> str:
+    parsed = urlparse(url)
+    host = str(parsed.netloc or "").strip().lower()
+    if host.startswith("www."):
+        host = host[4:]
+    return host
+
+
+def _domain_matches(host: str, domain_suffixes: set[str]) -> bool:
+    if not host:
+        return False
+    return any(host == suffix or host.endswith(f".{suffix}") for suffix in domain_suffixes)
+
+
+def _is_quality_source(url: str) -> bool:
+    host = _source_domain(url)
+    return _domain_matches(host, SOURCE_QUALITY_DOMAIN_SUFFIXES)
+
+
+def _is_low_quality_source(url: str) -> bool:
+    host = _source_domain(url)
+    return _domain_matches(host, SOURCE_LOW_QUALITY_DOMAIN_SUFFIXES)
+
+
+def _title_fingerprint(text: str) -> str:
+    tokens = re.findall(r"[a-z0-9]{3,}", str(text or "").lower())
+    return " ".join(tokens[:16]).strip()
+
+
+def _extract_target_tokens_from_idea(idea_line: str) -> tuple[str, set[str]]:
+    target = _extract_acquisition_target(idea_line)
+    cleaned = re.sub(r"[^a-z0-9 ]+", " ", target.lower())
+    tokens = {
+        tok
+        for tok in cleaned.split()
+        if len(tok) >= 3 and tok not in PITCH_STOPWORDS and tok not in TARGET_TOKEN_STOPWORDS
+    }
+    return target, tokens
+
+
+def _matches_any_token(text: str, tokens: set[str]) -> bool:
+    if not text or not tokens:
+        return False
+    return any(re.search(rf"\b{re.escape(token)}\b", text) for token in tokens)
+
+
+def _classify_source_ref(
+    *,
+    company: str,
+    target: str,
+    target_tokens: set[str],
+    text_blob: str,
+) -> str:
+    blob = str(text_blob or "").lower()
+    company_tokens = set(_tokenize(company))
+    target_blob = str(target or "").strip().lower()
+    has_target_phrase = bool(target_blob and target_blob in blob)
+    has_target_token = _matches_any_token(blob, target_tokens)
+    has_proxy = any(term in blob for term in TARGET_PROXY_TERMS)
+    has_funding = any(term in blob for term in FUNDING_CONTEXT_TERMS)
+    has_parent = _matches_any_token(blob, company_tokens)
+    if has_funding:
+        return "funding_context"
+    if has_target_phrase or has_target_token:
+        return "target_direct"
+    if has_parent:
+        return "parent_context"
+    if has_proxy:
+        return "target_proxy"
+    return "target_proxy"
+
+
+def _target_search_rows(*, target: str, company: str, snippets: list[str]) -> list[dict[str, str]]:
+    api_key = _brave_search_api_key()
+    if not api_key:
+        return []
+    hints = " ".join(snippets[:2]).strip()
+    headers = {
+        "Accept": "application/json",
+        "X-Subscription-Token": api_key,
+        "User-Agent": "CoatueClaw/1.0",
+    }
+    queries = [
+        f"{target} company product enterprise",
+        f"{target} browser automation security runtime",
+        f"{company} acquire {target}",
+        f"{target} traction customers funding",
+    ]
+    if hints:
+        queries.append(f"{target} {hints}")
+
+    rows: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for query in queries:
+        try:
+            payload = _http_json(
+                url=WEB_SEARCH_ENDPOINT,
+                headers=headers,
+                params={"q": query, "count": str(TARGET_SEARCH_RESULTS), "country": "us", "search_lang": "en"},
+            )
+        except Exception:
+            continue
+        web = payload.get("web") if isinstance(payload, dict) else None
+        results = web.get("results") if isinstance(web, dict) else None
+        if not isinstance(results, list):
+            continue
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            url = _normalize_source_url(str(item.get("url") or ""))
+            if not url:
+                continue
+            key = url.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            title = _normalize_source_text(str(item.get("title") or ""), max_chars=180)
+            snippet = _normalize_text(str(item.get("description") or ""), max_chars=420)
+            rows.append(
+                {
+                    "publisher": _publisher_from_url(url),
+                    "title": title or _normalize_source_text(snippet, max_chars=180) or "Reference",
+                    "snippet": snippet,
+                    "url": url,
+                }
+            )
+            if len(rows) >= TARGET_SEARCH_RESULTS:
+                return rows
+    return rows
+
+
+def _source_selection_confidence(candidates: list[SourceCandidate]) -> str:
+    target_candidates = [item for item in candidates if item.category in {"target_direct", "target_proxy"}]
+    quality_target = [item for item in target_candidates if item.quality > 0]
+    quality_domains = {_source_domain(item.ref.url) for item in quality_target}
+    direct_quality = [item for item in quality_target if item.category == "target_direct"]
+    if len(target_candidates) >= 3 and len(quality_domains) >= 2:
+        return "High"
+    if len(direct_quality) >= _target_min_quality_sources() and len(target_candidates) >= _target_min_total_sources():
+        return "Medium"
+    return "Low"
+
+
+def _normalize_confidence_label(value: str, *, fallback: str = "Low") -> str:
+    normalized = str(value or "").strip().capitalize()
+    if normalized in TARGET_CONFIDENCE_LEVELS:
+        return normalized
+    return fallback
+
+
+def _fallback_source_refs(company: str, *, target: str = "") -> list[SourceRef]:
+    target_query = target or f"{company} strategic acquisition target"
     return [
         SourceRef(
             name_or_publisher="Google Search",
-            title=f"{company} acquisitions and acquihires",
-            url=f"https://www.google.com/search?{urlencode({'q': f'{company} acquisitions acquihires startup'})}",
+            title=f"{target_query} enterprise fit",
+            url=f"https://www.google.com/search?{urlencode({'q': f'{target_query} company product customers'})}",
         ),
         SourceRef(
             name_or_publisher="Google Search",
-            title=f"{company} funding latest round backers",
-            url=f"https://www.google.com/search?{urlencode({'q': f'{company} funding latest round backers'})}",
+            title=f"{target_query} security runtime",
+            url=f"https://www.google.com/search?{urlencode({'q': f'{target_query} security automation runtime'})}",
         ),
     ]
 
@@ -372,7 +646,7 @@ def _message_source_refs(*, company: str, draft: BoardSeatDraft) -> list[SourceR
     refs = _normalize_source_refs(draft.source_refs, max_items=4)
     if refs:
         return refs
-    return _fallback_source_refs(company)
+    return _fallback_source_refs(company, target=_extract_acquisition_target(draft.idea_line))
 
 
 def _format_source_ref_for_slack(ref: SourceRef) -> str:
@@ -896,6 +1170,7 @@ def _render_board_seat_message(*, company: str, draft: BoardSeatDraft) -> str:
         "",
         "*Thesis*",
         f"*Idea:* {draft.idea_line}",
+        f"*Idea confidence:* {draft.idea_confidence}",
         f"*Why now:* {draft.why_now}",
         f"*What's different:* {draft.whats_different}",
         f"*MOS/risks:* {draft.mos_risks}",
@@ -1037,24 +1312,142 @@ def _build_source_refs(
     draft: BoardSeatDraft,
     funding: FundingSnapshot,
     acquisition_rows: list[dict[str, str]],
-) -> list[SourceRef]:
-    refs: list[SourceRef] = []
-    refs.extend(draft.source_refs)
+) -> SourceSelection:
+    target, target_tokens = _extract_target_tokens_from_idea(draft.idea_line)
+    target_rows = _target_search_rows(
+        target=target or company,
+        company=company,
+        snippets=[draft.why_now, draft.whats_different, draft.context_domain_fit_gaps],
+    )
+    include_funding = _include_funding_links()
+    policy = _source_policy()
+
+    normalized_candidates: list[SourceCandidate] = []
+    seen_url: set[str] = set()
+    seen_title: set[str] = set()
+
+    def _append_candidate(*, ref: SourceRef, text_blob: str, origin: str) -> None:
+        normalized = _normalize_source_ref(ref)
+        if normalized is None:
+            return
+        url_key = normalized.url.lower()
+        title_key = _title_fingerprint(normalized.title)
+        dedupe_key = f"{_source_domain(normalized.url)}::{title_key}"
+        if url_key in seen_url or dedupe_key in seen_title:
+            return
+        seen_url.add(url_key)
+        seen_title.add(dedupe_key)
+        category = _classify_source_ref(
+            company=company,
+            target=target,
+            target_tokens=target_tokens,
+            text_blob=text_blob,
+        )
+        quality = 1 if _is_quality_source(normalized.url) else (-1 if _is_low_quality_source(normalized.url) else 0)
+        score = {
+            "target_direct": 3.0,
+            "target_proxy": 2.0,
+            "parent_context": 1.0,
+            "funding_context": 0.2,
+        }.get(category, 1.0)
+        score += {"target_search": 0.4, "acquisition_search": 0.25, "draft": 0.1, "funding": -0.25}.get(origin, 0.0)
+        score += 0.4 if quality > 0 else (-0.2 if quality < 0 else 0.0)
+        normalized_candidates.append(
+            SourceCandidate(
+                ref=normalized,
+                category=category,
+                quality=quality,
+                score=score,
+                text_blob=text_blob,
+            )
+        )
+
+    for ref in draft.source_refs:
+        _append_candidate(ref=ref, text_blob=f"{ref.title} {ref.url}", origin="draft")
+    for row in target_rows:
+        ref = _source_ref_from_row(row)
+        if ref is not None:
+            _append_candidate(
+                ref=ref,
+                text_blob=" ".join(
+                    [str(row.get("title") or ""), str(row.get("snippet") or ""), str(row.get("url") or "")]
+                ),
+                origin="target_search",
+            )
     for row in acquisition_rows:
         ref = _source_ref_from_row(row)
         if ref is not None:
-            refs.append(ref)
-    refs.extend(_source_refs_from_urls(funding.source_urls, title_hint=f"{company} funding reference"))
-    refs = _normalize_source_refs(refs, max_items=4)
-    if refs:
-        return refs
-    return _fallback_source_refs(company)
+            _append_candidate(
+                ref=ref,
+                text_blob=" ".join(
+                    [str(row.get("title") or ""), str(row.get("snippet") or ""), str(row.get("url") or "")]
+                ),
+                origin="acquisition_search",
+            )
+    if include_funding:
+        for ref in _source_refs_from_urls(funding.source_urls, title_hint=f"{company} funding reference"):
+            _append_candidate(ref=ref, text_blob=f"{ref.title} {ref.url}", origin="funding")
+
+    if not include_funding:
+        normalized_candidates = [item for item in normalized_candidates if item.category != "funding_context"]
+
+    normalized_candidates.sort(key=lambda item: item.score, reverse=True)
+    selected: list[SourceCandidate] = []
+    selected_urls: set[str] = set()
+    parent_count = 0
+
+    if policy == "target_first_3_1":
+        for candidate in normalized_candidates:
+            if len(selected) >= 3:
+                break
+            if candidate.category not in {"target_direct", "target_proxy"}:
+                continue
+            key = candidate.ref.url.lower()
+            if key in selected_urls:
+                continue
+            selected.append(candidate)
+            selected_urls.add(key)
+
+        for candidate in normalized_candidates:
+            if len(selected) >= 4:
+                break
+            key = candidate.ref.url.lower()
+            if key in selected_urls:
+                continue
+            if candidate.category == "parent_context" and parent_count < 1:
+                selected.append(candidate)
+                selected_urls.add(key)
+                parent_count += 1
+                continue
+            if candidate.category in {"target_direct", "target_proxy"}:
+                selected.append(candidate)
+                selected_urls.add(key)
+    else:
+        for candidate in normalized_candidates:
+            if len(selected) >= 4:
+                break
+            key = candidate.ref.url.lower()
+            if key in selected_urls:
+                continue
+            selected.append(candidate)
+            selected_urls.add(key)
+
+    if not selected:
+        fallback = _fallback_source_refs(company, target=target)
+        return SourceSelection(refs=_normalize_source_refs(fallback, max_items=4), confidence="Low")
+
+    refs = [item.ref for item in selected[:4]]
+    confidence = _source_selection_confidence(selected[:4])
+    if confidence == "Low" and _low_signal_mode() != "candidate_with_confidence":
+        confidence = "Medium"
+    return SourceSelection(refs=refs, confidence=confidence)
 
 
 def _validate_draft(draft: BoardSeatDraft) -> list[str]:
     errors: list[str] = []
     checks = {
         "idea_line": draft.idea_line,
+        "idea_confidence": draft.idea_confidence,
         "why_now": draft.why_now,
         "whats_different": draft.whats_different,
         "mos_risks": draft.mos_risks,
@@ -1073,6 +1466,8 @@ def _validate_draft(draft: BoardSeatDraft) -> list[str]:
             errors.append(f"{key}_too_long")
     if not _is_valid_acquisition_idea_line(draft.idea_line):
         errors.append("idea_line_invalid")
+    if _normalize_confidence_label(draft.idea_confidence, fallback="") not in TARGET_CONFIDENCE_LEVELS:
+        errors.append("idea_confidence_invalid")
     if not _normalize_source_refs(draft.source_refs, max_items=4):
         errors.append("missing_source_refs")
     return errors
@@ -1098,9 +1493,11 @@ def _sanitize_draft(
             ]
         )
         idea_line = _best_effort_idea_line(company=company, seed_text=seed_text)
-    source_refs = _build_source_refs(company=company, draft=draft, funding=funding, acquisition_rows=acq_rows)
+    source_selection = _build_source_refs(company=company, draft=draft, funding=funding, acquisition_rows=acq_rows)
+    idea_confidence = source_selection.confidence
     return BoardSeatDraft(
         idea_line=idea_line,
+        idea_confidence=idea_confidence,
         why_now=_normalize_line(draft.why_now)
         or f"{company} has a near-term window to drive measurable strategic leverage.",
         whats_different=_normalize_line(draft.whats_different)
@@ -1115,7 +1512,7 @@ def _sanitize_draft(
         or "Fit is strongest where roadmap, partnerships, and deployment constraints are explicitly addressed.",
         funding_history=_normalize_line(draft.funding_history) or funding_history,
         funding_latest_round_backers=_normalize_line(draft.funding_latest_round_backers) or funding_latest_round_backers,
-        source_refs=source_refs,
+        source_refs=source_selection.refs,
         raw_model_output=draft.raw_model_output,
         rewrite_reasons=draft.rewrite_reasons,
     )
@@ -1244,6 +1641,7 @@ def _build_novel_fallback_draft(
         acquisition_rows=acquisition_rows or [],
         draft=BoardSeatDraft(
             idea_line=_best_effort_idea_line(company=company, seed_text=chosen),
+            idea_confidence="Low",
             why_now=chosen,
             whats_different="Use net-new evidence versus previously pitched ideas.",
             mos_risks="Main risk is repeating stale theses without materially new information.",
@@ -1779,6 +2177,7 @@ def _fallback_draft(
     funding_history, funding_latest_round_backers = _funding_lines_from_snapshot(funding)
     draft = BoardSeatDraft(
         idea_line=_best_effort_idea_line(company=company, seed_text=why_now),
+        idea_confidence="Low",
         why_now=why_now,
         whats_different=whats_different,
         mos_risks=mos_risks,
@@ -1799,6 +2198,7 @@ def _parse_llm_draft_payload(payload: Any) -> BoardSeatDraft | None:
         return None
     required = (
         "idea_line",
+        "idea_confidence",
         "why_now",
         "whats_different",
         "mos_risks",
@@ -1825,6 +2225,7 @@ def _parse_llm_draft_payload(payload: Any) -> BoardSeatDraft | None:
             )
     return BoardSeatDraft(
         idea_line=str(payload.get("idea_line") or ""),
+        idea_confidence=str(payload.get("idea_confidence") or ""),
         why_now=str(payload.get("why_now") or ""),
         whats_different=str(payload.get("whats_different") or ""),
         mos_risks=str(payload.get("mos_risks") or ""),
@@ -1865,17 +2266,20 @@ def _llm_draft(
     prompt = (
         f"Generate a structured board-seat brief for {company}.\n"
         "Return strict JSON only with keys: "
-        "idea_line, why_now, whats_different, mos_risks, bottom_line, "
+        "idea_line, idea_confidence, why_now, whats_different, mos_risks, bottom_line, "
         "context_current_efforts, context_domain_fit_gaps, "
         "funding_history, funding_latest_round_backers, source_refs.\n"
         "Constraints:\n"
         f"- each value must be a single line <= {MAX_LINE_WORDS} words\n"
         "- idea_line must start with Acquire or Acquihire and name a concrete target.\n"
+        "- idea_confidence must be exactly one of High, Medium, Low.\n"
         "- do not propose internal build as primary recommendation.\n"
         "- short, high skim value, decision-useful.\n"
         "- style must be concise labeled-line content, not bullets.\n"
         "- do not use legacy labels (Signal/Board lens/Watchlist/Team ask).\n"
         "- source_refs is an array of objects with name_or_publisher, title, url.\n"
+        "- source_refs must prioritize target-company evidence, not parent-company funding links.\n"
+        "- avoid Reuters/SoftBank-style parent funding links in source_refs by default.\n"
         "Recent channel context:\n"
         f"{joined}\n"
         f"Funding snapshot input:\n{funding_json}\n"
@@ -1910,6 +2314,7 @@ def _llm_draft(
             return None
         return BoardSeatDraft(
             idea_line=draft.idea_line,
+            idea_confidence=draft.idea_confidence,
             why_now=draft.why_now,
             whats_different=draft.whats_different,
             mos_risks=draft.mos_risks,

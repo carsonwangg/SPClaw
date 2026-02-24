@@ -12,6 +12,7 @@ def _funding(
     latest_round: str = "Series D",
     latest_date: str = "2025",
     backers: list[str] | None = None,
+    source_urls: list[str] | None = None,
     source_type: str = "cache",
     as_of_utc: str | None = None,
 ) -> board_seat_daily.FundingSnapshot:
@@ -20,7 +21,7 @@ def _funding(
         latest_round=latest_round,
         latest_date=latest_date,
         backers=backers or ["Founders Fund", "General Catalyst"],
-        source_urls=["https://example.com/funding"],
+        source_urls=source_urls or ["https://example.com/funding"],
         source_type=source_type,
         as_of_utc=as_of_utc or datetime.now(UTC).isoformat(),
         confidence=0.8,
@@ -54,9 +55,10 @@ def _seed_prior_pitch(
     )
 
 
-def _v4_draft() -> board_seat_daily.BoardSeatDraft:
+def _v5_draft() -> board_seat_daily.BoardSeatDraft:
     return board_seat_daily.BoardSeatDraft(
         idea_line="Acquire Saronic to accelerate autonomous maritime deployment advantage.",
+        idea_confidence="Medium",
         why_now="Defense demand is accelerating and budgets are prioritizing autonomous systems now.",
         whats_different="Anduril can deploy integrated hardware-software stacks faster than incumbents in contested environments.",
         mos_risks="Key risks are procurement delay, hardware margin volatility, and integration complexity at scale.",
@@ -95,21 +97,23 @@ def test_parse_portcos_defaults_include_portco_list() -> None:
     assert "Sunday Robotics" in names
 
 
-def test_v4_message_structure_includes_explicit_idea_line() -> None:
-    message = board_seat_daily._render_board_seat_message(company="Anduril", draft=_v4_draft())
+def test_v5_message_structure_includes_explicit_idea_line() -> None:
+    message = board_seat_daily._render_board_seat_message(company="Anduril", draft=_v5_draft())
     assert "*Board Seat as a Service — Anduril*" in message
     assert "*Thesis*" in message
     assert "*Idea:* Acquire Saronic to accelerate autonomous maritime deployment advantage." in message
+    assert "*Idea confidence:* Medium" in message
     assert "*Anduril context*" in message
     assert "*Funding snapshot*" in message
     assert "*Sources*" in message
     assert "\n- " not in message
 
 
-def test_v4_rejects_non_acquisition_idea_line() -> None:
-    draft = _v4_draft()
+def test_v5_rejects_non_acquisition_idea_line() -> None:
+    draft = _v5_draft()
     draft = board_seat_daily.BoardSeatDraft(
         idea_line="Build an internal product layer for identity controls.",
+        idea_confidence=draft.idea_confidence,
         why_now=draft.why_now,
         whats_different=draft.whats_different,
         mos_risks=draft.mos_risks,
@@ -124,9 +128,10 @@ def test_v4_rejects_non_acquisition_idea_line() -> None:
     assert "idea_line_invalid" in errors
 
 
-def test_v4_best_effort_fallback_still_emits_acq_candidate() -> None:
+def test_v5_best_effort_fallback_still_emits_acq_candidate() -> None:
     draft = board_seat_daily.BoardSeatDraft(
         idea_line="Build it internally",
+        idea_confidence="Low",
         why_now="AI workflow demand is growing quickly.",
         whats_different="Cross-product data plane creates leverage.",
         mos_risks="Execution and integration risk remain.",
@@ -158,20 +163,20 @@ def test_best_effort_idea_line_avoids_placeholder_no_target() -> None:
 
 
 def test_sources_render_named_title_lines_not_source_numbers() -> None:
-    message = board_seat_daily._render_board_seat_message(company="Anduril", draft=_v4_draft())
+    message = board_seat_daily._render_board_seat_message(company="Anduril", draft=_v5_draft())
     assert "*Reuters — Anduril explores defense acquisitions:* <https://www.reuters.com/markets/deals/example>" in message
     assert "*TechCrunch — Saronic raises new funding round:* <https://techcrunch.com/example>" in message
 
 
 def test_sources_never_emit_source_number_labels() -> None:
-    message = board_seat_daily._render_board_seat_message(company="Anduril", draft=_v4_draft())
+    message = board_seat_daily._render_board_seat_message(company="Anduril", draft=_v5_draft())
     assert "Source 1" not in message
     assert "Source 2" not in message
     assert "Source 3" not in message
 
 
-def test_extract_investment_text_parses_v4_idea_line() -> None:
-    message = board_seat_daily._render_board_seat_message(company="Anduril", draft=_v4_draft())
+def test_extract_investment_text_parses_v5_idea_line() -> None:
+    message = board_seat_daily._render_board_seat_message(company="Anduril", draft=_v5_draft())
     extracted = board_seat_daily._extract_investment_text(message)
     core = board_seat_daily._core_investment_text(message)
     assert "acquire saronic" in extracted.lower()
@@ -206,7 +211,7 @@ def test_extract_investment_text_parses_legacy_v2_and_old5() -> None:
     assert "backlog accelerated" in board_seat_daily._extract_investment_text(old_message).lower()
 
 
-def test_repeat_guardrail_v4_still_blocks_duplicate_without_significant_change(tmp_path: Path, monkeypatch) -> None:
+def test_repeat_guardrail_v5_still_blocks_duplicate_without_significant_change(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_TZ", "UTC")
@@ -215,7 +220,7 @@ def test_repeat_guardrail_v4_still_blocks_duplicate_without_significant_change(t
     monkeypatch.setattr(board_seat_daily, "_slack_tokens", lambda: ["xoxb-test"])
 
     store = board_seat_daily.BoardSeatStore()
-    prior_message = board_seat_daily._render_board_seat_message(company="Anduril", draft=_v4_draft())
+    prior_message = board_seat_daily._render_board_seat_message(company="Anduril", draft=_v5_draft())
     _seed_prior_pitch(
         store=store,
         message=prior_message,
@@ -243,9 +248,9 @@ def test_repeat_guardrail_v4_still_blocks_duplicate_without_significant_change(t
     monkeypatch.setattr(board_seat_daily, "WebClient", FakeWebClient)
     monkeypatch.setattr(board_seat_daily, "SlackApiError", Exception)
     monkeypatch.setattr(board_seat_daily, "_resolve_funding_snapshot", lambda **kwargs: _funding())
-    monkeypatch.setattr(board_seat_daily, "_llm_draft", lambda **kwargs: _v4_draft())
+    monkeypatch.setattr(board_seat_daily, "_llm_draft", lambda **kwargs: _v5_draft())
     monkeypatch.setattr(board_seat_daily, "_acquisition_search_rows", lambda **kwargs: [])
-    monkeypatch.setattr(board_seat_daily, "_build_novel_fallback_draft", lambda **kwargs: _v4_draft())
+    monkeypatch.setattr(board_seat_daily, "_build_novel_fallback_draft", lambda **kwargs: _v5_draft())
 
     payload = board_seat_daily.run_once(force=True, dry_run=False)
     assert payload["ok"] is True
@@ -254,7 +259,7 @@ def test_repeat_guardrail_v4_still_blocks_duplicate_without_significant_change(t
     assert payload["skipped"][0]["reason"] == "repeat_investment_without_significant_change"
 
 
-def test_repeat_guardrail_v4_allows_with_significant_change(tmp_path: Path, monkeypatch) -> None:
+def test_repeat_guardrail_v5_allows_with_significant_change(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_TZ", "UTC")
@@ -263,7 +268,7 @@ def test_repeat_guardrail_v4_allows_with_significant_change(tmp_path: Path, monk
     monkeypatch.setattr(board_seat_daily, "_slack_tokens", lambda: ["xoxb-test"])
 
     store = board_seat_daily.BoardSeatStore()
-    prior_message = board_seat_daily._render_board_seat_message(company="Anduril", draft=_v4_draft())
+    prior_message = board_seat_daily._render_board_seat_message(company="Anduril", draft=_v5_draft())
     _seed_prior_pitch(
         store=store,
         message=prior_message,
@@ -294,7 +299,7 @@ def test_repeat_guardrail_v4_allows_with_significant_change(tmp_path: Path, monk
     monkeypatch.setattr(board_seat_daily, "WebClient", FakeWebClient)
     monkeypatch.setattr(board_seat_daily, "SlackApiError", Exception)
     monkeypatch.setattr(board_seat_daily, "_resolve_funding_snapshot", lambda **kwargs: _funding())
-    monkeypatch.setattr(board_seat_daily, "_llm_draft", lambda **kwargs: _v4_draft())
+    monkeypatch.setattr(board_seat_daily, "_llm_draft", lambda **kwargs: _v5_draft())
     monkeypatch.setattr(board_seat_daily, "_acquisition_search_rows", lambda **kwargs: [])
 
     payload = board_seat_daily.run_once(force=True, dry_run=False)
@@ -312,10 +317,11 @@ def test_unknown_funding_renders_two_explicit_unknown_labeled_lines() -> None:
     assert latest == board_seat_daily.UNKNOWN_FUNDING_TEXT
 
 
-def test_line_word_caps_enforced_for_v4_fields() -> None:
+def test_line_word_caps_enforced_for_v5_fields() -> None:
     very_long = " ".join(["word"] * 40)
     draft = board_seat_daily.BoardSeatDraft(
         idea_line=very_long,
+        idea_confidence="Low",
         why_now=very_long,
         whats_different=very_long,
         mos_risks=very_long,
@@ -341,7 +347,7 @@ def test_line_word_caps_enforced_for_v4_fields() -> None:
     assert all(len(item.split()) <= board_seat_daily.MAX_LINE_WORDS for item in fields)
 
 
-def test_run_once_dry_run_v4_contains_hierarchy_sections(tmp_path: Path, monkeypatch) -> None:
+def test_run_once_dry_run_v5_contains_hierarchy_sections(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_PORTCOS", "Cursor:cursor")
@@ -366,6 +372,7 @@ def test_render_board_seat_message_uses_fallback_sources_when_missing() -> None:
         company="Anduril",
         draft=board_seat_daily.BoardSeatDraft(
             idea_line="Acquire Saronic to accelerate maritime autonomy programs.",
+            idea_confidence="Low",
             why_now="Defense demand is accelerating.",
             whats_different="Integrated autonomy stack deploys quickly.",
             mos_risks="Execution and procurement timing remain risks.",
@@ -378,8 +385,144 @@ def test_render_board_seat_message_uses_fallback_sources_when_missing() -> None:
         ),
     )
     assert "*Sources*" in message
-    assert "*Google Search — Anduril acquisitions and acquihires:* <https://www.google.com/search?q=Anduril+acquisitions+acquihires+startup>" in message
+    assert "*Google Search — Saronic enterprise fit:* <https://www.google.com/search?q=Saronic+company+product+customers>" in message
     assert "Source 1" not in message
+
+
+def test_source_classifier_tags_target_parent_and_funding() -> None:
+    target = "Browserbase"
+    target_tokens = {"browserbase"}
+    target_kind = board_seat_daily._classify_source_ref(
+        company="OpenAI",
+        target=target,
+        target_tokens=target_tokens,
+        text_blob="Browserbase launches enterprise browser automation runtime",
+    )
+    parent_kind = board_seat_daily._classify_source_ref(
+        company="OpenAI",
+        target=target,
+        target_tokens=target_tokens,
+        text_blob="OpenAI expands enterprise GTM motions with partners",
+    )
+    funding_kind = board_seat_daily._classify_source_ref(
+        company="OpenAI",
+        target=target,
+        target_tokens=target_tokens,
+        text_blob="Reuters reports SoftBank funding round valuation update",
+    )
+    assert target_kind == "target_direct"
+    assert parent_kind == "parent_context"
+    assert funding_kind == "funding_context"
+
+
+def test_source_composer_v5_target_first_excludes_funding_links(monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SOURCE_POLICY", "target_first_3_1")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_INCLUDE_FUNDING_LINKS", "0")
+
+    draft = board_seat_daily.BoardSeatDraft(
+        idea_line="Acquire Browserbase to harden enterprise browser-agent execution.",
+        idea_confidence="Low",
+        why_now="Computer-use agents need reliable execution controls.",
+        whats_different="Runtime and policy telemetry become a distribution moat.",
+        mos_risks="Execution quality and platform bundling risk remain.",
+        bottom_line="Own execution reliability for enterprise workflows.",
+        context_current_efforts="OpenAI has enterprise distribution and model leadership.",
+        context_domain_fit_gaps="Gap is deterministic browser automation and governance.",
+        funding_history="Funding details are currently unavailable.",
+        funding_latest_round_backers="Funding details are currently unavailable.",
+        source_refs=[
+            board_seat_daily.SourceRef(
+                name_or_publisher="Reuters",
+                title="OpenAI in talks to raise up to $40B led by SoftBank",
+                url="https://www.reuters.com/technology/openai-talks-raise-up-40-billion-softbank-wsj-reports-2025-01-30/",
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_target_search_rows",
+        lambda **kwargs: [
+            {
+                "publisher": "Browserbase",
+                "title": "Browserbase enterprise browser automation",
+                "snippet": "Secure browser automation control plane for agents.",
+                "url": "https://www.browserbase.com/",
+            },
+                {
+                    "publisher": "Pulse2",
+                    "title": "Browserbase expands enterprise automation controls",
+                    "snippet": "Infrastructure for reliable browser tasks with stronger governance controls.",
+                    "url": "https://pulse2.com/browserbase-web-browser-automation-company-raises-21-million-series-a/",
+                },
+            {
+                "publisher": "TechCrunch",
+                "title": "Browserbase launches cloud browser platform",
+                "snippet": "Platform focused on auditable browser workflows.",
+                "url": "https://techcrunch.com/example-browserbase-platform/",
+            },
+        ],
+    )
+    selection = board_seat_daily._build_source_refs(
+        company="OpenAI",
+        draft=draft,
+        funding=_funding(
+            source_urls=[
+                "https://www.reuters.com/technology/openai-talks-raise-up-40-billion-softbank-wsj-reports-2025-01-30/"
+            ]
+        ),
+        acquisition_rows=[
+            {
+                "publisher": "OpenTools",
+                "title": "OpenAI evaluates browser runtime targets",
+                "snippet": "Target would improve policy controls for agents.",
+                "url": "https://opentools.ai/news/openai-evaluates-browser-runtime-targets",
+            }
+        ],
+    )
+    assert len(selection.refs) <= 4
+    target, tokens = board_seat_daily._extract_target_tokens_from_idea(draft.idea_line)
+    target_categories = [
+        board_seat_daily._classify_source_ref(
+            company="OpenAI",
+            target=target,
+            target_tokens=tokens,
+            text_blob=f"{ref.title} {ref.url}",
+        )
+        for ref in selection.refs
+    ]
+    assert sum(category in {"target_direct", "target_proxy"} for category in target_categories) >= 3
+    assert all("softbank" not in ref.title.lower() for ref in selection.refs)
+    assert all("reuters.com/technology/openai-talks-raise-up-40-billion-softbank-wsj-reports-2025-01-30/" not in ref.url for ref in selection.refs)
+    assert selection.confidence in {"High", "Medium"}
+
+
+def test_low_signal_candidate_mode_sets_low_confidence_without_parent_funding(monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_INCLUDE_FUNDING_LINKS", "0")
+    monkeypatch.setattr(board_seat_daily, "_target_search_rows", lambda **kwargs: [])
+    draft = board_seat_daily.BoardSeatDraft(
+        idea_line="Acquire Browserbase to improve browser automation reliability.",
+        idea_confidence="Low",
+        why_now="Need better runtime reliability for enterprise agents.",
+        whats_different="Execution guardrails create defensibility.",
+        mos_risks="Bundling risk from hyperscalers remains.",
+        bottom_line="A focused target could close execution gaps quickly.",
+        context_current_efforts="OpenAI has enterprise momentum.",
+        context_domain_fit_gaps="Control plane capabilities remain limited.",
+        funding_history="Funding details are currently unavailable.",
+        funding_latest_round_backers="Funding details are currently unavailable.",
+        source_refs=[],
+    )
+    selection = board_seat_daily._build_source_refs(
+        company="OpenAI",
+        draft=draft,
+        funding=_funding(
+            source_urls=["https://www.reuters.com/technology/openai-talks-raise-up-40-billion-softbank-wsj-reports-2025-01-30/"]
+        ),
+        acquisition_rows=[],
+    )
+    assert selection.confidence == "Low"
+    assert len(selection.refs) >= 1
+    assert all("funding latest round backers" not in ref.title.lower() for ref in selection.refs)
 
 
 def test_backfill_channel_pitches_parses_legacy_history(tmp_path: Path, monkeypatch) -> None:

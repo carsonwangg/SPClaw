@@ -40,6 +40,14 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Board Seat V5 target-first sourcing is now implemented for all portco channels:
+  - `BOARD_SEAT_FORMAT_VERSION = v5_target_first_confidence_sources`
+  - source policy defaults to `target_first_3_1` (up to 3 target refs + 1 parent-context ref)
+  - parent funding links are excluded from `Sources` by default (`COATUE_CLAW_BOARD_SEAT_INCLUDE_FUNDING_LINKS=0`)
+  - deterministic `Idea confidence` line added to thesis (`High|Medium|Low`)
+  - low-signal mode now remains candidate-first with explicit confidence labeling
+  - LLM prompt + sanitizer updated so final source composition is deterministic and target-led
+  - validation: `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `19 passed`
 - Premium model policy is now defaulted for all OpenAI-backed tasks:
   - board-seat synthesis default: `gpt-5.2-chat-latest`
   - x-chart title/copy synthesis default: `gpt-5.2-chat-latest`

@@ -3,6 +3,56 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-24, Board Seat V5 target-first sources + confidence)
+- Implemented Board Seat V5 in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`.
+- `format_version` bumped to:
+  - `v5_target_first_confidence_sources`
+- New deterministic source policy path:
+  - default policy: `target_first_3_1`
+  - source classification buckets: `target_direct`, `target_proxy`, `parent_context`, `funding_context`
+  - enforced mix: up to 3 target refs + up to 1 parent-context ref
+  - funding links are excluded from `Sources` by default (funding remains in Funding snapshot text)
+- New target-first evidence plumbing:
+  - target token extraction from idea line
+  - target-focused Brave retrieval (`_target_search_rows`) merged with model refs + acquisition rows
+  - quality-domain weighting + low-quality downranking
+  - URL/title-fingerprint dedupe
+- New confidence output:
+  - `BoardSeatDraft` now carries `idea_confidence`
+  - rendered line under Thesis:
+    - `*Idea confidence:* High|Medium|Low`
+  - confidence is deterministic from selected source composition (not model-only)
+- LLM draft prompt updated:
+  - requires `idea_confidence` field
+  - asks for target-company/idea-specific source refs
+  - explicitly avoids parent funding links in source refs
+- Fallback source behavior updated:
+  - when refs are missing, fallback search links are target-oriented (not funding-oriented)
+
+### Public config added
+- `COATUE_CLAW_BOARD_SEAT_SOURCE_POLICY` (default `target_first_3_1`)
+- `COATUE_CLAW_BOARD_SEAT_INCLUDE_FUNDING_LINKS` (default `0`)
+- `COATUE_CLAW_BOARD_SEAT_TARGET_MIN_QUALITY_SOURCES` (default `1`)
+- `COATUE_CLAW_BOARD_SEAT_TARGET_MIN_TOTAL_SOURCES` (default `2`)
+- `COATUE_CLAW_BOARD_SEAT_LOW_SIGNAL_MODE` (default `candidate_with_confidence`)
+
+### Tests
+- Updated `/Users/carsonwang/CoatueClaw/tests/test_board_seat_daily.py` for V5.
+- Added coverage for:
+  - source classification (target/parent/funding)
+  - target-first composer mix and funding-link exclusion
+  - low-signal confidence behavior
+  - confidence line rendering in message output
+- Validation run:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py`
+  - Result: `19 passed`
+
+### Immediate next steps
+1. Pull latest `main` on Mac mini runtime repo (`/opt/coatue-claw`), restart OpenClaw, and run a board-seat dry run for `OpenAI`.
+2. Validate one live `#openai` post:
+   - has `Idea confidence` line
+   - `Sources` are target-first (Browserbase-style evidence), no generic parent funding links.
+
 ## Update (2026-02-24, Board Seat Readability V3 labeled hierarchy)
 - Implemented Board Seat readability V3 in `/opt/coatue-claw/src/coatue_claw/board_seat_daily.py`.
 - Format is now deterministic labeled-line hierarchy (no bullet subheaders):
