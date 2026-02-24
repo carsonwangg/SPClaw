@@ -3,6 +3,34 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-24, Market Daily hard removes X evidence/links)
+- Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
+  - removed X from MD catalyst evidence collection path; Yahoo news + web only.
+  - enforced allowed evidence source filter (`yahoo_news`, `web`) before catalyst ranking.
+  - removed `[X]` link rendering from mover lines.
+  - updated source footer text:
+    - open/close MD: `Yahoo fast_info + Yahoo news + web search`
+    - earnings recap: `Yahoo earnings calendar/history + Yahoo fast_info + Yahoo/web evidence`
+  - removed X URLs from MD artifacts and debug link payloads.
+  - removed `x_max_results` from `market_daily.status()` payload.
+- Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/slack_bot.py`:
+  - `md debug` output no longer renders `x:` lines, even if present in legacy payloads.
+- Tests updated in `/Users/carsonwang/worktrees/coatue-claw/market-daily/tests/test_market_daily.py`:
+  - message format now asserts no `[X]`
+  - specific-catalyst path now also asserts no `[X]`
+  - evidence collection web-trigger test now starts from Yahoo-only evidence
+  - debug payload test asserts no `x` key in links
+  - earnings recap artifact checks footer excludes X
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_market_daily.py` -> `40 passed`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `6 passed`
+
+### Immediate next steps
+1. Integrator merge this branch and deploy on `main`.
+2. On Mac mini, run `make openclaw-market-daily-run-once FORCE=1` and verify no `[X]` links in Slack.
+3. Run `md debug AMD close` and verify only `news`/`web` links are shown.
+4. Run `make openclaw-market-daily-earnings-recap-run-once FORCE=1` and verify recap footer excludes X.
+
 ## Update (2026-02-24, MD catalyst + link relevance hardening for AMD/INTC regression)
 - Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
   - Added deterministic `_is_low_signal_x_post(...)` gate and applied it before X evidence candidate scoring.

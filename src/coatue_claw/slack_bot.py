@@ -1191,8 +1191,6 @@ def _handle_market_daily_command(*, text: str, channel: str | None, thread_ts: s
         ]
         links = payload.get("links") if isinstance(payload.get("links"), dict) else {}
         if links:
-            if links.get("x"):
-                lines.append(f"- x: {links['x']}")
             if links.get("news"):
                 lines.append(f"- news: {links['news']}")
             if links.get("web"):

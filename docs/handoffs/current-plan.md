@@ -40,6 +40,15 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Market Daily hard-removed X evidence/links for headline + recap quality:
+  - MD catalyst evidence collection now uses only Yahoo news + web evidence.
+  - MD mover links now render `[News]`/`[Web]` only; `[X]` is never emitted.
+  - MD/earnings recap source footers now exclude X.
+  - MD debug links now return only `news` + `web`.
+  - `market_daily.status()` no longer reports `x_max_results`.
+  - validation:
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_market_daily.py` -> `40 passed`
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `6 passed`
 - MD catalyst + link relevance hardening shipped (AMD/INTC regression fix):
   - X evidence now rejects low-signal promo/cashtag spam before candidate scoring.
   - Catalyst selection now supports deterministic direct-evidence fallback (quality Yahoo/Web) when cluster confirmation fails but headline is clearly causal.

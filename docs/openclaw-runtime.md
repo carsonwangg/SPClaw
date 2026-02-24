@@ -238,7 +238,6 @@ MD (Market Daily) environment controls:
 - `COATUE_CLAW_MD_OPENFIGI_API_KEY`: optional OpenFIGI key for stronger CUSIP->ticker resolution
 - `COATUE_CLAW_MD_MODEL`: optional catalyst summarizer model (default `gpt-5.2-chat-latest`)
 - `COATUE_CLAW_MD_MAX_LOOKBACK_HOURS`: max evidence lookback cap for session windows (default `96`)
-- `COATUE_CLAW_MD_X_MAX_RESULTS`: X search depth for catalyst retrieval (default `50`)
 - `COATUE_CLAW_MD_WEB_SEARCH_ENABLED`: enable web fallback retrieval (`1`/`0`, default `1`)
 - `COATUE_CLAW_MD_WEB_SEARCH_BACKEND`: web backend (`google_serp` primary with `ddg_html` fallback, default `google_serp`)
 - `COATUE_CLAW_MD_GOOGLE_SERP_API_KEY`: SERP API key for Google-backed evidence retrieval

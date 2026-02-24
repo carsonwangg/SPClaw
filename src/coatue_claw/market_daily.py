@@ -2210,7 +2210,11 @@ def _fetch_web_evidence(
 
 
 def _source_rank(source_type: str) -> int:
-    return {"yahoo_news": 0, "web": 1, "x": 2}.get(source_type, 9)
+    return {"yahoo_news": 0, "web": 1}.get(source_type, 9)
+
+
+def _md_allowed_evidence_sources() -> set[str]:
+    return {"yahoo_news", "web"}
 
 
 def _directional_bonus(*, text: str, pct_move: float | None) -> float:
@@ -2307,23 +2311,6 @@ def _is_quality_url(url: str | None) -> bool:
     return _is_quality_domain(url)
 
 
-def _allow_x_link_for_specific(*, ev: CatalystEvidence) -> bool:
-    if not ev.x_url or not ev.x_text:
-        return False
-    if _is_low_signal_x_post(ev.x_text):
-        return False
-    if _is_generic_headline_wrapper(text=ev.x_text, ticker=ev.ticker, aliases=[]):
-        return False
-    if _contains_disallowed_reason_phrasing(ev.x_text):
-        return False
-    if ev.confidence < _min_evidence_confidence():
-        return False
-    if ev.cause_mode in {"cluster_confirmed", "decisive_primary"} and ev.selected_cluster:
-        if ev.selected_cluster not in _extract_driver_keywords(ev.x_text):
-            return False
-    return True
-
-
 def _build_links_for_mover(*, ev: CatalystEvidence, cat_line: str) -> list[str]:
     fallback = (cat_line or "").strip() == FALLBACK_CAUSE_LINE
     links: list[str] = []
@@ -2348,8 +2335,6 @@ def _build_links_for_mover(*, ev: CatalystEvidence, cat_line: str) -> list[str]:
 
     _push(ev.news_url, "News", quality_only=False)
     _push(ev.web_url, "Web", quality_only=False)
-    if _allow_x_link_for_specific(ev=ev):
-        _push(ev.x_url, "X", quality_only=False)
     return links
 
 
@@ -2489,18 +2474,15 @@ def _collect_evidence_for_ticker(
     pct_move: float | None = None,
 ) -> tuple[list[_EvidenceCandidate], list[str], str | None]:
     rejected: list[str] = []
-    x_candidates = _fetch_x_evidence_candidates(ticker=ticker, aliases=aliases, since_utc=since_utc)
-    if not x_candidates:
-        rejected.append("x:no_relevant_matches")
     yahoo_candidates = _fetch_yahoo_news_candidates(ticker=ticker, aliases=aliases, since_utc=since_utc)
     if not yahoo_candidates:
         rejected.append("yahoo:no_recent_relevant_headlines")
 
-    combined = _normalize_evidence_candidates(candidates=(x_candidates + yahoo_candidates), ticker=ticker, aliases=aliases)
-    x_y_best = max((c.score for c in combined), default=0.0)
+    combined = _normalize_evidence_candidates(candidates=yahoo_candidates, ticker=ticker, aliases=aliases)
+    baseline_best = max((c.score for c in combined), default=0.0)
     source_diversity = len({c.source_type for c in combined})
     directional_hits = any(_directional_bonus(text=c.text, pct_move=pct_move) > 0 for c in combined)
-    needs_web = (x_y_best < _min_evidence_confidence()) or (source_diversity < 2) or (not directional_hits)
+    needs_web = (baseline_best < _min_evidence_confidence()) or (source_diversity < 2) or (not directional_hits)
     web_backend: str | None = None
     if needs_web:
         web_candidates, web_backend, web_notes = _fetch_web_evidence(
@@ -2515,10 +2497,14 @@ def _collect_evidence_for_ticker(
             rejected.append(f"web:backend={web_backend}")
         else:
             rejected.append("web:no_relevant_results")
-    if not combined:
+    allowed_sources = _md_allowed_evidence_sources()
+    filtered = [c for c in combined if c.source_type in allowed_sources]
+    if combined and (not filtered):
+        rejected.append("all_sources:filtered_to_empty")
+    if not filtered:
         rejected.append("all_sources:empty")
     return (
-        sorted(combined, key=lambda c: (-_effective_candidate_score(candidate=c, pct_move=pct_move), _source_rank(c.source_type))),
+        sorted(filtered, key=lambda c: (-_effective_candidate_score(candidate=c, pct_move=pct_move), _source_rank(c.source_type))),
         rejected,
         web_backend,
     )
@@ -2527,11 +2513,9 @@ def _collect_evidence_for_ticker(
 def _preferred_evidence_text(evidence: CatalystEvidence) -> str:
     if evidence.chosen_source == "web" and evidence.web_title:
         return evidence.web_title
-    if evidence.chosen_source == "x" and evidence.x_text:
-        return evidence.x_text
     if evidence.chosen_source == "yahoo_news" and evidence.news_title:
         return evidence.news_title
-    return evidence.news_title or evidence.web_title or evidence.x_text or ""
+    return evidence.news_title or evidence.web_title or ""
 
 
 def _summarize_catalyst(*, ticker: str, slot_name: str, evidence: CatalystEvidence) -> str:
@@ -2712,7 +2696,7 @@ def _build_message(
         for item in earnings_after_close:
             lines.append(f"- {item.ticker} ({item.company}) — {_session_human_label(item.expected_session)}")
 
-    lines.append(f"Data UTC: {_utc_now_iso()} | Sources: Yahoo fast_info + X recent search + Yahoo news + web search")
+    lines.append(f"Data UTC: {_utc_now_iso()} | Sources: Yahoo fast_info + Yahoo news + web search")
     return "\n".join(lines)
 
 
@@ -2773,8 +2757,6 @@ def _write_artifact(
             lines.append("  - cluster_debug:")
             for entry in ev.cluster_debug:
                 lines.append(f"    - {entry}")
-        if ev.x_url:
-            lines.append(f"  - x: {ev.x_url}")
         if ev.news_url:
             lines.append(f"  - news: {ev.news_url}")
         if ev.web_url:
@@ -2847,6 +2829,9 @@ def _build_catalyst_for_mover(*, mover: QuoteSnapshot, slot_name: str, since_utc
     else:  # backwards-compatible for patched tests/mocks returning legacy shape
         candidates, rejected = collected  # type: ignore[misc]
         web_backend = None
+    candidates = [c for c in candidates if c.source_type in _md_allowed_evidence_sources()]
+    if not candidates:
+        rejected = list(rejected) + ["all_sources:empty_after_filter"]
     ranked = sorted(
         candidates,
         key=lambda c: (
@@ -2936,7 +2921,6 @@ def _build_catalyst_for_mover(*, mover: QuoteSnapshot, slot_name: str, since_utc
                 confidence = max(confidence, _effective_candidate_score(candidate=direct_candidate, pct_move=mover.pct_move))
                 rejected.append("cluster:using_direct_evidence_fallback")
 
-    best_x = _pick_best_by_source(ranked, "x", pct_move=mover.pct_move)
     best_news = _pick_best_by_source(ranked, "yahoo_news", pct_move=mover.pct_move)
     best_web = _pick_best_by_source(ranked, "web", pct_move=mover.pct_move)
     top_evidence = tuple(
@@ -2949,9 +2933,9 @@ def _build_catalyst_for_mover(*, mover: QuoteSnapshot, slot_name: str, since_utc
 
     evidence = CatalystEvidence(
         ticker=mover.ticker,
-        x_text=best_x.text if best_x else None,
-        x_url=best_x.url if best_x else None,
-        x_engagement=best_x.engagement if best_x else 0,
+        x_text=None,
+        x_url=None,
+        x_engagement=0,
         news_title=best_news.text if best_news else None,
         news_url=best_news.url if best_news else None,
         web_title=best_web.text if best_web else None,
@@ -3080,7 +3064,6 @@ def debug_catalyst(*, ticker: str, slot_name: str = "open") -> dict[str, Any]:
         "cluster_debug": list(evidence.cluster_debug),
         "rejected_reasons": list(evidence.rejected_reasons),
         "links": {
-            "x": evidence.x_url,
             "news": evidence.news_url,
             "web": evidence.web_url,
         },
@@ -3467,7 +3450,7 @@ def _build_earnings_recap_message(*, rows: list[EarningsRecapRow], now_local: da
         if row.source_links:
             refs = [f"<{url}|[S{idx}]>" for idx, url in enumerate(row.source_links, start=1)]
             lines.append(f"Sources: {' '.join(refs)}")
-    lines.append(f"Data UTC: {_utc_now_iso()} | Sources: Yahoo earnings calendar/history + Yahoo fast_info + X/Yahoo/web evidence")
+    lines.append(f"Data UTC: {_utc_now_iso()} | Sources: Yahoo earnings calendar/history + Yahoo fast_info + Yahoo/web evidence")
     return "\n".join(lines)
 
 
@@ -3804,7 +3787,6 @@ def status() -> dict[str, Any]:
         "model": _md_model(),
         "top_n": _top_n(),
         "top_k": _top_k(),
-        "x_max_results": _x_max_results(),
         "max_lookback_hours": _max_lookback_hours(),
         "web_search_enabled": _web_search_enabled(),
         "web_search_backend": _web_search_backend(),
