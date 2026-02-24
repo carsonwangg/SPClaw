@@ -711,3 +711,40 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 ### Next
 1. Prompt in `#openai`: `give me a new board seat idea` and verify the `Idea` target is concrete and non-placeholder.
 2. If fallback quality is still weak in sparse-signal conditions, add deterministic company-specific fallback target maps.
+
+## 2026-02-24 Plan Update - Memory-to-Git Reconciliation Policy v1
+
+### Completed
+- Implemented explicit `git-memory:` capture path in `src/coatue_claw/slack_bot.py`:
+  - prefixed requests are captured as `request_kind=memory_git`, `trigger_mode=git_memory_prefix`
+  - bot replies in-thread with queue id/status
+  - runtime memory ingestion still occurs for the same message.
+- Extended tracker schema + APIs in `src/coatue_claw/spencer_change_log.py`:
+  - new columns: `request_kind`, `trigger_mode`, `source_ref`, `related_commit`
+  - backward-compatible migration on startup for existing DBs
+  - filtering support for `memory_git` queue views.
+- Added deterministic reconciliation artifacts + commands:
+  - `claw memory reconcile-status`
+  - `claw memory reconcile-export --limit N` -> writes `docs/memory-inbox/queue.md`
+  - `claw memory reconcile-link --ids ... --commit <hash>` -> updates status/commit and appends `docs/memory-inbox/reconciliation-ledger.csv`
+- Added repo-tracked memory inbox artifacts:
+  - `docs/memory-inbox/queue.md`
+  - `docs/memory-inbox/reconciliation-ledger.csv`
+- Updated operator docs:
+  - `AGENTS.md`
+  - `docs/laptop-codex-openclaw-workflow.md`
+- Test coverage added/updated in:
+  - `tests/test_spencer_change_log.py`
+  - `tests/test_spencer_change_digest.py` (still green with new schema)
+
+### Validation
+- Targeted:
+  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_spencer_change_log.py /opt/coatue-claw/tests/test_spencer_change_digest.py` -> `14 passed`
+
+### In Progress
+- Runtime restart + Slack health verification on Mac mini after policy ship.
+
+### Next
+1. Post a live Slack message prefixed with `git-memory:` and confirm queue capture acknowledgment.
+2. Run `spencer changes memory` to verify filtered queue listing.
+3. Run `claw memory reconcile-export --limit 200` and confirm queue snapshot refresh in repo.

@@ -1715,3 +1715,41 @@ Then confirm bot returns:
 ### Immediate Next Steps
 1. Live-test `#openai` with `give me a new board seat idea` and confirm no placeholder targets in `Idea`.
 2. If a fallback idea still looks weak, add a deterministic company-specific fallback target map before posting.
+
+## 2026-02-24 - Memory-to-Git Reconciliation Policy v1 (Hybrid Auto)
+- Scope shipped to `main`:
+  - explicit Slack prefix trigger: `git-memory:`
+  - queueing for git reconciliation using existing change tracker.
+- Code changes:
+  - `src/coatue_claw/slack_bot.py`
+    - detects `git-memory:` at message start
+    - captures queue items as:
+      - `request_kind=memory_git`
+      - `trigger_mode=git_memory_prefix`
+      - `source_ref=slack://... | memory:/Users/spclaw/.openclaw/workspace/memory/YYYY-MM-DD.md`
+    - preserves runtime memory ingestion and replies with queue id/status in-thread.
+  - `src/coatue_claw/spencer_change_log.py`
+    - schema migration adds: `request_kind`, `trigger_mode`, `source_ref`, `related_commit`
+    - new tracker methods:
+      - `reconcile_status()`
+      - `export_memory_git_queue(...)`
+      - `reconcile_link(...)`
+    - `list_changes(...)` now supports `request_kind` and `open_only` filters.
+  - `src/coatue_claw/cli.py`
+    - added:
+      - `claw memory reconcile-status`
+      - `claw memory reconcile-export --limit N`
+      - `claw memory reconcile-link --ids 1,2 --commit <hash> [--resolved-by ...]`
+- Repo audit artifacts:
+  - `docs/memory-inbox/queue.md`
+  - `docs/memory-inbox/reconciliation-ledger.csv`
+- Slack governance UX (reused existing surface):
+  - `spencer changes memory`
+  - `change requests memory`
+- Validation:
+  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_spencer_change_log.py /opt/coatue-claw/tests/test_spencer_change_digest.py` -> `14 passed`
+
+### Immediate Next Steps
+1. Restart runtime and verify Slack probe healthy.
+2. Post one live `git-memory:` message in Slack and confirm ack + queue id.
+3. Run `spencer changes memory` and `claw memory reconcile-export --limit 200` to verify end-to-end queue visibility.

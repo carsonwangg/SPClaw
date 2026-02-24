@@ -34,6 +34,23 @@ cd /opt/coatue-claw
 make openclaw-slack-logs
 ```
 
+## Memory-to-Git Queue Loop (`git-memory:`)
+Use this when Slack writes runtime memory that should become repo-tracked behavior.
+
+1. In Slack, start the request with:
+   - `git-memory: <change request>`
+2. Check queue in Slack:
+   - `spencer changes memory`
+3. In Codex session, export queue snapshot:
+   - `claw memory reconcile-export --limit 200`
+4. Implement accepted items, then ship one batch commit.
+5. Link resolved queue IDs to commit:
+   - `claw memory reconcile-link --ids 12,13 --commit <hash> --resolved-by codex`
+
+Artifacts:
+- queue snapshot: `/opt/coatue-claw/docs/memory-inbox/queue.md`
+- append-only ledger: `/opt/coatue-claw/docs/memory-inbox/reconciliation-ledger.csv`
+
 ## How to Operate From Personal Laptop
 Use SSH to run runtime commands on Mac mini:
 

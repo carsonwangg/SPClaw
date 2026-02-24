@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 import logging
 import os
 import re
@@ -235,7 +236,7 @@ def _format_chart_usage() -> str:
         "- memory: `memory status` or `what is my daughter's birthday?`\n"
         "- file ingest: upload a file in Slack and I'll auto-sort it into the knowledge folders\n"
         "- routing: messages default to OpenClaw unless you @ another user\n"
-        "- governance: `spencer changes`, `change requests`, `spencer changes last 50`\n"
+        "- governance: `spencer changes`, `change requests`, `spencer changes memory`\n"
         "- default: YoY Revenue Growth is y-axis unless you specify axes"
     )
 
@@ -361,6 +362,70 @@ def _capture_spencer_change_request(
         return None
 
 
+def _parse_git_memory_request_text(text: str) -> str | None:
+    stripped = _strip_slack_mentions(text).strip()
+    prefix = "git-memory:"
+    if not stripped.lower().startswith(prefix):
+        return None
+    body = stripped[len(prefix):].strip()
+    return body or ""
+
+
+def _git_memory_source_ref(
+    *,
+    channel: str | None,
+    thread_ts: str | None,
+    message_ts: str | None,
+    source_ts_utc: str | None,
+) -> str:
+    day_key = datetime.now(UTC).strftime("%Y-%m-%d")
+    if source_ts_utc:
+        try:
+            day_key = datetime.fromtimestamp(float(source_ts_utc), tz=UTC).strftime("%Y-%m-%d")
+        except Exception:
+            pass
+    channel_part = (channel or "unknown-channel").strip() or "unknown-channel"
+    thread_part = (thread_ts or "no-thread-ts").strip() or "no-thread-ts"
+    message_part = (message_ts or "no-message-ts").strip() or "no-message-ts"
+    memory_file = f"/Users/spclaw/.openclaw/workspace/memory/{day_key}.md"
+    return f"slack://{channel_part}/{thread_part}/{message_part} | memory:{memory_file}"
+
+
+def _capture_git_memory_request(
+    *,
+    user_id: str | None,
+    channel: str | None,
+    thread_ts: str | None,
+    message_ts: str | None,
+    source_ts_utc: str | None,
+    text: str,
+) -> int | None:
+    tracker = _spencer_change_log()
+    if tracker is None:
+        return None
+    source_ref = _git_memory_source_ref(
+        channel=channel,
+        thread_ts=thread_ts,
+        message_ts=message_ts,
+        source_ts_utc=source_ts_utc,
+    )
+    payload = text if text else "No details provided."
+    try:
+        return tracker.capture_request(
+            user_id=(user_id or "unknown-user"),
+            channel=channel,
+            thread_ts=thread_ts,
+            message_ts=message_ts,
+            text=payload,
+            request_kind="memory_git",
+            trigger_mode="git_memory_prefix",
+            source_ref=source_ref,
+        )
+    except Exception:
+        logger.exception("Failed to capture git-memory request")
+        return None
+
+
 def _mark_spencer_change(change_id: int | None, *, status: str, note: str) -> None:
     if change_id is None:
         return
@@ -389,12 +454,15 @@ def _handle_spencer_change_command(*, text: str, thread_ts: str, say) -> bool:
         return True
 
     status: str | None = None
+    request_kind: str | None = None
     if re.search(r"\b(open|pending)\b", lower):
         status = "captured"
     elif re.search(r"\b(implemented|done)\b", lower):
         status = "implemented"
     elif re.search(r"\b(blocked)\b", lower):
         status = "blocked"
+    if re.search(r"\bmemory\b", lower):
+        request_kind = "memory_git"
 
     limit = 20
     m = re.search(r"\blast\s+(\d{1,3})\b", lower)
@@ -404,10 +472,14 @@ def _handle_spencer_change_command(*, text: str, thread_ts: str, say) -> bool:
         except Exception:
             limit = 20
 
-    rows = tracker.list_changes(limit=limit, status=status)
+    rows = tracker.list_changes(limit=limit, status=status, request_kind=request_kind)
     title = "Tracked change requests (Spencer + Carson)"
+    if request_kind == "memory_git":
+        title = "Tracked git-memory reconciliation requests"
     if status:
         title = f"Tracked change requests ({status})"
+        if request_kind == "memory_git":
+            title = f"Tracked git-memory reconciliation requests ({status})"
     say(text=format_spencer_changes(rows, title=title), thread_ts=thread_ts)
     return True
 
@@ -1539,6 +1611,49 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
     )
 
     if not text.strip():
+        return
+
+    git_memory_text = _parse_git_memory_request_text(text)
+    if git_memory_text is not None:
+        memory = _memory_runtime()
+        if memory is not None:
+            try:
+                memory.ingest_message(
+                    channel=channel,
+                    user_id=user_id,
+                    text=text,
+                    source=memory_source,
+                    source_ts_utc=event_ts,
+                )
+            except Exception:
+                logger.exception("Failed to ingest git-memory message into runtime memory")
+        queued_id = _capture_git_memory_request(
+            user_id=user_id,
+            channel=channel,
+            thread_ts=thread_ts,
+            message_ts=event_ts,
+            source_ts_utc=event_ts,
+            text=git_memory_text,
+        )
+        if queued_id is None:
+            say(
+                text=(
+                    "I couldn't queue that `git-memory:` request right now. "
+                    "Tracker storage is unavailable."
+                ),
+                thread_ts=thread_ts,
+            )
+            return
+        say(
+            text=(
+                "Queued for memory-to-git reconciliation.\n"
+                f"- id: `#{queued_id}`\n"
+                "- status: `captured`\n"
+                "- kind: `memory_git`\n"
+                "Use `spencer changes memory` to review."
+            ),
+            thread_ts=thread_ts,
+        )
         return
 
     change_id = _capture_spencer_change_request(

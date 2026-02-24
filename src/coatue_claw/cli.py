@@ -15,6 +15,7 @@ from coatue_claw.market_daily import refresh_coatue_holdings as market_daily_ref
 from coatue_claw.market_daily import run_once as run_market_daily_once
 from coatue_claw.market_daily import set_override as market_daily_set_override
 from coatue_claw.market_daily import status as market_daily_status
+from coatue_claw.spencer_change_log import SpencerChangeLog
 from coatue_claw.valuation_chart import run_valuation_chart
 from coatue_claw.x_chart_daily import add_source as add_x_chart_source
 from coatue_claw.x_chart_daily import list_sources as list_x_chart_sources
@@ -55,7 +56,40 @@ def _parse_tickers(value: str) -> list[str]:
     return tickers
 
 
+def _parse_change_ids(value: str) -> list[int]:
+    parts = [item.strip() for item in str(value or "").split(",") if item.strip()]
+    out: list[int] = []
+    for part in parts:
+        if not part.isdigit():
+            raise argparse.ArgumentTypeError(f"Invalid change id: {part}")
+        out.append(int(part))
+    if not out:
+        raise argparse.ArgumentTypeError("At least one change id is required")
+    return out
+
+
 def _run_memory_command(args) -> None:
+    tracker = SpencerChangeLog()
+
+    if args.memory_cmd == "reconcile-status":
+        print(json.dumps(tracker.reconcile_status(), indent=2, sort_keys=True))
+        return
+
+    if args.memory_cmd == "reconcile-export":
+        print(json.dumps(tracker.export_memory_git_queue(limit=int(args.limit)), indent=2, sort_keys=True))
+        return
+
+    if args.memory_cmd == "reconcile-link":
+        result = tracker.reconcile_link(
+            ids=list(args.ids),
+            commit=str(args.commit),
+            resolved_by=str(args.resolved_by),
+            note=str(args.note or ""),
+            mapped_paths=str(args.mapped_paths or ""),
+        )
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return
+
     memory = MemoryRuntime()
 
     if args.memory_cmd == "status":
@@ -181,6 +215,18 @@ def main():
 
     mc = memory_sub.add_parser("checkpoint")
     mc.add_argument("--scope", default=None)
+
+    memory_sub.add_parser("reconcile-status")
+
+    mre = memory_sub.add_parser("reconcile-export")
+    mre.add_argument("--limit", type=int, default=200)
+
+    mrl = memory_sub.add_parser("reconcile-link")
+    mrl.add_argument("--ids", type=_parse_change_ids, required=True, help="Comma-separated change ids")
+    mrl.add_argument("--commit", required=True, help="Git commit hash")
+    mrl.add_argument("--resolved-by", default="cli")
+    mrl.add_argument("--mapped-paths", default="")
+    mrl.add_argument("--note", default="")
 
     x = sub.add_parser("x-digest")
     x.add_argument("query", help="Topic, ticker, handle, or boolean query")

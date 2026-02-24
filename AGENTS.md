@@ -83,6 +83,23 @@ Detailed runbook for humans and Codex:
   - `docs/handoffs/live-session.md`: current status + immediate next steps
   - `docs/handoffs/current-plan.md`: plan/status changes when scope or priority changes
 
+## Memory-to-Git Reconciliation Protocol (v1)
+- Runtime memory (`~/.openclaw/workspace/memory/*`) is operational context; repo code/docs are the product source of truth.
+- Slack prefix `git-memory:` creates a git-bound queue item (`request_kind=memory_git`) in the change tracker.
+- Queue review uses existing governance commands:
+  - `spencer changes memory`
+  - `change requests memory`
+- Codex reconciliation loop (batch per session):
+  1. `claw memory reconcile-export --limit 200`
+  2. implement accepted requests in `/opt/coatue-claw`
+  3. link resolved IDs to shipped commit:
+     - `claw memory reconcile-link --ids 12,13 --commit <hash> --resolved-by codex`
+- Repo audit artifacts (git-tracked):
+  - `docs/memory-inbox/queue.md`
+  - `docs/memory-inbox/reconciliation-ledger.csv`
+- Conflict default:
+  - code wins; leave item as `needs_followup` with an explicit note until a concrete implementation decision is made.
+
 ## Slack X-URL Chart Rule
 - For Slack requests that include an X/Twitter status URL and ask for chart-of-the-day output, use the deterministic CLI path:
   - `/opt/coatue-claw/.venv/bin/python -m coatue_claw.x_chart_daily run-post-url "<x-url>" [--channel "<channel-id>"]`
