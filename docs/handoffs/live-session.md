@@ -18,13 +18,17 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `74 passed`
   - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `5 passed`
 
-### Immediate runtime steps
-1. Pull and restart on Mac mini:
+### Runtime verification (Mac mini)
+1. Deployed latest main (`bb0472f`) and restarted runtime:
    - `cd /opt/coatue-claw && git pull origin main`
    - `make openclaw-restart`
-2. Verify:
-   - `make openclaw-x-chart-status`
-   - check `recent_posts` and `last_scheduled_posted_at_utc` after next window.
+2. Verified scheduler/service health:
+   - `make openclaw-24x7-status` -> `com.coatueclaw.x-chart-daily` loaded
+   - `make openclaw-x-chart-status` showed stale scheduled pointer pre-fix (`last_scheduled_posted_at_utc=2026-02-21...`)
+3. Live validation at `Tue Feb 24 10:55:57 PST 2026`:
+   - `/opt/coatue-claw/.venv/bin/python -m coatue_claw.x_chart_daily run-once`
+   - result posted scheduled slot `2026-02-24-09:00` with convention `Coatue Chart of the Morning`
+   - `make openclaw-x-chart-status` now shows refreshed scheduled post timestamp (`2026-02-24T18:56:04.178971+00:00`)
 
 ## Update (2026-02-24, Board Seat V6 target-memory lock + ledger + format guard)
 - Implemented hard target-memory controls in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:

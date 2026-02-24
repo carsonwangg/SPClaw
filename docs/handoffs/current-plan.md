@@ -47,6 +47,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - tests:
     - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `74 passed`
     - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `5 passed`
+  - deployed on Mac mini (`/opt/coatue-claw`), restarted runtime, and validated live scheduled post for slot `2026-02-24-09:00` (`Coatue Chart of the Morning`)
 - Board Seat V6 target-memory enforcement + ledger tracking shipped:
   - added `board_seat_target_memory` table and hard target lock window (`COATUE_CLAW_BOARD_SEAT_TARGET_LOCK_DAYS`, default 30 days)
   - repeated targets (for example Epirus for Anduril) are now auto-retargeted or explicitly skipped with `repeat_target_within_lock_window`
