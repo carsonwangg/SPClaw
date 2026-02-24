@@ -3,6 +3,17 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-24, launchd 24x7 enable resilience for transient bootstrap errors)
+- Hardened `/Users/carsonwang/CoatueClaw/src/coatue_claw/launchd_runtime.py` against intermittent launchctl bootstrap failures seen in `make openclaw-24x7-enable`:
+  - `_bootstrap(...)` now retries transient `Input/output error` failures (configurable via `COATUE_CLAW_LAUNCHCTL_BOOTSTRAP_RETRIES`, default `3`).
+  - `enable_services(...)` now raises label-specific errors (`failed enabling <label>: ...`) so failing service is explicit.
+- Added regression coverage in `/Users/carsonwang/CoatueClaw/tests/test_launchd_runtime.py`:
+  - retry path succeeds after first transient bootstrap failure
+  - enable error includes failing service label
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_market_daily.py tests/test_launchd_runtime.py` -> `44 passed`
+
 ## Update (2026-02-24, SSH host alias memory for future Codex sessions)
 - Added operator memory to `AGENTS.md`:
   - Mac mini SSH host alias is `mini` (`ssh mini`)

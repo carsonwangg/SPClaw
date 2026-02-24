@@ -7,6 +7,7 @@ from pathlib import Path
 import plistlib
 import re
 import subprocess
+import time
 from typing import Any
 
 from dotenv import load_dotenv
@@ -302,14 +303,33 @@ def _bootout(label: str) -> None:
 
 
 def _bootstrap(path: str) -> str:
-    errors: list[str] = []
-    for domain in _launchctl_domains():
-        proc = _run(["launchctl", "bootstrap", domain, path], check=False)
-        if proc.returncode == 0:
-            return domain
-        err = proc.stderr.strip() or proc.stdout.strip() or f"exit={proc.returncode}"
-        errors.append(f"{domain}: {err}")
-    raise RuntimeError("bootstrap failed across launchctl domains: " + " | ".join(errors))
+    retries_raw = (os.environ.get("COATUE_CLAW_LAUNCHCTL_BOOTSTRAP_RETRIES", "3") or "3").strip()
+    try:
+        retries = int(retries_raw)
+    except Exception:
+        retries = 3
+    retries = max(1, min(8, retries))
+
+    last_errors: list[str] = []
+    for attempt in range(retries):
+        errors: list[str] = []
+        for domain in _launchctl_domains():
+            proc = _run(["launchctl", "bootstrap", domain, path], check=False)
+            if proc.returncode == 0:
+                return domain
+            err = proc.stderr.strip() or proc.stdout.strip() or f"exit={proc.returncode}"
+            errors.append(f"{domain}: {err}")
+
+        last_errors = errors
+        merged = " | ".join(errors)
+        is_transient = "Input/output error" in merged
+        if is_transient and attempt < retries - 1:
+            # launchctl can transiently fail during rapid bootout/bootstrap churn.
+            time.sleep(0.25 * (attempt + 1))
+            continue
+        break
+
+    raise RuntimeError("bootstrap failed across launchctl domains: " + " | ".join(last_errors))
 
 
 def enable_services(*, services: list[str]) -> dict[str, Any]:
@@ -318,7 +338,10 @@ def enable_services(*, services: list[str]) -> dict[str, Any]:
     for label in services:
         path = plists[label]
         _bootout(label)
-        domain = _bootstrap(path)
+        try:
+            domain = _bootstrap(path)
+        except RuntimeError as exc:
+            raise RuntimeError(f"failed enabling {label}: {exc}") from exc
         changed.append({"label": label, "plist": path, "domain": domain, "action": "enabled"})
     return {"ok": True, "services": changed}
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import plistlib
+import subprocess
 
 from coatue_claw import launchd_runtime
 
@@ -172,3 +173,38 @@ def test_launchctl_domains(monkeypatch) -> None:
 
     monkeypatch.setenv("COATUE_CLAW_LAUNCHCTL_DOMAIN", "user/501")
     assert launchd_runtime._launchctl_domains() == ["user/501"]
+
+
+def test_bootstrap_retries_transient_io_error(monkeypatch) -> None:
+    calls: list[int] = []
+
+    monkeypatch.setenv("COATUE_CLAW_LAUNCHCTL_DOMAIN", "gui/501")
+    monkeypatch.setenv("COATUE_CLAW_LAUNCHCTL_BOOTSTRAP_RETRIES", "3")
+    monkeypatch.setattr(launchd_runtime.time, "sleep", lambda _: None)
+
+    def fake_run(cmd: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
+        assert cmd[:2] == ["launchctl", "bootstrap"]
+        calls.append(1)
+        if len(calls) == 1:
+            return subprocess.CompletedProcess(cmd, 5, "", "Bootstrap failed: 5: Input/output error")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(launchd_runtime, "_run", fake_run)
+    domain = launchd_runtime._bootstrap("/tmp/fake.plist")
+    assert domain == "gui/501"
+    assert len(calls) == 2
+
+
+def test_enable_services_error_includes_label(monkeypatch) -> None:
+    monkeypatch.setattr(launchd_runtime, "write_service_plists", lambda: {launchd_runtime.EMAIL_LABEL: "/tmp/a.plist"})
+    monkeypatch.setattr(launchd_runtime, "_bootout", lambda _: None)
+
+    def fail_bootstrap(_: str) -> str:
+        raise RuntimeError("bootstrap failed across launchctl domains: gui/501: boom")
+
+    monkeypatch.setattr(launchd_runtime, "_bootstrap", fail_bootstrap)
+    try:
+        launchd_runtime.enable_services(services=[launchd_runtime.EMAIL_LABEL])
+        raise AssertionError("expected RuntimeError")
+    except RuntimeError as exc:
+        assert "failed enabling com.coatueclaw.email-gateway" in str(exc)

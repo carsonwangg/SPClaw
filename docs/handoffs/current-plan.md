@@ -40,6 +40,14 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- launchd 24x7 enable path hardened for transient bootstrap errors:
+  - `src/coatue_claw/launchd_runtime.py` now retries transient launchctl bootstrap `Input/output error` failures during `enable`.
+  - retry control env added: `COATUE_CLAW_LAUNCHCTL_BOOTSTRAP_RETRIES` (default `3`).
+  - enable failure messages now include the exact failing label (`failed enabling <label>: ...`) for faster operator triage.
+  - regression coverage added in `tests/test_launchd_runtime.py` for retry behavior + label-specific error context.
+  - validation:
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_market_daily.py tests/test_launchd_runtime.py` -> `44 passed`
 - HFA V1 (docs-first hedge fund analyst workflow) is implemented on `codex/agent-hf-analyst`:
   - new modules:
     - `src/coatue_claw/hf_document_extract.py`
