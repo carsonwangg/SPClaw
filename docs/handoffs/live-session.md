@@ -130,6 +130,31 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 4. In Slack thread with uploaded docs, run:
    - `hfa analyze`
 5. In DM with uploaded docs (no command), verify single auto-run and no duplicate rerun on same file set.
+## Update (2026-02-24, MD catalyst + link relevance hardening for AMD/INTC regression)
+- Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
+  - Added deterministic `_is_low_signal_x_post(...)` gate and applied it before X evidence candidate scoring.
+  - Added direct evidence fallback path for catalyst generation:
+    - if cluster confirmation/decisive-primary fails, high-quality Yahoo/Web causal headlines can still generate specific reason lines.
+  - Added cause-aware link rendering:
+    - fallback line hides `[X]`
+    - fallback keeps only quality `[News]/[Web]`
+    - specific lines include `[X]` only when stricter relevance checks pass.
+  - Added `CatalystEvidence` trace fields:
+    - `cause_mode`, `cause_source_type`, `cause_source_url`
+  - Added artifact/debug trace output for cause fields.
+- Tests updated in `/Users/carsonwang/worktrees/coatue-claw/market-daily/tests/test_market_daily.py`:
+  - promo X spam rejection
+  - direct evidence fallback without cluster match
+  - fallback link policy (`[X]` suppressed)
+  - specific-line relevant X inclusion
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_market_daily.py` -> `40 passed`
+  - `PYTHONPATH=src python3 -m pytest -q` -> `238 passed`
+
+### Immediate next steps
+1. Merge role branch into integrator queue.
+2. Restart runtime on Mac mini and verify next MD post no longer shows random `[X]` on fallback lines.
+3. Run `md debug AMD` / `md debug INTC` after next cycle and verify `cause_mode` + `cause_source_*` fields in debug output.
 
 ## Update (2026-02-24, Market Daily earnings preview + 7PM recap)
 - Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:

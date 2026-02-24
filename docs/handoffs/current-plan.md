@@ -100,6 +100,21 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
     - `pypdf`, `python-docx`, `python-pptx`
   - validation:
     - `PYTHONPATH=src python3 -m pytest -q` -> `240 passed`
+- MD catalyst + link relevance hardening shipped (AMD/INTC regression fix):
+  - X evidence now rejects low-signal promo/cashtag spam before candidate scoring.
+  - Catalyst selection now supports deterministic direct-evidence fallback (quality Yahoo/Web) when cluster confirmation fails but headline is clearly causal.
+  - Link rendering is cause-aware:
+    - fallback line suppresses `[X]`
+    - fallback retains only quality `[News]/[Web]`
+    - specific lines include `[X]` only when stricter relevance checks pass.
+  - `CatalystEvidence` now records cause trace fields:
+    - `cause_mode` (`cluster_confirmed|decisive_primary|direct_evidence|fallback`)
+    - `cause_source_type`
+    - `cause_source_url`
+  - debug/artifact output now exposes cause tracing fields for quicker diagnosis.
+  - validation:
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_market_daily.py` -> `40 passed`
+    - `PYTHONPATH=src python3 -m pytest -q` -> `238 passed`
 - Market Daily earnings expansion shipped in `codex/agent-market-daily` worktree:
   - Morning `open` MD post now appends `Earnings After Close Today` for same-day after-close names detected from final MD universe (`top-K + Coatue overlay + overrides`).
   - New nightly MD recap path added at `19:00` local runtime by default:
