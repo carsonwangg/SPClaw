@@ -88,3 +88,19 @@ Detailed runbook for humans and Codex:
   - `/opt/coatue-claw/.venv/bin/python -m coatue_claw.x_chart_daily run-post-url "<x-url>" [--channel "<channel-id>"]`
 - Final chart artifact should be the source chart image snip from the X post (no Coatue-style redraw/reconstruction required).
 - If source image is unavailable, return the explicit error to Slack.
+
+## Board Seat V4 Rule (Acquisition/Acquihire)
+- Applies to both:
+  - scheduled board-seat runs (`board_seat_daily`)
+  - conversational board-seat replies in Slack portco channels.
+- Required structure:
+  - `Board Seat as a Service — {Company}`
+  - `Thesis` with explicit first line:
+    - `Idea: Acquire/Acquihire {Target} — {one-line rationale}`
+  - `Why now`, `What's different`, `MOS/risks`, `Bottom line`
+  - `{Company} context` and `Funding snapshot`
+  - `Sources`
+- Primary recommendation must be acquisition/acquihire-oriented (no internal build-first thesis).
+- Citations must be named and human-readable:
+  - `Publisher/Source — Article title: <url>`
+- Numeric labels like `Source 1/2/3` are disallowed.

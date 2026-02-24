@@ -634,3 +634,28 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 2. Re-run board-seat history backfill for `#anduril` and confirm `board_seat_pitches` contains all legacy channel posts (not only run-table seed).
 3. Add explicit named-investment entity extraction (e.g., Epirus) to strengthen semantic repeat blocking beyond lexical similarity.
 4. Continue monitoring skip reasons in runtime logs to tune novelty thresholds without suppressing truly new ideas.
+
+## 2026-02-23 Plan Update - Board Seat V4 Acquisition + Named Citations
+
+### Completed
+- Upgraded board-seat output contract to acquisition/acquihire-first in `src/coatue_claw/board_seat_daily.py`.
+- Bumped format version to `v4_acq_acquihire_named_sources`.
+- Added explicit `Idea` line to thesis rendering and repeat-signal parsing.
+- Added structured source reference model (`SourceRef`) and replaced numeric source labels with named citation lines:
+  - `Publisher/Source — Article title: <url>`.
+- Added acquisition-idea validation + deterministic best-effort rewrite path for invalid/non-acquisition idea lines.
+- Added acquisition evidence retrieval helper (`_acquisition_search_rows`) and source-reference merge/fallback logic.
+- Updated board-seat test suite to V4 behaviors and regression coverage.
+- Validation:
+  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_board_seat_daily.py` -> `15 passed`.
+  - Full suite unchanged except pre-existing Spencer identity failures.
+
+### In Progress
+- Live interactive validation in `#openai` for conversational board-seat replies using V4 format.
+
+### Next
+1. Trigger a fresh `#openai` prompt (`give me a new board seat idea`) and verify:
+   - first thesis line is `Idea: Acquire/Acquihire ...`
+   - citations are named title lines (no `Source 1/2/3`).
+2. If any conversational path still emits generic/non-M&A framing, tighten that path’s prompt/routing rule in OpenClaw workspace config.
+3. Resolve unrelated Spencer identity default test failures in a dedicated patch.
