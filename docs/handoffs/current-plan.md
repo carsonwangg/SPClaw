@@ -51,6 +51,16 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
     - `docs/handoffs/agent-chart-day.md`
     - `docs/handoffs/agent-hf-analyst.md`
     - `docs/handoffs/agent-market-daily.md`
+  - worktrees created and verified:
+    - `/Users/carsonwang/worktrees/coatue-claw/board-seat`
+    - `/Users/carsonwang/worktrees/coatue-claw/chart-day`
+    - `/Users/carsonwang/worktrees/coatue-claw/hf-analyst`
+    - `/Users/carsonwang/worktrees/coatue-claw/market-daily`
+  - remote role branches pushed:
+    - `origin/codex/agent-board-seat`
+    - `origin/codex/agent-chart-day`
+    - `origin/codex/agent-hf-analyst`
+    - `origin/codex/agent-market-daily`
   - deploy gate remains integrator-only (`main` merge then runtime restart/verification).
 - X-chart slot posting reliability fix shipped (Morning/Afternoon/Evening not posting):
   - root cause: `_slot_key` required runtime minute within ±20 of configured windows while launchd scout runs on drifting `StartInterval=3600`.

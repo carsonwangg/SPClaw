@@ -17,10 +17,21 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `/Users/carsonwang/worktrees/coatue-claw/chart-day`
   - `/Users/carsonwang/worktrees/coatue-claw/hf-analyst`
   - `/Users/carsonwang/worktrees/coatue-claw/market-daily`
+- Created and pushed parallel role branches:
+  - `origin/codex/agent-board-seat`
+  - `origin/codex/agent-chart-day`
+  - `origin/codex/agent-hf-analyst`
+  - `origin/codex/agent-market-daily`
+- Verified active worktrees and branch mapping:
+  - `/Users/carsonwang/CoatueClaw` -> `main`
+  - `/Users/carsonwang/worktrees/coatue-claw/board-seat` -> `codex/agent-board-seat`
+  - `/Users/carsonwang/worktrees/coatue-claw/chart-day` -> `codex/agent-chart-day`
+  - `/Users/carsonwang/worktrees/coatue-claw/hf-analyst` -> `codex/agent-hf-analyst`
+  - `/Users/carsonwang/worktrees/coatue-claw/market-daily` -> `codex/agent-market-daily`
 
 ### Immediate next steps
-1. Create/push the four `codex/agent-*` branches and verify `git worktree list` includes all four paths.
-2. Start one Codex session per worktree and keep edits within role-owned files.
+1. Start one Codex session per worktree and keep edits within role-owned files.
+2. Use only role-owned files on each branch to minimize merge collisions.
 3. Merge to `main` via integrator queue only; restart runtime once per merged batch.
 
 ## Update (2026-02-24, Board Seat V6 structured headers + target funding reliability)
