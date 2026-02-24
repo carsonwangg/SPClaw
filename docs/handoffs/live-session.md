@@ -1486,3 +1486,26 @@ Then confirm bot returns:
 ### Immediate Next Steps
 1. In Slack `#anduril` (or any portco channel), request a fresh board-seat idea and confirm section labels render as bold and include `Sources` links.
 2. If any ad-hoc conversational reply still shows italics, inspect the specific outgoing text path (OpenClaw conversational formatter vs `board_seat_daily`) and enforce bold markers in that path as well.
+
+## 2026-02-23 - Slack `#openai` No-Response Incident (Operational Fix)
+- Symptom:
+  - user reported no reply after posting in `#openai`.
+- Root cause found:
+  - bot membership check showed `openai` channel existed but bot was not a member:
+    - `openai id=C0AFZ2YSQN9 is_member=False`
+  - OpenClaw runtime channel map in `/Users/spclaw/.openclaw/openclaw.json` only had:
+    - `C0AFGMRFWP8` (general)
+- Fix applied (runtime-side, non-repo):
+  - Joined bot to `#openai` via Slack API:
+    - `conversations_join(channel=C0AFZ2YSQN9)` -> success.
+  - Updated OpenClaw config channel map to include `#openai`:
+    - added `C0AFZ2YSQN9: { enabled: true, requireMention: false }`
+  - Restarted gateway and verified health:
+    - `make -C /opt/coatue-claw openclaw-restart`
+    - `make -C /opt/coatue-claw openclaw-slack-status` -> probe `ok=true`
+  - Posted a heartbeat message directly to `#openai` as delivery check:
+    - `chat_postMessage(channel=C0AFZ2YSQN9, text='SPClaw runtime check...')` -> success.
+
+### Immediate Next Steps
+1. Ask user to send one fresh message in `#openai` to confirm end-to-end reply behavior.
+2. If still no auto-reply, capture exact message text and timestamp, then inspect `openclaw channels logs --channel slack --lines 300` around that timestamp.
