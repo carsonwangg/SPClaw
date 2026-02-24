@@ -40,6 +40,18 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Parallel Codex multi-agent branch model is now codified for this repo:
+  - branch naming standard added in `AGENTS.md`:
+    - `codex/agent-board-seat`
+    - `codex/agent-chart-day`
+    - `codex/agent-hf-analyst`
+    - `codex/agent-market-daily`
+  - per-agent handoff docs added:
+    - `docs/handoffs/agent-board-seat.md`
+    - `docs/handoffs/agent-chart-day.md`
+    - `docs/handoffs/agent-hf-analyst.md`
+    - `docs/handoffs/agent-market-daily.md`
+  - deploy gate remains integrator-only (`main` merge then runtime restart/verification).
 - X-chart slot posting reliability fix shipped (Morning/Afternoon/Evening not posting):
   - root cause: `_slot_key` required runtime minute within ±20 of configured windows while launchd scout runs on drifting `StartInterval=3600`.
   - fix: `_slot_key` now maps each scheduled run to the most recent elapsed configured window (`09:00/12:00/18:00` by default), with existing slot dedupe preserved.

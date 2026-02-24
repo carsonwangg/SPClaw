@@ -3,6 +3,26 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-24, parallel Codex branch/worktree protocol + agent handoff docs)
+- Added parallel-branch operating protocol to `/Users/carsonwang/CoatueClaw/AGENTS.md`:
+  - branch naming standard: `codex/agent-board-seat`, `codex/agent-chart-day`, `codex/agent-hf-analyst`, `codex/agent-market-daily`
+  - integrator-only deploy gate preserved (`main` merge -> restart + runtime verification).
+- Added per-agent continuity docs:
+  - `/Users/carsonwang/CoatueClaw/docs/handoffs/agent-board-seat.md`
+  - `/Users/carsonwang/CoatueClaw/docs/handoffs/agent-chart-day.md`
+  - `/Users/carsonwang/CoatueClaw/docs/handoffs/agent-hf-analyst.md`
+  - `/Users/carsonwang/CoatueClaw/docs/handoffs/agent-market-daily.md`
+- Worktree bootstrap target paths standardized:
+  - `/Users/carsonwang/worktrees/coatue-claw/board-seat`
+  - `/Users/carsonwang/worktrees/coatue-claw/chart-day`
+  - `/Users/carsonwang/worktrees/coatue-claw/hf-analyst`
+  - `/Users/carsonwang/worktrees/coatue-claw/market-daily`
+
+### Immediate next steps
+1. Create/push the four `codex/agent-*` branches and verify `git worktree list` includes all four paths.
+2. Start one Codex session per worktree and keep edits within role-owned files.
+3. Merge to `main` via integrator queue only; restart runtime once per merged batch.
+
 ## Update (2026-02-24, Board Seat V6 structured headers + target funding reliability)
 - Implemented Board Seat V6 in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`.
 - Output contract changes now live:

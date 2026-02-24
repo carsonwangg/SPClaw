@@ -83,6 +83,22 @@ Detailed runbook for humans and Codex:
   - `docs/handoffs/live-session.md`: current status + immediate next steps
   - `docs/handoffs/current-plan.md`: plan/status changes when scope or priority changes
 
+## Parallel Codex Branch Protocol
+- Branch naming standard for concurrent sessions:
+  - `codex/agent-board-seat`
+  - `codex/agent-chart-day`
+  - `codex/agent-hf-analyst`
+  - `codex/agent-market-daily`
+- Each parallel agent must run in its own git worktree and stay scoped to its role-owned files.
+- Agent continuity docs:
+  - `docs/handoffs/agent-board-seat.md`
+  - `docs/handoffs/agent-chart-day.md`
+  - `docs/handoffs/agent-hf-analyst.md`
+  - `docs/handoffs/agent-market-daily.md`
+- Deploy gate for parallel mode:
+  - role branches never restart runtime directly
+  - only the integrator merges to `main`, restarts OpenClaw, and verifies Slack/24x7 status
+
 ## Memory-to-Git Reconciliation Protocol (v1)
 - Runtime memory (`~/.openclaw/workspace/memory/*`) is operational context; repo code/docs are the product source of truth.
 - Slack behavior-change requests are auto-captured as git-bound queue items (`request_kind=memory_git`):
