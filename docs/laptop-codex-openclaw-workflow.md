@@ -37,14 +37,20 @@ make openclaw-slack-logs
 ## Memory-to-Git Queue Loop (`git-memory:`)
 Use this when Slack writes runtime memory that should become repo-tracked behavior.
 
-1. In Slack, start the request with:
-   - `git-memory: <change request>`
-2. Check queue in Slack:
+1. In Slack, either:
+   - start with `git-memory: <change request>`, or
+   - ask for a bot behavior change in plain language (auto-detected).
+2. Bot auto-actions:
+   - queues request as `memory_git`
+   - appends it to runtime `MEMORY.md`
+   - DMs Carson with request details
+   - refreshes queue snapshot.
+3. Check queue in Slack:
    - `spencer changes memory`
-3. In Codex session, export queue snapshot:
+4. In Codex session, export queue snapshot:
    - `claw memory reconcile-export --limit 200`
-4. Implement accepted items, then ship one batch commit.
-5. Link resolved queue IDs to commit:
+5. Implement accepted items, then ship one batch commit.
+6. Link resolved queue IDs to commit:
    - `claw memory reconcile-link --ids 12,13 --commit <hash> --resolved-by codex`
 
 Artifacts:

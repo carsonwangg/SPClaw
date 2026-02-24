@@ -273,6 +273,8 @@ Spencer change-digest environment controls:
 - `COATUE_CLAW_SPENCER_CHANGE_DIGEST_DM_USER_IDS`: comma-separated Slack user IDs to DM with daily open-request digest
 - `COATUE_CLAW_SPENCER_CHANGE_DIGEST_TIME`: local daily digest time (`HH:MM`, default `18:00`)
 - `COATUE_CLAW_SPENCER_CHANGE_DIGEST_TZ`: timezone used in digest header text (default `America/Los_Angeles`)
+- `COATUE_CLAW_CHANGE_NOTIFY_USER_IDS`: comma-separated Slack user IDs for immediate DM notifications when behavior-change requests are captured (default `U0AGD28QSQG`)
+- `COATUE_CLAW_CHANGE_MEMORY_MD_PATH`: path to memory markdown file appended on change capture (default `/Users/spclaw/.openclaw/workspace/MEMORY.md`)
 
 Email integration environment controls:
 - `COATUE_CLAW_EMAIL_ENABLED`: set `true` to enable email processing

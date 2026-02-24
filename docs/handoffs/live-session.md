@@ -1782,3 +1782,31 @@ Then confirm bot returns:
 ### Immediate Next Steps
 1. Send one `git-memory:` message in Slack and confirm queue file refreshes automatically within 15 minutes.
 2. If needed, tune interval by setting `COATUE_CLAW_MEMORY_RECONCILE_INTERVAL_SECONDS` in `.env.prod` and rerun `make openclaw-24x7-enable`.
+
+## 2026-02-24 - Auto DM Alert for Behavior Change Requests
+- User request: for every Slack behavior-change ask, auto-notify Carson and confirm:
+  - A) request added to memory markdown
+  - B) request queued for git reconciliation upload path.
+- Shipped in `src/coatue_claw/slack_bot.py`:
+  - detects behavior-change asks in plain language (not just `git-memory:` prefix)
+  - captures as `memory_git` queue item with trigger mode:
+    - `git_memory_prefix` or `auto_behavior_request`
+  - appends request line to `MEMORY.md` (path env-configurable)
+  - refreshes queue snapshot (`docs/memory-inbox/queue.md`)
+  - sends immediate DM to Carson (or env-configured notify users)
+  - posts in-thread acknowledgement with queue ID.
+- Tracker update:
+  - `src/coatue_claw/spencer_change_log.py` now accepts `auto_behavior_request` trigger mode.
+- Config knobs:
+  - `COATUE_CLAW_CHANGE_NOTIFY_USER_IDS` (default Carson ID)
+  - `COATUE_CLAW_CHANGE_MEMORY_MD_PATH` (default `/Users/spclaw/.openclaw/workspace/MEMORY.md`)
+- Validation:
+  - targeted tests: `20 passed`
+  - full suite: `223 passed`
+
+### Immediate Next Steps
+1. In Slack, post a plain request like “can you change the bot so chart follow-up is shorter”.
+2. Confirm:
+   - Carson receives DM immediately
+   - queue shows item under `spencer changes memory`
+   - request line appears in configured `MEMORY.md`.

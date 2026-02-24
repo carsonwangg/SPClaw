@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 import logging
 import os
+from pathlib import Path
 import re
 import threading
 import time
@@ -399,6 +400,7 @@ def _capture_git_memory_request(
     message_ts: str | None,
     source_ts_utc: str | None,
     text: str,
+    trigger_mode: str = "git_memory_prefix",
 ) -> int | None:
     tracker = _spencer_change_log()
     if tracker is None:
@@ -418,12 +420,155 @@ def _capture_git_memory_request(
             message_ts=message_ts,
             text=payload,
             request_kind="memory_git",
-            trigger_mode="git_memory_prefix",
+            trigger_mode=trigger_mode,
             source_ref=source_ref,
         )
     except Exception:
         logger.exception("Failed to capture git-memory request")
         return None
+
+
+def _change_notify_user_ids() -> list[str]:
+    raw = (os.environ.get("COATUE_CLAW_CHANGE_NOTIFY_USER_IDS", "U0AGD28QSQG") or "").strip()
+    ids = [item.strip() for item in raw.split(",") if item.strip()]
+    return ids or ["U0AGD28QSQG"]
+
+
+def _memory_md_path() -> Path:
+    return Path(
+        os.environ.get(
+            "COATUE_CLAW_CHANGE_MEMORY_MD_PATH",
+            "/Users/spclaw/.openclaw/workspace/MEMORY.md",
+        )
+    )
+
+
+def _append_change_to_memory_md(
+    *,
+    change_id: int,
+    user_id: str | None,
+    channel: str | None,
+    text: str,
+) -> str:
+    path = _memory_md_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%SZ")
+    requester = user_id or "unknown-user"
+    channel_ref = channel or "unknown-channel"
+    line = f"- {ts} [change #{change_id}] requester={requester} channel={channel_ref} request={text}\n"
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(line)
+    return str(path)
+
+
+def _dm_user(*, user_id: str, text: str) -> bool:
+    try:
+        dm = app.client.conversations_open(users=user_id)
+        channel_id = str((dm.get("channel") or {}).get("id") or "").strip()
+        if channel_id:
+            app.client.chat_postMessage(channel=channel_id, text=text)
+            return True
+    except Exception:
+        logger.exception("Failed to open DM for user_id=%s", user_id)
+    try:
+        app.client.chat_postMessage(channel=user_id, text=text)
+        return True
+    except Exception:
+        logger.exception("Failed to send fallback DM for user_id=%s", user_id)
+    return False
+
+
+def _notify_change_capture(
+    *,
+    change_id: int,
+    user_id: str | None,
+    channel: str | None,
+    text: str,
+    memory_md_path: str | None,
+    queue_path: str | None,
+) -> None:
+    requester = f"<@{user_id}>" if user_id else "unknown-user"
+    channel_ref = f"<#{channel}>" if channel else "unknown-channel"
+    summary = (
+        "Bot behavior change request captured.\n"
+        f"- queue_id: `#{change_id}`\n"
+        f"- requester: {requester}\n"
+        f"- channel: {channel_ref}\n"
+        f"- requested_change: {text}\n"
+        f"- A) memory.md: {'written' if memory_md_path else 'write_failed'}"
+    )
+    if memory_md_path:
+        summary += f"\n  path: `{memory_md_path}`"
+    summary += f"\n- B) git upload queue: {'refreshed' if queue_path else 'refresh_failed'}"
+    if queue_path:
+        summary += f"\n  queue_snapshot: `{queue_path}`"
+    summary += "\n- next: queued for Codex reconciliation + commit linking."
+
+    for notify_user in _change_notify_user_ids():
+        _dm_user(user_id=notify_user, text=summary)
+
+
+def _capture_and_notify_memory_git_change(
+    *,
+    user_id: str | None,
+    channel: str | None,
+    thread_ts: str | None,
+    message_ts: str | None,
+    source_ts_utc: str | None,
+    request_text: str,
+    trigger_mode: str,
+) -> int | None:
+    queued_id = _capture_git_memory_request(
+        user_id=user_id,
+        channel=channel,
+        thread_ts=thread_ts,
+        message_ts=message_ts,
+        source_ts_utc=source_ts_utc,
+        text=request_text,
+        trigger_mode=trigger_mode,
+    )
+    if queued_id is None:
+        return None
+
+    tracker = _spencer_change_log()
+    memory_path: str | None = None
+    queue_path: str | None = None
+    try:
+        memory_path = _append_change_to_memory_md(
+            change_id=queued_id,
+            user_id=user_id,
+            channel=channel,
+            text=request_text,
+        )
+    except Exception:
+        logger.exception("Failed to append change to memory.md change_id=%s", queued_id)
+
+    try:
+        if tracker is not None:
+            export = tracker.export_memory_git_queue(limit=200)
+            queue_path = str(export.get("queue_path") or "")
+    except Exception:
+        logger.exception("Failed to refresh memory-git queue snapshot after capture change_id=%s", queued_id)
+
+    try:
+        if tracker is not None:
+            tracker.update_status(
+                queued_id,
+                status="captured",
+                note=f"Captured via {trigger_mode}; memory+queue mirror attempted.",
+            )
+    except Exception:
+        logger.exception("Failed to annotate memory-git capture note change_id=%s", queued_id)
+
+    _notify_change_capture(
+        change_id=queued_id,
+        user_id=user_id,
+        channel=channel,
+        text=request_text,
+        memory_md_path=memory_path,
+        queue_path=(queue_path or None),
+    )
+    return queued_id
 
 
 def _mark_spencer_change(change_id: int | None, *, status: str, note: str) -> None:
@@ -1627,13 +1772,14 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
                 )
             except Exception:
                 logger.exception("Failed to ingest git-memory message into runtime memory")
-        queued_id = _capture_git_memory_request(
+        queued_id = _capture_and_notify_memory_git_change(
             user_id=user_id,
             channel=channel,
             thread_ts=thread_ts,
             message_ts=event_ts,
             source_ts_utc=event_ts,
-            text=git_memory_text,
+            request_text=git_memory_text or "No details provided.",
+            trigger_mode="git_memory_prefix",
         )
         if queued_id is None:
             say(
@@ -1650,6 +1796,41 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
                 f"- id: `#{queued_id}`\n"
                 "- status: `captured`\n"
                 "- kind: `memory_git`\n"
+                "- A) change mirrored to `memory.md`\n"
+                "- B) queue snapshot refreshed for git reconciliation\n"
+                "Use `spencer changes memory` to review."
+            ),
+            thread_ts=thread_ts,
+        )
+        return
+
+    stripped_text = _strip_slack_mentions(text).strip()
+    if looks_like_change_request(stripped_text):
+        queued_id = _capture_and_notify_memory_git_change(
+            user_id=user_id,
+            channel=channel,
+            thread_ts=thread_ts,
+            message_ts=event_ts,
+            source_ts_utc=event_ts,
+            request_text=stripped_text,
+            trigger_mode="auto_behavior_request",
+        )
+        if queued_id is None:
+            say(
+                text=(
+                    "I detected a bot behavior change request, but couldn't queue it right now.\n"
+                    "Please retry with `git-memory:` prefix."
+                ),
+                thread_ts=thread_ts,
+            )
+            return
+        say(
+            text=(
+                "I logged this as a bot behavior change request.\n"
+                f"- id: `#{queued_id}`\n"
+                "- A) Added to `memory.md`\n"
+                "- B) Added to memory→git reconciliation queue\n"
+                "Carson has been DM'd with the request details.\n"
                 "Use `spencer changes memory` to review."
             ),
             thread_ts=thread_ts,

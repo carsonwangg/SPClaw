@@ -783,3 +783,31 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 ### Next
 1. Post one live `git-memory:` request in Slack and confirm queue snapshot updates within 15 minutes without manual export.
 2. If you want tighter cadence, set `COATUE_CLAW_MEMORY_RECONCILE_INTERVAL_SECONDS` in `/opt/coatue-claw/.env.prod`, then re-run `make openclaw-24x7-enable`.
+
+## 2026-02-24 Plan Update - Auto DM + Auto Capture for Behavior Change Requests
+
+### Completed
+- Implemented automatic memory-git capture for behavior-change requests in `src/coatue_claw/slack_bot.py`:
+  - explicit prefix `git-memory: ...` (existing)
+  - auto-detected natural-language behavior-change asks (new)
+- On each captured request, bot now automatically:
+  - appends entry to workspace `MEMORY.md` (configurable path)
+  - refreshes reconciliation queue snapshot (`docs/memory-inbox/queue.md`)
+  - sends immediate DM notification to Carson (configurable notify list)
+- Added new trigger mode support in tracker schema code:
+  - `auto_behavior_request` (alongside `manual`, `git_memory_prefix`)
+- Added env knobs in docs:
+  - `COATUE_CLAW_CHANGE_NOTIFY_USER_IDS`
+  - `COATUE_CLAW_CHANGE_MEMORY_MD_PATH`
+
+### Validation
+- Targeted tests:
+  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_spencer_change_log.py /opt/coatue-claw/tests/test_spencer_change_digest.py /opt/coatue-claw/tests/test_launchd_runtime.py` -> `20 passed`
+- Full suite:
+  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q` -> `223 passed`
+
+### Next
+1. Live-test in Slack with a plain-language behavior change request (without `git-memory:`) and verify:
+   - in-thread queue acknowledgment
+   - Carson DM
+   - `spencer changes memory` shows new row.

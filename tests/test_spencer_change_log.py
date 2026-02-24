@@ -68,6 +68,24 @@ def test_capture_memory_git_request_fields(tmp_path: Path) -> None:
     assert "slack://" in str(row.source_ref)
 
 
+def test_capture_memory_git_request_auto_behavior_trigger_mode(tmp_path: Path) -> None:
+    db_path = tmp_path / "spencer.sqlite"
+    log = SpencerChangeLog(db_path=db_path)
+    change_id = log.capture_request(
+        user_id="U123",
+        channel="C123",
+        thread_ts="333.444",
+        message_ts="333.444",
+        text="please change bot behavior for chart follow-up",
+        request_kind="memory_git",
+        trigger_mode="auto_behavior_request",
+    )
+    row = log.get_change(change_id)
+    assert row is not None
+    assert row.request_kind == "memory_git"
+    assert row.trigger_mode == "auto_behavior_request"
+
+
 def test_list_changes_filter_request_kind(tmp_path: Path) -> None:
     db_path = tmp_path / "spencer.sqlite"
     log = SpencerChangeLog(db_path=db_path)

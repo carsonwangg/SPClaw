@@ -19,7 +19,7 @@ DEFAULT_TRACKED_CHANGE_USERS: dict[str, str] = {
 DEFAULT_REQUEST_KIND = "change_request"
 REQUEST_KINDS = {DEFAULT_REQUEST_KIND, "memory_git"}
 DEFAULT_TRIGGER_MODE = "manual"
-TRIGGER_MODES = {DEFAULT_TRIGGER_MODE, "git_memory_prefix"}
+TRIGGER_MODES = {DEFAULT_TRIGGER_MODE, "git_memory_prefix", "auto_behavior_request"}
 LEDGER_COLUMNS: tuple[str, ...] = (
     "change_id",
     "request_kind",

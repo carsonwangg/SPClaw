@@ -85,10 +85,16 @@ Detailed runbook for humans and Codex:
 
 ## Memory-to-Git Reconciliation Protocol (v1)
 - Runtime memory (`~/.openclaw/workspace/memory/*`) is operational context; repo code/docs are the product source of truth.
-- Slack prefix `git-memory:` creates a git-bound queue item (`request_kind=memory_git`) in the change tracker.
+- Slack behavior-change requests are auto-captured as git-bound queue items (`request_kind=memory_git`):
+  - explicit prefix: `git-memory: ...`
+  - automatic detection for natural-language bot behavior change asks.
 - Queue review uses existing governance commands:
   - `spencer changes memory`
   - `change requests memory`
+- On each capture, the bot:
+  - appends the request to `MEMORY.md` (runtime workspace path configurable via env)
+  - refreshes `docs/memory-inbox/queue.md`
+  - sends immediate DM alert to Carson (or configured notify users).
 - Codex reconciliation loop (batch per session):
   1. `claw memory reconcile-export --limit 200`
   2. implement accepted requests in `/opt/coatue-claw`
