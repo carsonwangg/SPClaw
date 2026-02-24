@@ -1528,3 +1528,54 @@ Then confirm bot returns:
 ### Immediate Next Steps
 1. Ask user to test in any previously non-responsive channel (for example `#openai`) and confirm response path is live.
 2. If a newly created channel is missed in the future, run another join sweep or verify `COATUE_CLAW_SLACK_AUTOJOIN_PUBLIC_CHANNELS=1`.
+
+## 2026-02-23 - Board Seat V4 (Acquisition/Acquihire + Named Citations)
+- Runtime module updated: `/opt/coatue-claw/src/coatue_claw/board_seat_daily.py`
+  - format version bumped:
+    - `BOARD_SEAT_FORMAT_VERSION = "v4_acq_acquihire_named_sources"`
+  - `BoardSeatDraft` schema expanded:
+    - `idea_line` (mandatory explicit acquisition/acquihire line)
+    - `source_refs` (`SourceRef` objects with publisher/title/url)
+  - added `SourceRef` dataclass and source-normalization/render helpers.
+  - rendering now enforces V4 structure:
+    - `Idea` line is first under `Thesis`
+    - `Sources` block uses named source + title + clickable link
+    - numeric labels (`Source 1/2/3`) removed.
+  - acquisition-idea enforcement:
+    - validator rejects non-acquisition idea lines
+    - validator rejects placeholder target patterns
+    - sanitizer rewrites invalid ideas to best-effort acquisition form
+    - fallback behavior remains “always post best-effort candidate”.
+  - repeat guardrail extraction updated:
+    - `Idea:` is parsed as part of thesis/core investment signal.
+  - acquisition evidence collection added:
+    - `_acquisition_search_rows(...)` uses Brave search (when key exists) for acquisition/acquihire-target evidence rows.
+- Tests updated: `/opt/coatue-claw/tests/test_board_seat_daily.py`
+  - migrated to V4 expectations and added coverage for:
+    - explicit `Idea` line
+    - invalid non-acquisition thesis rejection
+    - best-effort acquisition fallback behavior
+    - named citation rendering and ban on numeric source labels
+    - V4 repeat-guardrail behavior
+    - legacy parse compatibility.
+- Validation:
+  - targeted:
+    - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_board_seat_daily.py` -> `15 passed`
+  - full smoke:
+    - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q` -> unchanged unrelated failures:
+      - `tests/test_spencer_change_digest.py::test_run_once_dry_run_includes_carson_label`
+      - `tests/test_spencer_change_log.py::test_is_spencer_user_defaults`
+      - `tests/test_spencer_change_log.py::test_requester_label_defaults`
+- Interactive prompt path update (non-repo):
+  - `/Users/spclaw/.openclaw/workspace/AGENTS.md`
+  - Portco idea template now requires:
+    - acquisition/acquihire-only primary idea
+    - explicit `Idea` labeled line
+    - named source+title citation lines (no Source 1/2/3)
+  - runtime restarted and verified healthy:
+    - `make -C /opt/coatue-claw openclaw-restart`
+    - `make -C /opt/coatue-claw openclaw-slack-status` (`probe.ok=true`)
+
+### Immediate Next Steps
+1. In `#openai`, send: `give me a new board seat idea` and verify first thesis line is `Idea: Acquire/Acquihire ...`.
+2. Confirm `Sources` now render as `Publisher — Article title: <link>` and never as numeric source labels.

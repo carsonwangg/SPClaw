@@ -10,7 +10,7 @@ from pathlib import Path
 import re
 import sqlite3
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
@@ -95,9 +95,9 @@ SIGNIFICANT_CHANGE_TERMS = {
 }
 
 BOARD_SEAT_HEADER_RE = re.compile(r"board seat as a service\s*[—-]\s*(.+)$", re.IGNORECASE)
-BOARD_SEAT_FORMAT_VERSION = "v3_labeled_hierarchy"
+BOARD_SEAT_FORMAT_VERSION = "v4_acq_acquihire_named_sources"
 MAX_LINE_WORDS = 18
-THESIS_LABELS: tuple[str, ...] = ("Why now", "What's different", "MOS/risks", "Bottom line")
+THESIS_LABELS: tuple[str, ...] = ("Idea", "Why now", "What's different", "MOS/risks", "Bottom line")
 CONTEXT_LABELS: tuple[str, ...] = ("Current efforts", "Domain fit/gaps")
 FUNDING_LABELS: tuple[str, ...] = ("History", "Latest round/backers")
 FUNDING_CACHE_TTL_DAYS_DEFAULT = 14
@@ -105,6 +105,9 @@ UNKNOWN_FUNDING_TEXT = "Funding details are currently unavailable."
 WEB_SEARCH_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
 BRAVE_SEARCH_RESULTS = 5
 FUNDING_EXTRACT_MODEL = "gpt-5.2-chat-latest"
+ACQ_SEARCH_RESULTS = 6
+ACQ_PLACEHOLDER_TARGETS = {"tbd", "unknown", "none", "n/a", "startup", "company", "target"}
+ACQ_INVALID_TARGET_TERMS = {"startup team", "domain-adjacent", "internal", "in-house"}
 
 
 @dataclass(frozen=True)
@@ -120,7 +123,15 @@ class FundingSnapshot:
 
 
 @dataclass(frozen=True)
+class SourceRef:
+    name_or_publisher: str
+    title: str
+    url: str
+
+
+@dataclass(frozen=True)
 class BoardSeatDraft:
+    idea_line: str
     why_now: str
     whats_different: str
     mos_risks: str
@@ -129,7 +140,7 @@ class BoardSeatDraft:
     context_domain_fit_gaps: str
     funding_history: str
     funding_latest_round_backers: str
-    source_urls: list[str] = field(default_factory=list)
+    source_refs: list[SourceRef] = field(default_factory=list)
     raw_model_output: str = ""
     rewrite_reasons: list[str] = field(default_factory=list)
 
@@ -281,14 +292,42 @@ def _normalize_source_url(url: str) -> str:
     return cleaned[:320]
 
 
-def _normalize_source_urls(urls: list[str], *, max_items: int = 4) -> list[str]:
-    out: list[str] = []
+def _publisher_from_url(url: str) -> str:
+    parsed = urlparse(url)
+    host = str(parsed.netloc or "").strip().lower()
+    if host.startswith("www."):
+        host = host[4:]
+    if not host:
+        return "Web"
+    primary = host.split(".")[0]
+    name = primary.replace("-", " ").replace("_", " ").strip()
+    if not name:
+        return "Web"
+    return " ".join(piece.capitalize() for piece in name.split())
+
+
+def _normalize_source_text(text: str, *, max_chars: int) -> str:
+    cleaned = re.sub(r"\s+", " ", str(text or "")).strip().strip(" -:;,.")
+    return cleaned[:max_chars]
+
+
+def _normalize_source_ref(ref: SourceRef) -> SourceRef | None:
+    url = _normalize_source_url(ref.url)
+    if not url:
+        return None
+    name = _normalize_source_text(ref.name_or_publisher, max_chars=64) or _publisher_from_url(url)
+    title = _normalize_source_text(ref.title, max_chars=180) or "Reference"
+    return SourceRef(name_or_publisher=name, title=title, url=url)
+
+
+def _normalize_source_refs(refs: list[SourceRef], *, max_items: int = 4) -> list[SourceRef]:
+    out: list[SourceRef] = []
     seen: set[str] = set()
-    for raw in urls:
-        normalized = _normalize_source_url(raw)
-        if not normalized:
+    for ref in refs:
+        normalized = _normalize_source_ref(ref)
+        if normalized is None:
             continue
-        key = normalized.lower()
+        key = normalized.url.lower()
         if key in seen:
             continue
         seen.add(key)
@@ -298,18 +337,46 @@ def _normalize_source_urls(urls: list[str], *, max_items: int = 4) -> list[str]:
     return out
 
 
-def _fallback_source_urls(company: str) -> list[str]:
+def _source_refs_from_urls(urls: list[str], *, title_hint: str) -> list[SourceRef]:
+    out: list[SourceRef] = []
+    for raw in urls:
+        url = _normalize_source_url(raw)
+        if not url:
+            continue
+        out.append(
+            SourceRef(
+                name_or_publisher=_publisher_from_url(url),
+                title=title_hint,
+                url=url,
+            )
+        )
+    return out
+
+
+def _fallback_source_refs(company: str) -> list[SourceRef]:
     return [
-        f"https://www.google.com/search?{urlencode({'q': f'{company} funding latest round backers'})}",
-        f"https://www.google.com/search?{urlencode({'q': f'{company} investors valuation'})}",
+        SourceRef(
+            name_or_publisher="Google Search",
+            title=f"{company} acquisitions and acquihires",
+            url=f"https://www.google.com/search?{urlencode({'q': f'{company} acquisitions acquihires startup'})}",
+        ),
+        SourceRef(
+            name_or_publisher="Google Search",
+            title=f"{company} funding latest round backers",
+            url=f"https://www.google.com/search?{urlencode({'q': f'{company} funding latest round backers'})}",
+        ),
     ]
 
 
-def _message_source_urls(*, company: str, draft: BoardSeatDraft) -> list[str]:
-    source_urls = _normalize_source_urls(draft.source_urls, max_items=4)
-    if source_urls:
-        return source_urls
-    return _fallback_source_urls(company)
+def _message_source_refs(*, company: str, draft: BoardSeatDraft) -> list[SourceRef]:
+    refs = _normalize_source_refs(draft.source_refs, max_items=4)
+    if refs:
+        return refs
+    return _fallback_source_refs(company)
+
+
+def _format_source_ref_for_slack(ref: SourceRef) -> str:
+    return f"*{ref.name_or_publisher} — {ref.title}:* <{ref.url}>"
 
 def _slack_tokens() -> list[str]:
     tokens: list[str] = []
@@ -748,6 +815,7 @@ def _extract_investment_sections(message: str) -> dict[str, list[str]]:
         return key
 
     label_to_section = {
+        _label_key("Idea"): "thesis",
         _label_key("Why now"): "thesis",
         _label_key("What's different"): "thesis",
         _label_key("MOS/risks"): "thesis",
@@ -794,7 +862,7 @@ def _extract_investment_sections(message: str) -> dict[str, list[str]]:
             continue
         if active and line.startswith("- "):
             sections[active].append(line[2:].strip())
-    for key, max_items in (("thesis", 4), ("context", 2), ("funding", 2)):
+    for key, max_items in (("thesis", 5), ("context", 2), ("funding", 2)):
         sections[key] = _normalize_line_list(sections[key], max_items=max_items)
     return sections
 
@@ -822,11 +890,12 @@ def _core_investment_text(message: str) -> str:
 
 
 def _render_board_seat_message(*, company: str, draft: BoardSeatDraft) -> str:
-    source_urls = _message_source_urls(company=company, draft=draft)
+    source_refs = _message_source_refs(company=company, draft=draft)
     lines = [
         f"*Board Seat as a Service — {company}*",
         "",
         "*Thesis*",
+        f"*Idea:* {draft.idea_line}",
         f"*Why now:* {draft.why_now}",
         f"*What's different:* {draft.whats_different}",
         f"*MOS/risks:* {draft.mos_risks}",
@@ -841,14 +910,149 @@ def _render_board_seat_message(*, company: str, draft: BoardSeatDraft) -> str:
         f"*Latest round/backers:* {draft.funding_latest_round_backers}",
         "",
         "*Sources*",
-        *[f"<{url}|Source {idx + 1}>" for idx, url in enumerate(source_urls)],
+        *[_format_source_ref_for_slack(ref) for ref in source_refs],
     ]
     return "\n".join(lines)
+
+
+def _acquisition_verb(text: str) -> str | None:
+    lower = str(text or "").lower()
+    if "acquihire" in lower:
+        return "Acquihire"
+    if "acquire" in lower or "acquisition" in lower:
+        return "Acquire"
+    return None
+
+
+def _extract_acquisition_target(text: str) -> str:
+    cleaned = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not cleaned:
+        return ""
+    patterns = [
+        r"\b(?:acquihire|acquire)\s+([A-Z][A-Za-z0-9&.'\- ]{1,60})",
+        r"\b(?:acquihires?|acquired)\s+([A-Z][A-Za-z0-9&.'\- ]{1,60})",
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, cleaned, flags=re.IGNORECASE)
+        if not m:
+            continue
+        candidate = m.group(1).strip(" .,:;-")
+        candidate = re.split(r"\b(to|for|as|with|while|amid)\b", candidate, maxsplit=1, flags=re.IGNORECASE)[0].strip(" .,:;-")
+        if candidate:
+            return candidate
+    return ""
+
+
+def _is_valid_acquisition_idea_line(text: str) -> bool:
+    line = _normalize_line(text)
+    if not line:
+        return False
+    if _acquisition_verb(line) is None:
+        return False
+    target = _extract_acquisition_target(line)
+    if not target:
+        return False
+    target_key = re.sub(r"[^a-z0-9]+", "", target.lower())
+    if target_key in ACQ_PLACEHOLDER_TARGETS:
+        return False
+    lowered_target = target.lower()
+    if any(term in lowered_target for term in ACQ_INVALID_TARGET_TERMS):
+        return False
+    return True
+
+
+def _target_candidates_from_seed(*, company: str, seed_text: str) -> list[str]:
+    cleaned = re.sub(r"[“”\"'`]", "", str(seed_text or ""))
+    matches = re.findall(r"\b[A-Z][A-Za-z0-9&.\-]{1,30}(?:\s+[A-Z][A-Za-z0-9&.\-]{1,30}){0,2}\b", cleaned)
+    company_key = _slug(company)
+    blocked = {
+        "reuters",
+        "techcrunch",
+        "bloomberg",
+        "microsoft",
+        "softbank",
+        "wall street journal",
+        "wsj",
+        "series",
+        "funding",
+        "deal",
+        "news",
+        "ai",
+        "build",
+        "create",
+        "develop",
+        "launch",
+        "acquire",
+        "acquihire",
+    }
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in matches:
+        candidate = re.sub(r"\s+", " ", item).strip(" .,:;-")
+        if not candidate:
+            continue
+        key = _slug(candidate)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        if key in ACQ_PLACEHOLDER_TARGETS:
+            continue
+        if key in blocked:
+            continue
+        if company_key and key == company_key:
+            continue
+        if any(term in candidate.lower() for term in ACQ_INVALID_TARGET_TERMS):
+            continue
+        out.append(candidate)
+    return out
+
+
+def _best_effort_target(*, company: str, seed_text: str) -> str:
+    candidates = _target_candidates_from_seed(company=company, seed_text=seed_text)
+    if candidates:
+        return candidates[0]
+    return "Stealth AI Systems"
+
+
+def _best_effort_idea_line(*, company: str, seed_text: str) -> str:
+    target = _extract_acquisition_target(seed_text) or _best_effort_target(company=company, seed_text=seed_text)
+    line = f"Acquire {target} to accelerate {company} execution in a strategic wedge."
+    return _normalize_line(line)
+
+
+def _source_ref_from_row(row: dict[str, str]) -> SourceRef | None:
+    url = _normalize_source_url(str(row.get("url") or ""))
+    if not url:
+        return None
+    title = _normalize_source_text(str(row.get("title") or ""), max_chars=180) or "Reference"
+    publisher = _normalize_source_text(str(row.get("publisher") or ""), max_chars=64) or _publisher_from_url(url)
+    return SourceRef(name_or_publisher=publisher, title=title, url=url)
+
+
+def _build_source_refs(
+    *,
+    company: str,
+    draft: BoardSeatDraft,
+    funding: FundingSnapshot,
+    acquisition_rows: list[dict[str, str]],
+) -> list[SourceRef]:
+    refs: list[SourceRef] = []
+    refs.extend(draft.source_refs)
+    for row in acquisition_rows:
+        ref = _source_ref_from_row(row)
+        if ref is not None:
+            refs.append(ref)
+    refs.extend(_source_refs_from_urls(funding.source_urls, title_hint=f"{company} funding reference"))
+    refs = _normalize_source_refs(refs, max_items=4)
+    if refs:
+        return refs
+    return _fallback_source_refs(company)
 
 
 def _validate_draft(draft: BoardSeatDraft) -> list[str]:
     errors: list[str] = []
     checks = {
+        "idea_line": draft.idea_line,
         "why_now": draft.why_now,
         "whats_different": draft.whats_different,
         "mos_risks": draft.mos_risks,
@@ -865,13 +1069,36 @@ def _validate_draft(draft: BoardSeatDraft) -> list[str]:
             continue
         if len(text.split()) > MAX_LINE_WORDS:
             errors.append(f"{key}_too_long")
+    if not _is_valid_acquisition_idea_line(draft.idea_line):
+        errors.append("idea_line_invalid")
+    if not _normalize_source_refs(draft.source_refs, max_items=4):
+        errors.append("missing_source_refs")
     return errors
 
 
-def _sanitize_draft(*, company: str, draft: BoardSeatDraft, funding: FundingSnapshot) -> BoardSeatDraft:
+def _sanitize_draft(
+    *,
+    company: str,
+    draft: BoardSeatDraft,
+    funding: FundingSnapshot,
+    acquisition_rows: list[dict[str, str]] | None = None,
+) -> BoardSeatDraft:
     funding_history, funding_latest_round_backers = _funding_lines_from_snapshot(funding)
-    source_urls = _normalize_source_urls(draft.source_urls, max_items=4) or _normalize_source_urls(funding.source_urls, max_items=4)
+    acq_rows = acquisition_rows or []
+    idea_line = _normalize_line(draft.idea_line)
+    if not _is_valid_acquisition_idea_line(idea_line):
+        seed_text = " ".join(
+            [
+                str(draft.idea_line or ""),
+                str(draft.why_now or ""),
+                str(draft.whats_different or ""),
+                " ".join(str(row.get("title") or "") for row in acq_rows[:2]),
+            ]
+        )
+        idea_line = _best_effort_idea_line(company=company, seed_text=seed_text)
+    source_refs = _build_source_refs(company=company, draft=draft, funding=funding, acquisition_rows=acq_rows)
     return BoardSeatDraft(
+        idea_line=idea_line,
         why_now=_normalize_line(draft.why_now)
         or f"{company} has a near-term window to drive measurable strategic leverage.",
         whats_different=_normalize_line(draft.whats_different)
@@ -886,7 +1113,7 @@ def _sanitize_draft(*, company: str, draft: BoardSeatDraft, funding: FundingSnap
         or "Fit is strongest where roadmap, partnerships, and deployment constraints are explicitly addressed.",
         funding_history=_normalize_line(draft.funding_history) or funding_history,
         funding_latest_round_backers=_normalize_line(draft.funding_latest_round_backers) or funding_latest_round_backers,
-        source_urls=source_urls,
+        source_refs=source_refs,
         raw_model_output=draft.raw_model_output,
         rewrite_reasons=draft.rewrite_reasons,
     )
@@ -989,6 +1216,7 @@ def _build_novel_fallback_draft(
     snippets: list[str],
     recent_pitches: list[dict[str, Any]],
     funding: FundingSnapshot,
+    acquisition_rows: list[dict[str, str]] | None = None,
 ) -> BoardSeatDraft:
     previous_signatures = [str(item.get("investment_signature") or "").strip() for item in recent_pitches]
     chosen = ""
@@ -1011,7 +1239,9 @@ def _build_novel_fallback_draft(
     return _sanitize_draft(
         company=company,
         funding=funding,
+        acquisition_rows=acquisition_rows or [],
         draft=BoardSeatDraft(
+            idea_line=_best_effort_idea_line(company=company, seed_text=chosen),
             why_now=chosen,
             whats_different="Use net-new evidence versus previously pitched ideas.",
             mos_risks="Main risk is repeating stale theses without materially new information.",
@@ -1020,6 +1250,7 @@ def _build_novel_fallback_draft(
             context_domain_fit_gaps="Map recommendation to current roadmap, partnerships, and deployment gaps.",
             funding_history=funding_history,
             funding_latest_round_backers=funding_latest_round_backers,
+            source_refs=[],
             raw_model_output="",
             rewrite_reasons=["novel_fallback"],
         ),
@@ -1135,6 +1366,61 @@ def _brave_search_rows(company: str) -> list[dict[str, str]]:
                 }
             )
             if len(rows) >= BRAVE_SEARCH_RESULTS:
+                return rows
+    return rows
+
+
+def _acquisition_search_rows(*, company: str, snippets: list[str]) -> list[dict[str, str]]:
+    api_key = _brave_search_api_key()
+    if not api_key:
+        return []
+    headers = {
+        "Accept": "application/json",
+        "X-Subscription-Token": api_key,
+        "User-Agent": "CoatueClaw/1.0",
+    }
+    hints = " ".join(snippets[:3]).strip()
+    queries = [
+        f"{company} acquisition acquihire startup",
+        f"{company} acquihire team",
+        f"{company} M&A target {hints}" if hints else f"{company} M&A target startup",
+    ]
+    rows: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for query in queries:
+        try:
+            payload = _http_json(
+                url=WEB_SEARCH_ENDPOINT,
+                headers=headers,
+                params={"q": query, "count": str(ACQ_SEARCH_RESULTS), "country": "us", "search_lang": "en"},
+            )
+        except Exception:
+            continue
+        web = payload.get("web") if isinstance(payload, dict) else None
+        results = web.get("results") if isinstance(web, dict) else None
+        if not isinstance(results, list):
+            continue
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            url = _normalize_source_url(str(item.get("url") or ""))
+            if not url:
+                continue
+            key = url.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            title = _normalize_source_text(str(item.get("title") or ""), max_chars=180)
+            snippet = _normalize_text(str(item.get("description") or ""), max_chars=420)
+            rows.append(
+                {
+                    "publisher": _publisher_from_url(url),
+                    "title": title or _normalize_source_text(snippet, max_chars=180) or "Reference",
+                    "snippet": snippet,
+                    "url": url,
+                }
+            )
+            if len(rows) >= ACQ_SEARCH_RESULTS:
                 return rows
     return rows
 
@@ -1478,12 +1764,19 @@ def _backfill_channel_pitches(
     return {"scanned": len(history), "matched": matched, "inserted": inserted}
 
 
-def _fallback_draft(*, company: str, snippets: list[str], funding: FundingSnapshot) -> BoardSeatDraft:
+def _fallback_draft(
+    *,
+    company: str,
+    snippets: list[str],
+    funding: FundingSnapshot,
+    acquisition_rows: list[dict[str, str]] | None = None,
+) -> BoardSeatDraft:
     why_now = _normalize_line(snippets[0]) if snippets else f"No high-signal updates surfaced for {company} in the last 24 hours."
     whats_different = _normalize_line(snippets[1]) if len(snippets) > 1 else "Differentiate on speed to deployment, measured outcomes, and implementation feasibility."
     mos_risks = _normalize_line(snippets[2]) if len(snippets) > 2 else "Key risks are execution bandwidth, procurement timing, and integration complexity."
     funding_history, funding_latest_round_backers = _funding_lines_from_snapshot(funding)
     draft = BoardSeatDraft(
+        idea_line=_best_effort_idea_line(company=company, seed_text=why_now),
         why_now=why_now,
         whats_different=whats_different,
         mos_risks=mos_risks,
@@ -1492,16 +1785,18 @@ def _fallback_draft(*, company: str, snippets: list[str], funding: FundingSnapsh
         context_domain_fit_gaps="Spell out where existing capabilities fit, and which gaps need partners or build plans.",
         funding_history=funding_history,
         funding_latest_round_backers=funding_latest_round_backers,
+        source_refs=[],
         raw_model_output="",
         rewrite_reasons=["fallback"],
     )
-    return _sanitize_draft(company=company, draft=draft, funding=funding)
+    return _sanitize_draft(company=company, draft=draft, funding=funding, acquisition_rows=acquisition_rows or [])
 
 
 def _parse_llm_draft_payload(payload: Any) -> BoardSeatDraft | None:
     if not isinstance(payload, dict):
         return None
     required = (
+        "idea_line",
         "why_now",
         "whats_different",
         "mos_risks",
@@ -1513,7 +1808,21 @@ def _parse_llm_draft_payload(payload: Any) -> BoardSeatDraft | None:
     )
     if any(not isinstance(payload.get(key), str) for key in required):
         return None
+    source_refs_raw = payload.get("source_refs")
+    source_refs: list[SourceRef] = []
+    if isinstance(source_refs_raw, list):
+        for item in source_refs_raw:
+            if not isinstance(item, dict):
+                continue
+            source_refs.append(
+                SourceRef(
+                    name_or_publisher=str(item.get("name_or_publisher") or ""),
+                    title=str(item.get("title") or ""),
+                    url=str(item.get("url") or ""),
+                )
+            )
     return BoardSeatDraft(
+        idea_line=str(payload.get("idea_line") or ""),
         why_now=str(payload.get("why_now") or ""),
         whats_different=str(payload.get("whats_different") or ""),
         mos_risks=str(payload.get("mos_risks") or ""),
@@ -1522,6 +1831,7 @@ def _parse_llm_draft_payload(payload: Any) -> BoardSeatDraft | None:
         context_domain_fit_gaps=str(payload.get("context_domain_fit_gaps") or ""),
         funding_history=str(payload.get("funding_history") or ""),
         funding_latest_round_backers=str(payload.get("funding_latest_round_backers") or ""),
+        source_refs=source_refs,
         raw_model_output=json.dumps(payload, ensure_ascii=False),
         rewrite_reasons=[],
     )
@@ -1553,14 +1863,17 @@ def _llm_draft(
     prompt = (
         f"Generate a structured board-seat brief for {company}.\n"
         "Return strict JSON only with keys: "
-        "why_now, whats_different, mos_risks, bottom_line, "
+        "idea_line, why_now, whats_different, mos_risks, bottom_line, "
         "context_current_efforts, context_domain_fit_gaps, "
-        "funding_history, funding_latest_round_backers.\n"
+        "funding_history, funding_latest_round_backers, source_refs.\n"
         "Constraints:\n"
         f"- each value must be a single line <= {MAX_LINE_WORDS} words\n"
+        "- idea_line must start with Acquire or Acquihire and name a concrete target.\n"
+        "- do not propose internal build as primary recommendation.\n"
         "- short, high skim value, decision-useful.\n"
         "- style must be concise labeled-line content, not bullets.\n"
         "- do not use legacy labels (Signal/Board lens/Watchlist/Team ask).\n"
+        "- source_refs is an array of objects with name_or_publisher, title, url.\n"
         "Recent channel context:\n"
         f"{joined}\n"
         f"Funding snapshot input:\n{funding_json}\n"
@@ -1594,6 +1907,7 @@ def _llm_draft(
         if draft is None:
             return None
         return BoardSeatDraft(
+            idea_line=draft.idea_line,
             why_now=draft.why_now,
             whats_different=draft.whats_different,
             mos_risks=draft.mos_risks,
@@ -1602,6 +1916,7 @@ def _llm_draft(
             context_domain_fit_gaps=draft.context_domain_fit_gaps,
             funding_history=draft.funding_history,
             funding_latest_round_backers=draft.funding_latest_round_backers,
+            source_refs=draft.source_refs,
             raw_model_output=text,
             rewrite_reasons=[],
         )
@@ -1616,12 +1931,13 @@ def _build_draft(
     funding: FundingSnapshot,
     recent_pitches: list[dict[str, Any]] | None = None,
 ) -> BoardSeatDraft:
+    acquisition_rows = _acquisition_search_rows(company=company, snippets=snippets)
     prior_investments = [str(item.get("investment_text") or "").strip() for item in (recent_pitches or [])]
     llm = _llm_draft(company=company, snippets=snippets, funding=funding, prior_investments=prior_investments)
-    draft = llm if llm is not None else _fallback_draft(company=company, snippets=snippets, funding=funding)
-    draft = _sanitize_draft(company=company, draft=draft, funding=funding)
+    draft = llm if llm is not None else _fallback_draft(company=company, snippets=snippets, funding=funding, acquisition_rows=acquisition_rows)
+    draft = _sanitize_draft(company=company, draft=draft, funding=funding, acquisition_rows=acquisition_rows)
     if _validate_draft(draft):
-        return _fallback_draft(company=company, snippets=snippets, funding=funding)
+        return _fallback_draft(company=company, snippets=snippets, funding=funding, acquisition_rows=acquisition_rows)
     return draft
 
 
@@ -1717,11 +2033,13 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                 previous_pitch = recent_pitches[0] if recent_pitches else None
                 significant_change = _has_significant_change(previous_pitch=previous_pitch, current_snippets=snippets)
                 if repeated and not significant_change:
+                    acquisition_rows = _acquisition_search_rows(company=company, snippets=snippets)
                     draft = _build_novel_fallback_draft(
                         company=company,
                         snippets=snippets,
                         recent_pitches=recent_pitches,
                         funding=funding,
+                        acquisition_rows=acquisition_rows,
                     )
                     message = _render_board_seat_message(company=company, draft=draft)
                     investment_text = _extract_investment_text(message)
