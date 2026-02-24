@@ -3,6 +3,16 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-24, SSH host alias memory for future Codex sessions)
+- Added operator memory to `AGENTS.md`:
+  - Mac mini SSH host alias is `mini` (`ssh mini`)
+  - explicit guardrail added to avoid storing SSH passwords/secrets in git
+- Integrator deploy/health check was executed via `ssh mini`:
+  - pulled latest `main` in `/opt/coatue-claw` (now at `e5ffeb7`)
+  - `make openclaw-restart` succeeded
+  - `make openclaw-slack-status` probe now reports `ok: true`
+  - `make openclaw-slack-logs` confirms Slack socket mode connected
+
 ## Update (2026-02-24, HFA V1 docs-first workflow shipped on `codex/agent-hf-analyst`)
 - Implemented HFA V1 modules:
   - `src/coatue_claw/hf_document_extract.py`

@@ -19,7 +19,9 @@ Build and operate a 24/7 equity research system for Spencer + Carson, with Slack
 ## Operator Workflow (Laptop + Codex + Mac mini)
 - Canonical production repo path on Mac mini: `/opt/coatue-claw`
 - Runtime control path on Mac mini: `openclaw` CLI + `make` targets in `/opt/coatue-claw/Makefile`
+- Mac mini SSH host alias: `mini` (use `ssh mini` for remote ops from laptop/Codex sessions)
 - If Codex opens an empty/local mirror repo (for example `/Users/spclaw/Documents/Coatue Claw` with no commits), switch immediately to `/opt/coatue-claw` before making changes.
+- Never store SSH passwords or secrets in git-tracked files.
 
 Required end-to-end loop for every Codex task:
 1. Edit code/docs in `/opt/coatue-claw`.
