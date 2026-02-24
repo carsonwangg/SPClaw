@@ -19,6 +19,9 @@ from coatue_claw.chart_intent import parse_chart_intent
 from coatue_claw.chart_metrics import METRIC_SPECS, metric_label
 from coatue_claw.chart_title_context import infer_chart_title_context
 from coatue_claw.cli import run_diligence
+from coatue_claw.hf_analyst import HFAError, analyze_thread as run_hfa_thread
+from coatue_claw.hf_analyst import format_hfa_slack_summary, hfa_status as hfa_status_lookup
+from coatue_claw.hf_analyst import parse_hfa_intent, record_dm_autorun, should_run_dm_autorun
 from coatue_claw.memory_extraction import parse_memory_lookup_query
 from coatue_claw.memory_runtime import MemoryRuntime
 from coatue_claw.market_daily import MarketDailyError
@@ -223,6 +226,7 @@ def _format_chart_usage() -> str:
     return (
         "Usage:\n"
         "- `diligence TICKER`\n"
+        "- `hfa analyze [optional question]` / `hfa status`\n"
         "- `md now` / `md status` / `md holdings refresh`\n"
         "- `x digest <topic|ticker|handle> [last 24h] [limit 50]`\n"
         "- `x chart now` (run chart-scout winner now)\n"
@@ -333,6 +337,110 @@ def _spencer_change_log() -> SpencerChangeLog | None:
         logger.exception("Failed to initialize spencer change log")
         _SPENCER_CHANGE_LOG = None
     return _SPENCER_CHANGE_LOG
+
+
+def _is_dm_event(event: dict) -> bool:
+    channel_type = str(event.get("channel_type") or "").strip().lower()
+    if channel_type == "im":
+        return True
+    channel_id = str(event.get("channel") or "").strip()
+    return channel_id.startswith("D")
+
+
+def _handle_hfa_command(
+    *,
+    text: str,
+    channel: str | None,
+    thread_ts: str,
+    user_id: str | None,
+    say,
+) -> bool:
+    kind, tail = parse_hfa_intent(text)
+    if kind is None:
+        return False
+
+    if not channel:
+        say(text="HFA command failed: missing Slack channel context.", thread_ts=thread_ts)
+        return True
+
+    if kind == "status":
+        status = hfa_status_lookup(channel=channel, thread_ts=thread_ts, limit=5)
+        runs = list(status.get("runs") or [])
+        if not runs:
+            say(text="No HFA runs recorded for this thread yet.", thread_ts=thread_ts)
+            return True
+        latest = runs[0]
+        lines = [
+            "HFA status:",
+            f"- run_id: `{latest.get('run_id')}`",
+            f"- status: `{latest.get('status')}`",
+            f"- created_at_utc: `{latest.get('created_at_utc')}`",
+        ]
+        artifact = str(latest.get("artifact_path") or "").strip()
+        if artifact:
+            lines.append(f"- artifact: `{artifact}`")
+        say(text="\n".join(lines), thread_ts=thread_ts)
+        return True
+
+    if kind == "analyze":
+        try:
+            result = run_hfa_thread(
+                channel=channel,
+                thread_ts=thread_ts,
+                question=tail,
+                requested_by=user_id,
+                trigger_mode="slack_command",
+                dry_run=False,
+                slack_client=app.client,
+                memory_runtime=_memory_runtime(),
+            )
+        except HFAError as exc:
+            say(text=f"HFA analyze failed: `{exc}`", thread_ts=thread_ts)
+            return True
+        say(text=format_hfa_slack_summary(result), thread_ts=thread_ts)
+        return True
+
+    return False
+
+
+def _maybe_auto_run_hfa_dm(
+    *,
+    event: dict,
+    thread_ts: str,
+    channel: str | None,
+    user_id: str | None,
+    say,
+) -> bool:
+    if not _is_dm_event(event):
+        return False
+    if not channel or not user_id:
+        return False
+    files = _extract_event_files(event)
+    file_ids = [str(item.get("id") or "").strip() for item in files if isinstance(item, dict) and str(item.get("id") or "").strip()]
+    if not file_ids:
+        return False
+    if not should_run_dm_autorun(channel=channel, user_id=user_id, thread_ts=thread_ts, file_ids=file_ids):
+        return False
+    try:
+        result = run_hfa_thread(
+            channel=channel,
+            thread_ts=thread_ts,
+            question=None,
+            requested_by=user_id,
+            trigger_mode="dm_auto",
+            dry_run=False,
+            slack_client=app.client,
+            memory_runtime=_memory_runtime(),
+        )
+    except HFAError as exc:
+        say(text=f"HFA auto-run failed: `{exc}`", thread_ts=thread_ts)
+        return True
+    record_dm_autorun(channel=channel, user_id=user_id, thread_ts=thread_ts, file_ids=file_ids)
+    say(
+        text=f"{format_hfa_slack_summary(result)}\n- trigger_mode: `dm_auto`",
+        thread_ts=thread_ts,
+    )
+    return True
 
 
 def _capture_spencer_change_request(
@@ -1756,6 +1864,13 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
     )
 
     if not text.strip():
+        _maybe_auto_run_hfa_dm(
+            event=event,
+            thread_ts=thread_ts,
+            channel=channel,
+            user_id=user_id,
+            say=say,
+        )
         return
 
     git_memory_text = _parse_git_memory_request_text(text)
@@ -1895,6 +2010,10 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
 
     if _handle_market_daily_command(text=text, channel=channel, thread_ts=thread_ts, say=say):
         _mark_spencer_change(change_id, status="implemented", note="Handled by market daily workflow.")
+        return
+
+    if _handle_hfa_command(text=text, channel=channel, thread_ts=thread_ts, user_id=user_id, say=say):
+        _mark_spencer_change(change_id, status="implemented", note="Handled by HFA workflow.")
         return
 
     try:

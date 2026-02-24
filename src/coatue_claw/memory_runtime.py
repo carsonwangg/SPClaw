@@ -307,3 +307,98 @@ class MemoryRuntime:
             f"- expected_outcome: `{checkpoint.expected_outcome}`\n"
             f"- files: `{checkpoint.files_json}`"
         )
+
+    def ingest_hfa_facts(
+        self,
+        *,
+        requested_by: str,
+        artifact_path: str,
+        generated_at_utc: str,
+        thesis: str,
+        catalysts: list[str],
+        risks: list[str],
+        weighted_total: float,
+        confidence_label: str,
+    ) -> list[int]:
+        candidates: list[FactCandidate] = []
+        if thesis.strip():
+            candidates.append(
+                FactCandidate(
+                    category="hfa_analysis",
+                    entity=requested_by.strip() or "hfa-user",
+                    fact_key="thesis",
+                    fact_value=thesis.strip(),
+                    rationale="HFA thesis writeback",
+                    source="hfa-analysis",
+                    source_ts_utc=generated_at_utc,
+                    tier="stable",
+                    confidence=0.75,
+                )
+            )
+        for idx, value in enumerate(catalysts[:2], start=1):
+            cleaned = str(value or "").strip()
+            if not cleaned:
+                continue
+            candidates.append(
+                FactCandidate(
+                    category="hfa_analysis",
+                    entity=requested_by.strip() or "hfa-user",
+                    fact_key=f"catalyst_{idx}",
+                    fact_value=cleaned,
+                    rationale="HFA catalyst writeback",
+                    source="hfa-analysis",
+                    source_ts_utc=generated_at_utc,
+                    tier="active",
+                    confidence=0.7,
+                )
+            )
+        for idx, value in enumerate(risks[:2], start=1):
+            cleaned = str(value or "").strip()
+            if not cleaned:
+                continue
+            candidates.append(
+                FactCandidate(
+                    category="hfa_analysis",
+                    entity=requested_by.strip() or "hfa-user",
+                    fact_key=f"risk_{idx}",
+                    fact_value=cleaned,
+                    rationale="HFA risk writeback",
+                    source="hfa-analysis",
+                    source_ts_utc=generated_at_utc,
+                    tier="active",
+                    confidence=0.7,
+                )
+            )
+        candidates.append(
+            FactCandidate(
+                category="hfa_analysis",
+                entity=requested_by.strip() or "hfa-user",
+                fact_key="score_summary",
+                fact_value=f"weighted_total={weighted_total:.2f}/100 confidence={confidence_label}",
+                rationale="HFA score summary writeback",
+                source="hfa-analysis",
+                source_ts_utc=generated_at_utc,
+                tier="stable",
+                confidence=0.8,
+            )
+        )
+        if artifact_path.strip():
+            candidates.append(
+                FactCandidate(
+                    category="hfa_analysis",
+                    entity=requested_by.strip() or "hfa-user",
+                    fact_key="artifact_path",
+                    fact_value=artifact_path.strip(),
+                    rationale="HFA artifact pointer",
+                    source="hfa-analysis",
+                    source_ts_utc=generated_at_utc,
+                    tier="stable",
+                    confidence=0.9,
+                )
+            )
+        ids: list[int] = []
+        for candidate in candidates:
+            memory_id = self.store.upsert_fact(candidate)
+            self.semantic.upsert(memory_id=memory_id, candidate=candidate)
+            ids.append(memory_id)
+        return ids

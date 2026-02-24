@@ -8,6 +8,8 @@ import json
 
 from coatue_claw.chart_metrics import DEFAULT_X_METRIC, DEFAULT_Y_METRIC, METRIC_SPECS
 from coatue_claw.diligence_report import build_neutral_investment_memo
+from coatue_claw.hf_analyst import analyze_thread as hfa_analyze_thread
+from coatue_claw.hf_analyst import hfa_status
 from coatue_claw.memory_runtime import MemoryRuntime
 from coatue_claw.market_daily import debug_catalyst as market_daily_debug_catalyst
 from coatue_claw.market_daily import holdings as market_daily_holdings
@@ -185,6 +187,45 @@ def _run_market_daily_command(args) -> None:
         return
 
 
+def _run_hfa_command(args) -> None:
+    if args.hfa_cmd == "analyze":
+        result = hfa_analyze_thread(
+            channel=str(args.channel).strip(),
+            thread_ts=str(args.thread_ts).strip(),
+            question=(str(args.question).strip() or None),
+            requested_by="cli",
+            trigger_mode="cli",
+            dry_run=bool(args.dry_run),
+            memory_runtime=MemoryRuntime(),
+        )
+        payload = {
+            "run_id": result.run_id,
+            "summary_text": result.summary_text,
+            "artifact_path": result.artifact_path,
+            "files_analyzed": result.files_analyzed,
+            "score": result.scorecard.weighted_total,
+            "confidence": result.scorecard.confidence_label,
+            "warnings": list(result.warnings),
+            "memory_facts": list(result.memory_facts),
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return
+
+    if args.hfa_cmd == "status":
+        print(
+            json.dumps(
+                hfa_status(
+                    channel=(str(args.channel).strip() or None),
+                    thread_ts=(str(args.thread_ts).strip() or None),
+                    limit=max(1, min(100, int(args.limit))),
+                ),
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return
+
+
 def main():
     parser = argparse.ArgumentParser("coatue-claw")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -270,6 +311,20 @@ def main():
     mdd.add_argument("ticker")
     mdd.add_argument("--slot", choices=("open", "close"), default="open")
 
+    hfa = sub.add_parser("hfa")
+    hfa_sub = hfa.add_subparsers(dest="hfa_cmd", required=True)
+
+    hfaa = hfa_sub.add_parser("analyze")
+    hfaa.add_argument("--channel", required=True)
+    hfaa.add_argument("--thread-ts", required=True)
+    hfaa.add_argument("--question", default="")
+    hfaa.add_argument("--dry-run", action="store_true")
+
+    hfas = hfa_sub.add_parser("status")
+    hfas.add_argument("--channel", default="")
+    hfas.add_argument("--thread-ts", default="")
+    hfas.add_argument("--limit", type=int, default=20)
+
     args = parser.parse_args()
 
     if args.cmd == "diligence":
@@ -334,6 +389,11 @@ def main():
 
     if args.cmd == "market-daily":
         _run_market_daily_command(args)
+        return
+
+    if args.cmd == "hfa":
+        _run_hfa_command(args)
+        return
 
 
 if __name__ == "__main__":

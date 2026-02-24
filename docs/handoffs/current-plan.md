@@ -40,6 +40,27 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- HFA V1 (docs-first hedge fund analyst workflow) is implemented on `codex/agent-hf-analyst`:
+  - new modules:
+    - `src/coatue_claw/hf_document_extract.py`
+    - `src/coatue_claw/hf_prompt_contract.py`
+    - `src/coatue_claw/hf_store.py`
+    - `src/coatue_claw/hf_analyst.py`
+  - CLI:
+    - `claw hfa analyze --channel <id> --thread-ts <ts> [--question "..."] [--dry-run]`
+    - `claw hfa status [--channel <id>] [--thread-ts <ts>]`
+  - Slack:
+    - explicit `hfa analyze` and `hfa status`
+    - DM auto-run for new file sets only (`hf_dm_autoruns` dedupe)
+  - runtime persistence:
+    - DB: `/opt/coatue-claw-data/db/hf_analyst.sqlite`
+    - artifact dir: `/opt/coatue-claw-data/artifacts/hf-analyst`
+  - memory writeback:
+    - structured thesis/catalyst/risk/score/artifact pointer via `MemoryRuntime.ingest_hfa_facts(...)`
+  - dependency adds:
+    - `pypdf`, `python-docx`, `python-pptx`
+  - validation:
+    - `PYTHONPATH=src python3 -m pytest -q` -> `240 passed`
 - Parallel Codex multi-agent branch model is now codified for this repo:
   - branch naming standard added in `AGENTS.md`:
     - `codex/agent-board-seat`

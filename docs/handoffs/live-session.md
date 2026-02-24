@@ -3,6 +3,55 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-24, HFA V1 docs-first workflow shipped on `codex/agent-hf-analyst`)
+- Implemented HFA V1 modules:
+  - `src/coatue_claw/hf_document_extract.py`
+  - `src/coatue_claw/hf_prompt_contract.py`
+  - `src/coatue_claw/hf_store.py`
+  - `src/coatue_claw/hf_analyst.py`
+- Implemented docs-first extraction for:
+  - PDF (`pypdf`)
+  - DOCX (`python-docx`)
+  - PPTX (`python-pptx`)
+  - TXT/MD/CSV (native read path)
+- Added HFA run persistence and audit tables in `/opt/coatue-claw-data/db/hf_analyst.sqlite`:
+  - `hf_runs`
+  - `hf_run_inputs`
+  - `hf_run_sections`
+  - `hf_dm_autoruns`
+- Added CLI surface in `src/coatue_claw/cli.py`:
+  - `claw hfa analyze --channel <id> --thread-ts <ts> [--question "..."] [--dry-run]`
+  - `claw hfa status [--channel <id>] [--thread-ts <ts>]`
+- Added Slack HFA workflow in `src/coatue_claw/slack_bot.py`:
+  - explicit `hfa analyze [optional question]`
+  - explicit `hfa status`
+  - DM auto-run on new file sets only (deduped by file-set hash in `hf_dm_autoruns`)
+- Added HFA memory writeback helper in `src/coatue_claw/memory_runtime.py`:
+  - `ingest_hfa_facts(...)` persists thesis/catalysts/risks/score/artifact pointer
+  - no full memo body writeback
+- Added tests:
+  - `tests/test_hf_document_extract.py`
+  - `tests/test_hf_prompt_contract.py`
+  - `tests/test_hf_analyst.py`
+- Dependency updates in `pyproject.toml`:
+  - `pypdf`
+  - `python-docx`
+  - `python-pptx`
+
+### Validation
+- `PYTHONPATH=src python3 -m pytest -q tests/test_hf_document_extract.py tests/test_hf_prompt_contract.py tests/test_hf_analyst.py` -> `12 passed`
+- `PYTHONPATH=src python3 -m pytest -q tests/test_memory_runtime.py tests/test_slack_routing.py tests/test_slack_file_ingest.py` -> `9 passed`
+- `PYTHONPATH=src python3 -m pytest -q` -> `240 passed`
+- `python3 -m compileall -q src/coatue_claw/hf_document_extract.py src/coatue_claw/hf_prompt_contract.py src/coatue_claw/hf_store.py src/coatue_claw/hf_analyst.py src/coatue_claw/cli.py src/coatue_claw/slack_bot.py src/coatue_claw/memory_runtime.py` -> pass
+
+### Integrator Runtime Steps (after merge to `main`)
+1. `cd /opt/coatue-claw && git pull origin main`
+2. `make openclaw-restart`
+3. `make openclaw-slack-status`
+4. In Slack thread with uploaded docs, run:
+   - `hfa analyze`
+5. In DM with uploaded docs (no command), verify single auto-run and no duplicate rerun on same file set.
+
 ## Update (2026-02-24, parallel Codex branch/worktree protocol + agent handoff docs)
 - Added parallel-branch operating protocol to `/Users/carsonwang/CoatueClaw/AGENTS.md`:
   - branch naming standard: `codex/agent-board-seat`, `codex/agent-chart-day`, `codex/agent-hf-analyst`, `codex/agent-market-daily`
