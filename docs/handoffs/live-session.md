@@ -1289,3 +1289,26 @@ Then confirm bot returns:
 ### Immediate Next Steps
 1. If full channel wipe is still required, use a user/admin token with delete rights (or manual Slack admin UI deletion for non-bot messages).
 2. Keep current bot deletion helper for future bot-authored cleanup runs.
+
+## 2026-02-23 - DM Routing Fix for SPClaw
+- Runtime modules updated:
+  - `/opt/coatue-claw/src/coatue_claw/slack_routing.py`
+    - added `should_route_message_event(text, channel_type)`:
+      - always routes non-empty direct-message events (`channel_type=im`), even if the DM includes `<@SPClaw>` mention markup.
+      - preserves existing mention-based default routing behavior for channel messages.
+  - `/opt/coatue-claw/src/coatue_claw/slack_bot.py`
+    - `handle_message` now uses `should_route_message_event(...)` instead of only `should_default_route_message(...)`.
+    - DM events are tagged as `source_event=slack-message-dm` for logging/memory source traceability.
+- Tests updated:
+  - `/opt/coatue-claw/tests/test_slack_routing.py`
+    - added `test_should_route_message_event_im_always_routes_nonempty`
+    - added `test_should_route_message_event_non_im_follows_default_rules`
+- Validation:
+  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_slack_routing.py /opt/coatue-claw/tests/test_x_chart_daily.py /opt/coatue-claw/tests/test_slack_x_chart_intent.py` -> `82 passed`
+  - runtime restart:
+    - `make openclaw-restart` (gateway restarted)
+    - `make openclaw-slack-status` -> Slack probe `ok=true`, bot `coatue_claw` connected.
+
+### Immediate Next Steps
+1. DM `SPClaw` a plain message and a second message including `@SPClaw` to verify both trigger replies.
+2. If DM still does not trigger, check Slack app Event Subscriptions include DM `message` events (`message.im`) and reinstall app.

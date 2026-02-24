@@ -57,7 +57,7 @@ from coatue_claw.slack_pipeline import (
     undo_last_deploy,
 )
 from coatue_claw.slack_pipeline_intent import parse_pipeline_intent
-from coatue_claw.slack_routing import should_default_route_message
+from coatue_claw.slack_routing import should_default_route_message, should_route_message_event
 from coatue_claw.slack_x_chart_intent import parse_x_chart_post_intent
 from coatue_claw.slack_x_intent import parse_x_digest_intent
 from coatue_claw.universe_store import (
@@ -1476,12 +1476,14 @@ def handle_message(event, say):
     if event.get("bot_id"):
         return
     text = event.get("text") or ""
-    if should_default_route_message(text):
+    channel_type = str(event.get("channel_type") or "")
+    if should_route_message_event(text=text, channel_type=channel_type):
+        source_event = "slack-message-dm" if channel_type.lower() == "im" else "slack-message-default"
         _handle_slack_request_event(
             event=event,
             say=say,
-            source_event="slack-message-default",
-            memory_source="slack-message-default",
+            source_event=source_event,
+            memory_source=source_event,
         )
         return
     # Not default-routed (typically because another user was @mentioned), but still ingest files.
