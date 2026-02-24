@@ -118,6 +118,91 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
    - `make openclaw-market-daily-run-once DRY_RUN=1`
    - `make openclaw-market-daily-earnings-recap-run-once DRY_RUN=1`
    - Slack: `md status` should show `earnings_recap_time`.
+## Update (2026-02-24, Board Seat hard 14-day no-repeat + strict repitch evidence gate)
+- Implemented strict repitch governance in `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/board_seat_daily.py`:
+  - hard no-repeat rule: same target cannot be re-pitched within `14` days (non-bypassable).
+  - default target lock updated to `14` days (`COATUE_CLAW_BOARD_SEAT_TARGET_LOCK_DAYS`, minimum enforced 14).
+  - `COATUE_CLAW_BOARD_SEAT_ALLOW_REPEAT_TARGETS=1` now only bypasses configurable lock window beyond 14 days; it cannot bypass the hard 14-day rule.
+- Added continuous promising-target event tracking:
+  - new DB table: `board_seat_target_events`
+  - each run tracks event flow for promising targets (current target + rotation + target memory) and stores normalized event rows with:
+    - `event_type`
+    - `impact_score`
+    - `evidence_quality`
+    - source metadata and timestamps
+- Added strict post-lock repitch assessment:
+  - new DB table: `board_seat_repitch_assessments`
+  - repeated ideas after lock window are only allowed when events meet exceptional thresholds (critical bias against repeats).
+  - rejected resurfacing is explicit with `repitch_not_significant_enough`.
+- Added explicit repitch disclosure when resurfacing is allowed:
+  - message includes:
+    - `Repitch note`
+    - `New evidence`
+  - pitch audit fields now persisted in `board_seat_pitches`:
+    - `is_repitch`
+    - `repitch_of_pitch_id`
+    - `repitch_prev_posted_at_utc`
+    - `repitch_similarity`
+    - `repitch_new_evidence_json`
+
+### Validation
+- `python3 -m compileall -q src/coatue_claw/board_seat_daily.py` -> pass
+- `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `37 passed`
+- `PYTHONPATH=src python3 -m pytest -q` -> `236 passed`
+
+## Update (2026-02-24, Board Seat funding accuracy hardening: web-first + warning-mode)
+- Implemented funding accuracy hardening in `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/board_seat_daily.py`:
+  - `FundingSnapshot` expanded with:
+    - `evidence_count`
+    - `distinct_domains`
+    - `conflict_flags`
+    - `verification_status`
+  - `board_seat_funding_cache` schema expanded with persisted columns for the above fields plus migration-safe `ALTER TABLE` add-on logic.
+  - funding evidence pipeline now normalizes and scores web rows before extraction:
+    - canonical URL normalization + dedupe
+    - low-signal row rejection
+    - top-N evidence selection (`COATUE_CLAW_BOARD_SEAT_FUNDING_WEB_TOP_ROWS`, default `8`)
+    - conflict flag detection (`major_round_mismatch`, `major_amount_mismatch`, `minor_date_variance`)
+  - funding confidence/verification contract added:
+    - env controls:
+      - `COATUE_CLAW_BOARD_SEAT_FUNDING_MIN_DOMAINS` (default `2`)
+      - `COATUE_CLAW_BOARD_SEAT_FUNDING_LOW_CONF_THRESHOLD` (default `0.55`)
+      - `COATUE_CLAW_BOARD_SEAT_FUNDING_WARNING_MODE` (default `1`)
+    - low-confidence funding now appends warning line:
+      - `Warning: Funding data is low-confidence; verify before action.`
+  - status telemetry expanded:
+    - `funding_verification_by_company`
+    - `funding_quality_metrics` (`verified_pct`, `low_confidence_pct`, `oldest_cache_age_days`, counts)
+  - new board-seat CLI commands shipped:
+    - `refresh-funding --all-portcos`
+    - `funding-quality-report --all-portcos`
+    - report artifact: `funding-quality-report-YYYY-MM-DD.md` under board-seat artifact dir
+  - Make targets added:
+    - `openclaw-board-seat-refresh-funding`
+    - `openclaw-board-seat-funding-report`
+
+### Validation
+- `python3 -m compileall -q src/coatue_claw/board_seat_daily.py` -> pass
+- `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `35 passed`
+
+### Tests added/updated
+- canonical URL funding-evidence dedupe
+- funding conflict detection (round/amount mismatch)
+- funding confidence band mapping (`high`/`medium`/`low`)
+- low-confidence warning line rendering in board-seat message
+- web refresh domain/evidence metrics path
+- status funding quality metric payload coverage
+
+### Immediate runtime steps (Mac mini integrator)
+1. `cd /opt/coatue-claw && git pull origin main`
+2. Set runtime keys in `/opt/coatue-claw/.env.prod` for web-first funding:
+   - `COATUE_CLAW_BRAVE_API_KEY`
+   - `COATUE_CLAW_BOARD_SEAT_GOOGLE_SERP_API_KEY` (or `SERPAPI_API_KEY`)
+   - keep `COATUE_CLAW_BOARD_SEAT_CRUNCHBASE_ENABLED=0` until Crunchbase key is provisioned
+3. `make openclaw-restart`
+4. `make openclaw-board-seat-status`
+5. `make openclaw-board-seat-refresh-funding`
+6. `make openclaw-board-seat-funding-report`
 
 ## Update (2026-02-24, parallel Codex branch/worktree protocol + agent handoff docs)
 - Added parallel-branch operating protocol to `/Users/carsonwang/CoatueClaw/AGENTS.md`:

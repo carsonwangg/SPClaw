@@ -11,7 +11,7 @@ from pathlib import Path
 import re
 import sqlite3
 from typing import Any
-from urllib.parse import urlencode, urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
@@ -98,15 +98,21 @@ SIGNIFICANT_CHANGE_TERMS = {
 BOARD_SEAT_HEADER_RE = re.compile(r"board seat as a service\s*[—-]\s*(.+)$", re.IGNORECASE)
 BOARD_SEAT_FORMAT_VERSION = "v6_richtext_target_does_monthly_theme"
 MAX_LINE_WORDS = 18
-TARGET_LOCK_DAYS_DEFAULT = 30
+TARGET_LOCK_DAYS_DEFAULT = 14
+HARD_NO_REPITCH_DAYS = 14
 THESIS_LABELS: tuple[str, ...] = ("Idea", "Target does", "Why now", "What's different", "MOS/risks", "Bottom line")
 CONTEXT_LABELS: tuple[str, ...] = ("Current efforts", "Domain fit/gaps")
 FUNDING_LABELS: tuple[str, ...] = ("History", "Latest round/backers")
 FUNDING_CACHE_TTL_DAYS_DEFAULT = 14
 UNKNOWN_FUNDING_TEXT = "Target funding data is limited; verify via Crunchbase/PitchBook before action."
+LOW_CONFIDENCE_FUNDING_WARNING_TEXT = "Funding data is low-confidence; verify before action."
+REPITCH_DISCOURAGE_TEXT = "Spencer preference: avoid repeated ideas unless evidence is exceptionally material."
 WEB_SEARCH_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
 BRAVE_SEARCH_RESULTS = 5
 FUNDING_EXTRACT_MODEL = "gpt-5.2-chat-latest"
+FUNDING_WEB_TOP_ROWS_DEFAULT = 8
+FUNDING_MIN_DOMAINS_DEFAULT = 2
+FUNDING_LOW_CONF_THRESHOLD_DEFAULT = 0.55
 ACQ_SEARCH_RESULTS = 6
 TARGET_SEARCH_RESULTS = 10
 ACQ_PLACEHOLDER_TARGETS = {
@@ -257,6 +263,27 @@ LEGACY_BOARD_SEAT_PATTERNS = (
     "4. strategic fit for",
     "5. value creation",
 )
+FUNDING_SIGNAL_TERMS = {
+    "funding",
+    "raised",
+    "raises",
+    "raising",
+    "round",
+    "series",
+    "backed",
+    "backers",
+    "investor",
+    "investors",
+    "valuation",
+    "seed",
+    "pre-seed",
+    "growth",
+}
+FUNDING_ROUND_RE = re.compile(r"\b(series\s+[a-z][\+\-]?|seed|pre-seed|growth|debt|ipo)\b", re.IGNORECASE)
+FUNDING_AMOUNT_RE = re.compile(r"\$?\d+(?:\.\d+)?\s?(?:m|b|million|billion)\b", re.IGNORECASE)
+FUNDING_YEAR_RE = re.compile(r"\b(20\d{2})\b")
+TARGET_EVENT_MAX_TARGETS_PER_COMPANY_DEFAULT = 4
+TARGET_EVENT_MAX_ROWS_PER_TARGET_DEFAULT = 8
 
 
 @dataclass(frozen=True)
@@ -269,6 +296,10 @@ class FundingSnapshot:
     source_type: str
     as_of_utc: str
     confidence: float = 0.0
+    evidence_count: int = 0
+    distinct_domains: int = 0
+    conflict_flags: list[str] = field(default_factory=list)
+    verification_status: str = "weak"
 
 
 @dataclass(frozen=True)
@@ -306,6 +337,9 @@ class BoardSeatDraft:
     context_domain_fit_gaps: str
     funding_history: str
     funding_latest_round_backers: str
+    funding_warning: str = ""
+    repitch_note: str = ""
+    repitch_new_evidence: str = ""
     source_refs: list[SourceRef] = field(default_factory=list)
     raw_model_output: str = ""
     rewrite_reasons: list[str] = field(default_factory=list)
@@ -344,13 +378,31 @@ def _target_lock_days() -> int:
     return _env_int(
         "COATUE_CLAW_BOARD_SEAT_TARGET_LOCK_DAYS",
         TARGET_LOCK_DAYS_DEFAULT,
-        minimum=1,
+        minimum=HARD_NO_REPITCH_DAYS,
         maximum=365,
     )
 
 
 def _allow_repeat_targets() -> bool:
     return _env_flag("COATUE_CLAW_BOARD_SEAT_ALLOW_REPEAT_TARGETS", False)
+
+
+def _target_event_max_targets_per_company() -> int:
+    return _env_int(
+        "COATUE_CLAW_BOARD_SEAT_EVENT_TRACK_TARGETS_PER_COMPANY",
+        TARGET_EVENT_MAX_TARGETS_PER_COMPANY_DEFAULT,
+        minimum=1,
+        maximum=12,
+    )
+
+
+def _target_event_max_rows_per_target() -> int:
+    return _env_int(
+        "COATUE_CLAW_BOARD_SEAT_EVENT_TRACK_ROWS_PER_TARGET",
+        TARGET_EVENT_MAX_ROWS_PER_TARGET_DEFAULT,
+        minimum=3,
+        maximum=20,
+    )
 
 
 def _ledger_dir() -> Path:
@@ -384,6 +436,15 @@ def _funding_ttl_days() -> int:
     except Exception:
         value = FUNDING_CACHE_TTL_DAYS_DEFAULT
     return max(1, min(90, value))
+
+
+def _funding_web_top_rows() -> int:
+    return _env_int(
+        "COATUE_CLAW_BOARD_SEAT_FUNDING_WEB_TOP_ROWS",
+        FUNDING_WEB_TOP_ROWS_DEFAULT,
+        minimum=3,
+        maximum=20,
+    )
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -434,6 +495,34 @@ def _specificity_mode() -> str:
 
 def _funding_scope() -> str:
     return (os.environ.get("COATUE_CLAW_BOARD_SEAT_FUNDING_SCOPE", "target") or "target").strip().lower()
+
+
+def _funding_min_domains() -> int:
+    return _env_int(
+        "COATUE_CLAW_BOARD_SEAT_FUNDING_MIN_DOMAINS",
+        FUNDING_MIN_DOMAINS_DEFAULT,
+        minimum=1,
+        maximum=5,
+    )
+
+
+def _funding_low_conf_threshold() -> float:
+    raw = (
+        os.environ.get(
+            "COATUE_CLAW_BOARD_SEAT_FUNDING_LOW_CONF_THRESHOLD",
+            str(FUNDING_LOW_CONF_THRESHOLD_DEFAULT),
+        )
+        or str(FUNDING_LOW_CONF_THRESHOLD_DEFAULT)
+    ).strip()
+    try:
+        value = float(raw)
+    except Exception:
+        value = FUNDING_LOW_CONF_THRESHOLD_DEFAULT
+    return max(0.1, min(0.95, value))
+
+
+def _funding_warning_mode() -> bool:
+    return _env_flag("COATUE_CLAW_BOARD_SEAT_FUNDING_WARNING_MODE", True)
 
 
 def _crunchbase_enabled() -> bool:
@@ -546,6 +635,12 @@ def _load_manual_funding_seed() -> dict[str, FundingSnapshot]:
             source_type="manual_seed",
             as_of_utc=_utc_now_iso(),
             confidence=float(row.get("confidence") or 0.9),
+            evidence_count=int(row.get("evidence_count") or max(1, len(source_urls[:8]))),
+            distinct_domains=int(row.get("distinct_domains") or max(1, len({_domain_from_url(item) for item in source_urls if _domain_from_url(item)}))),
+            conflict_flags=[str(item).strip() for item in row.get("conflict_flags", []) if str(item).strip()]
+            if isinstance(row.get("conflict_flags"), list)
+            else [],
+            verification_status=str(row.get("verification_status") or "verified").strip().lower() or "verified",
         )
     return out
 
@@ -590,7 +685,39 @@ def _normalize_source_url(url: str) -> str:
     cleaned = cleaned.rstrip(".,;)")
     if not re.match(r"^https?://", cleaned, flags=re.IGNORECASE):
         return ""
-    return cleaned[:320]
+    return _canonicalize_url(cleaned)[:320]
+
+
+def _canonicalize_url(url: str) -> str:
+    parsed = urlparse(str(url or "").strip())
+    if parsed.scheme.lower() not in {"http", "https"}:
+        return ""
+    host = str(parsed.netloc or "").strip().lower()
+    if not host:
+        return ""
+    path = re.sub(r"/{2,}", "/", parsed.path or "/")
+    if len(path) > 1 and path.endswith("/"):
+        path = path[:-1]
+    ignored_params = {"ref", "source", "fbclid", "gclid", "mc_cid", "mc_eid"}
+    kept_params = []
+    for key, value in parse_qsl(parsed.query, keep_blank_values=False):
+        key_l = str(key or "").strip().lower()
+        if (not key_l) or key_l.startswith("utm_") or key_l in ignored_params:
+            continue
+        kept_params.append((key_l, value))
+    query = urlencode(sorted(kept_params))
+    return urlunparse((parsed.scheme.lower(), host, path or "/", "", query, ""))
+
+
+def _url_dedupe_key(url: str) -> str:
+    canonical = _canonicalize_url(url)
+    if not canonical:
+        return ""
+    parsed = urlparse(canonical)
+    host = str(parsed.netloc or "").strip().lower()
+    if host.startswith("www."):
+        host = host[4:]
+    return urlunparse((parsed.scheme.lower(), host, parsed.path, "", parsed.query, ""))
 
 
 def _publisher_from_url(url: str) -> str:
@@ -662,6 +789,10 @@ def _source_domain(url: str) -> str:
     return host
 
 
+def _domain_from_url(url: str) -> str:
+    return _source_domain(url)
+
+
 def _domain_matches(host: str, domain_suffixes: set[str]) -> bool:
     if not host:
         return False
@@ -676,6 +807,117 @@ def _is_quality_source(url: str) -> bool:
 def _is_low_quality_source(url: str) -> bool:
     host = _source_domain(url)
     return _domain_matches(host, SOURCE_LOW_QUALITY_DOMAIN_SUFFIXES)
+
+
+def _funding_row_signal_score(row: dict[str, str]) -> float:
+    text = f"{row.get('title', '')} {row.get('snippet', '')}".lower()
+    score = 0.0
+    if any(term in text for term in FUNDING_SIGNAL_TERMS):
+        score += 1.0
+    if FUNDING_ROUND_RE.search(text):
+        score += 1.3
+    if FUNDING_AMOUNT_RE.search(text):
+        score += 1.2
+    if re.search(r"\b(led by|backed by|investors include|participated)\b", text):
+        score += 0.8
+    url = str(row.get("url") or "")
+    if _is_quality_source(url):
+        score += 0.6
+    if _is_low_quality_source(url):
+        score -= 0.5
+    return score
+
+
+def _extract_published_date_hint(text: str) -> str:
+    value = str(text or "").strip()
+    if not value:
+        return ""
+    m = re.search(r"\b(20\d{2}-\d{2}-\d{2})\b", value)
+    if m:
+        return m.group(1)
+    m = re.search(r"\b(20\d{2}-\d{2})\b", value)
+    if m:
+        return m.group(1)
+    m = re.search(
+        r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(20\d{2})\b",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if m:
+        return m.group(1)
+    m = FUNDING_YEAR_RE.search(value)
+    if m:
+        return m.group(1)
+    return ""
+
+
+def _funding_evidence_conflicts(rows: list[dict[str, str]]) -> list[str]:
+    rounds: set[str] = set()
+    amounts: set[str] = set()
+    years: set[str] = set()
+    for row in rows:
+        text = f"{row.get('title', '')} {row.get('snippet', '')}".lower()
+        round_match = FUNDING_ROUND_RE.search(text)
+        if round_match:
+            rounds.add(round_match.group(1).strip().lower())
+        amount_match = FUNDING_AMOUNT_RE.search(text)
+        if amount_match:
+            amounts.add(amount_match.group(0).strip().lower())
+        for match in FUNDING_YEAR_RE.finditer(text):
+            years.add(match.group(1))
+    flags: list[str] = []
+    if len(rounds) > 1:
+        flags.append("major_round_mismatch")
+    if len(amounts) > 1:
+        flags.append("major_amount_mismatch")
+    if len(years) > 2:
+        flags.append("minor_date_variance")
+    return flags
+
+
+def _prepare_funding_evidence_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    normalized: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
+    for row in rows:
+        raw_url = str(row.get("url") or "")
+        url = _normalize_source_url(raw_url)
+        if not url:
+            continue
+        key = _url_dedupe_key(url) or url.lower()
+        if key in seen_urls:
+            continue
+        seen_urls.add(key)
+        title = _normalize_source_text(str(row.get("title") or ""), max_chars=180)
+        snippet = _normalize_text(str(row.get("snippet") or ""), max_chars=420)
+        publisher = _normalize_source_text(str(row.get("publisher") or ""), max_chars=64) or _publisher_from_url(url)
+        published_hint = _extract_published_date_hint(
+            " ".join(
+                str(row.get(item) or "")
+                for item in ("published", "date", "published_at", "age", "page_age", "snippet", "title")
+            )
+        )
+        candidate = {
+            "publisher": publisher,
+            "title": title or _normalize_source_text(snippet, max_chars=180) or "Reference",
+            "snippet": snippet,
+            "url": url,
+            "published_hint": published_hint,
+        }
+        signal_score = _funding_row_signal_score(candidate)
+        if signal_score < 1.2:
+            continue
+        candidate["signal_score"] = f"{signal_score:.3f}"
+        normalized.append(candidate)
+
+    normalized.sort(
+        key=lambda row: (
+            float(row.get("signal_score") or "0"),
+            row.get("published_hint") or "",
+            row.get("title") or "",
+        ),
+        reverse=True,
+    )
+    return normalized[: _funding_web_top_rows()]
 
 
 def _title_fingerprint(text: str) -> str:
@@ -973,15 +1215,39 @@ class BoardSeatStore:
                     investment_signature TEXT NOT NULL,
                     context_signature TEXT NOT NULL,
                     context_snippets_json TEXT NOT NULL DEFAULT '[]',
-                    significant_change INTEGER NOT NULL DEFAULT 0
+                    significant_change INTEGER NOT NULL DEFAULT 0,
+                    is_repitch INTEGER NOT NULL DEFAULT 0,
+                    repitch_of_pitch_id INTEGER,
+                    repitch_prev_posted_at_utc TEXT,
+                    repitch_similarity REAL NOT NULL DEFAULT 0.0,
+                    repitch_new_evidence_json TEXT NOT NULL DEFAULT '[]'
                 );
                 """
             )
+            pitch_cols = {
+                str(row["name"]).strip().lower()
+                for row in conn.execute("PRAGMA table_info(board_seat_pitches)").fetchall()
+            }
+            if "is_repitch" not in pitch_cols:
+                conn.execute("ALTER TABLE board_seat_pitches ADD COLUMN is_repitch INTEGER NOT NULL DEFAULT 0;")
+            if "repitch_of_pitch_id" not in pitch_cols:
+                conn.execute("ALTER TABLE board_seat_pitches ADD COLUMN repitch_of_pitch_id INTEGER;")
+            if "repitch_prev_posted_at_utc" not in pitch_cols:
+                conn.execute("ALTER TABLE board_seat_pitches ADD COLUMN repitch_prev_posted_at_utc TEXT;")
+            if "repitch_similarity" not in pitch_cols:
+                conn.execute("ALTER TABLE board_seat_pitches ADD COLUMN repitch_similarity REAL NOT NULL DEFAULT 0.0;")
+            if "repitch_new_evidence_json" not in pitch_cols:
+                conn.execute(
+                    "ALTER TABLE board_seat_pitches ADD COLUMN repitch_new_evidence_json TEXT NOT NULL DEFAULT '[]';"
+                )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_board_seat_pitches_company_recent ON board_seat_pitches(company, posted_at_utc DESC);"
             )
             conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_board_seat_pitches_message_ts ON board_seat_pitches(message_ts) WHERE message_ts IS NOT NULL;"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_board_seat_pitches_repitch ON board_seat_pitches(company, is_repitch, posted_at_utc DESC);"
             )
             conn.execute(
                 """
@@ -994,13 +1260,33 @@ class BoardSeatStore:
                     source_urls_json TEXT NOT NULL,
                     source_type TEXT NOT NULL,
                     as_of_utc TEXT NOT NULL,
-                    confidence REAL NOT NULL DEFAULT 0.0
+                    confidence REAL NOT NULL DEFAULT 0.0,
+                    evidence_count INTEGER NOT NULL DEFAULT 0,
+                    distinct_domains INTEGER NOT NULL DEFAULT 0,
+                    conflict_flags_json TEXT NOT NULL DEFAULT '[]',
+                    verification_status TEXT NOT NULL DEFAULT 'weak'
                 );
                 """
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_board_seat_funding_cache_asof ON board_seat_funding_cache(as_of_utc DESC);"
             )
+            existing_cols = {
+                str(row["name"]).strip().lower()
+                for row in conn.execute("PRAGMA table_info(board_seat_funding_cache)").fetchall()
+            }
+            if "evidence_count" not in existing_cols:
+                conn.execute("ALTER TABLE board_seat_funding_cache ADD COLUMN evidence_count INTEGER NOT NULL DEFAULT 0;")
+            if "distinct_domains" not in existing_cols:
+                conn.execute("ALTER TABLE board_seat_funding_cache ADD COLUMN distinct_domains INTEGER NOT NULL DEFAULT 0;")
+            if "conflict_flags_json" not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE board_seat_funding_cache ADD COLUMN conflict_flags_json TEXT NOT NULL DEFAULT '[]';"
+                )
+            if "verification_status" not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE board_seat_funding_cache ADD COLUMN verification_status TEXT NOT NULL DEFAULT 'weak';"
+                )
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS board_seat_target_memory (
@@ -1022,6 +1308,56 @@ class BoardSeatStore:
             )
             conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_board_seat_target_memory_message_ts ON board_seat_target_memory(message_ts) WHERE message_ts IS NOT NULL;"
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS board_seat_target_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    company TEXT NOT NULL,
+                    target TEXT NOT NULL,
+                    target_key TEXT NOT NULL,
+                    event_at_utc TEXT NOT NULL,
+                    publisher TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    url TEXT NOT NULL,
+                    snippet TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    evidence_quality REAL NOT NULL DEFAULT 0.0,
+                    impact_score REAL NOT NULL DEFAULT 0.0,
+                    source_type TEXT NOT NULL,
+                    created_at_utc TEXT NOT NULL
+                );
+                """
+            )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_board_seat_target_events_unique ON board_seat_target_events(target_key, url, event_at_utc);"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_board_seat_target_events_recent ON board_seat_target_events(target_key, event_at_utc DESC);"
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS board_seat_repitch_assessments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    company TEXT NOT NULL,
+                    target TEXT NOT NULL,
+                    target_key TEXT NOT NULL,
+                    prior_pitch_posted_at_utc TEXT NOT NULL,
+                    window_start_utc TEXT NOT NULL,
+                    window_end_utc TEXT NOT NULL,
+                    top_events_json TEXT NOT NULL,
+                    aggregate_score REAL NOT NULL DEFAULT 0.0,
+                    max_event_score REAL NOT NULL DEFAULT 0.0,
+                    distinct_domains INTEGER NOT NULL DEFAULT 0,
+                    decision TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    strictness_version TEXT NOT NULL,
+                    created_at_utc TEXT NOT NULL
+                );
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_board_seat_repitch_assessments_recent ON board_seat_repitch_assessments(target_key, created_at_utc DESC);"
             )
 
     def _seed_pitches_from_runs(self) -> None:
@@ -1148,6 +1484,11 @@ class BoardSeatStore:
         context_signature: str,
         context_snippets: list[str],
         significant_change: bool,
+        is_repitch: bool = False,
+        repitch_of_pitch_id: int | None = None,
+        repitch_prev_posted_at_utc: str | None = None,
+        repitch_similarity: float = 0.0,
+        repitch_new_evidence: list[str] | None = None,
     ) -> bool:
         with self._connect() as conn:
             cur = conn.execute(
@@ -1166,8 +1507,13 @@ class BoardSeatStore:
                     investment_signature,
                     context_signature,
                     context_snippets_json,
-                    significant_change
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    significant_change,
+                    is_repitch,
+                    repitch_of_pitch_id,
+                    repitch_prev_posted_at_utc,
+                    repitch_similarity,
+                    repitch_new_evidence_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     company,
@@ -1184,6 +1530,11 @@ class BoardSeatStore:
                     context_signature,
                     json.dumps(context_snippets, ensure_ascii=False),
                     1 if significant_change else 0,
+                    1 if is_repitch else 0,
+                    repitch_of_pitch_id,
+                    repitch_prev_posted_at_utc,
+                    float(repitch_similarity),
+                    json.dumps(repitch_new_evidence or [], ensure_ascii=False),
                 ),
             )
         return bool(cur.rowcount)
@@ -1207,7 +1558,12 @@ class BoardSeatStore:
                     investment_signature,
                     context_signature,
                     context_snippets_json,
-                    significant_change
+                    significant_change,
+                    is_repitch,
+                    repitch_of_pitch_id,
+                    repitch_prev_posted_at_utc,
+                    repitch_similarity,
+                    repitch_new_evidence_json
                 FROM board_seat_pitches
                 WHERE company = ?
                 ORDER BY posted_at_utc DESC
@@ -1216,6 +1572,22 @@ class BoardSeatStore:
                 (company, max(1, min(500, int(limit)))),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def latest_target_pitch(self, *, company: str, target_key: str) -> dict[str, Any] | None:
+        if not company or not target_key:
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT company, target, target_key, channel_ref, channel_id, source, posted_at_utc, run_date_local, message_ts
+                FROM board_seat_target_memory
+                WHERE company = ? AND target_key = ?
+                ORDER BY posted_at_utc DESC
+                LIMIT 1
+                """,
+                (company, target_key),
+            ).fetchone()
+        return dict(row) if row is not None else None
 
     def pitch_count(self, *, company: str | None = None) -> int:
         with self._connect() as conn:
@@ -1340,11 +1712,140 @@ class BoardSeatStore:
             rows = conn.execute(query, (*params, cap)).fetchall()
         return [dict(row) for row in rows]
 
+    def record_target_event(
+        self,
+        *,
+        company: str,
+        target: str,
+        event_at_utc: str,
+        publisher: str,
+        title: str,
+        url: str,
+        snippet: str,
+        event_type: str,
+        evidence_quality: float,
+        impact_score: float,
+        source_type: str,
+    ) -> bool:
+        target_clean = _normalize_source_text(target, max_chars=120)
+        target_key = _target_key(target_clean)
+        url_clean = _normalize_source_url(url)
+        if (not target_key) or (not url_clean):
+            return False
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT OR IGNORE INTO board_seat_target_events (
+                    company, target, target_key, event_at_utc, publisher, title, url, snippet,
+                    event_type, evidence_quality, impact_score, source_type, created_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    company,
+                    target_clean,
+                    target_key,
+                    event_at_utc,
+                    _normalize_source_text(publisher, max_chars=80) or "Web",
+                    _normalize_source_text(title, max_chars=240) or "Reference",
+                    url_clean,
+                    _normalize_text(snippet, max_chars=420),
+                    _normalize_source_text(event_type, max_chars=48) or "other",
+                    float(max(0.0, min(1.0, evidence_quality))),
+                    float(max(0.0, min(1.0, impact_score))),
+                    _normalize_source_text(source_type, max_chars=24) or "web",
+                    _utc_now_iso(),
+                ),
+            )
+        return bool(cur.rowcount)
+
+    def recent_target_events(
+        self,
+        *,
+        company: str,
+        target_key: str,
+        since_utc: str,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        cap = max(1, min(1000, int(limit)))
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    id, company, target, target_key, event_at_utc, publisher, title, url, snippet,
+                    event_type, evidence_quality, impact_score, source_type, created_at_utc
+                FROM board_seat_target_events
+                WHERE company = ? AND target_key = ? AND event_at_utc >= ?
+                ORDER BY impact_score DESC, event_at_utc DESC
+                LIMIT ?
+                """,
+                (company, target_key, since_utc, cap),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def record_repitch_assessment(
+        self,
+        *,
+        company: str,
+        target: str,
+        target_key: str,
+        prior_pitch_posted_at_utc: str,
+        window_start_utc: str,
+        window_end_utc: str,
+        top_events: list[dict[str, Any]],
+        aggregate_score: float,
+        max_event_score: float,
+        distinct_domains: int,
+        decision: str,
+        reason: str,
+        strictness_version: str,
+    ) -> int:
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO board_seat_repitch_assessments (
+                    company, target, target_key, prior_pitch_posted_at_utc, window_start_utc, window_end_utc,
+                    top_events_json, aggregate_score, max_event_score, distinct_domains, decision, reason,
+                    strictness_version, created_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    company,
+                    _normalize_source_text(target, max_chars=120),
+                    target_key,
+                    prior_pitch_posted_at_utc,
+                    window_start_utc,
+                    window_end_utc,
+                    json.dumps(top_events, ensure_ascii=False),
+                    float(aggregate_score),
+                    float(max_event_score),
+                    int(distinct_domains),
+                    _normalize_source_text(decision, max_chars=16) or "reject",
+                    _normalize_text(reason, max_chars=320),
+                    _normalize_source_text(strictness_version, max_chars=48) or "strict_v1",
+                    _utc_now_iso(),
+                ),
+            )
+            rowid = int(cur.lastrowid)
+        return rowid
+
     def get_funding_snapshot(self, *, company: str) -> FundingSnapshot | None:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT company, history, latest_round, latest_date, backers_json, source_urls_json, source_type, as_of_utc, confidence
+                SELECT
+                    company,
+                    history,
+                    latest_round,
+                    latest_date,
+                    backers_json,
+                    source_urls_json,
+                    source_type,
+                    as_of_utc,
+                    confidence,
+                    evidence_count,
+                    distinct_domains,
+                    conflict_flags_json,
+                    verification_status
                 FROM board_seat_funding_cache
                 WHERE company = ?
                 LIMIT 1
@@ -1365,6 +1866,12 @@ class BoardSeatStore:
                 source_urls = []
         except Exception:
             source_urls = []
+        try:
+            conflict_flags = json.loads(str(row["conflict_flags_json"] or "[]"))
+            if not isinstance(conflict_flags, list):
+                conflict_flags = []
+        except Exception:
+            conflict_flags = []
         return FundingSnapshot(
             history=str(row["history"] or ""),
             latest_round=str(row["latest_round"] or ""),
@@ -1374,6 +1881,10 @@ class BoardSeatStore:
             source_type=str(row["source_type"] or "unknown").strip() or "unknown",
             as_of_utc=str(row["as_of_utc"] or _utc_now_iso()),
             confidence=float(row["confidence"] if row["confidence"] is not None else 0.0),
+            evidence_count=int(row["evidence_count"] if row["evidence_count"] is not None else 0),
+            distinct_domains=int(row["distinct_domains"] if row["distinct_domains"] is not None else 0),
+            conflict_flags=[str(item).strip() for item in conflict_flags if str(item).strip()],
+            verification_status=str(row["verification_status"] or "weak").strip().lower() or "weak",
         )
 
     def upsert_funding_snapshot(self, *, company: str, snapshot: FundingSnapshot) -> None:
@@ -1381,8 +1892,9 @@ class BoardSeatStore:
             conn.execute(
                 """
                 INSERT INTO board_seat_funding_cache (
-                    company, history, latest_round, latest_date, backers_json, source_urls_json, source_type, as_of_utc, confidence
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    company, history, latest_round, latest_date, backers_json, source_urls_json, source_type, as_of_utc, confidence,
+                    evidence_count, distinct_domains, conflict_flags_json, verification_status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(company) DO UPDATE SET
                     history = excluded.history,
                     latest_round = excluded.latest_round,
@@ -1391,7 +1903,11 @@ class BoardSeatStore:
                     source_urls_json = excluded.source_urls_json,
                     source_type = excluded.source_type,
                     as_of_utc = excluded.as_of_utc,
-                    confidence = excluded.confidence
+                    confidence = excluded.confidence,
+                    evidence_count = excluded.evidence_count,
+                    distinct_domains = excluded.distinct_domains,
+                    conflict_flags_json = excluded.conflict_flags_json,
+                    verification_status = excluded.verification_status
                 """,
                 (
                     company,
@@ -1403,6 +1919,10 @@ class BoardSeatStore:
                     snapshot.source_type,
                     snapshot.as_of_utc,
                     float(snapshot.confidence),
+                    int(snapshot.evidence_count),
+                    int(snapshot.distinct_domains),
+                    json.dumps(snapshot.conflict_flags, ensure_ascii=False),
+                    str(snapshot.verification_status or "weak").strip().lower() or "weak",
                 ),
             )
 
@@ -1542,6 +2062,8 @@ def _render_board_seat_message(*, company: str, draft: BoardSeatDraft) -> str:
         f"*What's different:* {draft.whats_different}",
         f"*MOS/risks:* {draft.mos_risks}",
         f"*Bottom line:* {draft.bottom_line}",
+        *([f"*Repitch note:* {draft.repitch_note}"] if draft.repitch_note else []),
+        *([f"*New evidence:* {draft.repitch_new_evidence}"] if draft.repitch_new_evidence else []),
         "",
         f"*{company} context*",
         f"*Current efforts:* {draft.context_current_efforts}",
@@ -1550,6 +2072,7 @@ def _render_board_seat_message(*, company: str, draft: BoardSeatDraft) -> str:
         "*Funding snapshot*",
         f"*History:* {draft.funding_history}",
         f"*Latest round/backers:* {draft.funding_latest_round_backers}",
+        *([f"*Warning:* {draft.funding_warning}"] if draft.funding_warning else []),
         "",
         "*Sources*",
         *[_format_source_ref_for_slack(ref) for ref in source_refs],
@@ -1597,12 +2120,18 @@ def _render_board_seat_blocks(*, company: str, draft: BoardSeatDraft) -> list[di
     blocks.append(_rich_text_labeled_line_block("What's different", draft.whats_different))
     blocks.append(_rich_text_labeled_line_block("MOS/risks", draft.mos_risks))
     blocks.append(_rich_text_labeled_line_block("Bottom line", draft.bottom_line))
+    if draft.repitch_note:
+        blocks.append(_rich_text_labeled_line_block("Repitch note", draft.repitch_note))
+    if draft.repitch_new_evidence:
+        blocks.append(_rich_text_labeled_line_block("New evidence", draft.repitch_new_evidence))
     blocks.extend(_rich_text_header_block(f"{company} context"))
     blocks.append(_rich_text_labeled_line_block("Current efforts", draft.context_current_efforts))
     blocks.append(_rich_text_labeled_line_block("Domain fit/gaps", draft.context_domain_fit_gaps))
     blocks.extend(_rich_text_header_block("Funding snapshot"))
     blocks.append(_rich_text_labeled_line_block("History", draft.funding_history))
     blocks.append(_rich_text_labeled_line_block("Latest round/backers", draft.funding_latest_round_backers))
+    if draft.funding_warning:
+        blocks.append(_rich_text_labeled_line_block("Warning", draft.funding_warning))
     blocks.extend(_rich_text_header_block("Sources"))
     for ref in refs:
         blocks.append(
@@ -1991,6 +2520,7 @@ def _sanitize_draft(
     acquisition_rows: list[dict[str, str]] | None = None,
 ) -> BoardSeatDraft:
     funding_history, funding_latest_round_backers = _funding_lines_from_snapshot(funding)
+    funding_warning = _funding_warning_line(funding)
     acq_rows = acquisition_rows or []
     idea_line = _normalize_line(draft.idea_line)
     if not _is_valid_acquisition_idea_line(idea_line):
@@ -2025,6 +2555,9 @@ def _sanitize_draft(
         context_domain_fit_gaps=_normalize_line(draft.context_domain_fit_gaps) or _normalize_line(default_context_fit),
         funding_history=_normalize_line(draft.funding_history) or funding_history,
         funding_latest_round_backers=_normalize_line(draft.funding_latest_round_backers) or funding_latest_round_backers,
+        funding_warning=_normalize_line(draft.funding_warning) or funding_warning,
+        repitch_note=_normalize_line(draft.repitch_note, max_words=32),
+        repitch_new_evidence=_normalize_line(draft.repitch_new_evidence, max_words=32),
         source_refs=source_selection.refs,
         raw_model_output=draft.raw_model_output,
         rewrite_reasons=draft.rewrite_reasons,
@@ -2180,6 +2713,10 @@ def _empty_funding_snapshot(*, source_type: str = "unknown") -> FundingSnapshot:
         source_type=source_type,
         as_of_utc=_utc_now_iso(),
         confidence=0.0,
+        evidence_count=0,
+        distinct_domains=0,
+        conflict_flags=[],
+        verification_status="weak",
     )
 
 
@@ -2215,6 +2752,43 @@ def _funding_lines_from_snapshot(snapshot: FundingSnapshot) -> tuple[str, str]:
         latest_parts.append(f"backers: {backers}")
     latest_line = _normalize_line(" ".join(latest_parts)) if latest_parts else _normalize_line(UNKNOWN_FUNDING_TEXT)
     return (_normalize_line(history_line), _normalize_line(latest_line))
+
+
+def _funding_has_major_conflict(conflict_flags: list[str]) -> bool:
+    lowered = [str(item or "").strip().lower() for item in conflict_flags if str(item or "").strip()]
+    if not lowered:
+        return False
+    return any(item.startswith("major_") for item in lowered)
+
+
+def _funding_verification_status(snapshot: FundingSnapshot) -> str:
+    status = str(snapshot.verification_status or "").strip().lower()
+    if status in {"verified", "partial", "weak"}:
+        return status
+    if snapshot.distinct_domains >= _funding_min_domains() and (not _funding_has_major_conflict(snapshot.conflict_flags)):
+        return "verified"
+    if snapshot.evidence_count >= 1 and snapshot.distinct_domains >= 1:
+        return "partial"
+    return "weak"
+
+
+def _funding_confidence_band(snapshot: FundingSnapshot) -> str:
+    if _is_funding_snapshot_unknown(snapshot):
+        return "low"
+    status = _funding_verification_status(snapshot)
+    if snapshot.confidence < _funding_low_conf_threshold():
+        return "low"
+    if status == "verified":
+        return "high"
+    if status == "partial":
+        return "medium"
+    return "low"
+
+
+def _funding_warning_line(snapshot: FundingSnapshot) -> str:
+    if (not _funding_warning_mode()) or (_funding_confidence_band(snapshot) != "low"):
+        return ""
+    return _normalize_line(LOW_CONFIDENCE_FUNDING_WARNING_TEXT)
 
 
 def _funding_snapshot_fresh(*, snapshot: FundingSnapshot | None, ttl_days: int) -> bool:
@@ -2318,6 +2892,7 @@ def _target_funding_from_crunchbase(target_name: str) -> FundingSnapshot | None:
     source_urls: list[str] = []
     if permalink:
         source_urls.append(f"https://www.crunchbase.com/organization/{permalink}")
+    domain_count = len({_domain_from_url(item) for item in source_urls if _domain_from_url(item)})
     snapshot = FundingSnapshot(
         history=history,
         latest_round=latest,
@@ -2327,6 +2902,10 @@ def _target_funding_from_crunchbase(target_name: str) -> FundingSnapshot | None:
         source_type="crunchbase_api",
         as_of_utc=_utc_now_iso(),
         confidence=0.72 if latest else 0.58,
+        evidence_count=max(1, len(source_urls)),
+        distinct_domains=max(1, domain_count),
+        conflict_flags=[],
+        verification_status="partial",
     )
     if not snapshot.history and not snapshot.latest_round:
         return None
@@ -2353,6 +2932,24 @@ def _merge_funding_snapshots(primary: FundingSnapshot | None, secondary: Funding
             continue
         seen.add(key)
         urls.append(url)
+    merged_conflicts: list[str] = []
+    seen_flags: set[str] = set()
+    for item in [*primary.conflict_flags, *secondary.conflict_flags]:
+        flag = str(item or "").strip().lower()
+        if (not flag) or (flag in seen_flags):
+            continue
+        seen_flags.add(flag)
+        merged_conflicts.append(flag)
+    evidence_count = max(int(primary.evidence_count), int(secondary.evidence_count))
+    distinct_domains = max(int(primary.distinct_domains), int(secondary.distinct_domains))
+    verification = "weak"
+    for candidate in (primary.verification_status, secondary.verification_status):
+        key = str(candidate or "").strip().lower()
+        if key == "verified":
+            verification = "verified"
+            break
+        if key == "partial":
+            verification = "partial"
     return FundingSnapshot(
         history=history,
         latest_round=latest_round,
@@ -2362,10 +2959,14 @@ def _merge_funding_snapshots(primary: FundingSnapshot | None, secondary: Funding
         source_type=primary.source_type if primary.history or primary.latest_round else secondary.source_type,
         as_of_utc=_utc_now_iso(),
         confidence=max(float(primary.confidence), float(secondary.confidence)),
+        evidence_count=evidence_count,
+        distinct_domains=distinct_domains,
+        conflict_flags=merged_conflicts,
+        verification_status=verification,
     )
 
 
-def _brave_search_rows(company: str) -> list[dict[str, str]]:
+def _brave_query_rows(query: str, *, count: int) -> list[dict[str, str]]:
     api_key = _brave_search_api_key()
     if not api_key:
         return []
@@ -2374,6 +2975,41 @@ def _brave_search_rows(company: str) -> list[dict[str, str]]:
         "X-Subscription-Token": api_key,
         "User-Agent": "CoatueClaw/1.0",
     }
+    rows: list[dict[str, str]] = []
+    seen: set[str] = set()
+    try:
+        payload = _http_json(
+            url=WEB_SEARCH_ENDPOINT,
+            headers=headers,
+            params={"q": query, "count": str(count), "country": "us", "search_lang": "en"},
+        )
+    except Exception:
+        return []
+    web = payload.get("web") if isinstance(payload, dict) else None
+    results = web.get("results") if isinstance(web, dict) else None
+    if not isinstance(results, list):
+        return []
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        url = _normalize_source_url(str(item.get("url") or ""))
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        rows.append(
+            {
+                "publisher": _publisher_from_url(url),
+                "title": _normalize_text(str(item.get("title") or ""), max_chars=240),
+                "snippet": _normalize_text(str(item.get("description") or ""), max_chars=420),
+                "url": url,
+            }
+        )
+        if len(rows) >= count:
+            return rows
+    return rows
+
+
+def _brave_search_rows(company: str) -> list[dict[str, str]]:
     queries = [
         f"{company} funding history latest round backers",
         f"{company} raised series funding investors",
@@ -2381,32 +3017,12 @@ def _brave_search_rows(company: str) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
     seen: set[str] = set()
     for query in queries:
-        try:
-            payload = _http_json(
-                url=WEB_SEARCH_ENDPOINT,
-                headers=headers,
-                params={"q": query, "count": str(BRAVE_SEARCH_RESULTS), "country": "us", "search_lang": "en"},
-            )
-        except Exception:
-            continue
-        web = payload.get("web") if isinstance(payload, dict) else None
-        results = web.get("results") if isinstance(web, dict) else None
-        if not isinstance(results, list):
-            continue
-        for item in results:
-            if not isinstance(item, dict):
+        for row in _brave_query_rows(query, count=BRAVE_SEARCH_RESULTS):
+            key = _url_dedupe_key(str(row.get("url") or "")) or str(row.get("url") or "").lower()
+            if not key or key in seen:
                 continue
-            url = _normalize_text(str(item.get("url") or ""), max_chars=320)
-            if not url or url in seen:
-                continue
-            seen.add(url)
-            rows.append(
-                {
-                    "title": _normalize_text(str(item.get("title") or ""), max_chars=240),
-                    "snippet": _normalize_text(str(item.get("description") or ""), max_chars=420),
-                    "url": url,
-                }
-            )
+            seen.add(key)
+            rows.append(row)
             if len(rows) >= BRAVE_SEARCH_RESULTS:
                 return rows
     return rows
@@ -2524,6 +3140,294 @@ def _google_serp_rows(query: str, *, max_results: int = 8) -> list[dict[str, str
     return rows
 
 
+def _funding_rows_metrics(rows: list[dict[str, str]]) -> tuple[int, int, list[str]]:
+    evidence_count = len(rows)
+    domains = {_domain_from_url(str(item.get("url") or "")) for item in rows}
+    domains = {item for item in domains if item}
+    return evidence_count, len(domains), _funding_evidence_conflicts(rows)
+
+
+def _build_funding_snapshot(
+    *,
+    history: str,
+    latest_round: str,
+    latest_date: str,
+    backers: list[str],
+    source_urls: list[str],
+    source_type: str,
+    confidence: float,
+    evidence_rows: list[dict[str, str]],
+) -> FundingSnapshot:
+    evidence_count, distinct_domains, conflict_flags = _funding_rows_metrics(evidence_rows)
+    status = "weak"
+    if (distinct_domains >= _funding_min_domains()) and (not _funding_has_major_conflict(conflict_flags)):
+        status = "verified"
+    elif evidence_count >= 1 and distinct_domains >= 1:
+        status = "partial"
+    return FundingSnapshot(
+        history=history,
+        latest_round=latest_round,
+        latest_date=latest_date,
+        backers=backers,
+        source_urls=source_urls,
+        source_type=source_type,
+        as_of_utc=_utc_now_iso(),
+        confidence=max(0.0, min(1.0, confidence)),
+        evidence_count=evidence_count,
+        distinct_domains=distinct_domains,
+        conflict_flags=conflict_flags,
+        verification_status=status,
+    )
+
+
+def _iso_to_utc(value: str | None) -> datetime:
+    raw = str(value or "").strip()
+    if not raw:
+        return datetime.now(UTC)
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(UTC)
+    except Exception:
+        return datetime.now(UTC)
+
+
+def _event_type_and_score(*, title: str, snippet: str) -> tuple[str, float]:
+    text = f"{title} {snippet}".lower()
+    if re.search(r"\b(acquire|acquired|acquisition|merger|m&a)\b", text):
+        return ("mna", 0.99)
+    if re.search(r"\b(bankrupt|chapter 11|fraud|probe|investigation|sanction)\b", text):
+        return ("critical_risk", 0.98)
+    if re.search(r"\b(filed for ipo|files for ipo|ipo)\b", text):
+        return ("ipo", 0.97)
+    if re.search(r"\b(awarded|wins?)\b.{0,60}\b(contract|program)\b", text):
+        return ("major_contract", 0.95)
+    if re.search(r"\b(raises?|raised)\b", text) and FUNDING_AMOUNT_RE.search(text):
+        return ("funding_step_change", 0.9)
+    if re.search(r"\b(launches?|launched|release[ds])\b", text):
+        return ("product_launch", 0.72)
+    if re.search(r"\b(partner(ship|ed)?|integration)\b", text):
+        return ("partnership", 0.68)
+    return ("other", 0.45)
+
+
+def _event_evidence_quality(url: str) -> float:
+    if _is_quality_source(url):
+        return 1.0
+    if _is_low_quality_source(url):
+        return 0.25
+    return 0.6
+
+
+def _target_event_rows(*, company: str, target: str, max_rows: int) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    seen: set[str] = set()
+    queries = [
+        f"{target} funding round valuation investors",
+        f"{target} acquisition merger strategic alternatives",
+        f"{target} major contract customer announcement",
+        f"{target} product launch regulatory update",
+        f"{target} {company} partnership",
+    ]
+    for query in queries:
+        for item in _brave_query_rows(query, count=6):
+            url = _normalize_source_url(str(item.get("url") or ""))
+            key = _url_dedupe_key(url) or url.lower()
+            if (not url) or (key in seen):
+                continue
+            seen.add(key)
+            rows.append(
+                {
+                    "publisher": _normalize_source_text(str(item.get("publisher") or ""), max_chars=64) or _publisher_from_url(url),
+                    "title": _normalize_source_text(str(item.get("title") or ""), max_chars=200),
+                    "snippet": _normalize_text(str(item.get("snippet") or ""), max_chars=420),
+                    "url": url,
+                    "source_type": "brave",
+                    "event_at_utc": _utc_now_iso(),
+                }
+            )
+            if len(rows) >= max_rows:
+                return rows
+        for item in _google_serp_rows(query, max_results=6):
+            url = _normalize_source_url(str(item.get("url") or ""))
+            key = _url_dedupe_key(url) or url.lower()
+            if (not url) or (key in seen):
+                continue
+            seen.add(key)
+            rows.append(
+                {
+                    "publisher": _normalize_source_text(str(item.get("publisher") or ""), max_chars=64) or _publisher_from_url(url),
+                    "title": _normalize_source_text(str(item.get("title") or ""), max_chars=200),
+                    "snippet": _normalize_text(str(item.get("snippet") or ""), max_chars=420),
+                    "url": url,
+                    "source_type": "google_serp",
+                    "event_at_utc": _utc_now_iso(),
+                }
+            )
+            if len(rows) >= max_rows:
+                return rows
+    return rows
+
+
+def _track_promising_target_events(
+    *,
+    store: BoardSeatStore,
+    company: str,
+    candidate_targets: list[str],
+) -> dict[str, Any]:
+    inserted = 0
+    scanned = 0
+    tracked_targets: list[str] = []
+    unique_targets: list[str] = []
+    seen_target_keys: set[str] = set()
+    for target in candidate_targets:
+        normalized = _normalize_source_text(target, max_chars=120)
+        key = _target_key(normalized)
+        if (not key) or (key in seen_target_keys):
+            continue
+        seen_target_keys.add(key)
+        unique_targets.append(normalized)
+        if len(unique_targets) >= _target_event_max_targets_per_company():
+            break
+    for target in unique_targets:
+        tracked_targets.append(target)
+        rows = _target_event_rows(company=company, target=target, max_rows=_target_event_max_rows_per_target())
+        for row in rows:
+            scanned += 1
+            title = str(row.get("title") or "")
+            snippet = str(row.get("snippet") or "")
+            event_type, base_score = _event_type_and_score(title=title, snippet=snippet)
+            quality = _event_evidence_quality(str(row.get("url") or ""))
+            impact_score = max(0.0, min(1.0, base_score + (0.06 * (quality - 0.5))))
+            if impact_score < 0.67:
+                continue
+            did_insert = store.record_target_event(
+                company=company,
+                target=target,
+                event_at_utc=str(row.get("event_at_utc") or _utc_now_iso()),
+                publisher=str(row.get("publisher") or ""),
+                title=title,
+                url=str(row.get("url") or ""),
+                snippet=snippet,
+                event_type=event_type,
+                evidence_quality=quality,
+                impact_score=impact_score,
+                source_type=str(row.get("source_type") or "web"),
+            )
+            if did_insert:
+                inserted += 1
+    return {
+        "company": company,
+        "tracked_targets": tracked_targets,
+        "scanned": scanned,
+        "inserted": inserted,
+    }
+
+
+def _assess_repitch_significance(
+    *,
+    store: BoardSeatStore,
+    company: str,
+    target: str,
+    prior_pitch_posted_at_utc: str,
+) -> dict[str, Any]:
+    prior_ts = _iso_to_utc(prior_pitch_posted_at_utc)
+    window_end = datetime.now(UTC)
+    window_start = max(prior_ts, window_end - timedelta(days=HARD_NO_REPITCH_DAYS))
+    target_key = _target_key(target)
+    events = store.recent_target_events(
+        company=company,
+        target_key=target_key,
+        since_utc=window_start.isoformat(),
+        limit=200,
+    )
+    ranked = sorted(
+        events,
+        key=lambda row: (float(row.get("impact_score") or 0.0), float(row.get("evidence_quality") or 0.0), str(row.get("event_at_utc") or "")),
+        reverse=True,
+    )
+    top = ranked[:5]
+    aggregate_score = sum(float(item.get("impact_score") or 0.0) for item in top[:3])
+    max_event_score = max((float(item.get("impact_score") or 0.0) for item in top), default=0.0)
+    strong_events = [
+        item
+        for item in top
+        if (float(item.get("impact_score") or 0.0) >= 0.93) and (float(item.get("evidence_quality") or 0.0) >= 0.8)
+    ]
+    strong_domains = {
+        _domain_from_url(str(item.get("url") or ""))
+        for item in strong_events
+        if _domain_from_url(str(item.get("url") or ""))
+    }
+    allow = bool(
+        (len(strong_events) >= 2)
+        and (len(strong_domains) >= 2)
+        and (max_event_score >= 0.97)
+        and (aggregate_score >= 2.75)
+    )
+    reason = (
+        "allow_repitch_exceptional_signal"
+        if allow
+        else "reject_repitch_not_exceptional_enough"
+    )
+    compact_events: list[dict[str, Any]] = []
+    for item in top:
+        compact_events.append(
+            {
+                "event_at_utc": str(item.get("event_at_utc") or ""),
+                "publisher": str(item.get("publisher") or ""),
+                "title": str(item.get("title") or ""),
+                "url": str(item.get("url") or ""),
+                "event_type": str(item.get("event_type") or "other"),
+                "impact_score": round(float(item.get("impact_score") or 0.0), 3),
+                "evidence_quality": round(float(item.get("evidence_quality") or 0.0), 3),
+            }
+        )
+    assessment_id = store.record_repitch_assessment(
+        company=company,
+        target=target,
+        target_key=target_key,
+        prior_pitch_posted_at_utc=prior_pitch_posted_at_utc,
+        window_start_utc=window_start.isoformat(),
+        window_end_utc=window_end.isoformat(),
+        top_events=compact_events,
+        aggregate_score=aggregate_score,
+        max_event_score=max_event_score,
+        distinct_domains=len(strong_domains),
+        decision=("allow" if allow else "reject"),
+        reason=reason,
+        strictness_version="critical_v1",
+    )
+    return {
+        "assessment_id": assessment_id,
+        "allow": allow,
+        "reason": reason,
+        "top_events": compact_events,
+        "aggregate_score": round(aggregate_score, 3),
+        "max_event_score": round(max_event_score, 3),
+        "distinct_domains": len(strong_domains),
+    }
+
+
+def _repitch_disclosure_from_assessment(
+    *,
+    prior_pitch_posted_at_utc: str,
+    top_events: list[dict[str, Any]],
+) -> tuple[str, str]:
+    prior_day = _iso_to_utc(prior_pitch_posted_at_utc).strftime("%Y-%m-%d")
+    note = f"This target was pitched on {prior_day}; resurfacing only because new evidence is exceptionally material."
+    evidence_items: list[str] = []
+    for item in top_events[:2]:
+        publisher = _normalize_source_text(str(item.get("publisher") or ""), max_chars=32) or "Source"
+        title = _normalize_source_text(str(item.get("title") or ""), max_chars=120)
+        if not title:
+            continue
+        evidence_items.append(f"{publisher}: {title}")
+    if not evidence_items:
+        evidence = "No qualifying post-pitch evidence met strict resurfacing criteria."
+    else:
+        evidence = "; ".join(evidence_items)
+    return (_normalize_line(note, max_words=32), _normalize_line(evidence, max_words=32))
+
+
 def _fetch_thematic_context(*, company: str, target: str, snippets: list[str]) -> list[str]:
     query_seed = " ".join(snippets[:2]).strip()
     queries = [
@@ -2599,15 +3503,16 @@ def _extract_funding_with_llm(*, company: str, rows: list[dict[str, str]]) -> Fu
     backers_raw = payload.get("backers")
     backers = [str(item).strip() for item in backers_raw if str(item).strip()] if isinstance(backers_raw, list) else []
     confidence = float(payload.get("confidence") or 0.0)
-    return FundingSnapshot(
+    source_urls = [str(item.get("url") or "").strip() for item in rows if str(item.get("url") or "").strip()]
+    return _build_funding_snapshot(
         history=history,
         latest_round=latest_round,
         latest_date=latest_date,
         backers=backers[:8],
-        source_urls=[item.get("url", "") for item in rows if item.get("url")][:8],
+        source_urls=source_urls[:8],
         source_type="web_refresh",
-        as_of_utc=_utc_now_iso(),
-        confidence=max(0.0, min(1.0, confidence)),
+        confidence=confidence,
+        evidence_rows=rows,
     )
 
 
@@ -2628,15 +3533,16 @@ def _extract_funding_with_regex(*, rows: list[dict[str, str]]) -> FundingSnapsho
             token = piece.strip(" .")
             if token and len(token.split()) <= 4:
                 backers.append(token)
-    snapshot = FundingSnapshot(
+    source_urls = [str(item.get("url") or "").strip() for item in rows if str(item.get("url") or "").strip()]
+    snapshot = _build_funding_snapshot(
         history=_normalize_text(history_match.group(1), max_chars=220) if history_match else "",
         latest_round=_normalize_text(round_match.group(1), max_chars=50) if round_match else "",
         latest_date=_normalize_text(date_match.group(0), max_chars=30) if date_match else "",
         backers=backers[:6],
-        source_urls=[item.get("url", "") for item in rows if item.get("url")][:8],
+        source_urls=source_urls[:8],
         source_type="web_refresh",
-        as_of_utc=_utc_now_iso(),
         confidence=0.45,
+        evidence_rows=rows,
     )
     if not snapshot.history and not snapshot.latest_round and not snapshot.latest_date and not snapshot.backers:
         return None
@@ -2644,7 +3550,8 @@ def _extract_funding_with_regex(*, rows: list[dict[str, str]]) -> FundingSnapsho
 
 
 def _refresh_funding_snapshot_from_web(*, company: str) -> FundingSnapshot | None:
-    rows = _funding_web_rows(company)
+    raw_rows = _funding_web_rows(company)
+    rows = _prepare_funding_evidence_rows(raw_rows)
     if not rows:
         return None
     llm_snapshot = _extract_funding_with_llm(company=company, rows=rows)
@@ -2653,14 +3560,14 @@ def _refresh_funding_snapshot_from_web(*, company: str) -> FundingSnapshot | Non
     return _extract_funding_with_regex(rows=rows)
 
 
-def _resolve_funding_snapshot(*, store: BoardSeatStore, company: str) -> FundingSnapshot:
+def _resolve_funding_snapshot(*, store: BoardSeatStore, company: str, force_refresh: bool = False) -> FundingSnapshot:
     manual = _load_manual_funding_seed()
     key = _slug_company(company)
     if key in manual:
         return manual[key]
 
     cached = store.get_funding_snapshot(company=company)
-    if _funding_snapshot_fresh(snapshot=cached, ttl_days=_funding_ttl_days()) and cached is not None:
+    if (not force_refresh) and _funding_snapshot_fresh(snapshot=cached, ttl_days=_funding_ttl_days()) and cached is not None:
         return FundingSnapshot(
             history=cached.history,
             latest_round=cached.latest_round,
@@ -2670,6 +3577,10 @@ def _resolve_funding_snapshot(*, store: BoardSeatStore, company: str) -> Funding
             source_type="cache",
             as_of_utc=cached.as_of_utc,
             confidence=cached.confidence,
+            evidence_count=cached.evidence_count,
+            distinct_domains=cached.distinct_domains,
+            conflict_flags=cached.conflict_flags,
+            verification_status=cached.verification_status,
         )
 
     refreshed_primary = _target_funding_from_crunchbase(company)
@@ -2689,6 +3600,10 @@ def _resolve_funding_snapshot(*, store: BoardSeatStore, company: str) -> Funding
             source_type="cache",
             as_of_utc=cached.as_of_utc,
             confidence=cached.confidence,
+            evidence_count=cached.evidence_count,
+            distinct_domains=cached.distinct_domains,
+            conflict_flags=cached.conflict_flags,
+            verification_status=cached.verification_status,
         )
 
     return _empty_funding_snapshot(source_type="unknown")
@@ -3185,6 +4100,27 @@ def _funding_entity_for_draft(*, company: str, draft: BoardSeatDraft) -> str:
     return target or company
 
 
+def _promising_targets_for_company(*, store: BoardSeatStore, company: str, draft: BoardSeatDraft) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _push(value: str) -> None:
+        target = _normalize_source_text(value, max_chars=120)
+        key = _target_key(target)
+        if (not key) or (key in seen):
+            return
+        seen.add(key)
+        out.append(target)
+
+    _push(_extract_acquisition_target(draft.idea_line))
+    company_key = _slug_company(company)
+    for target in TARGET_ROTATION_BY_COMPANY.get(company_key, ()):
+        _push(target)
+    for row in store.target_ledger_rows(company=company, limit=200):
+        _push(str(row.get("target") or ""))
+    return out[: _target_event_max_targets_per_company()]
+
+
 def _write_target_ledger(store: BoardSeatStore) -> dict[str, str]:
     rows = store.target_ledger_rows(limit=5000)
     out_dir = _ledger_dir()
@@ -3230,6 +4166,106 @@ def _write_target_ledger(store: BoardSeatStore) -> dict[str, str]:
     }
 
 
+def _funding_refresh_entities(
+    *,
+    store: BoardSeatStore,
+    all_portcos: bool,
+    company: str = "",
+    include_recent_targets: bool = True,
+) -> list[str]:
+    entities: list[str] = []
+    seen: set[str] = set()
+    explicit_company = _normalize_source_text(company, max_chars=120)
+    if explicit_company:
+        entities.append(explicit_company)
+        seen.add(_target_key(explicit_company))
+    elif all_portcos:
+        for name, _channel_ref in _parse_portcos():
+            key = _target_key(name)
+            if key in seen:
+                continue
+            seen.add(key)
+            entities.append(name)
+    if include_recent_targets:
+        for row in store.target_ledger_rows(limit=5000):
+            target = _normalize_source_text(str(row.get("target") or ""), max_chars=120)
+            if not target:
+                continue
+            key = _target_key(target)
+            if key in seen:
+                continue
+            seen.add(key)
+            entities.append(target)
+    return entities
+
+
+def _refresh_funding_entities(
+    *,
+    store: BoardSeatStore,
+    entities: list[str],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for entity in entities:
+        snapshot = _resolve_funding_snapshot(store=store, company=entity, force_refresh=True)
+        rows.append(
+            {
+                "entity": entity,
+                "source_type": snapshot.source_type,
+                "verification_status": _funding_verification_status(snapshot),
+                "confidence_band": _funding_confidence_band(snapshot),
+                "confidence": round(float(snapshot.confidence), 4),
+                "evidence_count": int(snapshot.evidence_count),
+                "distinct_domains": int(snapshot.distinct_domains),
+                "conflict_flags": [str(flag) for flag in snapshot.conflict_flags],
+                "as_of_utc": snapshot.as_of_utc,
+                "unknown": _is_funding_snapshot_unknown(snapshot),
+            }
+        )
+    return rows
+
+
+def _build_funding_quality_report_markdown(rows: list[dict[str, Any]]) -> str:
+    total = len(rows)
+    verified = sum(1 for row in rows if str(row.get("verification_status") or "") == "verified")
+    low = sum(1 for row in rows if str(row.get("confidence_band") or "") == "low")
+    generated_at = _utc_now_iso()
+    lines = [
+        "# Board Seat Funding Quality Report",
+        "",
+        f"- Generated at (UTC): `{generated_at}`",
+        f"- Total entities: `{total}`",
+        f"- Verified: `{verified}` ({round((100.0 * verified / total), 1) if total else 0.0}%)",
+        f"- Low confidence: `{low}` ({round((100.0 * low / total), 1) if total else 0.0}%)",
+        "",
+        "| Entity | Source | Verification | Band | Confidence | Evidence | Domains | Conflicts | As Of (UTC) |",
+        "| --- | --- | --- | --- | ---: | ---: | ---: | --- | --- |",
+    ]
+    for row in rows:
+        conflicts = ",".join(str(item) for item in row.get("conflict_flags") or []) or "-"
+        lines.append(
+            "| {entity} | {source} | {status} | {band} | {confidence} | {evidence} | {domains} | {conflicts} | {as_of} |".format(
+                entity=str(row.get("entity") or ""),
+                source=str(row.get("source_type") or ""),
+                status=str(row.get("verification_status") or ""),
+                band=str(row.get("confidence_band") or ""),
+                confidence=str(row.get("confidence") or ""),
+                evidence=str(row.get("evidence_count") or 0),
+                domains=str(row.get("distinct_domains") or 0),
+                conflicts=conflicts,
+                as_of=str(row.get("as_of_utc") or ""),
+            )
+        )
+    return "\n".join(lines).strip() + "\n"
+
+
+def _write_funding_quality_report(rows: list[dict[str, Any]]) -> str:
+    out_dir = _ledger_dir()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    report_path = out_dir / f"funding-quality-report-{_today_key()}.md"
+    report_path.write_text(_build_funding_quality_report_markdown(rows), encoding="utf-8")
+    return str(report_path)
+
+
 def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
     store = BoardSeatStore()
     run_date = _today_key()
@@ -3245,6 +4281,8 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
         "sent": [],
         "skipped": [],
         "history_backfill": [],
+        "event_tracking": [],
+        "repitch_assessments": [],
         "ledger": {},
     }
 
@@ -3267,11 +4305,14 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
             )
             initial_target = _extract_acquisition_target(draft.idea_line)
             initial_target_key = _target_key(initial_target)
-            locked_hit = (
-                store.recent_target_hit(company=company, target_key=initial_target_key, lookback_days=target_lock_days)
-                if (initial_target_key and not _allow_repeat_targets())
+            hard_locked_hit = (
+                store.recent_target_hit(company=company, target_key=initial_target_key, lookback_days=HARD_NO_REPITCH_DAYS)
+                if initial_target_key
                 else None
             )
+            locked_hit = hard_locked_hit
+            if (locked_hit is None) and initial_target_key and (target_lock_days > HARD_NO_REPITCH_DAYS) and (not _allow_repeat_targets()):
+                locked_hit = store.recent_target_hit(company=company, target_key=initial_target_key, lookback_days=target_lock_days)
             if locked_hit is not None:
                 seed = " ".join([draft.idea_line, draft.why_now, draft.whats_different])
                 replacement = _best_effort_target(
@@ -3279,6 +4320,19 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                     seed_text=seed,
                     blocked_keys={initial_target_key},
                 )
+                replacement_key = _target_key(replacement)
+                if replacement_key == initial_target_key:
+                    result["skipped"].append(
+                        {
+                            "company": company,
+                            "channel_ref": channel_ref,
+                            "reason": "repeat_target_within_lock_window",
+                            "target": initial_target,
+                            "target_key": initial_target_key,
+                            "matched_posted_at_utc": str(locked_hit.get("posted_at_utc") or ""),
+                        }
+                    )
+                    continue
                 draft = BoardSeatDraft(
                     idea_line=_normalize_line(f"Acquire {replacement} to accelerate {company} execution in a strategic wedge."),
                     target_does=draft.target_does,
@@ -3294,6 +4348,13 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                     raw_model_output=draft.raw_model_output,
                     rewrite_reasons=[*draft.rewrite_reasons, "target_lock_retarget"],
                 )
+            result["event_tracking"].append(
+                _track_promising_target_events(
+                    store=store,
+                    company=company,
+                    candidate_targets=_promising_targets_for_company(store=store, company=company, draft=draft),
+                )
+            )
             funding = _resolve_funding_snapshot(store=store, company=_funding_entity_for_draft(company=company, draft=draft))
             draft = _sanitize_draft(company=company, draft=draft, funding=funding, acquisition_rows=[])
             message = _render_board_seat_message(company=company, draft=draft)
@@ -3321,6 +4382,9 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                     "funding_source_type": funding.source_type,
                     "funding_as_of_utc": funding.as_of_utc,
                     "funding_unknown": _is_funding_snapshot_unknown(funding),
+                    "funding_verification_status": _funding_verification_status(funding),
+                    "funding_confidence_band": _funding_confidence_band(funding),
+                    "funding_warning": _funding_warning_line(funding),
                     "target": _extract_acquisition_target(draft.idea_line),
                 }
             )
@@ -3355,66 +4419,82 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                 draft = _build_draft(company=company, snippets=snippets, store=store, recent_pitches=recent_pitches)
                 initial_target = _extract_acquisition_target(draft.idea_line)
                 initial_target_key = _target_key(initial_target)
-                if initial_target_key and (not _allow_repeat_targets()):
+                locked_hit = (
+                    store.recent_target_hit(
+                        company=company,
+                        target_key=initial_target_key,
+                        lookback_days=HARD_NO_REPITCH_DAYS,
+                    )
+                    if initial_target_key
+                    else None
+                )
+                if (locked_hit is None) and initial_target_key and (target_lock_days > HARD_NO_REPITCH_DAYS) and (not _allow_repeat_targets()):
                     locked_hit = store.recent_target_hit(
                         company=company,
                         target_key=initial_target_key,
                         lookback_days=target_lock_days,
                     )
-                    if locked_hit is not None:
-                        seed = " ".join(
-                            [
-                                draft.idea_line,
-                                draft.why_now,
-                                draft.whats_different,
-                                " ".join(snippets[:3]),
-                            ]
+                if locked_hit is not None:
+                    seed = " ".join(
+                        [
+                            draft.idea_line,
+                            draft.why_now,
+                            draft.whats_different,
+                            " ".join(snippets[:3]),
+                        ]
+                    )
+                    replacement = _best_effort_target(
+                        company=company,
+                        seed_text=seed,
+                        blocked_keys={initial_target_key},
+                    )
+                    replacement_key = _target_key(replacement)
+                    if replacement_key == initial_target_key:
+                        result["skipped"].append(
+                            {
+                                "company": company,
+                                "channel_ref": channel_ref,
+                                "channel_id": channel_id,
+                                "reason": "repeat_target_within_lock_window",
+                                "target": initial_target,
+                                "target_key": initial_target_key,
+                                "matched_posted_at_utc": str(locked_hit.get("posted_at_utc") or ""),
+                            }
                         )
-                        replacement = _best_effort_target(
-                            company=company,
-                            seed_text=seed,
-                            blocked_keys={initial_target_key},
-                        )
-                        replacement_key = _target_key(replacement)
-                        if replacement_key == initial_target_key:
-                            result["skipped"].append(
-                                {
-                                    "company": company,
-                                    "channel_ref": channel_ref,
-                                    "channel_id": channel_id,
-                                    "reason": "repeat_target_within_lock_window",
-                                    "target": initial_target,
-                                    "target_key": initial_target_key,
-                                    "matched_posted_at_utc": str(locked_hit.get("posted_at_utc") or ""),
-                                }
-                            )
-                            posted = True
-                            break
-                        draft = BoardSeatDraft(
-                            idea_line=_normalize_line(f"Acquire {replacement} to accelerate {company} execution in a strategic wedge."),
-                            target_does=draft.target_does,
-                            why_now=draft.why_now,
-                            whats_different=draft.whats_different,
-                            mos_risks=draft.mos_risks,
-                            bottom_line=draft.bottom_line,
-                            context_current_efforts=draft.context_current_efforts,
-                            context_domain_fit_gaps=draft.context_domain_fit_gaps,
-                            funding_history=draft.funding_history,
-                            funding_latest_round_backers=draft.funding_latest_round_backers,
-                            source_refs=draft.source_refs,
-                            raw_model_output=draft.raw_model_output,
-                            rewrite_reasons=[*draft.rewrite_reasons, "target_lock_retarget"],
-                        )
-                        replacement_funding = _resolve_funding_snapshot(
-                            store=store,
-                            company=_funding_entity_for_draft(company=company, draft=draft),
-                        )
-                        draft = _sanitize_draft(
-                            company=company,
-                            draft=draft,
-                            funding=replacement_funding,
-                            acquisition_rows=[],
-                        )
+                        posted = True
+                        break
+                    draft = BoardSeatDraft(
+                        idea_line=_normalize_line(f"Acquire {replacement} to accelerate {company} execution in a strategic wedge."),
+                        target_does=draft.target_does,
+                        why_now=draft.why_now,
+                        whats_different=draft.whats_different,
+                        mos_risks=draft.mos_risks,
+                        bottom_line=draft.bottom_line,
+                        context_current_efforts=draft.context_current_efforts,
+                        context_domain_fit_gaps=draft.context_domain_fit_gaps,
+                        funding_history=draft.funding_history,
+                        funding_latest_round_backers=draft.funding_latest_round_backers,
+                        source_refs=draft.source_refs,
+                        raw_model_output=draft.raw_model_output,
+                        rewrite_reasons=[*draft.rewrite_reasons, "target_lock_retarget"],
+                    )
+                    replacement_funding = _resolve_funding_snapshot(
+                        store=store,
+                        company=_funding_entity_for_draft(company=company, draft=draft),
+                    )
+                    draft = _sanitize_draft(
+                        company=company,
+                        draft=draft,
+                        funding=replacement_funding,
+                        acquisition_rows=[],
+                    )
+                result["event_tracking"].append(
+                    _track_promising_target_events(
+                        store=store,
+                        company=company,
+                        candidate_targets=_promising_targets_for_company(store=store, company=company, draft=draft),
+                    )
+                )
                 funding = _resolve_funding_snapshot(store=store, company=_funding_entity_for_draft(company=company, draft=draft))
                 draft = _sanitize_draft(company=company, draft=draft, funding=funding, acquisition_rows=[])
                 message = _render_board_seat_message(company=company, draft=draft)
@@ -3442,6 +4522,11 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                 signal_text = _signal_text_from_investment(investment_text)
                 investment_hash = _stable_hash(investment_signature or core_investment_text or investment_text)
                 context_signature = _context_signature_from_snippets(snippets)
+                is_repitch = False
+                repitch_of_pitch_id: int | None = None
+                repitch_prev_posted_at_utc: str | None = None
+                repitch_similarity = 0.0
+                repitch_new_evidence: list[str] = []
                 repeated, matched_pitch, similarity = _detect_repeat_investment(
                     investment_hash=investment_hash,
                     investment_signature=investment_signature,
@@ -3487,6 +4572,99 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                     )
                     posted = True
                     break
+                if repeated and significant_change:
+                    current_target = _extract_target_from_message_text(company=company, text=message)
+                    latest_target_pitch = store.latest_target_pitch(
+                        company=company,
+                        target_key=_target_key(current_target),
+                    )
+                    prior_pitch_posted_at_utc = str(
+                        (matched_pitch or {}).get("posted_at_utc")
+                        or (latest_target_pitch or {}).get("posted_at_utc")
+                        or ""
+                    )
+                    if not prior_pitch_posted_at_utc:
+                        result["skipped"].append(
+                            {
+                                "company": company,
+                                "channel_ref": channel_ref,
+                                "channel_id": channel_id,
+                                "reason": "repitch_missing_prior_anchor",
+                            }
+                        )
+                        posted = True
+                        break
+                    repitch_assessment = _assess_repitch_significance(
+                        store=store,
+                        company=company,
+                        target=current_target,
+                        prior_pitch_posted_at_utc=prior_pitch_posted_at_utc,
+                    )
+                    result["repitch_assessments"].append(
+                        {
+                            "company": company,
+                            "channel_ref": channel_ref,
+                            "channel_id": channel_id,
+                            "target": current_target,
+                            **repitch_assessment,
+                        }
+                    )
+                    if not bool(repitch_assessment.get("allow")):
+                        result["skipped"].append(
+                            {
+                                "company": company,
+                                "channel_ref": channel_ref,
+                                "channel_id": channel_id,
+                                "reason": "repitch_not_significant_enough",
+                                "target": current_target,
+                                "assessment_id": repitch_assessment.get("assessment_id"),
+                                "assessment_reason": repitch_assessment.get("reason"),
+                                "aggregate_score": repitch_assessment.get("aggregate_score"),
+                                "max_event_score": repitch_assessment.get("max_event_score"),
+                                "distinct_domains": repitch_assessment.get("distinct_domains"),
+                                "note": REPITCH_DISCOURAGE_TEXT,
+                            }
+                        )
+                        posted = True
+                        break
+                    repitch_note, repitch_evidence = _repitch_disclosure_from_assessment(
+                        prior_pitch_posted_at_utc=prior_pitch_posted_at_utc,
+                        top_events=list(repitch_assessment.get("top_events") or []),
+                    )
+                    draft = BoardSeatDraft(
+                        idea_line=draft.idea_line,
+                        target_does=draft.target_does,
+                        why_now=draft.why_now,
+                        whats_different=draft.whats_different,
+                        mos_risks=draft.mos_risks,
+                        bottom_line=draft.bottom_line,
+                        context_current_efforts=draft.context_current_efforts,
+                        context_domain_fit_gaps=draft.context_domain_fit_gaps,
+                        funding_history=draft.funding_history,
+                        funding_latest_round_backers=draft.funding_latest_round_backers,
+                        funding_warning=draft.funding_warning,
+                        repitch_note=repitch_note,
+                        repitch_new_evidence=repitch_evidence,
+                        source_refs=draft.source_refs,
+                        raw_model_output=draft.raw_model_output,
+                        rewrite_reasons=[*draft.rewrite_reasons, "repitch_disclosure"],
+                    )
+                    message = _render_board_seat_message(company=company, draft=draft)
+                    investment_text = _extract_investment_text(message)
+                    core_investment_text = _core_investment_text(message)
+                    investment_signature = _token_signature(core_investment_text)
+                    signal_signature = _signal_signature_from_investment(investment_text)
+                    signal_text = _signal_text_from_investment(investment_text)
+                    investment_hash = _stable_hash(investment_signature or core_investment_text or investment_text)
+                    is_repitch = True
+                    repitch_of_pitch_id = int((matched_pitch or {}).get("id")) if (matched_pitch or {}).get("id") is not None else None
+                    repitch_prev_posted_at_utc = prior_pitch_posted_at_utc
+                    repitch_similarity = float(similarity)
+                    repitch_new_evidence = [
+                        str(item.get("title") or "").strip()
+                        for item in list(repitch_assessment.get("top_events") or [])[:2]
+                        if str(item.get("title") or "").strip()
+                    ]
                 if dry_run:
                     current_target = _extract_target_from_message_text(company=company, text=message)
                     result["sent"].append(
@@ -3501,6 +4679,14 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                             "funding_source_type": funding.source_type,
                             "funding_as_of_utc": funding.as_of_utc,
                             "funding_unknown": _is_funding_snapshot_unknown(funding),
+                            "funding_verification_status": _funding_verification_status(funding),
+                            "funding_confidence_band": _funding_confidence_band(funding),
+                            "funding_warning": _funding_warning_line(funding),
+                            "is_repitch": bool(is_repitch),
+                            "repitch_of_pitch_id": repitch_of_pitch_id,
+                            "repitch_prev_posted_at_utc": repitch_prev_posted_at_utc,
+                            "repitch_similarity": round(float(repitch_similarity), 3),
+                            "repitch_new_evidence": repitch_new_evidence,
                         }
                     )
                     posted = True
@@ -3542,6 +4728,11 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                     context_signature=context_signature,
                     context_snippets=snippets,
                     significant_change=bool(significant_change),
+                    is_repitch=bool(is_repitch),
+                    repitch_of_pitch_id=repitch_of_pitch_id,
+                    repitch_prev_posted_at_utc=repitch_prev_posted_at_utc,
+                    repitch_similarity=float(repitch_similarity),
+                    repitch_new_evidence=repitch_new_evidence,
                 )
                 current_target = _extract_target_from_message_text(company=company, text=message)
                 store.record_target(
@@ -3566,6 +4757,14 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                         "funding_source_type": funding.source_type,
                         "funding_as_of_utc": funding.as_of_utc,
                         "funding_unknown": _is_funding_snapshot_unknown(funding),
+                        "funding_verification_status": _funding_verification_status(funding),
+                        "funding_confidence_band": _funding_confidence_band(funding),
+                        "funding_warning": _funding_warning_line(funding),
+                        "is_repitch": bool(is_repitch),
+                        "repitch_of_pitch_id": repitch_of_pitch_id,
+                        "repitch_prev_posted_at_utc": repitch_prev_posted_at_utc,
+                        "repitch_similarity": round(float(repitch_similarity), 3),
+                        "repitch_new_evidence": repitch_new_evidence,
                     }
                 )
                 posted = True
@@ -3598,22 +4797,61 @@ def status() -> dict[str, Any]:
     manual_seed = _load_manual_funding_seed()
     funding_age_days: dict[str, float | None] = {}
     funding_source_by_company: dict[str, str] = {}
+    funding_verification_by_company: dict[str, dict[str, Any]] = {}
+    verified_count = 0
+    low_conf_count = 0
+    oldest_cache_age_days = 0.0
+    total_companies = len(portcos)
     for item in portcos:
         company = item["company"]
         manual_snapshot = manual_seed.get(_slug_company(company))
+        snapshot: FundingSnapshot | None = manual_snapshot
         if manual_snapshot is not None:
             funding_age_days[company] = 0.0
             funding_source_by_company[company] = "manual_seed"
+        else:
+            funding_age_days[company] = store.funding_cache_age_days(company=company)
+            snapshot = store.get_funding_snapshot(company=company)
+            funding_source_by_company[company] = str(snapshot.source_type).strip() if snapshot is not None else "unknown"
+        age = funding_age_days[company]
+        if age is not None:
+            oldest_cache_age_days = max(oldest_cache_age_days, float(age))
+        if snapshot is None:
+            low_conf_count += 1
+            funding_verification_by_company[company] = {
+                "source_type": "unknown",
+                "verification_status": "weak",
+                "confidence_band": "low",
+                "confidence": 0.0,
+                "evidence_count": 0,
+                "distinct_domains": 0,
+                "conflict_flags": [],
+            }
             continue
-        funding_age_days[company] = store.funding_cache_age_days(company=company)
-        snapshot = store.get_funding_snapshot(company=company)
-        funding_source_by_company[company] = str(snapshot.source_type).strip() if snapshot is not None else "unknown"
+        verification_status = _funding_verification_status(snapshot)
+        confidence_band = _funding_confidence_band(snapshot)
+        if verification_status == "verified":
+            verified_count += 1
+        if confidence_band == "low":
+            low_conf_count += 1
+        funding_verification_by_company[company] = {
+            "source_type": str(snapshot.source_type or "unknown").strip() or "unknown",
+            "verification_status": verification_status,
+            "confidence_band": confidence_band,
+            "confidence": round(float(snapshot.confidence), 4),
+            "evidence_count": int(snapshot.evidence_count),
+            "distinct_domains": int(snapshot.distinct_domains),
+            "conflict_flags": [str(flag) for flag in snapshot.conflict_flags],
+        }
+    verified_pct = round((100.0 * verified_count / float(total_companies)), 1) if total_companies else 0.0
+    low_conf_pct = round((100.0 * low_conf_count / float(total_companies)), 1) if total_companies else 0.0
     return {
         "ok": True,
         "format_version": BOARD_SEAT_FORMAT_VERSION,
         "timezone": str(_timezone()),
         "run_date_local": _today_key(),
         "target_lock_days": _target_lock_days(),
+        "hard_no_repitch_days": HARD_NO_REPITCH_DAYS,
         "portcos": portcos,
         "recent_runs": store.recent_runs(limit=20),
         "pitch_counts": {
@@ -3632,6 +4870,15 @@ def status() -> dict[str, Any]:
         },
         "funding_cache_age_days_by_company": funding_age_days,
         "funding_data_source_by_company": funding_source_by_company,
+        "funding_verification_by_company": funding_verification_by_company,
+        "funding_quality_metrics": {
+            "total_companies": total_companies,
+            "verified_count": verified_count,
+            "verified_pct": verified_pct,
+            "low_confidence_count": low_conf_count,
+            "low_confidence_pct": low_conf_pct,
+            "oldest_cache_age_days": round(oldest_cache_age_days, 2),
+        },
         "ledger_paths": {
             "artifact_dir": str(_ledger_dir()),
             "mirror_dir": str(_ledger_mirror_path()) if _ledger_mirror_enabled() else "",
@@ -3659,6 +4906,16 @@ def main() -> None:
     memory = sub.add_parser("target-memory")
     memory.add_argument("--company", default="")
     memory.add_argument("--limit", type=int, default=200)
+
+    refresh = sub.add_parser("refresh-funding")
+    refresh.add_argument("--all-portcos", action="store_true")
+    refresh.add_argument("--company", default="")
+    refresh.add_argument("--include-recent-targets", action="store_true")
+
+    funding_report = sub.add_parser("funding-quality-report")
+    funding_report.add_argument("--all-portcos", action="store_true")
+    funding_report.add_argument("--company", default="")
+    funding_report.add_argument("--include-recent-targets", action="store_true")
 
     args = parser.parse_args()
     if args.command == "run-once":
@@ -3697,6 +4954,40 @@ def main() -> None:
             "rows": rows,
             "count": len(rows),
             "company_filter": args.company or "",
+        }
+    elif args.command == "refresh-funding":
+        store = BoardSeatStore()
+        include_targets = bool(args.include_recent_targets or args.all_portcos)
+        entities = _funding_refresh_entities(
+            store=store,
+            all_portcos=bool(args.all_portcos),
+            company=str(args.company or ""),
+            include_recent_targets=include_targets,
+        )
+        rows = _refresh_funding_entities(store=store, entities=entities)
+        payload = {
+            "ok": True,
+            "entities_refreshed": len(rows),
+            "entities": entities,
+            "rows": rows,
+        }
+    elif args.command == "funding-quality-report":
+        store = BoardSeatStore()
+        include_targets = bool(args.include_recent_targets or args.all_portcos)
+        entities = _funding_refresh_entities(
+            store=store,
+            all_portcos=bool(args.all_portcos),
+            company=str(args.company or ""),
+            include_recent_targets=include_targets,
+        )
+        rows = _refresh_funding_entities(store=store, entities=entities)
+        report_path = _write_funding_quality_report(rows)
+        payload = {
+            "ok": True,
+            "report_path": report_path,
+            "entities": entities,
+            "rows": rows,
+            "count": len(rows),
         }
     else:
         store = BoardSeatStore()

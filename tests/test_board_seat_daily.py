@@ -310,6 +310,34 @@ def test_repeat_guardrail_v5_still_blocks_duplicate_without_significant_change(t
     assert payload["skipped"][0]["reason"] == "repeat_investment_without_significant_change"
 
 
+def test_hard_14_day_target_lock_cannot_be_bypassed(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_TZ", "UTC")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_PORTCOS", "Anduril:anduril")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_ALLOW_REPEAT_TARGETS", "1")
+    monkeypatch.setattr(board_seat_daily, "WebClient", None)
+    monkeypatch.setattr(board_seat_daily, "_resolve_funding_snapshot", lambda **kwargs: _funding())
+    monkeypatch.setattr(board_seat_daily, "_llm_draft", lambda **kwargs: _v6_draft())
+    monkeypatch.setattr(board_seat_daily, "_best_effort_target", lambda **kwargs: "Saronic")
+
+    store = board_seat_daily.BoardSeatStore()
+    store.record_target(
+        company="Anduril",
+        target="Saronic",
+        channel_ref="anduril",
+        channel_id="C_ANDURIL",
+        source="seed",
+        posted_at_utc=datetime.now(UTC).isoformat(),
+        run_date_local="2026-02-24",
+        message_ts=None,
+    )
+    payload = board_seat_daily.run_once(force=True, dry_run=True)
+    assert payload["ok"] is True
+    assert payload["sent"] == []
+    assert payload["skipped"][0]["reason"] == "repeat_target_within_lock_window"
+
+
 def test_repeat_guardrail_v5_allows_with_significant_change(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
@@ -352,13 +380,108 @@ def test_repeat_guardrail_v5_allows_with_significant_change(tmp_path: Path, monk
     monkeypatch.setattr(board_seat_daily, "_resolve_funding_snapshot", lambda **kwargs: _funding())
     monkeypatch.setattr(board_seat_daily, "_llm_draft", lambda **kwargs: _v6_draft())
     monkeypatch.setattr(board_seat_daily, "_acquisition_search_rows", lambda **kwargs: [])
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_assess_repitch_significance",
+        lambda **_kwargs: {
+            "assessment_id": 1,
+            "allow": True,
+            "reason": "allow_repitch_exceptional_signal",
+            "top_events": [
+                {
+                    "title": "Anduril wins major international defense contract",
+                    "publisher": "Reuters",
+                    "url": "https://www.reuters.com/example",
+                    "event_at_utc": datetime.now(UTC).isoformat(),
+                    "event_type": "major_contract",
+                    "impact_score": 0.99,
+                    "evidence_quality": 1.0,
+                },
+                {
+                    "title": "Anduril announces acquisition discussions",
+                    "publisher": "Bloomberg",
+                    "url": "https://www.bloomberg.com/example",
+                    "event_at_utc": datetime.now(UTC).isoformat(),
+                    "event_type": "mna",
+                    "impact_score": 0.98,
+                    "evidence_quality": 1.0,
+                },
+            ],
+            "aggregate_score": 2.9,
+            "max_event_score": 0.99,
+            "distinct_domains": 2,
+        },
+    )
 
     payload = board_seat_daily.run_once(force=True, dry_run=False)
     assert payload["ok"] is True
     assert len(payload["sent"]) == 1
     assert payload["sent"][0]["significant_change"] is True
+    assert payload["sent"][0]["is_repitch"] is True
+    assert payload["sent"][0]["repitch_of_pitch_id"] is not None
     assert payload["sent"][0]["format_version"] == board_seat_daily.BOARD_SEAT_FORMAT_VERSION
     assert len(sent) == 1
+    assert "Repitch note:" in sent[0]["text"]
+    assert "New evidence:" in sent[0]["text"]
+
+
+def test_repeat_with_significant_change_rejected_when_assessment_not_exceptional(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_TZ", "UTC")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_PORTCOS", "Anduril:anduril")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_BACKFILL_ENABLED", "0")
+    monkeypatch.setattr(board_seat_daily, "_slack_tokens", lambda: ["xoxb-test"])
+
+    store = board_seat_daily.BoardSeatStore()
+    prior_message = board_seat_daily._render_board_seat_message(company="Anduril", draft=_v6_draft())
+    _seed_prior_pitch(
+        store=store,
+        message=prior_message,
+        context_snippets=["Anduril won a major DoD contract and backlog expanded."],
+    )
+
+    class FakeWebClient:
+        def __init__(self, token: str) -> None:
+            self.token = token
+
+        def conversations_list(self, **kwargs):
+            return {"channels": [{"id": "C_ANDURIL", "name": "anduril"}], "response_metadata": {"next_cursor": ""}}
+
+        def conversations_history(self, **kwargs):
+            return {
+                "messages": [
+                    {"text": "Anduril signed a new $1.2B multi-year international contract.", "user": "U1"},
+                ],
+                "response_metadata": {"next_cursor": ""},
+            }
+
+        def chat_postMessage(self, channel: str, text: str, **kwargs):
+            raise AssertionError("Should skip when repitch assessment is not exceptional")
+
+    monkeypatch.setattr(board_seat_daily, "WebClient", FakeWebClient)
+    monkeypatch.setattr(board_seat_daily, "SlackApiError", Exception)
+    monkeypatch.setattr(board_seat_daily, "_resolve_funding_snapshot", lambda **kwargs: _funding())
+    monkeypatch.setattr(board_seat_daily, "_llm_draft", lambda **kwargs: _v6_draft())
+    monkeypatch.setattr(board_seat_daily, "_acquisition_search_rows", lambda **kwargs: [])
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_assess_repitch_significance",
+        lambda **_kwargs: {
+            "assessment_id": 2,
+            "allow": False,
+            "reason": "reject_repitch_not_exceptional_enough",
+            "top_events": [],
+            "aggregate_score": 0.9,
+            "max_event_score": 0.5,
+            "distinct_domains": 1,
+        },
+    )
+
+    payload = board_seat_daily.run_once(force=True, dry_run=False)
+    assert payload["ok"] is True
+    assert payload["sent"] == []
+    assert payload["skipped"][0]["reason"] == "repitch_not_significant_enough"
 
 
 def test_unknown_funding_renders_two_explicit_unknown_labeled_lines() -> None:
@@ -737,3 +860,172 @@ def test_write_target_ledger_writes_csv_json_and_mirror(tmp_path: Path, monkeypa
     assert Path(paths["json_path"]).exists()
     assert Path(paths["mirror_csv_path"]).exists()
     assert Path(paths["mirror_json_path"]).exists()
+
+
+def test_prepare_funding_evidence_rows_dedupes_canonical_urls() -> None:
+    rows = board_seat_daily._prepare_funding_evidence_rows(
+        [
+            {
+                "publisher": "Example",
+                "title": "Browserbase raises Series A",
+                "snippet": "Browserbase raised $21M led by Kleiner Perkins.",
+                "url": "https://example.com/browserbase?utm_source=newsletter",
+            },
+            {
+                "publisher": "Example",
+                "title": "Browserbase raises Series A",
+                "snippet": "Browserbase raised $21M led by Kleiner Perkins.",
+                "url": "https://www.example.com/browserbase/",
+            },
+        ]
+    )
+    assert len(rows) == 1
+    assert rows[0]["url"] == "https://example.com/browserbase"
+
+
+def test_funding_conflict_detection_flags_round_mismatch() -> None:
+    conflicts = board_seat_daily._funding_evidence_conflicts(
+        [
+            {
+                "title": "Company raises Series A",
+                "snippet": "Raised $20M in 2024 led by investors.",
+                "url": "https://a.example.com/funding",
+            },
+            {
+                "title": "Company raises Series B",
+                "snippet": "Raised $40M in 2025 with new investors.",
+                "url": "https://b.example.com/funding",
+            },
+        ]
+    )
+    assert "major_round_mismatch" in conflicts
+    assert "major_amount_mismatch" in conflicts
+
+
+def test_funding_confidence_band_maps_levels() -> None:
+    high = board_seat_daily.FundingSnapshot(
+        history="Raised capital.",
+        latest_round="Series A",
+        latest_date="2025",
+        backers=["A"],
+        source_urls=["https://a.example.com", "https://b.example.com"],
+        source_type="web_refresh",
+        as_of_utc=datetime.now(UTC).isoformat(),
+        confidence=0.9,
+        evidence_count=3,
+        distinct_domains=2,
+        conflict_flags=[],
+        verification_status="verified",
+    )
+    medium = board_seat_daily.FundingSnapshot(
+        history="Raised capital.",
+        latest_round="Series A",
+        latest_date="2025",
+        backers=["A"],
+        source_urls=["https://a.example.com"],
+        source_type="web_refresh",
+        as_of_utc=datetime.now(UTC).isoformat(),
+        confidence=0.7,
+        evidence_count=1,
+        distinct_domains=1,
+        conflict_flags=["minor_date_variance"],
+        verification_status="partial",
+    )
+    low = board_seat_daily.FundingSnapshot(
+        history="Raised capital.",
+        latest_round="Series A",
+        latest_date="2025",
+        backers=["A"],
+        source_urls=["https://a.example.com"],
+        source_type="web_refresh",
+        as_of_utc=datetime.now(UTC).isoformat(),
+        confidence=0.2,
+        evidence_count=1,
+        distinct_domains=1,
+        conflict_flags=[],
+        verification_status="weak",
+    )
+    assert board_seat_daily._funding_confidence_band(high) == "high"
+    assert board_seat_daily._funding_confidence_band(medium) == "medium"
+    assert board_seat_daily._funding_confidence_band(low) == "low"
+
+
+def test_low_confidence_funding_adds_warning_line() -> None:
+    draft = board_seat_daily._sanitize_draft(
+        company="Anduril",
+        draft=_v6_draft(),
+        funding=board_seat_daily.FundingSnapshot(
+            history="Sparse funding references.",
+            latest_round="Series A",
+            latest_date="2024",
+            backers=[],
+            source_urls=["https://a.example.com/funding"],
+            source_type="web_refresh",
+            as_of_utc=datetime.now(UTC).isoformat(),
+            confidence=0.3,
+            evidence_count=1,
+            distinct_domains=1,
+            conflict_flags=[],
+            verification_status="weak",
+        ),
+        acquisition_rows=[],
+    )
+    message = board_seat_daily._render_board_seat_message(company="Anduril", draft=draft)
+    assert "*Warning:* Funding data is low-confidence; verify before action." in message
+
+
+def test_refresh_funding_snapshot_brave_plus_serp_sets_domain_metrics(monkeypatch) -> None:
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_funding_web_rows",
+        lambda _company: [
+            {
+                "publisher": "TechCrunch",
+                "title": "Browserbase raises Series A",
+                "snippet": "Browserbase raised $21M led by Kleiner Perkins.",
+                "url": "https://techcrunch.com/example-browserbase-round",
+            },
+            {
+                "publisher": "Crunchbase News",
+                "title": "Browserbase funding",
+                "snippet": "Investors include Kleiner Perkins in 2024.",
+                "url": "https://news.crunchbase.com/example-browserbase-round",
+            },
+        ],
+    )
+    monkeypatch.setattr(board_seat_daily, "_extract_funding_with_llm", lambda **_kwargs: None)
+    snapshot = board_seat_daily._refresh_funding_snapshot_from_web(company="Browserbase")
+    assert snapshot is not None
+    assert snapshot.source_type == "web_refresh"
+    assert snapshot.evidence_count >= 2
+    assert snapshot.distinct_domains >= 2
+
+
+def test_status_reports_funding_quality_metrics(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_PORTCOS", "Anduril:anduril")
+    store = board_seat_daily.BoardSeatStore()
+    store.upsert_funding_snapshot(
+        company="Anduril",
+        snapshot=board_seat_daily.FundingSnapshot(
+            history="Anduril has raised substantial capital.",
+            latest_round="Series F",
+            latest_date="2024",
+            backers=["Founders Fund"],
+            source_urls=["https://a.example.com/funding", "https://b.example.com/funding"],
+            source_type="web_refresh",
+            as_of_utc=datetime.now(UTC).isoformat(),
+            confidence=0.8,
+            evidence_count=2,
+            distinct_domains=2,
+            conflict_flags=[],
+            verification_status="verified",
+        ),
+    )
+    payload = board_seat_daily.status()
+    metrics = payload["funding_quality_metrics"]
+    assert metrics["total_companies"] == 1
+    assert metrics["verified_count"] == 1
+    assert metrics["low_confidence_count"] == 0
+    assert payload["funding_verification_by_company"]["Anduril"]["verification_status"] == "verified"
