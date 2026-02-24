@@ -95,12 +95,11 @@ SIGNIFICANT_CHANGE_TERMS = {
 }
 
 BOARD_SEAT_HEADER_RE = re.compile(r"board seat as a service\s*[—-]\s*(.+)$", re.IGNORECASE)
-BOARD_SEAT_FORMAT_VERSION = "v2_thesis_context_funding"
-MAX_TOTAL_BULLETS = 6
-MAX_THESIS_BULLETS = 2
-MAX_CONTEXT_BULLETS = 2
-MAX_FUNDING_BULLETS = 2
-MAX_BULLET_WORDS = 20
+BOARD_SEAT_FORMAT_VERSION = "v3_labeled_hierarchy"
+MAX_LINE_WORDS = 18
+THESIS_LABELS: tuple[str, ...] = ("Why now", "What's different", "MOS/risks", "Bottom line")
+CONTEXT_LABELS: tuple[str, ...] = ("Current efforts", "Domain fit/gaps")
+FUNDING_LABELS: tuple[str, ...] = ("History", "Latest round/backers")
 FUNDING_CACHE_TTL_DAYS_DEFAULT = 14
 UNKNOWN_FUNDING_TEXT = "Funding details are currently unavailable."
 WEB_SEARCH_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
@@ -122,9 +121,14 @@ class FundingSnapshot:
 
 @dataclass(frozen=True)
 class BoardSeatDraft:
-    thesis_bullets: list[str]
-    context_bullets: list[str]
-    funding_bullets: list[str]
+    why_now: str
+    whats_different: str
+    mos_risks: str
+    bottom_line: str
+    context_current_efforts: str
+    context_domain_fit_gaps: str
+    funding_history: str
+    funding_latest_round_backers: str
     raw_model_output: str = ""
     rewrite_reasons: list[str] = field(default_factory=list)
 
@@ -233,31 +237,31 @@ def _load_manual_funding_seed() -> dict[str, FundingSnapshot]:
     return out
 
 
-def _normalize_bullet(text: str) -> str:
-    cleaned = _normalize_text(str(text or ""), max_chars=320)
-    cleaned = cleaned.strip().lstrip("-").strip()
+def _normalize_line_text(text: str) -> str:
+    cleaned = _normalize_text(str(text or ""), max_chars=420)
+    cleaned = cleaned.strip().lstrip("-").lstrip("•").strip()
     cleaned = re.sub(r"\s+", " ", cleaned)
+    cleaned = cleaned.strip(" ;,")
     return cleaned
 
 
-def _limit_words(text: str, *, max_words: int = MAX_BULLET_WORDS) -> str:
+def _limit_words(text: str, *, max_words: int = MAX_LINE_WORDS) -> str:
     words = str(text or "").split()
     if len(words) <= max_words:
         return " ".join(words).strip()
     return " ".join(words[:max_words]).strip()
 
+def _normalize_line(text: str, *, max_words: int = MAX_LINE_WORDS) -> str:
+    return _limit_words(_normalize_line_text(text), max_words=max_words)
 
-def _has_digits(text: str) -> bool:
-    return bool(re.search(r"\d", str(text or "")))
 
-
-def _normalize_bullet_list(items: list[str], *, max_items: int) -> list[str]:
+def _normalize_line_list(items: list[str], *, max_items: int, max_words: int = MAX_LINE_WORDS) -> list[str]:
     out: list[str] = []
     for item in items:
-        bullet = _limit_words(_normalize_bullet(item))
-        if not bullet:
+        line = _normalize_line(item, max_words=max_words)
+        if not line:
             continue
-        out.append(bullet)
+        out.append(line)
         if len(out) >= max_items:
             break
     return out
@@ -693,6 +697,22 @@ def _stable_hash(text: str) -> str:
 
 
 def _extract_investment_sections(message: str) -> dict[str, list[str]]:
+    def _label_key(text: str) -> str:
+        key = str(text or "").lower().replace("’", "'")
+        key = re.sub(r"\s+", " ", key).strip()
+        return key
+
+    label_to_section = {
+        _label_key("Why now"): "thesis",
+        _label_key("What's different"): "thesis",
+        _label_key("MOS/risks"): "thesis",
+        _label_key("Bottom line"): "thesis",
+        _label_key("Current efforts"): "context",
+        _label_key("Domain fit/gaps"): "context",
+        _label_key("History"): "funding",
+        _label_key("Latest round/backers"): "funding",
+    }
+
     lines = [line.strip() for line in str(message or "").splitlines() if line.strip()]
     sections: dict[str, list[str]] = {"thesis": [], "context": [], "funding": []}
     active: str | None = None
@@ -707,6 +727,15 @@ def _extract_investment_sections(message: str) -> dict[str, list[str]]:
         if lower == "funding snapshot":
             active = "funding"
             continue
+        plain = re.sub(r"^\s*[-•]\s*", "", line).replace("*", "").strip()
+        if ":" in plain:
+            label, value = plain.split(":", 1)
+            section = label_to_section.get(_label_key(label))
+            if section:
+                cleaned = _normalize_line(value)
+                if cleaned:
+                    sections[section].append(cleaned)
+                continue
         if lower.startswith("- signal:"):
             sections["thesis"].append(line.split(":", 1)[1].strip())
             active = None
@@ -720,8 +749,8 @@ def _extract_investment_sections(message: str) -> dict[str, list[str]]:
             continue
         if active and line.startswith("- "):
             sections[active].append(line[2:].strip())
-    for key, max_items in (("thesis", MAX_THESIS_BULLETS), ("context", MAX_CONTEXT_BULLETS), ("funding", MAX_FUNDING_BULLETS)):
-        sections[key] = _normalize_bullet_list(sections[key], max_items=max_items)
+    for key, max_items in (("thesis", 4), ("context", 2), ("funding", 2)):
+        sections[key] = _normalize_line_list(sections[key], max_items=max_items)
     return sections
 
 
@@ -748,71 +777,65 @@ def _core_investment_text(message: str) -> str:
 
 
 def _render_board_seat_message(*, company: str, draft: BoardSeatDraft) -> str:
-    lines = [f"*Board Seat as a Service — {company}*", "*Thesis*"]
-    for bullet in draft.thesis_bullets:
-        lines.append(f"- {bullet}")
-    lines.append(f"*{company} context*")
-    for bullet in draft.context_bullets:
-        lines.append(f"- {bullet}")
-    lines.append("*Funding snapshot*")
-    for bullet in draft.funding_bullets:
-        lines.append(f"- {bullet}")
+    lines = [
+        f"*Board Seat as a Service — {company}*",
+        "",
+        "*Thesis*",
+        f"*Why now:* {draft.why_now}",
+        f"*What's different:* {draft.whats_different}",
+        f"*MOS/risks:* {draft.mos_risks}",
+        f"*Bottom line:* {draft.bottom_line}",
+        "",
+        f"*{company} context*",
+        f"*Current efforts:* {draft.context_current_efforts}",
+        f"*Domain fit/gaps:* {draft.context_domain_fit_gaps}",
+        "",
+        "*Funding snapshot*",
+        f"*History:* {draft.funding_history}",
+        f"*Latest round/backers:* {draft.funding_latest_round_backers}",
+    ]
     return "\n".join(lines)
 
 
 def _validate_draft(draft: BoardSeatDraft) -> list[str]:
     errors: list[str] = []
-    if not draft.thesis_bullets:
-        errors.append("missing_thesis")
-    if not draft.context_bullets:
-        errors.append("missing_context")
-    if not draft.funding_bullets:
-        errors.append("missing_funding")
-    if len(draft.thesis_bullets) > MAX_THESIS_BULLETS:
-        errors.append("too_many_thesis_bullets")
-    if len(draft.context_bullets) > MAX_CONTEXT_BULLETS:
-        errors.append("too_many_context_bullets")
-    if len(draft.funding_bullets) > MAX_FUNDING_BULLETS:
-        errors.append("too_many_funding_bullets")
-    total = len(draft.thesis_bullets) + len(draft.context_bullets) + len(draft.funding_bullets)
-    if total > MAX_TOTAL_BULLETS:
-        errors.append("too_many_total_bullets")
-    for section in (draft.thesis_bullets, draft.context_bullets, draft.funding_bullets):
-        for bullet in section:
-            if len(bullet.split()) > MAX_BULLET_WORDS:
-                errors.append("bullet_too_long")
-                break
+    checks = {
+        "why_now": draft.why_now,
+        "whats_different": draft.whats_different,
+        "mos_risks": draft.mos_risks,
+        "bottom_line": draft.bottom_line,
+        "context_current_efforts": draft.context_current_efforts,
+        "context_domain_fit_gaps": draft.context_domain_fit_gaps,
+        "funding_history": draft.funding_history,
+        "funding_latest_round_backers": draft.funding_latest_round_backers,
+    }
+    for key, value in checks.items():
+        text = str(value or "").strip()
+        if not text:
+            errors.append(f"missing_{key}")
+            continue
+        if len(text.split()) > MAX_LINE_WORDS:
+            errors.append(f"{key}_too_long")
     return errors
 
 
 def _sanitize_draft(*, company: str, draft: BoardSeatDraft, funding: FundingSnapshot) -> BoardSeatDraft:
-    thesis = _normalize_bullet_list(draft.thesis_bullets, max_items=MAX_THESIS_BULLETS)
-    context = _normalize_bullet_list(draft.context_bullets, max_items=MAX_CONTEXT_BULLETS)
-    funding_bullets = _normalize_bullet_list(draft.funding_bullets, max_items=MAX_FUNDING_BULLETS)
-
-    if not thesis:
-        thesis = [f"{company} has a board-relevant opportunity with measurable upside and execution risk in the next 12 months."]
-    if not context:
-        context = [f"Anchor this to {company}'s existing products, customer programs, and near-term execution priorities."]
-    if not funding_bullets:
-        funding_bullets = _funding_bullets_from_snapshot(funding)
-
-    total = len(thesis) + len(context) + len(funding_bullets)
-    if total > MAX_TOTAL_BULLETS:
-        overflow = total - MAX_TOTAL_BULLETS
-        while overflow > 0 and len(funding_bullets) > 1:
-            funding_bullets.pop()
-            overflow -= 1
-        while overflow > 0 and len(context) > 1:
-            context.pop()
-            overflow -= 1
-        while overflow > 0 and len(thesis) > 1:
-            thesis.pop()
-            overflow -= 1
+    funding_history, funding_latest_round_backers = _funding_lines_from_snapshot(funding)
     return BoardSeatDraft(
-        thesis_bullets=thesis[:MAX_THESIS_BULLETS],
-        context_bullets=context[:MAX_CONTEXT_BULLETS],
-        funding_bullets=funding_bullets[:MAX_FUNDING_BULLETS],
+        why_now=_normalize_line(draft.why_now)
+        or f"{company} has a near-term window to drive measurable strategic leverage.",
+        whats_different=_normalize_line(draft.whats_different)
+        or "Differentiation is strongest where product velocity and mission alignment beat alternatives.",
+        mos_risks=_normalize_line(draft.mos_risks)
+        or "Upside is meaningful, but execution, procurement timing, and integration risk remain.",
+        bottom_line=_normalize_line(draft.bottom_line)
+        or f"Prioritize one high-conviction move for {company} with clear 12-month milestones.",
+        context_current_efforts=_normalize_line(draft.context_current_efforts)
+        or f"{company} is already investing in adjacent capabilities and customer programs in this domain.",
+        context_domain_fit_gaps=_normalize_line(draft.context_domain_fit_gaps)
+        or "Fit is strongest where roadmap, partnerships, and deployment constraints are explicitly addressed.",
+        funding_history=_normalize_line(draft.funding_history) or funding_history,
+        funding_latest_round_backers=_normalize_line(draft.funding_latest_round_backers) or funding_latest_round_backers,
         raw_model_output=draft.raw_model_output,
         rewrite_reasons=draft.rewrite_reasons,
     )
@@ -923,23 +946,29 @@ def _build_novel_fallback_draft(
         if not sig:
             continue
         if all(_jaccard_similarity(sig, prev) < 0.6 for prev in previous_signatures if prev):
-            chosen = _limit_words(_normalize_text(snippet, max_chars=220))
+            chosen = _normalize_line(snippet)
             break
     if not chosen:
-        chosen = _limit_words(_normalize_text(snippets[0], max_chars=220)) if snippets else f"No high-signal updates surfaced for {company}."
+        chosen = _normalize_line(snippets[0]) if snippets else f"No high-signal updates surfaced for {company} in the last 24 hours."
 
     context_line = (
-        _limit_words(_normalize_text(snippets[1], max_chars=220))
+        _normalize_line(snippets[1])
         if len(snippets) > 1
         else f"Prioritize net-new ideas for {company} unless underlying data changed materially."
     )
+    funding_history, funding_latest_round_backers = _funding_lines_from_snapshot(funding)
     return _sanitize_draft(
         company=company,
         funding=funding,
         draft=BoardSeatDraft(
-            thesis_bullets=[chosen],
-            context_bullets=[context_line],
-            funding_bullets=_funding_bullets_from_snapshot(funding),
+            why_now=chosen,
+            whats_different="Use net-new evidence versus previously pitched ideas.",
+            mos_risks="Main risk is repeating stale theses without materially new information.",
+            bottom_line=f"Advance only one differentiated idea for {company} this week.",
+            context_current_efforts=context_line,
+            context_domain_fit_gaps="Map recommendation to current roadmap, partnerships, and deployment gaps.",
+            funding_history=funding_history,
+            funding_latest_round_backers=funding_latest_round_backers,
             raw_model_output="",
             rewrite_reasons=["novel_fallback"],
         ),
@@ -971,32 +1000,26 @@ def _is_funding_snapshot_unknown(snapshot: FundingSnapshot) -> bool:
     return not snapshot.backers
 
 
-def _funding_bullets_from_snapshot(snapshot: FundingSnapshot) -> list[str]:
+def _funding_lines_from_snapshot(snapshot: FundingSnapshot) -> tuple[str, str]:
     if _is_funding_snapshot_unknown(snapshot):
-        return [UNKNOWN_FUNDING_TEXT]
+        unknown = _normalize_line(UNKNOWN_FUNDING_TEXT)
+        return (unknown, unknown)
 
-    history = snapshot.history.strip()
-    latest = snapshot.latest_round.strip()
-    latest_date = snapshot.latest_date.strip()
-    backers = ", ".join(snapshot.backers[:4]).strip()
+    history = _normalize_line(snapshot.history)
+    latest = _normalize_line(snapshot.latest_round, max_words=8)
+    latest_date = _normalize_line(snapshot.latest_date, max_words=6)
+    backers = _normalize_line(", ".join(snapshot.backers[:4]), max_words=10)
 
-    bullets: list[str] = []
-    if history:
-        bullets.append(f"History: {_limit_words(history)}")
-    else:
-        bullets.append("History: funding history not confirmed from current sources.")
+    history_line = history or "Funding history not confirmed from current sources."
     latest_parts: list[str] = []
     if latest:
-        latest_parts.append(f"Latest round {latest}")
+        latest_parts.append(f"{latest}")
     if latest_date:
         latest_parts.append(f"({latest_date})")
     if backers:
         latest_parts.append(f"backers: {backers}")
-    if latest_parts:
-        bullets.append(_limit_words(" ".join(latest_parts)))
-    else:
-        bullets.append("Latest round/backers are currently unknown.")
-    return _normalize_bullet_list(bullets, max_items=MAX_FUNDING_BULLETS)
+    latest_line = _normalize_line(" ".join(latest_parts)) if latest_parts else "Funding details are currently unavailable."
+    return (_normalize_line(history_line), _normalize_line(latest_line))
 
 
 def _funding_snapshot_fresh(*, snapshot: FundingSnapshot | None, ttl_days: int) -> bool:
@@ -1405,20 +1428,19 @@ def _backfill_channel_pitches(
 
 
 def _fallback_draft(*, company: str, snippets: list[str], funding: FundingSnapshot) -> BoardSeatDraft:
-    thesis = (
-        _limit_words(_normalize_text(snippets[0], max_chars=220))
-        if snippets
-        else f"No high-signal updates surfaced for {company} in the last 24 hours."
-    )
-    context = (
-        _limit_words(_normalize_text(snippets[1], max_chars=220))
-        if len(snippets) > 1
-        else f"Tie this to {company}'s current programs, customer momentum, and execution risk over the next 1-2 quarters."
-    )
+    why_now = _normalize_line(snippets[0]) if snippets else f"No high-signal updates surfaced for {company} in the last 24 hours."
+    whats_different = _normalize_line(snippets[1]) if len(snippets) > 1 else "Differentiate on speed to deployment, measured outcomes, and implementation feasibility."
+    mos_risks = _normalize_line(snippets[2]) if len(snippets) > 2 else "Key risks are execution bandwidth, procurement timing, and integration complexity."
+    funding_history, funding_latest_round_backers = _funding_lines_from_snapshot(funding)
     draft = BoardSeatDraft(
-        thesis_bullets=[thesis],
-        context_bullets=[context],
-        funding_bullets=_funding_bullets_from_snapshot(funding),
+        why_now=why_now,
+        whats_different=whats_different,
+        mos_risks=mos_risks,
+        bottom_line=f"Prioritize one high-conviction move for {company} with clear 12-month milestones.",
+        context_current_efforts=f"Tie this to {company}'s current products, customer momentum, and execution priorities.",
+        context_domain_fit_gaps="Spell out where existing capabilities fit, and which gaps need partners or build plans.",
+        funding_history=funding_history,
+        funding_latest_round_backers=funding_latest_round_backers,
         raw_model_output="",
         rewrite_reasons=["fallback"],
     )
@@ -1428,15 +1450,27 @@ def _fallback_draft(*, company: str, snippets: list[str], funding: FundingSnapsh
 def _parse_llm_draft_payload(payload: Any) -> BoardSeatDraft | None:
     if not isinstance(payload, dict):
         return None
-    thesis = payload.get("thesis_bullets")
-    context = payload.get("context_bullets")
-    funding = payload.get("funding_bullets")
-    if not isinstance(thesis, list) or not isinstance(context, list) or not isinstance(funding, list):
+    required = (
+        "why_now",
+        "whats_different",
+        "mos_risks",
+        "bottom_line",
+        "context_current_efforts",
+        "context_domain_fit_gaps",
+        "funding_history",
+        "funding_latest_round_backers",
+    )
+    if any(not isinstance(payload.get(key), str) for key in required):
         return None
     return BoardSeatDraft(
-        thesis_bullets=[str(item) for item in thesis],
-        context_bullets=[str(item) for item in context],
-        funding_bullets=[str(item) for item in funding],
+        why_now=str(payload.get("why_now") or ""),
+        whats_different=str(payload.get("whats_different") or ""),
+        mos_risks=str(payload.get("mos_risks") or ""),
+        bottom_line=str(payload.get("bottom_line") or ""),
+        context_current_efforts=str(payload.get("context_current_efforts") or ""),
+        context_domain_fit_gaps=str(payload.get("context_domain_fit_gaps") or ""),
+        funding_history=str(payload.get("funding_history") or ""),
+        funding_latest_round_backers=str(payload.get("funding_latest_round_backers") or ""),
         raw_model_output=json.dumps(payload, ensure_ascii=False),
         rewrite_reasons=[],
     )
@@ -1466,15 +1500,15 @@ def _llm_draft(
         ensure_ascii=False,
     )
     prompt = (
-        f"Generate structured board-seat bullets for {company}.\n"
-        "Return strict JSON only with keys: thesis_bullets, context_bullets, funding_bullets.\n"
+        f"Generate a structured board-seat brief for {company}.\n"
+        "Return strict JSON only with keys: "
+        "why_now, whats_different, mos_risks, bottom_line, "
+        "context_current_efforts, context_domain_fit_gaps, "
+        "funding_history, funding_latest_round_backers.\n"
         "Constraints:\n"
-        f"- thesis_bullets: 1-{MAX_THESIS_BULLETS} bullets\n"
-        f"- context_bullets: 1-{MAX_CONTEXT_BULLETS} bullets tied to the company's actual domain work\n"
-        f"- funding_bullets: 1-{MAX_FUNDING_BULLETS} bullets grounded only in provided funding snapshot\n"
-        f"- each bullet <= {MAX_BULLET_WORDS} words\n"
-        f"- total bullets <= {MAX_TOTAL_BULLETS}\n"
+        f"- each value must be a single line <= {MAX_LINE_WORDS} words\n"
         "- short, high skim value, decision-useful.\n"
+        "- style must be concise labeled-line content, not bullets.\n"
         "- do not use legacy labels (Signal/Board lens/Watchlist/Team ask).\n"
         "Recent channel context:\n"
         f"{joined}\n"
@@ -1509,9 +1543,14 @@ def _llm_draft(
         if draft is None:
             return None
         return BoardSeatDraft(
-            thesis_bullets=draft.thesis_bullets,
-            context_bullets=draft.context_bullets,
-            funding_bullets=draft.funding_bullets,
+            why_now=draft.why_now,
+            whats_different=draft.whats_different,
+            mos_risks=draft.mos_risks,
+            bottom_line=draft.bottom_line,
+            context_current_efforts=draft.context_current_efforts,
+            context_domain_fit_gaps=draft.context_domain_fit_gaps,
+            funding_history=draft.funding_history,
+            funding_latest_round_backers=draft.funding_latest_round_backers,
             raw_model_output=text,
             rewrite_reasons=[],
         )

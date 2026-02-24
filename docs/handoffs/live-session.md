@@ -3,6 +3,56 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-24, Board Seat Readability V3 labeled hierarchy)
+- Implemented Board Seat readability V3 in `/opt/coatue-claw/src/coatue_claw/board_seat_daily.py`.
+- Format is now deterministic labeled-line hierarchy (no bullet subheaders):
+  - `*Thesis*` with fixed lines:
+    - `*Why now:* ...`
+    - `*What's different:* ...`
+    - `*MOS/risks:* ...`
+    - `*Bottom line:* ...`
+  - `*{Company} context*` with fixed lines:
+    - `*Current efforts:* ...`
+    - `*Domain fit/gaps:* ...`
+  - `*Funding snapshot*` with fixed lines:
+    - `*History:* ...`
+    - `*Latest round/backers:* ...`
+- `format_version` bumped from `v2_thesis_context_funding` to `v3_labeled_hierarchy`.
+- `BoardSeatDraft` moved from list-based bullet fields to fixed labeled fields:
+  - `why_now`, `whats_different`, `mos_risks`, `bottom_line`
+  - `context_current_efforts`, `context_domain_fit_gaps`
+  - `funding_history`, `funding_latest_round_backers`
+- Added per-line sanitization and validation:
+  - each required line must be present and non-empty
+  - each line is capped to `MAX_LINE_WORDS=18`
+  - strips accidental leading bullet markers (`-`, `•`) and trims noisy suffix punctuation
+- Extended parsing for repeat-guardrail compatibility:
+  - supports V3 labeled lines
+  - still supports V2 bullet sections and legacy 5-line posts (`Signal`, `Board lens`, `Watchlist`)
+  - repeat signature continues to focus on thesis/context core signal
+- Funding resolver/cache behavior kept unchanged (manual seed -> fresh cache -> web refresh -> unknown fallback).
+- Unknown funding now renders explicitly in both funding lines:
+  - `History: Funding details are currently unavailable.`
+  - `Latest round/backers: Funding details are currently unavailable.`
+- Runtime bugfix retained: Slack `SlackResponse` parsing in channel/history fetch paths.
+
+### Validation (this session)
+- Targeted board-seat tests:
+  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_board_seat_daily.py`
+  - Result: `12 passed`
+- Full suite smoke:
+  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q`
+  - Result: `3` unrelated/pre-existing failures in Spencer change label defaults:
+    - `tests/test_spencer_change_digest.py::test_run_once_dry_run_includes_carson_label`
+    - `tests/test_spencer_change_log.py::test_is_spencer_user_defaults`
+    - `tests/test_spencer_change_log.py::test_requester_label_defaults`
+- Dry-run check for hierarchy output:
+  - `COATUE_CLAW_BOARD_SEAT_PORTCOS='OpenAI:openai' ... run-once --force --dry-run`
+  - Confirmed labeled-line hierarchy and spacing in preview output.
+- Live Anduril run check:
+  - `COATUE_CLAW_BOARD_SEAT_PORTCOS='Anduril:anduril' ... run-once --force`
+  - Expected skip preserved: `repeat_investment_without_significant_change`.
+
 ## Update (2026-02-24, Board Seat V2 format + funding snapshot)
 - Implemented Board Seat V2 in `/opt/coatue-claw/src/coatue_claw/board_seat_daily.py`:
   - deterministic sectioned output for all portcos:
