@@ -50,6 +50,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - Google Drive mirror enabled by default at:
     - `/Users/spclaw/Documents/SPClaw Database/Companies/Board-Seat`
   - strict format guard added pre-post to block numbered/freeform board-seat output and enforce labeled hierarchy
+  - follow-up hardening blocks legacy header tokens (`board`, `boardseat`) from being persisted as target companies
   - new board-seat CLI operations:
     - `seed-target`, `target-memory`, `export-ledger`
   - validation:

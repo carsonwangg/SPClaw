@@ -22,6 +22,8 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - Added deterministic format contract validator before post:
   - rejects numbered templates and missing labeled fields
   - fallback regeneration attempted once; if still invalid, run skips with `invalid_format_contract`.
+- Follow-up parser hardening:
+  - added `boardseat`/`board` placeholder blocks in target normalization to prevent legacy header text from being stored as a target company.
 - New CLI surface in `board_seat_daily`:
   - `seed-target --company <name> --target <target>`
   - `target-memory [--company ...] [--limit ...]`
