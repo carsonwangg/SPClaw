@@ -36,6 +36,7 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
   - `claw x-digest "QUERY" --hours 24 --limit 50`
   - `claw x-chart run-once --manual`
   - `claw x-chart status|list-sources|add-source`
+  - `python -m coatue_claw.board_seat_daily run-once|status|target-memory|seed-target|export-ledger`
   - `claw market-daily run-once --manual|--force|--dry-run`
   - `claw market-daily status|holdings|refresh-coatue-holdings|debug-catalyst`
   - `claw memory status|query|prune|extract-daily|checkpoint`
@@ -253,6 +254,11 @@ Board Seat daily environment controls:
 - `COATUE_CLAW_BOARD_SEAT_MAX_MESSAGES`: max context messages fetched per channel (default `160`)
 - `COATUE_CLAW_BOARD_SEAT_DB_PATH`: optional SQLite path for daily run ledger
 - `COATUE_CLAW_BOARD_SEAT_MODEL`: optional LLM model for synthesis (default `gpt-5.2-chat-latest`)
+- `COATUE_CLAW_BOARD_SEAT_TARGET_LOCK_DAYS`: hard target-memory lock window to prevent re-pitching same target (default `30`)
+- `COATUE_CLAW_BOARD_SEAT_ALLOW_REPEAT_TARGETS`: set `1` to bypass target lock (default `0`)
+- `COATUE_CLAW_BOARD_SEAT_LEDGER_DIR`: board-seat target ledger artifact directory (default `/opt/coatue-claw-data/artifacts/board-seat`)
+- `COATUE_CLAW_BOARD_SEAT_LEDGER_MIRROR_ENABLED`: mirror ledger to Google Drive local path (default `1`)
+- `COATUE_CLAW_BOARD_SEAT_LEDGER_MIRROR_PATH`: mirror destination path (default `/Users/spclaw/Documents/SPClaw Database/Companies/Board-Seat`)
 
 Spencer change-digest environment controls:
 - `COATUE_CLAW_CHANGE_TRACKER_USERS`: optional comma-separated `user_id:label` mappings for tracked requesters (example: `U0AGD28QSQG:Carson Wang,U0AFJ5RS31C:Spencer Peterson`)

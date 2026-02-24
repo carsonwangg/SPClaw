@@ -3,6 +3,43 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-24, Board Seat V6 target-memory lock + ledger + format guard)
+- Implemented hard target-memory controls in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
+  - new SQLite table: `board_seat_target_memory`
+  - per-company target lock window via `COATUE_CLAW_BOARD_SEAT_TARGET_LOCK_DAYS` (default `30`)
+  - repeat-target bypass toggle only by explicit override: `COATUE_CLAW_BOARD_SEAT_ALLOW_REPEAT_TARGETS=1`
+- Repeat-prevention now checks target key before text-similarity fallback:
+  - if a target was recently pitched (for example `Epirus` for `Anduril`), board-seat auto-retargets to the next candidate.
+  - if no alternate target is available, post is skipped with explicit reason `repeat_target_within_lock_window`.
+- Added persistent target ledger exports:
+  - artifact paths:
+    - `/opt/coatue-claw-data/artifacts/board-seat/board-seat-target-ledger.csv`
+    - `/opt/coatue-claw-data/artifacts/board-seat/board-seat-target-ledger.json`
+  - Google Drive mirror support:
+    - default mirror path: `/Users/spclaw/Documents/SPClaw Database/Companies/Board-Seat`
+    - configurable via `COATUE_CLAW_BOARD_SEAT_LEDGER_MIRROR_PATH`
+- Backfill parser broadened to include legacy numbered board-seat messages (for example `1. Idea title`, `Target(s) / sector`) so historical targets enter memory.
+- Added deterministic format contract validator before post:
+  - rejects numbered templates and missing labeled fields
+  - fallback regeneration attempted once; if still invalid, run skips with `invalid_format_contract`.
+- New CLI surface in `board_seat_daily`:
+  - `seed-target --company <name> --target <target>`
+  - `target-memory [--company ...] [--limit ...]`
+  - `export-ledger [--company ...]`
+
+### Validation
+- `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `25 passed`
+- `PYTHONPATH=src python3 -m pytest -q` -> `217 passed`
+
+### Immediate runtime steps
+1. On Mac mini, seed Epirus into target memory:
+   - `/opt/coatue-claw/.venv/bin/python -m coatue_claw.board_seat_daily seed-target --company Anduril --target Epirus`
+2. Restart + health check:
+   - `make -C /opt/coatue-claw openclaw-restart`
+   - `make -C /opt/coatue-claw openclaw-slack-status`
+3. Verify ledger mirror files exist under:
+   - `/Users/spclaw/Documents/SPClaw Database/Companies/Board-Seat/`
+
 ## Update (2026-02-24, Board Seat V5 target-first sources + confidence)
 - Implemented Board Seat V5 in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`.
 - `format_version` bumped to:

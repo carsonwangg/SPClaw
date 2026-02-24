@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 import hashlib
@@ -97,6 +98,7 @@ SIGNIFICANT_CHANGE_TERMS = {
 BOARD_SEAT_HEADER_RE = re.compile(r"board seat as a service\s*[—-]\s*(.+)$", re.IGNORECASE)
 BOARD_SEAT_FORMAT_VERSION = "v5_target_first_confidence_sources"
 MAX_LINE_WORDS = 18
+TARGET_LOCK_DAYS_DEFAULT = 30
 THESIS_LABELS: tuple[str, ...] = ("Idea", "Why now", "What's different", "MOS/risks", "Bottom line")
 CONTEXT_LABELS: tuple[str, ...] = ("Current efforts", "Domain fit/gaps")
 FUNDING_LABELS: tuple[str, ...] = ("History", "Latest round/backers")
@@ -134,6 +136,18 @@ DEFAULT_TARGET_BY_COMPANY: dict[str, str] = {
     "spacex": "K2 Space",
     "stripe": "Modern Treasury",
     "sundayrobotics": "Viam",
+}
+TARGET_ROTATION_BY_COMPANY: dict[str, tuple[str, ...]] = {
+    "anduril": ("Saronic", "Shield AI", "Skydio", "AeroVironment", "Epirus"),
+    "anthropic": ("Langfuse", "Weights & Biases", "Scale AI"),
+    "cursor": ("Sourcegraph", "Codeium", "PostHog"),
+    "neuralink": ("Blackrock Neurotech", "Paradromics", "Synchron"),
+    "openai": ("Browserbase", "Langfuse", "Unstructured", "Vercel"),
+    "physicalintelligence": ("Covariant", "Skild AI", "Viam"),
+    "ramp": ("Brex", "Mercury", "Modern Treasury"),
+    "spacex": ("K2 Space", "Impulse Space", "Terran Orbital"),
+    "stripe": ("Modern Treasury", "Adyen", "Plaid"),
+    "sundayrobotics": ("Viam", "Realtime Robotics", "Skild AI"),
 }
 FUNDING_CONTEXT_TERMS = {
     "funding",
@@ -204,6 +218,13 @@ TARGET_TOKEN_STOPWORDS = {
     "llc",
     "ltd",
 }
+LEGACY_BOARD_SEAT_PATTERNS = (
+    "1. idea title",
+    "2. why now",
+    "3. target(s) / sector",
+    "4. strategic fit for",
+    "5. value creation",
+)
 
 
 @dataclass(frozen=True)
@@ -286,6 +307,43 @@ def _db_path() -> Path:
     )
 
 
+def _target_lock_days() -> int:
+    return _env_int(
+        "COATUE_CLAW_BOARD_SEAT_TARGET_LOCK_DAYS",
+        TARGET_LOCK_DAYS_DEFAULT,
+        minimum=1,
+        maximum=365,
+    )
+
+
+def _allow_repeat_targets() -> bool:
+    return _env_flag("COATUE_CLAW_BOARD_SEAT_ALLOW_REPEAT_TARGETS", False)
+
+
+def _ledger_dir() -> Path:
+    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_LEDGER_DIR", "") or "").strip()
+    if raw:
+        return Path(raw).expanduser().resolve()
+    return (_data_root() / "artifacts/board-seat").resolve()
+
+
+def _ledger_mirror_enabled() -> bool:
+    return _env_flag("COATUE_CLAW_BOARD_SEAT_LEDGER_MIRROR_ENABLED", True)
+
+
+def _ledger_mirror_path() -> Path:
+    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_LEDGER_MIRROR_PATH", "") or "").strip()
+    if raw:
+        return Path(raw).expanduser().resolve()
+    primary = Path("/Users/spclaw/Documents/SPClaw Database/Companies/Board-Seat")
+    fallback = Path("/Users/spclaw/Documents/Google Drive Local/Companies/Board-Seat")
+    if primary.exists():
+        return primary.resolve()
+    if fallback.exists():
+        return fallback.resolve()
+    return primary.resolve()
+
+
 def _funding_ttl_days() -> int:
     raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_FUNDING_TTL_DAYS", str(FUNDING_CACHE_TTL_DAYS_DEFAULT)) or "").strip()
     try:
@@ -359,6 +417,10 @@ def _manual_funding_path() -> Path | None:
 
 def _slug_company(text: str) -> str:
     return _slug(text).replace("-", "")
+
+
+def _target_key(text: str) -> str:
+    return _slug_company(str(text or ""))
 
 
 def _brave_search_api_key() -> str:
@@ -824,6 +886,28 @@ class BoardSeatStore:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_board_seat_funding_cache_asof ON board_seat_funding_cache(as_of_utc DESC);"
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS board_seat_target_memory (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    company TEXT NOT NULL,
+                    target TEXT NOT NULL,
+                    target_key TEXT NOT NULL,
+                    channel_ref TEXT NOT NULL,
+                    channel_id TEXT,
+                    source TEXT NOT NULL,
+                    posted_at_utc TEXT NOT NULL,
+                    run_date_local TEXT,
+                    message_ts TEXT
+                );
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_board_seat_target_memory_recent ON board_seat_target_memory(company, target_key, posted_at_utc DESC);"
+            )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_board_seat_target_memory_message_ts ON board_seat_target_memory(message_ts) WHERE message_ts IS NOT NULL;"
+            )
 
     def _seed_pitches_from_runs(self) -> None:
         with self._connect() as conn:
@@ -865,6 +949,18 @@ class BoardSeatStore:
                 context_snippets=context_snippets,
                 significant_change=False,
             )
+            target = _extract_target_from_message_text(company=str(row["company"] or ""), text=message_text)
+            if target:
+                self.record_target(
+                    company=str(row["company"] or ""),
+                    target=target,
+                    channel_ref=str(row["channel_ref"] or ""),
+                    channel_id=(str(row["channel_id"] or "").strip() or None),
+                    source="legacy_run_seed",
+                    posted_at_utc=str(row["posted_at_utc"] or _utc_now_iso()),
+                    run_date_local=(str(row["run_date_local"] or "").strip() or None),
+                    message_ts=(str(row["message_ts"] or "").strip() or None),
+                )
 
     def already_posted(self, *, run_date_local: str, company: str) -> bool:
         with self._connect() as conn:
@@ -1016,6 +1112,118 @@ class BoardSeatStore:
             else:
                 row = conn.execute("SELECT COUNT(1) AS n FROM board_seat_pitches").fetchone()
         return int(row["n"]) if row is not None else 0
+
+    def record_target(
+        self,
+        *,
+        company: str,
+        target: str,
+        channel_ref: str,
+        channel_id: str | None,
+        source: str,
+        posted_at_utc: str,
+        run_date_local: str | None,
+        message_ts: str | None,
+    ) -> bool:
+        clean_target = _normalize_text(str(target or ""), max_chars=120).strip()
+        if not clean_target:
+            return False
+        key = _target_key(clean_target)
+        if not key:
+            return False
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT OR IGNORE INTO board_seat_target_memory (
+                    company, target, target_key, channel_ref, channel_id, source, posted_at_utc, run_date_local, message_ts
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    company,
+                    clean_target,
+                    key,
+                    channel_ref,
+                    channel_id,
+                    source,
+                    posted_at_utc,
+                    run_date_local,
+                    message_ts,
+                ),
+            )
+        return bool(cur.rowcount)
+
+    def recent_target_hit(self, *, company: str, target_key: str, lookback_days: int) -> dict[str, Any] | None:
+        if not company or not target_key:
+            return None
+        cutoff = (datetime.now(UTC) - timedelta(days=max(1, int(lookback_days)))).isoformat()
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT company, target, target_key, channel_ref, channel_id, source, posted_at_utc, run_date_local, message_ts
+                FROM board_seat_target_memory
+                WHERE company = ? AND target_key = ? AND posted_at_utc >= ?
+                ORDER BY posted_at_utc DESC
+                LIMIT 1
+                """,
+                (company, target_key, cutoff),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def target_memory_count(self, *, company: str | None = None) -> int:
+        with self._connect() as conn:
+            if company:
+                row = conn.execute(
+                    "SELECT COUNT(1) AS n FROM board_seat_target_memory WHERE company = ?",
+                    (company,),
+                ).fetchone()
+            else:
+                row = conn.execute("SELECT COUNT(1) AS n FROM board_seat_target_memory").fetchone()
+        return int(row["n"]) if row is not None else 0
+
+    def target_ledger_rows(self, *, company: str | None = None, limit: int = 1000) -> list[dict[str, Any]]:
+        cap = max(1, min(5000, int(limit)))
+        where = ""
+        params: tuple[Any, ...] = ()
+        if company:
+            where = "WHERE company = ?"
+            params = (company,)
+        query = f"""
+            WITH ranked AS (
+                SELECT
+                    company,
+                    target,
+                    target_key,
+                    channel_ref,
+                    channel_id,
+                    source,
+                    message_ts,
+                    posted_at_utc,
+                    COUNT(1) OVER (PARTITION BY company, target_key) AS pitch_count,
+                    MIN(posted_at_utc) OVER (PARTITION BY company, target_key) AS first_seen_utc,
+                    MAX(posted_at_utc) OVER (PARTITION BY company, target_key) AS last_seen_utc,
+                    ROW_NUMBER() OVER (PARTITION BY company, target_key ORDER BY posted_at_utc DESC, id DESC) AS rn
+                FROM board_seat_target_memory
+                {where}
+            )
+            SELECT
+                company,
+                target,
+                target_key,
+                first_seen_utc,
+                last_seen_utc,
+                pitch_count,
+                channel_ref AS last_channel_ref,
+                channel_id AS last_channel_id,
+                source AS last_source,
+                message_ts AS last_message_ts
+            FROM ranked
+            WHERE rn = 1
+            ORDER BY company ASC, last_seen_utc DESC
+            LIMIT ?
+        """
+        with self._connect() as conn:
+            rows = conn.execute(query, (*params, cap)).fetchall()
+        return [dict(row) for row in rows]
 
     def get_funding_snapshot(self, *, company: str) -> FundingSnapshot | None:
         with self._connect() as conn:
@@ -1350,28 +1558,57 @@ def _is_valid_target_name(*, company: str, target: str) -> bool:
     return True
 
 
-def _default_target_for_company(company: str) -> str:
+def _default_target_for_company(company: str, *, blocked_keys: set[str] | None = None) -> str:
     company_key = _slug_company(company)
+    blocked = {item for item in (blocked_keys or set()) if item}
     manual = _manual_default_targets()
-    if company_key in manual and _is_valid_target_name(company=company, target=manual[company_key]):
-        return manual[company_key]
-    candidate = DEFAULT_TARGET_BY_COMPANY.get(company_key, "")
-    if _is_valid_target_name(company=company, target=candidate):
-        return candidate
+    ordered: list[str] = []
+    if company_key in manual:
+        ordered.append(manual[company_key])
+    for item in TARGET_ROTATION_BY_COMPANY.get(company_key, ()):
+        ordered.append(item)
+    fallback = DEFAULT_TARGET_BY_COMPANY.get(company_key, "")
+    if fallback:
+        ordered.append(fallback)
+    ordered.append("Scale AI")
+    seen: set[str] = set()
+    for candidate in ordered:
+        key = _target_key(candidate)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        if key in blocked:
+            continue
+        if _is_valid_target_name(company=company, target=candidate):
+            return candidate
+    for candidate in ordered:
+        if _is_valid_target_name(company=company, target=candidate):
+            return candidate
     return "Scale AI"
 
 
-def _best_effort_target(*, company: str, seed_text: str) -> str:
+def _best_effort_target(*, company: str, seed_text: str, blocked_keys: set[str] | None = None) -> str:
+    blocked = {item for item in (blocked_keys or set()) if item}
     candidates = _target_candidates_from_seed(company=company, seed_text=seed_text)
     for candidate in candidates:
+        if _target_key(candidate) in blocked:
+            continue
         if _is_valid_target_name(company=company, target=candidate):
             return candidate
-    return _default_target_for_company(company)
+    return _default_target_for_company(company, blocked_keys=blocked)
 
 
-def _best_effort_idea_line(*, company: str, seed_text: str) -> str:
+def _best_effort_idea_line(*, company: str, seed_text: str, blocked_keys: set[str] | None = None) -> str:
+    blocked = {item for item in (blocked_keys or set()) if item}
     extracted = _extract_acquisition_target(seed_text)
-    target = extracted if _is_valid_target_name(company=company, target=extracted) else _best_effort_target(company=company, seed_text=seed_text)
+    extracted_key = _target_key(extracted)
+    if extracted_key and extracted_key in blocked:
+        extracted = ""
+    target = (
+        extracted
+        if _is_valid_target_name(company=company, target=extracted)
+        else _best_effort_target(company=company, seed_text=seed_text, blocked_keys=blocked)
+    )
     line = f"Acquire {target} to accelerate {company} execution in a strategic wedge."
     return _normalize_line(line)
 
@@ -2174,10 +2411,71 @@ def _message_looks_like_board_seat_pitch(*, company: str, text: str) -> bool:
     if not first_line:
         return False
     match = BOARD_SEAT_HEADER_RE.search(first_line.strip("* "))
-    if not match:
-        return False
-    title_company = _slug(match.group(1))
-    return (not title_company) or (title_company == _slug(company))
+    if match:
+        title_company = _slug(match.group(1))
+        return (not title_company) or (title_company == _slug(company))
+    lower = raw.lower()
+    if any(pattern in lower for pattern in LEGACY_BOARD_SEAT_PATTERNS):
+        if company.lower() in lower or "board seat as a service" in lower:
+            return True
+    if "board seat as a service" in lower and ("why now" in lower or "target" in lower):
+        return True
+    return False
+
+
+def _extract_target_from_message_text(*, company: str, text: str) -> str:
+    raw = str(text or "")
+    target = _extract_acquisition_target(raw)
+    if _is_valid_target_name(company=company, target=target):
+        return target
+    for line in raw.splitlines():
+        plain = line.strip().strip("*")
+        if ":" not in plain:
+            continue
+        label, value = plain.split(":", 1)
+        lkey = label.strip().lower()
+        if lkey in {"primary", "target", "idea"}:
+            candidate = _normalize_text(value, max_chars=100).strip(" .,:;-")
+            if _is_valid_target_name(company=company, target=candidate):
+                return candidate
+    seed = " ".join(raw.splitlines()[:8])
+    return _best_effort_target(company=company, seed_text=seed)
+
+
+def _validate_rendered_message_format(*, company: str, message: str) -> list[str]:
+    raw = str(message or "").strip()
+    if not raw:
+        return ["empty_message"]
+    errors: list[str] = []
+    first_line = ""
+    for line in raw.splitlines():
+        if line.strip():
+            first_line = line.strip()
+            break
+    if first_line != f"*Board Seat as a Service — {company}*":
+        errors.append("header_mismatch")
+    if re.search(r"(?m)^\s*\d+\.\s+", raw):
+        errors.append("numbered_heading_disallowed")
+    required_tokens = [
+        "*Thesis*",
+        "*Idea:*",
+        "*Idea confidence:*",
+        "*Why now:*",
+        "*What's different:*",
+        "*MOS/risks:*",
+        "*Bottom line:*",
+        f"*{company} context*",
+        "*Current efforts:*",
+        "*Domain fit/gaps:*",
+        "*Funding snapshot*",
+        "*History:*",
+        "*Latest round/backers:*",
+        "*Sources*",
+    ]
+    for token in required_tokens:
+        if token not in raw:
+            errors.append(f"missing_{token.strip('*').lower().replace(' ', '_')}")
+    return errors
 
 
 def _local_date_for_utc_iso(value: str) -> str:
@@ -2208,6 +2506,7 @@ def _backfill_channel_pitches(
 
     matched = 0
     inserted = 0
+    target_inserted = 0
     for item in reversed(history):
         if not isinstance(item, dict):
             continue
@@ -2240,7 +2539,21 @@ def _backfill_channel_pitches(
         )
         if did_insert:
             inserted += 1
-    return {"scanned": len(history), "matched": matched, "inserted": inserted}
+        target = _extract_target_from_message_text(company=company, text=text)
+        if target:
+            did_target_insert = store.record_target(
+                company=company,
+                target=target,
+                channel_ref=channel_ref,
+                channel_id=channel_id,
+                source="slack_history_backfill",
+                posted_at_utc=posted_at_utc,
+                run_date_local=_local_date_for_utc_iso(posted_at_utc),
+                message_ts=message_ts,
+            )
+            if did_target_insert:
+                target_inserted += 1
+    return {"scanned": len(history), "matched": matched, "inserted": inserted, "target_inserted": target_inserted}
 
 
 def _fallback_draft(
@@ -2427,19 +2740,67 @@ def _build_draft(
     return draft
 
 
+def _write_target_ledger(store: BoardSeatStore) -> dict[str, str]:
+    rows = store.target_ledger_rows(limit=5000)
+    out_dir = _ledger_dir()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = out_dir / "board-seat-target-ledger.csv"
+    json_path = out_dir / "board-seat-target-ledger.json"
+    fields = [
+        "company",
+        "target",
+        "target_key",
+        "first_seen_utc",
+        "last_seen_utc",
+        "pitch_count",
+        "last_channel_ref",
+        "last_channel_id",
+        "last_source",
+        "last_message_ts",
+    ]
+    with csv_path.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fields)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({key: row.get(key, "") for key in fields})
+    with json_path.open("w", encoding="utf-8") as fh:
+        json.dump(rows, fh, indent=2, ensure_ascii=False, sort_keys=True)
+
+    mirror_csv_path = ""
+    mirror_json_path = ""
+    if _ledger_mirror_enabled():
+        mirror_dir = _ledger_mirror_path()
+        mirror_dir.mkdir(parents=True, exist_ok=True)
+        mirror_csv = mirror_dir / csv_path.name
+        mirror_json = mirror_dir / json_path.name
+        mirror_csv.write_text(csv_path.read_text(encoding="utf-8"), encoding="utf-8")
+        mirror_json.write_text(json_path.read_text(encoding="utf-8"), encoding="utf-8")
+        mirror_csv_path = str(mirror_csv)
+        mirror_json_path = str(mirror_json)
+    return {
+        "csv_path": str(csv_path),
+        "json_path": str(json_path),
+        "mirror_csv_path": mirror_csv_path,
+        "mirror_json_path": mirror_json_path,
+    }
+
+
 def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
     store = BoardSeatStore()
     run_date = _today_key()
+    target_lock_days = _target_lock_days()
     portcos = _parse_portcos()
     result: dict[str, Any] = {
         "ok": True,
         "format_version": BOARD_SEAT_FORMAT_VERSION,
         "run_date_local": run_date,
         "timezone": str(_timezone()),
+        "target_lock_days": target_lock_days,
         "portcos": [{"company": c, "channel_ref": ch} for c, ch in portcos],
         "sent": [],
         "skipped": [],
         "history_backfill": [],
+        "ledger": {},
     }
 
     if WebClient is None and not dry_run:
@@ -2453,13 +2814,58 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
 
         if dry_run and not clients:
             funding = _resolve_funding_snapshot(store=store, company=company)
+            recent_pitches = store.recent_pitches(company=company, limit=12)
             draft = _build_draft(
                 company=company,
                 snippets=[],
                 funding=funding,
-                recent_pitches=store.recent_pitches(company=company, limit=12),
+                recent_pitches=recent_pitches,
             )
+            initial_target = _extract_acquisition_target(draft.idea_line)
+            initial_target_key = _target_key(initial_target)
+            locked_hit = (
+                store.recent_target_hit(company=company, target_key=initial_target_key, lookback_days=target_lock_days)
+                if (initial_target_key and not _allow_repeat_targets())
+                else None
+            )
+            if locked_hit is not None:
+                seed = " ".join([draft.idea_line, draft.why_now, draft.whats_different])
+                replacement = _best_effort_target(
+                    company=company,
+                    seed_text=seed,
+                    blocked_keys={initial_target_key},
+                )
+                draft = BoardSeatDraft(
+                    idea_line=_normalize_line(f"Acquire {replacement} to accelerate {company} execution in a strategic wedge."),
+                    idea_confidence="Low",
+                    why_now=draft.why_now,
+                    whats_different=draft.whats_different,
+                    mos_risks=draft.mos_risks,
+                    bottom_line=draft.bottom_line,
+                    context_current_efforts=draft.context_current_efforts,
+                    context_domain_fit_gaps=draft.context_domain_fit_gaps,
+                    funding_history=draft.funding_history,
+                    funding_latest_round_backers=draft.funding_latest_round_backers,
+                    source_refs=draft.source_refs,
+                    raw_model_output=draft.raw_model_output,
+                    rewrite_reasons=[*draft.rewrite_reasons, "target_lock_retarget"],
+                )
             message = _render_board_seat_message(company=company, draft=draft)
+            format_errors = _validate_rendered_message_format(company=company, message=message)
+            if format_errors:
+                fallback = _fallback_draft(company=company, snippets=[], funding=funding, acquisition_rows=[])
+                message = _render_board_seat_message(company=company, draft=fallback)
+                format_errors = _validate_rendered_message_format(company=company, message=message)
+            if format_errors:
+                result["skipped"].append(
+                    {
+                        "company": company,
+                        "channel_ref": channel_ref,
+                        "reason": "invalid_format_contract",
+                        "format_errors": format_errors,
+                    }
+                )
+                continue
             result["sent"].append(
                 {
                     "company": company,
@@ -2469,6 +2875,7 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                     "funding_source_type": funding.source_type,
                     "funding_as_of_utc": funding.as_of_utc,
                     "funding_unknown": _is_funding_snapshot_unknown(funding),
+                    "target": _extract_acquisition_target(draft.idea_line),
                 }
             )
             continue
@@ -2501,7 +2908,76 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                 recent_pitches = store.recent_pitches(company=company, limit=12)
                 funding = _resolve_funding_snapshot(store=store, company=company)
                 draft = _build_draft(company=company, snippets=snippets, funding=funding, recent_pitches=recent_pitches)
+                initial_target = _extract_acquisition_target(draft.idea_line)
+                initial_target_key = _target_key(initial_target)
+                if initial_target_key and (not _allow_repeat_targets()):
+                    locked_hit = store.recent_target_hit(
+                        company=company,
+                        target_key=initial_target_key,
+                        lookback_days=target_lock_days,
+                    )
+                    if locked_hit is not None:
+                        seed = " ".join(
+                            [
+                                draft.idea_line,
+                                draft.why_now,
+                                draft.whats_different,
+                                " ".join(snippets[:3]),
+                            ]
+                        )
+                        replacement = _best_effort_target(
+                            company=company,
+                            seed_text=seed,
+                            blocked_keys={initial_target_key},
+                        )
+                        replacement_key = _target_key(replacement)
+                        if replacement_key == initial_target_key:
+                            result["skipped"].append(
+                                {
+                                    "company": company,
+                                    "channel_ref": channel_ref,
+                                    "channel_id": channel_id,
+                                    "reason": "repeat_target_within_lock_window",
+                                    "target": initial_target,
+                                    "target_key": initial_target_key,
+                                    "matched_posted_at_utc": str(locked_hit.get("posted_at_utc") or ""),
+                                }
+                            )
+                            posted = True
+                            break
+                        draft = BoardSeatDraft(
+                            idea_line=_normalize_line(f"Acquire {replacement} to accelerate {company} execution in a strategic wedge."),
+                            idea_confidence="Low",
+                            why_now=draft.why_now,
+                            whats_different=draft.whats_different,
+                            mos_risks=draft.mos_risks,
+                            bottom_line=draft.bottom_line,
+                            context_current_efforts=draft.context_current_efforts,
+                            context_domain_fit_gaps=draft.context_domain_fit_gaps,
+                            funding_history=draft.funding_history,
+                            funding_latest_round_backers=draft.funding_latest_round_backers,
+                            source_refs=draft.source_refs,
+                            raw_model_output=draft.raw_model_output,
+                            rewrite_reasons=[*draft.rewrite_reasons, "target_lock_retarget"],
+                        )
                 message = _render_board_seat_message(company=company, draft=draft)
+                format_errors = _validate_rendered_message_format(company=company, message=message)
+                if format_errors:
+                    fallback = _fallback_draft(company=company, snippets=snippets, funding=funding, acquisition_rows=[])
+                    message = _render_board_seat_message(company=company, draft=fallback)
+                    format_errors = _validate_rendered_message_format(company=company, message=message)
+                if format_errors:
+                    result["skipped"].append(
+                        {
+                            "company": company,
+                            "channel_ref": channel_ref,
+                            "channel_id": channel_id,
+                            "reason": "invalid_format_contract",
+                            "format_errors": format_errors,
+                        }
+                    )
+                    posted = True
+                    break
                 investment_text = _extract_investment_text(message)
                 core_investment_text = _core_investment_text(message)
                 investment_signature = _token_signature(core_investment_text)
@@ -2555,12 +3031,14 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                     posted = True
                     break
                 if dry_run:
+                    current_target = _extract_target_from_message_text(company=company, text=message)
                     result["sent"].append(
                         {
                             "company": company,
                             "channel_ref": channel_ref,
                             "channel_id": channel_id,
                             "preview": message,
+                            "target": current_target,
                             "significant_change": bool(significant_change),
                             "format_version": BOARD_SEAT_FORMAT_VERSION,
                             "funding_source_type": funding.source_type,
@@ -2596,12 +3074,24 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                     context_snippets=snippets,
                     significant_change=bool(significant_change),
                 )
+                current_target = _extract_target_from_message_text(company=company, text=message)
+                store.record_target(
+                    company=company,
+                    target=current_target,
+                    channel_ref=channel_ref,
+                    channel_id=channel_id,
+                    source="live_post",
+                    posted_at_utc=_iso_from_slack_ts(ts),
+                    run_date_local=run_date,
+                    message_ts=(ts or None),
+                )
                 result["sent"].append(
                     {
                         "company": company,
                         "channel_ref": channel_ref,
                         "channel_id": channel_id,
                         "ts": ts,
+                        "target": current_target,
                         "significant_change": bool(significant_change),
                         "format_version": BOARD_SEAT_FORMAT_VERSION,
                         "funding_source_type": funding.source_type,
@@ -2624,6 +3114,11 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
 
         if not posted:
             result["skipped"].append({"company": company, "channel_ref": channel_ref, "reason": last_error})
+
+    try:
+        result["ledger"] = _write_target_ledger(store)
+    except Exception as exc:
+        result["ledger"] = {"error": str(exc)}
 
     return result
 
@@ -2649,6 +3144,7 @@ def status() -> dict[str, Any]:
         "format_version": BOARD_SEAT_FORMAT_VERSION,
         "timezone": str(_timezone()),
         "run_date_local": _today_key(),
+        "target_lock_days": _target_lock_days(),
         "portcos": portcos,
         "recent_runs": store.recent_runs(limit=20),
         "pitch_counts": {
@@ -2658,8 +3154,19 @@ def status() -> dict[str, Any]:
                 for item in portcos
             },
         },
+        "target_memory_counts": {
+            "total": store.target_memory_count(),
+            "by_company": {
+                item["company"]: store.target_memory_count(company=item["company"])
+                for item in portcos
+            },
+        },
         "funding_cache_age_days_by_company": funding_age_days,
         "funding_data_source_by_company": funding_source_by_company,
+        "ledger_paths": {
+            "artifact_dir": str(_ledger_dir()),
+            "mirror_dir": str(_ledger_mirror_path()) if _ledger_mirror_enabled() else "",
+        },
     }
 
 
@@ -2672,12 +3179,66 @@ def main() -> None:
     run.add_argument("--dry-run", action="store_true")
 
     sub.add_parser("status")
+    seed = sub.add_parser("seed-target")
+    seed.add_argument("--company", required=True)
+    seed.add_argument("--target", required=True)
+    seed.add_argument("--channel-ref", default="manual")
+
+    export = sub.add_parser("export-ledger")
+    export.add_argument("--company", default="")
+
+    memory = sub.add_parser("target-memory")
+    memory.add_argument("--company", default="")
+    memory.add_argument("--limit", type=int, default=200)
 
     args = parser.parse_args()
     if args.command == "run-once":
         payload = run_once(force=bool(args.force), dry_run=bool(args.dry_run))
-    else:
+    elif args.command == "status":
         payload = status()
+    elif args.command == "seed-target":
+        store = BoardSeatStore()
+        now_iso = _utc_now_iso()
+        target = _normalize_text(args.target, max_chars=120).strip()
+        inserted = store.record_target(
+            company=args.company,
+            target=target,
+            channel_ref=args.channel_ref,
+            channel_id=None,
+            source="manual_seed",
+            posted_at_utc=now_iso,
+            run_date_local=_today_key(),
+            message_ts=None,
+        )
+        payload = {
+            "ok": True,
+            "inserted": bool(inserted),
+            "company": args.company,
+            "target": target,
+            "target_key": _target_key(target),
+            "posted_at_utc": now_iso,
+        }
+    elif args.command == "export-ledger":
+        store = BoardSeatStore()
+        ledger = _write_target_ledger(store)
+        rows = store.target_ledger_rows(company=args.company or None, limit=5000)
+        payload = {
+            "ok": True,
+            "ledger": ledger,
+            "rows": rows,
+            "count": len(rows),
+            "company_filter": args.company or "",
+        }
+    else:
+        store = BoardSeatStore()
+        rows = store.target_ledger_rows(company=args.company or None, limit=max(1, min(5000, int(args.limit))))
+        payload = {
+            "ok": True,
+            "target_lock_days": _target_lock_days(),
+            "company_filter": args.company or "",
+            "count": len(rows),
+            "rows": rows,
+        }
     print(json.dumps(payload, indent=2, sort_keys=True))
 
 

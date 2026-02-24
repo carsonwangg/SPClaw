@@ -573,3 +573,88 @@ def test_backfill_channel_pitches_parses_legacy_history(tmp_path: Path, monkeypa
     assert stats["matched"] == 1
     assert stats["inserted"] == 1
     assert store.pitch_count(company="Anduril") == 1
+
+
+def test_message_looks_like_board_seat_pitch_accepts_legacy_numbered_shape() -> None:
+    text = "\n".join(
+        [
+            "1. Idea title",
+            "Acquire Epirus to expand C-UAS stack.",
+            "2. Why now",
+            "3. Target(s) / sector",
+            "Anduril",
+        ]
+    )
+    assert board_seat_daily._message_looks_like_board_seat_pitch(company="Anduril", text=text) is True
+
+
+def test_record_target_and_lock_lookup(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
+    store = board_seat_daily.BoardSeatStore()
+    inserted = store.record_target(
+        company="Anduril",
+        target="Epirus",
+        channel_ref="anduril",
+        channel_id="C_ANDURIL",
+        source="manual_seed",
+        posted_at_utc=datetime.now(UTC).isoformat(),
+        run_date_local="2026-02-24",
+        message_ts=None,
+    )
+    assert inserted is True
+    hit = store.recent_target_hit(
+        company="Anduril",
+        target_key=board_seat_daily._target_key("Epirus"),
+        lookback_days=30,
+    )
+    assert hit is not None
+    assert str(hit["target"]).lower() == "epirus"
+
+
+def test_best_effort_target_skips_blocked_target() -> None:
+    seed = "Acquire Epirus to accelerate Anduril execution."
+    target = board_seat_daily._best_effort_target(
+        company="Anduril",
+        seed_text=seed,
+        blocked_keys={board_seat_daily._target_key("Epirus")},
+    )
+    assert board_seat_daily._target_key(target) != board_seat_daily._target_key("Epirus")
+    assert board_seat_daily._is_valid_target_name(company="Anduril", target=target) is True
+
+
+def test_validate_rendered_message_format_rejects_numbered_template() -> None:
+    bad = "\n".join(
+        [
+            "1. Idea title",
+            "Acquire Epirus to expand C-UAS stack.",
+            "2. Why now",
+            "Demand is rising.",
+        ]
+    )
+    errors = board_seat_daily._validate_rendered_message_format(company="Anduril", message=bad)
+    assert "numbered_heading_disallowed" in errors
+
+
+def test_write_target_ledger_writes_csv_json_and_mirror(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_LEDGER_DIR", str(tmp_path / "artifacts"))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_LEDGER_MIRROR_ENABLED", "1")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_LEDGER_MIRROR_PATH", str(tmp_path / "mirror"))
+    store = board_seat_daily.BoardSeatStore()
+    store.record_target(
+        company="Anduril",
+        target="Epirus",
+        channel_ref="anduril",
+        channel_id="C_ANDURIL",
+        source="manual_seed",
+        posted_at_utc=datetime.now(UTC).isoformat(),
+        run_date_local="2026-02-24",
+        message_ts=None,
+    )
+    paths = board_seat_daily._write_target_ledger(store)
+    assert Path(paths["csv_path"]).exists()
+    assert Path(paths["json_path"]).exists()
+    assert Path(paths["mirror_csv_path"]).exists()
+    assert Path(paths["mirror_json_path"]).exists()

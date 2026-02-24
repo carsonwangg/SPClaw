@@ -40,6 +40,21 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Board Seat V6 target-memory enforcement + ledger tracking shipped:
+  - added `board_seat_target_memory` table and hard target lock window (`COATUE_CLAW_BOARD_SEAT_TARGET_LOCK_DAYS`, default 30 days)
+  - repeated targets (for example Epirus for Anduril) are now auto-retargeted or explicitly skipped with `repeat_target_within_lock_window`
+  - expanded backfill now ingests legacy numbered board-seat posts into memory
+  - new ledger artifacts on each run:
+    - `/opt/coatue-claw-data/artifacts/board-seat/board-seat-target-ledger.csv`
+    - `/opt/coatue-claw-data/artifacts/board-seat/board-seat-target-ledger.json`
+  - Google Drive mirror enabled by default at:
+    - `/Users/spclaw/Documents/SPClaw Database/Companies/Board-Seat`
+  - strict format guard added pre-post to block numbered/freeform board-seat output and enforce labeled hierarchy
+  - new board-seat CLI operations:
+    - `seed-target`, `target-memory`, `export-ledger`
+  - validation:
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `25 passed`
+    - `PYTHONPATH=src python3 -m pytest -q` -> `217 passed`
 - Board Seat V5 target-first sourcing is now implemented for all portco channels:
   - `BOARD_SEAT_FORMAT_VERSION = v5_target_first_confidence_sources`
   - source policy defaults to `target_first_3_1` (up to 3 target refs + 1 parent-context ref)
