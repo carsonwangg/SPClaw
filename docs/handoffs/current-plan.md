@@ -61,6 +61,22 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
     - `pypdf`, `python-docx`, `python-pptx`
   - validation:
     - `PYTHONPATH=src python3 -m pytest -q` -> `240 passed`
+- Market Daily earnings expansion shipped in `codex/agent-market-daily` worktree:
+  - Morning `open` MD post now appends `Earnings After Close Today` for same-day after-close names detected from final MD universe (`top-K + Coatue overlay + overrides`).
+  - New nightly MD recap path added at `19:00` local runtime by default:
+    - `python -m coatue_claw.market_daily run-earnings-recap`
+    - deduped per local day via `slot_name=earnings_recap`
+    - scope: any final-universe name with same-day earnings report signal
+    - ranking: top 4 by absolute move since regular close
+    - output: 2-4 bullets per ticker (LLM synthesis with deterministic fallback)
+  - Slack/CLI/runtime wiring:
+    - Slack: `md earnings now`, `md earnings now force`
+    - CLI: `claw market-daily run-earnings-recap --manual|--force|--dry-run`
+    - launchd label: `com.coatueclaw.market-daily-earnings-recap`
+    - env: `COATUE_CLAW_MD_EARNINGS_RECAP_TIME` (default `19:00`)
+    - Make target: `openclaw-market-daily-earnings-recap-run-once`
+  - validation:
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_market_daily.py tests/test_launchd_runtime.py` -> `42 passed`
 - Parallel Codex multi-agent branch model is now codified for this repo:
   - branch naming standard added in `AGENTS.md`:
     - `codex/agent-board-seat`

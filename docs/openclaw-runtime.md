@@ -39,6 +39,7 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
   - `claw x-chart status|list-sources|add-source`
   - `python -m coatue_claw.board_seat_daily run-once|status|target-memory|seed-target|export-ledger`
   - `claw market-daily run-once --manual|--force|--dry-run`
+  - `claw market-daily run-earnings-recap --manual|--force|--dry-run`
   - `claw market-daily status|holdings|refresh-coatue-holdings|debug-catalyst`
   - `claw memory status|query|prune|extract-daily|checkpoint`
 - Scheduled (planned but not yet wired in this repo):
@@ -50,6 +51,7 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
   - Board Seat daily post via `launchd` (`com.coatueclaw.board-seat-daily`) at `COATUE_CLAW_BOARD_SEAT_TIME` (default `08:30`)
   - Daily Spencer change-request digest DM via `launchd` (`com.coatueclaw.spencer-change-digest`) at `COATUE_CLAW_SPENCER_CHANGE_DIGEST_TIME` (default `18:00`)
   - MD (Market Daily) via `launchd` (`com.coatueclaw.market-daily`) on US weekdays at `COATUE_CLAW_MD_TIMES` (default `07:00,14:15`, local PT runtime)
+  - MD earnings recap via `launchd` (`com.coatueclaw.market-daily-earnings-recap`) on US weekdays at `COATUE_CLAW_MD_EARNINGS_RECAP_TIME` (default `19:00`, local PT runtime)
   - Chart scout posts upload the source chart image snip from the selected X post (no redraw/reconstruction step)
 
 Diligence output contract:
@@ -117,6 +119,7 @@ Memory output contract:
   - `make openclaw-market-daily-status`
   - `make openclaw-market-daily-run-once`
   - `make openclaw-market-daily-refresh-holdings`
+  - `make openclaw-market-daily-earnings-recap-run-once`
 
 24/7 runtime bootstrap on Mac mini:
 1. `cd /opt/coatue-claw`
@@ -225,6 +228,7 @@ MD (Market Daily) environment controls:
 - `COATUE_CLAW_MD_SLACK_CHANNEL`: Slack destination channel id/name (default `general`)
 - `COATUE_CLAW_MD_TZ`: slot timezone (default `America/Los_Angeles`)
 - `COATUE_CLAW_MD_TIMES`: local run times (`HH:MM,HH:MM`, default `07:00,14:15`)
+- `COATUE_CLAW_MD_EARNINGS_RECAP_TIME`: local recap run time (`HH:MM`, default `19:00`)
 - `COATUE_CLAW_MD_TOP_N`: mover count (default `3`)
 - `COATUE_CLAW_MD_TMT_TOP_K`: top-ranked seed members to keep before overlay (default `40`)
 - `COATUE_CLAW_MD_CANDIDATE_SEED_PATH`: CSV universe seed path (default `/opt/coatue-claw/config/md_tmt_seed_universe.csv`)

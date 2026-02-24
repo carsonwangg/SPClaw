@@ -14,6 +14,7 @@ from coatue_claw.memory_runtime import MemoryRuntime
 from coatue_claw.market_daily import debug_catalyst as market_daily_debug_catalyst
 from coatue_claw.market_daily import holdings as market_daily_holdings
 from coatue_claw.market_daily import refresh_coatue_holdings as market_daily_refresh_holdings
+from coatue_claw.market_daily import run_earnings_recap as run_market_daily_earnings_recap
 from coatue_claw.market_daily import run_once as run_market_daily_once
 from coatue_claw.market_daily import set_override as market_daily_set_override
 from coatue_claw.market_daily import status as market_daily_status
@@ -122,6 +123,21 @@ def _run_market_daily_command(args) -> None:
         print(
             json.dumps(
                 run_market_daily_once(
+                    manual=bool(args.manual),
+                    force=bool(args.force),
+                    dry_run=bool(args.dry_run),
+                    channel_override=(str(args.channel).strip() or None),
+                ),
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return
+
+    if args.market_daily_cmd == "run-earnings-recap":
+        print(
+            json.dumps(
+                run_market_daily_earnings_recap(
                     manual=bool(args.manual),
                     force=bool(args.force),
                     dry_run=bool(args.dry_run),
@@ -298,6 +314,12 @@ def main():
     mdr.add_argument("--force", action="store_true")
     mdr.add_argument("--dry-run", action="store_true")
     mdr.add_argument("--channel", default="")
+
+    mdrr = md_sub.add_parser("run-earnings-recap")
+    mdrr.add_argument("--manual", action="store_true")
+    mdrr.add_argument("--force", action="store_true")
+    mdrr.add_argument("--dry-run", action="store_true")
+    mdrr.add_argument("--channel", default="")
 
     md_sub.add_parser("status")
     md_sub.add_parser("holdings")

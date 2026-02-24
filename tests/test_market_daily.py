@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
 from coatue_claw.market_daily import (
     CatalystEvidence,
+    EarningsPreviewItem,
+    EarningsRecapRow,
     MarketDailyStore,
     QuoteSnapshot,
     debug_catalyst,
@@ -19,7 +22,9 @@ from coatue_claw.market_daily import (
     _merge_universe,
     _parse_times,
     _select_top_movers,
+    _synthesize_earnings_bullets,
     refresh_coatue_holdings,
+    run_earnings_recap,
     run_once,
 )
 
@@ -207,6 +212,29 @@ def test_build_message_format() -> None:
     assert "NVDA +10.0%" in text
     assert "<https://x.com/i/web/status/1|[X]>" in text
     assert "<https://example.com/news|[News]>" in text
+
+
+def test_build_message_includes_earnings_after_close_section() -> None:
+    now_local = datetime(2026, 2, 20, 7, 0, 0, tzinfo=UTC)
+    movers = [QuoteSnapshot("NVDA", 1000.0, 110.0, 100.0, 0.10, "2026-02-20T07:00:00+00:00")]
+    text = _build_message(
+        slot_name="open",
+        now_local=now_local,
+        universe_count=41,
+        movers=movers,
+        catalyst_rows=[CatalystEvidence("NVDA", None, None, 0, None, None)],
+        catalyst_lines=["Shares rose after earnings optimism."],
+        earnings_after_close=[
+            EarningsPreviewItem(
+                ticker="NVDA",
+                company="NVIDIA",
+                earnings_date_et="2026-02-20",
+                expected_session="after_close",
+            )
+        ],
+    )
+    assert "Earnings After Close Today:" in text
+    assert "NVDA (NVIDIA)" in text
 
 
 def test_catalyst_sanitization_removes_tags_urls_and_extra_emoji() -> None:
@@ -866,3 +894,115 @@ def test_generic_deal_contract_cluster_is_not_reused_across_movers(monkeypatch) 
     assert rows[1].confirmed_cluster == "deal_contract"
     assert "mastercard partnerships" in lines[0].lower()
     assert "oracle faces ai lawsuits" in lines[1].lower()
+
+
+def test_infer_expected_session_from_history() -> None:
+    from coatue_claw import market_daily as md
+
+    after_close = [
+        (datetime(2026, 2, 20, 21, 5, tzinfo=UTC), None, None, None),
+        (datetime(2026, 1, 20, 21, 15, tzinfo=UTC), None, None, None),
+    ]
+    before_open = [
+        (datetime(2026, 2, 20, 12, 10, tzinfo=UTC), None, None, None),
+        (datetime(2026, 1, 20, 12, 20, tzinfo=UTC), None, None, None),
+    ]
+    assert md._infer_expected_session(earnings_history=after_close) == "after_close"
+    assert md._infer_expected_session(earnings_history=before_open) == "before_open"
+
+
+def test_synthesize_earnings_bullets_fallback_shape() -> None:
+    row = EarningsRecapRow(
+        ticker="NVDA",
+        company="NVIDIA",
+        earnings_date_et="2026-02-20",
+        inferred_session="after_close",
+        market_cap=1000.0,
+        last_price=112.0,
+        regular_close=109.0,
+        since_close_pct=(112.0 - 109.0) / 109.0,
+        eps_estimate=1.2,
+        reported_eps=1.3,
+        surprise_pct=8.0,
+        evidence=("Analysts highlighted stronger datacenter demand.",),
+        source_links=("https://example.com/nvda",),
+    )
+    bullets = _synthesize_earnings_bullets(client=None, row=row)
+    assert 2 <= len(bullets) <= 4
+    assert any("Shares traded" in x for x in bullets)
+
+
+def test_run_earnings_recap_skips_when_no_reporters(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_MD_DB_PATH", str(tmp_path / "db/market_daily.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_MD_ARTIFACT_DIR", str(tmp_path / "artifacts/market-daily"))
+
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._build_final_universe",
+        lambda store, refresh_holdings=True: (
+            [QuoteSnapshot("AAPL", 1.0, 101.0, 100.0, 0.01, "2026-02-20T00:00:00+00:00")],
+            {"AAPL": "top40"},
+            set(),
+            set(),
+            None,
+        ),
+    )
+    monkeypatch.setattr("coatue_claw.market_daily._collect_reported_today_rows", lambda universe, now_utc=None: [])
+    result = run_earnings_recap(manual=True, force=False, dry_run=True)
+    assert result["ok"] is True
+    assert result["posted"] is False
+    assert result["reason"] == "no_reporters"
+
+
+def test_run_earnings_recap_selects_top4_and_writes_artifact(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_MD_DB_PATH", str(tmp_path / "db/market_daily.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_MD_ARTIFACT_DIR", str(tmp_path / "artifacts/market-daily"))
+    monkeypatch.setenv("COATUE_CLAW_MD_TZ", "UTC")
+    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: None)
+
+    universe = [
+        QuoteSnapshot("AAA", 100, 112, 100, 0.12, "2026-02-20T00:00:00+00:00"),
+        QuoteSnapshot("BBB", 90, 93, 100, -0.07, "2026-02-20T00:00:00+00:00"),
+        QuoteSnapshot("CCC", 80, 106, 100, 0.06, "2026-02-20T00:00:00+00:00"),
+        QuoteSnapshot("DDD", 70, 96, 100, -0.04, "2026-02-20T00:00:00+00:00"),
+        QuoteSnapshot("EEE", 60, 102, 100, 0.02, "2026-02-20T00:00:00+00:00"),
+    ]
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._build_final_universe",
+        lambda store, refresh_holdings=True: (
+            universe,
+            {x.ticker: "top40" for x in universe},
+            set(),
+            set(),
+            None,
+        ),
+    )
+    rows = [
+        EarningsRecapRow("AAA", "AAA Co", "2026-02-20", "after_close", 100.0, 112.0, 100.0, 0.12),
+        EarningsRecapRow("BBB", "BBB Co", "2026-02-20", "after_close", 90.0, 93.0, 100.0, -0.07),
+        EarningsRecapRow("CCC", "CCC Co", "2026-02-20", "after_close", 80.0, 106.0, 100.0, 0.06),
+        EarningsRecapRow("DDD", "DDD Co", "2026-02-20", "after_close", 70.0, 96.0, 100.0, -0.04),
+        EarningsRecapRow("EEE", "EEE Co", "2026-02-20", "after_close", 60.0, 102.0, 100.0, 0.02),
+    ]
+    monkeypatch.setattr("coatue_claw.market_daily._collect_reported_today_rows", lambda universe, now_utc=None: rows)
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._hydrate_recap_row",
+        lambda row, since_utc, client: row
+        if row.bullets
+        else replace(
+            row,
+            bullets=("Shares traded since close.", "Guidance tone was constructive."),
+            evidence=("Coverage pointed to demand resilience.",),
+            source_links=("https://example.com/source",),
+        ),
+    )
+    result = run_earnings_recap(manual=True, force=False, dry_run=True)
+    assert result["ok"] is True
+    assert result["status"] == "dry_run"
+    assert len(result["movers"]) == 4
+    assert [x["ticker"] for x in result["movers"]] == ["AAA", "BBB", "CCC", "DDD"]
+    artifact = Path(result["artifact_path"])
+    assert artifact.exists()
+    content = artifact.read_text(encoding="utf-8")
+    assert "## Recap Rows" in content
