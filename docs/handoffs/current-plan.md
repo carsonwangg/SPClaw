@@ -40,6 +40,14 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Board-seat sqlite connection lifecycle fix shipped for ledger FD stability:
+  - `BoardSeatStore._connect()` now commits/rolls back and always closes sqlite connections.
+  - this resolves descriptor accumulation that surfaced as `[Errno 24] Too many open files` in board-seat ledger export path.
+  - regression test added:
+    - `tests/test_board_seat_daily.py::test_store_connect_context_closes_connection`
+  - validation:
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `38 passed`
+    - `PYTHONPATH=src python3 -m pytest -q` -> `257 passed`
 - Board Seat funding hardening + strict repitch governance merged/deployed:
   - merged commit: `fd8a942` (`Merge board-seat funding hardening and strict repitch governance`)
   - merged-tree validation:

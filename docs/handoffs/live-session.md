@@ -3,6 +3,16 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-24, board-seat sqlite connection lifecycle fix for ledger FD exhaustion)
+- Fixed file-descriptor leak in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
+  - `BoardSeatStore._connect()` is now a context manager that always commits/rolls back and closes the sqlite connection.
+  - previous behavior relied on sqlite connection context semantics, which do not close the connection and can accumulate open descriptors under repeated board-seat operations.
+- Added regression coverage in `/Users/carsonwang/CoatueClaw/tests/test_board_seat_daily.py`:
+  - `test_store_connect_context_closes_connection` validates commit + close behavior for `_connect()` context lifecycle.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `38 passed`
+  - `PYTHONPATH=src python3 -m pytest -q` -> `257 passed`
+
 ## Update (2026-02-24, integrator merge + deploy of board-seat funding hardening / strict repitch governance)
 - Integrated `origin/codex/agent-board-seat` into `main`:
   - merge commit: `fd8a942` (`Merge board-seat funding hardening and strict repitch governance`)

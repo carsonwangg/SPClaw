@@ -862,6 +862,39 @@ def test_write_target_ledger_writes_csv_json_and_mirror(tmp_path: Path, monkeypa
     assert Path(paths["mirror_json_path"]).exists()
 
 
+def test_store_connect_context_closes_connection(monkeypatch, tmp_path: Path) -> None:
+    class FakeConn:
+        def __init__(self) -> None:
+            self.row_factory = None
+            self.closed = False
+            self.committed = False
+            self.rolled_back = False
+
+        def commit(self) -> None:
+            self.committed = True
+
+        def rollback(self) -> None:
+            self.rolled_back = True
+
+        def close(self) -> None:
+            self.closed = True
+
+    fake = FakeConn()
+    monkeypatch.setattr(board_seat_daily.sqlite3, "connect", lambda _path: fake)
+
+    store = object.__new__(board_seat_daily.BoardSeatStore)
+    store.db_path = tmp_path / "db.sqlite"
+
+    with store._connect() as conn:
+        assert conn is fake
+        assert conn.row_factory == board_seat_daily.sqlite3.Row
+        assert fake.closed is False
+
+    assert fake.committed is True
+    assert fake.rolled_back is False
+    assert fake.closed is True
+
+
 def test_prepare_funding_evidence_rows_dedupes_canonical_urls() -> None:
     rows = board_seat_daily._prepare_funding_evidence_rows(
         [
