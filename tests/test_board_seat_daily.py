@@ -65,6 +65,7 @@ def _v3_draft() -> board_seat_daily.BoardSeatDraft:
         context_domain_fit_gaps="Best fit is strongest where current roadmap closes deployment gaps with channel partnerships.",
         funding_history="Raised capital across multiple rounds to support platform expansion.",
         funding_latest_round_backers="Series F (2024) led by Founders Fund and key strategic backers.",
+        source_urls=["https://example.com/funding", "https://example.com/investors"],
     )
 
 
@@ -89,6 +90,7 @@ def test_v3_message_structure_uses_labeled_lines_not_bullets() -> None:
     assert "*Thesis*" in message
     assert "*Anduril context*" in message
     assert "*Funding snapshot*" in message
+    assert "*Sources*" in message
     assert "\n- " not in message
 
 
@@ -106,6 +108,8 @@ def test_v3_context_and_funding_use_labeled_lines() -> None:
     assert "*Domain fit/gaps:*" in message
     assert "*History:*" in message
     assert "*Latest round/backers:*" in message
+    assert "<https://example.com/funding|Source 1>" in message
+    assert "<https://example.com/investors|Source 2>" in message
 
 
 def test_extract_investment_text_parses_v3_labeled_lines() -> None:
@@ -290,6 +294,25 @@ def test_run_once_dry_run_v3_contains_hierarchy_sections(tmp_path: Path, monkeyp
     assert "*Why now:*" in row["preview"]
     assert "*Current efforts:*" in row["preview"]
     assert "*Funding snapshot*" in row["preview"]
+    assert "*Sources*" in row["preview"]
+
+
+def test_render_board_seat_message_uses_fallback_sources_when_missing() -> None:
+    message = board_seat_daily._render_board_seat_message(
+        company="Anduril",
+        draft=board_seat_daily.BoardSeatDraft(
+            why_now="Defense demand is accelerating.",
+            whats_different="Integrated autonomy stack deploys quickly.",
+            mos_risks="Execution and procurement timing remain risks.",
+            bottom_line="High-upside candidate if milestones are validated.",
+            context_current_efforts="Anduril is scaling deployed autonomy programs.",
+            context_domain_fit_gaps="Fit is strong; gaps are partner coverage and sustainment.",
+            funding_history="Funding details are currently unavailable.",
+            funding_latest_round_backers="Funding details are currently unavailable.",
+        ),
+    )
+    assert "*Sources*" in message
+    assert "<https://www.google.com/search?q=Anduril+funding+latest+round+backers|Source 1>" in message
 
 
 def test_backfill_channel_pitches_parses_legacy_history(tmp_path: Path, monkeypatch) -> None:

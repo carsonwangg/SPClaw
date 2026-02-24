@@ -129,6 +129,7 @@ class BoardSeatDraft:
     context_domain_fit_gaps: str
     funding_history: str
     funding_latest_round_backers: str
+    source_urls: list[str] = field(default_factory=list)
     raw_model_output: str = ""
     rewrite_reasons: list[str] = field(default_factory=list)
 
@@ -265,6 +266,50 @@ def _normalize_line_list(items: list[str], *, max_items: int, max_words: int = M
         if len(out) >= max_items:
             break
     return out
+
+
+def _normalize_source_url(url: str) -> str:
+    cleaned = re.sub(r"\s+", " ", str(url or "")).strip()
+    if cleaned.startswith("<") and cleaned.endswith(">"):
+        cleaned = cleaned[1:-1].strip()
+    if "|" in cleaned:
+        cleaned = cleaned.split("|", 1)[0].strip()
+    cleaned = cleaned.strip("<>").strip()
+    cleaned = cleaned.rstrip(".,;)")
+    if not re.match(r"^https?://", cleaned, flags=re.IGNORECASE):
+        return ""
+    return cleaned[:320]
+
+
+def _normalize_source_urls(urls: list[str], *, max_items: int = 4) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in urls:
+        normalized = _normalize_source_url(raw)
+        if not normalized:
+            continue
+        key = normalized.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(normalized)
+        if len(out) >= max_items:
+            break
+    return out
+
+
+def _fallback_source_urls(company: str) -> list[str]:
+    return [
+        f"https://www.google.com/search?{urlencode({'q': f'{company} funding latest round backers'})}",
+        f"https://www.google.com/search?{urlencode({'q': f'{company} investors valuation'})}",
+    ]
+
+
+def _message_source_urls(*, company: str, draft: BoardSeatDraft) -> list[str]:
+    source_urls = _normalize_source_urls(draft.source_urls, max_items=4)
+    if source_urls:
+        return source_urls
+    return _fallback_source_urls(company)
 
 def _slack_tokens() -> list[str]:
     tokens: list[str] = []
@@ -777,6 +822,7 @@ def _core_investment_text(message: str) -> str:
 
 
 def _render_board_seat_message(*, company: str, draft: BoardSeatDraft) -> str:
+    source_urls = _message_source_urls(company=company, draft=draft)
     lines = [
         f"*Board Seat as a Service — {company}*",
         "",
@@ -793,6 +839,9 @@ def _render_board_seat_message(*, company: str, draft: BoardSeatDraft) -> str:
         "*Funding snapshot*",
         f"*History:* {draft.funding_history}",
         f"*Latest round/backers:* {draft.funding_latest_round_backers}",
+        "",
+        "*Sources*",
+        *[f"<{url}|Source {idx + 1}>" for idx, url in enumerate(source_urls)],
     ]
     return "\n".join(lines)
 
@@ -821,6 +870,7 @@ def _validate_draft(draft: BoardSeatDraft) -> list[str]:
 
 def _sanitize_draft(*, company: str, draft: BoardSeatDraft, funding: FundingSnapshot) -> BoardSeatDraft:
     funding_history, funding_latest_round_backers = _funding_lines_from_snapshot(funding)
+    source_urls = _normalize_source_urls(draft.source_urls, max_items=4) or _normalize_source_urls(funding.source_urls, max_items=4)
     return BoardSeatDraft(
         why_now=_normalize_line(draft.why_now)
         or f"{company} has a near-term window to drive measurable strategic leverage.",
@@ -836,6 +886,7 @@ def _sanitize_draft(*, company: str, draft: BoardSeatDraft, funding: FundingSnap
         or "Fit is strongest where roadmap, partnerships, and deployment constraints are explicitly addressed.",
         funding_history=_normalize_line(draft.funding_history) or funding_history,
         funding_latest_round_backers=_normalize_line(draft.funding_latest_round_backers) or funding_latest_round_backers,
+        source_urls=source_urls,
         raw_model_output=draft.raw_model_output,
         rewrite_reasons=draft.rewrite_reasons,
     )

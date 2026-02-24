@@ -1445,3 +1445,44 @@ Then confirm bot returns:
 ### Immediate Next Steps
 1. DM `SPClaw` a plain message and a second message including `@SPClaw` to verify both trigger replies.
 2. If DM still does not trigger, check Slack app Event Subscriptions include DM `message` events (`message.im`) and reinstall app.
+
+## 2026-02-23 - Board Seat Styling + Source Links (Global Default)
+- Runtime module updated: `/opt/coatue-claw/src/coatue_claw/board_seat_daily.py`
+  - BoardSeat draft schema now carries source links:
+    - `BoardSeatDraft.source_urls`
+  - Added deterministic source-link normalization/fallback helpers:
+    - `_normalize_source_url(...)`
+    - `_normalize_source_urls(...)`
+    - `_fallback_source_urls(company)`
+    - `_message_source_urls(company, draft)`
+  - Renderer now always appends a clickable sources block:
+    - `*Sources*`
+    - `<https://...|Source 1>`
+    - `<https://...|Source 2>`
+  - Source-link behavior:
+    - prefer funding/LLM-provided URLs when available
+    - if missing, auto-add deterministic Google reference queries so links are always present
+  - Sanitizer now preserves/normalizes source URLs from draft first, then funding snapshot fallback.
+- Tests updated: `/opt/coatue-claw/tests/test_board_seat_daily.py`
+  - `test_v3_message_structure_uses_labeled_lines_not_bullets` now asserts `*Sources*` exists.
+  - `test_v3_context_and_funding_use_labeled_lines` now asserts clickable source links are rendered.
+  - `test_run_once_dry_run_v3_contains_hierarchy_sections` now asserts sources section exists in preview.
+  - added `test_render_board_seat_message_uses_fallback_sources_when_missing`.
+- Validation:
+  - targeted:
+    - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_board_seat_daily.py` -> `13 passed`
+  - full smoke:
+    - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q` -> unchanged unrelated failures:
+      - `tests/test_spencer_change_digest.py::test_run_once_dry_run_includes_carson_label`
+      - `tests/test_spencer_change_log.py::test_is_spencer_user_defaults`
+      - `tests/test_spencer_change_log.py::test_requester_label_defaults`
+- Runtime prompt update (non-repo, live OpenClaw workspace):
+  - `/Users/spclaw/.openclaw/workspace/AGENTS.md`
+  - Portco idea template switched to markdown bold markers (`**...**`) and now explicitly requires a clickable `Sources` section with at least two links.
+  - Gateway restarted and health re-checked:
+    - `make -C /opt/coatue-claw openclaw-restart`
+    - `make -C /opt/coatue-claw openclaw-slack-status` -> probe `ok=true`
+
+### Immediate Next Steps
+1. In Slack `#anduril` (or any portco channel), request a fresh board-seat idea and confirm section labels render as bold and include `Sources` links.
+2. If any ad-hoc conversational reply still shows italics, inspect the specific outgoing text path (OpenClaw conversational formatter vs `board_seat_daily`) and enforce bold markers in that path as well.
