@@ -55,6 +55,18 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 2. Add/seed `COATUE_CLAW_BOARD_SEAT_FUNDING_MANUAL_PATH` JSON for top portcos to improve funding quality and reduce web variance.
 3. Separately fix Spencer change-tracker default user mapping to restore full-suite green.
 
+## Update (2026-02-24, runtime follow-up)
+- Runtime rollout executed:
+  - `make openclaw-restart`
+  - `make openclaw-slack-status` (probe `ok`, Slack account healthy)
+  - `board_seat_daily status` confirms `format_version: v2_thesis_context_funding`
+- Fixed a live-runtime bug in `board_seat_daily` Slack pagination/parsing:
+  - `SlackResponse` objects were being treated as plain `dict` in channel/history fetch paths.
+  - channel resolution now works with `channel_ref=anduril` and resolves `channel_id` correctly.
+- Live Anduril run currently skips posting due to preserved repeat guardrail:
+  - reason: `repeat_investment_without_significant_change`
+  - this is expected behavior with unchanged recent context.
+
 ## Update (2026-02-23, title/takeaway role + sentence integrity)
 - Fixed title/takeaway inversion class in X chart posts:
   - title is now enforced as the concise sentence

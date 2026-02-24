@@ -1238,14 +1238,14 @@ def _resolve_channel_id(client: Any, channel_ref: str) -> str | None:
                 # Fallback: post directly by channel name when list scope is unavailable.
                 return target
             return None
-        channels = payload.get("channels") if isinstance(payload, dict) else None
+        channels = payload.get("channels")
         for item in channels if isinstance(channels, list) else []:
             name = str(item.get("name") or "").strip().lower()
             if name == target:
                 cid = str(item.get("id") or "").strip()
                 if cid:
                     return cid
-        meta = payload.get("response_metadata") if isinstance(payload, dict) else None
+        meta = payload.get("response_metadata")
         next_cursor = str((meta or {}).get("next_cursor") or "").strip() if isinstance(meta, dict) else ""
         if not next_cursor:
             break
@@ -1273,7 +1273,7 @@ def _fetch_recent_context(client: Any, *, channel_id: str, company: str) -> list
             if err == "missing_scope":
                 return []
             return []
-        messages = payload.get("messages") if isinstance(payload, dict) else None
+        messages = payload.get("messages")
         for item in messages if isinstance(messages, list) else []:
             if not isinstance(item, dict):
                 continue
@@ -1287,7 +1287,7 @@ def _fetch_recent_context(client: Any, *, channel_id: str, company: str) -> list
                 snippets.append(text)
                 if len(snippets) >= max_messages:
                     break
-        meta = payload.get("response_metadata") if isinstance(payload, dict) else None
+        meta = payload.get("response_metadata")
         next_cursor = str((meta or {}).get("next_cursor") or "").strip() if isinstance(meta, dict) else ""
         if not next_cursor:
             break
@@ -1309,13 +1309,13 @@ def _fetch_channel_history(client: Any, *, channel_id: str, max_messages: int) -
             )
         except SlackApiError:
             return out
-        messages = payload.get("messages") if isinstance(payload, dict) else None
+        messages = payload.get("messages")
         for item in messages if isinstance(messages, list) else []:
             if isinstance(item, dict):
                 out.append(item)
                 if len(out) >= remaining:
                     break
-        meta = payload.get("response_metadata") if isinstance(payload, dict) else None
+        meta = payload.get("response_metadata")
         next_cursor = str((meta or {}).get("next_cursor") or "").strip() if isinstance(meta, dict) else ""
         if not next_cursor:
             break
