@@ -107,11 +107,34 @@ BRAVE_SEARCH_RESULTS = 5
 FUNDING_EXTRACT_MODEL = "gpt-5.2-chat-latest"
 ACQ_SEARCH_RESULTS = 6
 TARGET_SEARCH_RESULTS = 10
-ACQ_PLACEHOLDER_TARGETS = {"tbd", "unknown", "none", "n/a", "startup", "company", "target", "no"}
+ACQ_PLACEHOLDER_TARGETS = {
+    "tbd",
+    "unknown",
+    "none",
+    "n/a",
+    "startup",
+    "company",
+    "target",
+    "no",
+    "stealth",
+    "stealthaisystems",
+}
 ACQ_INVALID_TARGET_TERMS = {"startup team", "domain-adjacent", "internal", "in-house"}
 SOURCE_POLICY_DEFAULT = "target_first_3_1"
 LOW_SIGNAL_MODE_DEFAULT = "candidate_with_confidence"
 TARGET_CONFIDENCE_LEVELS = {"High", "Medium", "Low"}
+DEFAULT_TARGET_BY_COMPANY: dict[str, str] = {
+    "anduril": "Saronic",
+    "anthropic": "Langfuse",
+    "cursor": "Sourcegraph",
+    "neuralink": "Blackrock Neurotech",
+    "openai": "Browserbase",
+    "physicalintelligence": "Covariant",
+    "ramp": "Brex",
+    "spacex": "K2 Space",
+    "stripe": "Modern Treasury",
+    "sundayrobotics": "Viam",
+}
 FUNDING_CONTEXT_TERMS = {
     "funding",
     "series ",
@@ -304,6 +327,26 @@ def _target_min_total_sources() -> int:
 
 def _low_signal_mode() -> str:
     return (os.environ.get("COATUE_CLAW_BOARD_SEAT_LOW_SIGNAL_MODE", LOW_SIGNAL_MODE_DEFAULT) or LOW_SIGNAL_MODE_DEFAULT).strip()
+
+
+def _manual_default_targets() -> dict[str, str]:
+    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_DEFAULT_TARGETS", "") or "").strip()
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key, value in payload.items():
+        company_key = _slug_company(str(key or ""))
+        target = _normalize_source_text(str(value or ""), max_chars=80)
+        if not company_key or not target:
+            continue
+        out[company_key] = target
+    return out
 
 
 def _manual_funding_path() -> Path | None:
@@ -1259,11 +1302,15 @@ def _target_candidates_from_seed(*, company: str, seed_text: str) -> list[str]:
         "launch",
         "acquire",
         "acquihire",
+        "stealth",
     }
     out: list[str] = []
     seen: set[str] = set()
     for item in matches:
         candidate = re.sub(r"\s+", " ", item).strip(" .,:;-")
+        if not candidate:
+            continue
+        candidate = re.sub(r"^(?:Acquire|Acquihire)\s+", "", candidate, flags=re.IGNORECASE).strip()
         if not candidate:
             continue
         if len(candidate) < 3:
@@ -1272,11 +1319,16 @@ def _target_candidates_from_seed(*, company: str, seed_text: str) -> list[str]:
         if not key or key in seen:
             continue
         seen.add(key)
+        single_token = re.sub(r"[^a-z0-9]+", "", candidate.lower())
+        if single_token in TARGET_TOKEN_STOPWORDS:
+            continue
         if key in ACQ_PLACEHOLDER_TARGETS:
             continue
         if key in blocked:
             continue
         if company_key and key == company_key:
+            continue
+        if "stealth" in candidate.lower():
             continue
         if any(term in candidate.lower() for term in ACQ_INVALID_TARGET_TERMS):
             continue
@@ -1284,15 +1336,42 @@ def _target_candidates_from_seed(*, company: str, seed_text: str) -> list[str]:
     return out
 
 
+def _is_valid_target_name(*, company: str, target: str) -> bool:
+    candidate = _normalize_text(str(target or ""), max_chars=100).strip()
+    if not candidate:
+        return False
+    key = re.sub(r"[^a-z0-9]+", "", candidate.lower())
+    if not key or key in ACQ_PLACEHOLDER_TARGETS:
+        return False
+    if any(term in candidate.lower() for term in ACQ_INVALID_TARGET_TERMS):
+        return False
+    if _slug_company(company) == _slug_company(candidate):
+        return False
+    return True
+
+
+def _default_target_for_company(company: str) -> str:
+    company_key = _slug_company(company)
+    manual = _manual_default_targets()
+    if company_key in manual and _is_valid_target_name(company=company, target=manual[company_key]):
+        return manual[company_key]
+    candidate = DEFAULT_TARGET_BY_COMPANY.get(company_key, "")
+    if _is_valid_target_name(company=company, target=candidate):
+        return candidate
+    return "Scale AI"
+
+
 def _best_effort_target(*, company: str, seed_text: str) -> str:
     candidates = _target_candidates_from_seed(company=company, seed_text=seed_text)
-    if candidates:
-        return candidates[0]
-    return "Stealth AI Systems"
+    for candidate in candidates:
+        if _is_valid_target_name(company=company, target=candidate):
+            return candidate
+    return _default_target_for_company(company)
 
 
 def _best_effort_idea_line(*, company: str, seed_text: str) -> str:
-    target = _extract_acquisition_target(seed_text) or _best_effort_target(company=company, seed_text=seed_text)
+    extracted = _extract_acquisition_target(seed_text)
+    target = extracted if _is_valid_target_name(company=company, target=extracted) else _best_effort_target(company=company, seed_text=seed_text)
     line = f"Acquire {target} to accelerate {company} execution in a strategic wedge."
     return _normalize_line(line)
 

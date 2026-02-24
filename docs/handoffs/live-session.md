@@ -64,6 +64,22 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
    - has `Idea confidence` line
    - `Sources` are target-first (Browserbase-style evidence), no generic parent funding links.
 
+## Update (2026-02-24, Board Seat V5 fallback target hardening)
+- Fixed low-signal fallback behavior so `Idea` always names a concrete company target.
+- Removed placeholder fallback target output (`Stealth AI Systems` class).
+- Added deterministic default target map by portco:
+  - OpenAI defaults to `Browserbase` in low-signal conditions.
+- Strengthened target extraction filters to reject placeholder/generic captures:
+  - blocks `stealth` class terms
+  - strips leading acquire/acquihire artifacts
+  - rejects generic one-token company fragments (for example `Systems`).
+- Resulting behavior:
+  - even with `Idea confidence: Low`, idea line still emits a specific company.
+
+### Validation
+- `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `20 passed`
+- `PYTHONPATH=src python3 -m pytest -q` -> `212 passed`
+
 ## Update (2026-02-24, Board Seat Readability V3 labeled hierarchy)
 - Implemented Board Seat readability V3 in `/opt/coatue-claw/src/coatue_claw/board_seat_daily.py`.
 - Format is now deterministic labeled-line hierarchy (no bullet subheaders):

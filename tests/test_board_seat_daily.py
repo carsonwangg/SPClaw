@@ -159,7 +159,17 @@ def test_best_effort_idea_line_avoids_placeholder_no_target() -> None:
     )
     assert line.lower().startswith("acquire ")
     assert "acquire no " not in line.lower()
+    assert "browserbase" in line.lower()
     assert board_seat_daily._is_valid_acquisition_idea_line(line) is True
+
+
+def test_best_effort_idea_line_rejects_stealth_placeholder_and_uses_named_company() -> None:
+    line = board_seat_daily._best_effort_idea_line(
+        company="OpenAI",
+        seed_text="Acquire Stealth AI Systems to improve reliability.",
+    )
+    assert "stealth ai systems" not in line.lower()
+    assert "browserbase" in line.lower()
 
 
 def test_sources_render_named_title_lines_not_source_numbers() -> None:

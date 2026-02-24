@@ -52,6 +52,10 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
     - `make openclaw-restart`
     - `make openclaw-slack-status` (`probe.ok=true`)
     - `make openclaw-board-seat-status` (`format_version: v5_target_first_confidence_sources`)
+  - fallback target hardening shipped:
+    - low-signal idea line now always names a concrete company (no placeholder targets)
+    - OpenAI low-signal default target set to `Browserbase`
+    - placeholder/generic target extraction filters tightened (`stealth`, bare generic fragments)
 - Premium model policy is now defaulted for all OpenAI-backed tasks:
   - board-seat synthesis default: `gpt-5.2-chat-latest`
   - x-chart title/copy synthesis default: `gpt-5.2-chat-latest`
