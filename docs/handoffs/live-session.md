@@ -14,6 +14,18 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
   - `PYTHONPATH=src python3 -m pytest -q tests/test_market_daily.py tests/test_launchd_runtime.py` -> `44 passed`
 
+### Runtime verification (Mac mini)
+1. Pulled `main` to `/opt/coatue-claw` (`da144cd`) and restarted gateway:
+   - `make openclaw-restart`
+2. Re-ran 24x7 enable:
+   - `make openclaw-24x7-enable` -> success
+3. Verified scheduler load state:
+   - `make openclaw-24x7-status` shows all service labels loaded, including:
+     - `com.coatueclaw.market-daily`
+     - `com.coatueclaw.market-daily-earnings-recap`
+4. Verified Slack health:
+   - `make openclaw-slack-status` -> `probe.ok=true`
+
 ## Update (2026-02-24, SSH host alias memory for future Codex sessions)
 - Added operator memory to `AGENTS.md`:
   - Mac mini SSH host alias is `mini` (`ssh mini`)

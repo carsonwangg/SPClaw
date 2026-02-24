@@ -48,6 +48,11 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - validation:
     - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
     - `PYTHONPATH=src python3 -m pytest -q tests/test_market_daily.py tests/test_launchd_runtime.py` -> `44 passed`
+  - deployed/verified on Mac mini:
+    - `/opt/coatue-claw` updated to `da144cd`
+    - `make openclaw-24x7-enable` now succeeds
+    - `make openclaw-24x7-status` confirms `com.coatueclaw.market-daily` + `com.coatueclaw.market-daily-earnings-recap` loaded
+    - `make openclaw-slack-status` probe healthy (`ok=true`)
 - HFA V1 (docs-first hedge fund analyst workflow) is implemented on `codex/agent-hf-analyst`:
   - new modules:
     - `src/coatue_claw/hf_document_extract.py`
