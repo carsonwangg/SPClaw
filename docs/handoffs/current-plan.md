@@ -40,6 +40,19 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Board Seat funding hardening + strict repitch governance merged/deployed:
+  - merged commit: `fd8a942` (`Merge board-seat funding hardening and strict repitch governance`)
+  - merged-tree validation:
+    - `PYTHONPATH=src python3 -m pytest -q` -> `256 passed`
+  - Mac mini runtime verification:
+    - `make openclaw-restart`
+    - `make openclaw-slack-status` (`probe.ok=true`)
+    - `make openclaw-board-seat-status` shows `target_lock_days=14` and funding verification payloads
+    - `make openclaw-board-seat-refresh-funding` refreshed 23 entities
+    - `make openclaw-board-seat-funding-report` wrote `/opt/coatue-claw-data/artifacts/board-seat/funding-quality-report-2026-02-24.md`
+    - `make openclaw-board-seat-run-once DRY_RUN=1 FORCE=1` confirms strict repitch skip paths are active
+  - follow-up note:
+    - dry-run payload surfaced non-fatal ledger write warning (`[Errno 24] Too many open files`) in board-seat ledger export path.
 - launchd 24x7 enable path hardened for transient bootstrap errors:
   - `src/coatue_claw/launchd_runtime.py` now retries transient launchctl bootstrap `Input/output error` failures during `enable`.
   - retry control env added: `COATUE_CLAW_LAUNCHCTL_BOOTSTRAP_RETRIES` (default `3`).

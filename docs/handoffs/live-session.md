@@ -3,6 +3,30 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-24, integrator merge + deploy of board-seat funding hardening / strict repitch governance)
+- Integrated `origin/codex/agent-board-seat` into `main`:
+  - merge commit: `fd8a942` (`Merge board-seat funding hardening and strict repitch governance`)
+  - merge conflicts resolved in:
+    - `/Users/carsonwang/CoatueClaw/Makefile`
+    - `/Users/carsonwang/CoatueClaw/docs/handoffs/current-plan.md`
+    - `/Users/carsonwang/CoatueClaw/docs/handoffs/live-session.md`
+- Integrator validation on merged tree:
+  - `PYTHONPATH=src python3 -m pytest -q` -> `256 passed`
+- Mac mini deploy verification (`/opt/coatue-claw`):
+  - pulled latest `main` and restarted runtime via `make openclaw-restart`
+  - `make openclaw-slack-status` recovered to healthy probe (`ok=true`) after restart settle
+  - `make openclaw-board-seat-status` confirms:
+    - `target_lock_days=14`
+    - funding quality/verification payloads present
+  - `make openclaw-board-seat-refresh-funding` completed (`entities_refreshed=23`)
+  - `make openclaw-board-seat-funding-report` completed:
+    - `/opt/coatue-claw-data/artifacts/board-seat/funding-quality-report-2026-02-24.md`
+  - `make openclaw-board-seat-run-once DRY_RUN=1 FORCE=1` executed:
+    - strict repitch gate active (`repitch_not_significant_enough` paths surfaced)
+    - hard 14-day no-repeat behavior active
+  - observed runtime warning in dry-run payload:
+    - ledger export reported `[Errno 24] Too many open files` on target ledger write path (non-fatal for run result; follow-up candidate).
+
 ## Update (2026-02-24, launchd 24x7 enable resilience for transient bootstrap errors)
 - Hardened `/Users/carsonwang/CoatueClaw/src/coatue_claw/launchd_runtime.py` against intermittent launchctl bootstrap failures seen in `make openclaw-24x7-enable`:
   - `_bootstrap(...)` now retries transient `Input/output error` failures (configurable via `COATUE_CLAW_LAUNCHCTL_BOOTSTRAP_RETRIES`, default `3`).
