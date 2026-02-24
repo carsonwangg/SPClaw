@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 import hashlib
 import json
@@ -9,6 +10,8 @@ from pathlib import Path
 import re
 import sqlite3
 from typing import Any
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
@@ -92,6 +95,38 @@ SIGNIFICANT_CHANGE_TERMS = {
 }
 
 BOARD_SEAT_HEADER_RE = re.compile(r"board seat as a service\s*[—-]\s*(.+)$", re.IGNORECASE)
+BOARD_SEAT_FORMAT_VERSION = "v2_thesis_context_funding"
+MAX_TOTAL_BULLETS = 6
+MAX_THESIS_BULLETS = 2
+MAX_CONTEXT_BULLETS = 2
+MAX_FUNDING_BULLETS = 2
+MAX_BULLET_WORDS = 20
+FUNDING_CACHE_TTL_DAYS_DEFAULT = 14
+UNKNOWN_FUNDING_TEXT = "Funding details are currently unavailable."
+WEB_SEARCH_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
+BRAVE_SEARCH_RESULTS = 5
+FUNDING_EXTRACT_MODEL = "gpt-5.2-chat-latest"
+
+
+@dataclass(frozen=True)
+class FundingSnapshot:
+    history: str
+    latest_round: str
+    latest_date: str
+    backers: list[str]
+    source_urls: list[str]
+    source_type: str
+    as_of_utc: str
+    confidence: float = 0.0
+
+
+@dataclass(frozen=True)
+class BoardSeatDraft:
+    thesis_bullets: list[str]
+    context_bullets: list[str]
+    funding_bullets: list[str]
+    raw_model_output: str = ""
+    rewrite_reasons: list[str] = field(default_factory=list)
 
 
 def _utc_now_iso() -> str:
@@ -122,6 +157,110 @@ def _db_path() -> Path:
         )
     )
 
+
+def _funding_ttl_days() -> int:
+    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_FUNDING_TTL_DAYS", str(FUNDING_CACHE_TTL_DAYS_DEFAULT)) or "").strip()
+    try:
+        value = int(raw)
+    except Exception:
+        value = FUNDING_CACHE_TTL_DAYS_DEFAULT
+    return max(1, min(90, value))
+
+
+def _manual_funding_path() -> Path | None:
+    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_FUNDING_MANUAL_PATH", "") or "").strip()
+    if not raw:
+        return None
+    path = Path(raw).expanduser().resolve()
+    return path if path.exists() else None
+
+
+def _slug_company(text: str) -> str:
+    return _slug(text).replace("-", "")
+
+
+def _brave_search_api_key() -> str:
+    for key in ("COATUE_CLAW_BRAVE_API_KEY", "BRAVE_SEARCH_API_KEY"):
+        value = (os.environ.get(key, "") or "").strip()
+        if value:
+            return value
+    config_path = Path.home() / ".openclaw/openclaw.json"
+    if not config_path.exists():
+        return ""
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+    tools = payload.get("tools") if isinstance(payload, dict) else None
+    web = tools.get("web") if isinstance(tools, dict) else None
+    search = web.get("search") if isinstance(web, dict) else None
+    value = str((search or {}).get("apiKey") or "").strip() if isinstance(search, dict) else ""
+    return value
+
+
+def _load_manual_funding_seed() -> dict[str, FundingSnapshot]:
+    path = _manual_funding_path()
+    if path is None:
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    out: dict[str, FundingSnapshot] = {}
+    for key, row in payload.items():
+        if not isinstance(row, dict):
+            continue
+        company_key = _slug_company(str(key or ""))
+        if not company_key:
+            continue
+        history = _normalize_text(str(row.get("history") or ""), max_chars=500)
+        latest_round = _normalize_text(str(row.get("latest_round") or ""), max_chars=200)
+        latest_date = _normalize_text(str(row.get("latest_date") or ""), max_chars=80)
+        backers = [str(item).strip() for item in row.get("backers", []) if str(item).strip()] if isinstance(row.get("backers"), list) else []
+        source_urls = [str(item).strip() for item in row.get("source_urls", []) if str(item).strip()] if isinstance(row.get("source_urls"), list) else []
+        out[company_key] = FundingSnapshot(
+            history=history,
+            latest_round=latest_round,
+            latest_date=latest_date,
+            backers=backers[:8],
+            source_urls=source_urls[:8],
+            source_type="manual_seed",
+            as_of_utc=_utc_now_iso(),
+            confidence=float(row.get("confidence") or 0.9),
+        )
+    return out
+
+
+def _normalize_bullet(text: str) -> str:
+    cleaned = _normalize_text(str(text or ""), max_chars=320)
+    cleaned = cleaned.strip().lstrip("-").strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned
+
+
+def _limit_words(text: str, *, max_words: int = MAX_BULLET_WORDS) -> str:
+    words = str(text or "").split()
+    if len(words) <= max_words:
+        return " ".join(words).strip()
+    return " ".join(words[:max_words]).strip()
+
+
+def _has_digits(text: str) -> bool:
+    return bool(re.search(r"\d", str(text or "")))
+
+
+def _normalize_bullet_list(items: list[str], *, max_items: int) -> list[str]:
+    out: list[str] = []
+    for item in items:
+        bullet = _limit_words(_normalize_bullet(item))
+        if not bullet:
+            continue
+        out.append(bullet)
+        if len(out) >= max_items:
+            break
+    return out
 
 def _slack_tokens() -> list[str]:
     tokens: list[str] = []
@@ -234,6 +373,24 @@ class BoardSeatStore:
             conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_board_seat_pitches_message_ts ON board_seat_pitches(message_ts) WHERE message_ts IS NOT NULL;"
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS board_seat_funding_cache (
+                    company TEXT PRIMARY KEY,
+                    history TEXT NOT NULL,
+                    latest_round TEXT NOT NULL,
+                    latest_date TEXT NOT NULL,
+                    backers_json TEXT NOT NULL,
+                    source_urls_json TEXT NOT NULL,
+                    source_type TEXT NOT NULL,
+                    as_of_utc TEXT NOT NULL,
+                    confidence REAL NOT NULL DEFAULT 0.0
+                );
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_board_seat_funding_cache_asof ON board_seat_funding_cache(as_of_utc DESC);"
+            )
 
     def _seed_pitches_from_runs(self) -> None:
         with self._connect() as conn:
@@ -256,8 +413,9 @@ class BoardSeatStore:
             if not message_text:
                 continue
             investment_text = _extract_investment_text(message_text)
-            investment_signature = _token_signature(investment_text)
-            context_snippets = [investment_text] if investment_text else []
+            core_investment_text = _core_investment_text(message_text)
+            investment_signature = _token_signature(core_investment_text)
+            context_snippets = [core_investment_text] if core_investment_text else []
             self.record_pitch(
                 company=str(row["company"] or ""),
                 channel_ref=str(row["channel_ref"] or ""),
@@ -268,7 +426,7 @@ class BoardSeatStore:
                 posted_at_utc=str(row["posted_at_utc"] or _utc_now_iso()),
                 message_text=message_text,
                 investment_text=investment_text,
-                investment_hash=_stable_hash(investment_signature or investment_text),
+                investment_hash=_stable_hash(investment_signature or core_investment_text or investment_text),
                 investment_signature=investment_signature,
                 context_signature=_context_signature_from_snippets(context_snippets),
                 context_snippets=context_snippets,
@@ -426,6 +584,83 @@ class BoardSeatStore:
                 row = conn.execute("SELECT COUNT(1) AS n FROM board_seat_pitches").fetchone()
         return int(row["n"]) if row is not None else 0
 
+    def get_funding_snapshot(self, *, company: str) -> FundingSnapshot | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT company, history, latest_round, latest_date, backers_json, source_urls_json, source_type, as_of_utc, confidence
+                FROM board_seat_funding_cache
+                WHERE company = ?
+                LIMIT 1
+                """,
+                (company,),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            backers = json.loads(str(row["backers_json"] or "[]"))
+            if not isinstance(backers, list):
+                backers = []
+        except Exception:
+            backers = []
+        try:
+            source_urls = json.loads(str(row["source_urls_json"] or "[]"))
+            if not isinstance(source_urls, list):
+                source_urls = []
+        except Exception:
+            source_urls = []
+        return FundingSnapshot(
+            history=str(row["history"] or ""),
+            latest_round=str(row["latest_round"] or ""),
+            latest_date=str(row["latest_date"] or ""),
+            backers=[str(item).strip() for item in backers if str(item).strip()],
+            source_urls=[str(item).strip() for item in source_urls if str(item).strip()],
+            source_type=str(row["source_type"] or "unknown").strip() or "unknown",
+            as_of_utc=str(row["as_of_utc"] or _utc_now_iso()),
+            confidence=float(row["confidence"] if row["confidence"] is not None else 0.0),
+        )
+
+    def upsert_funding_snapshot(self, *, company: str, snapshot: FundingSnapshot) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO board_seat_funding_cache (
+                    company, history, latest_round, latest_date, backers_json, source_urls_json, source_type, as_of_utc, confidence
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(company) DO UPDATE SET
+                    history = excluded.history,
+                    latest_round = excluded.latest_round,
+                    latest_date = excluded.latest_date,
+                    backers_json = excluded.backers_json,
+                    source_urls_json = excluded.source_urls_json,
+                    source_type = excluded.source_type,
+                    as_of_utc = excluded.as_of_utc,
+                    confidence = excluded.confidence
+                """,
+                (
+                    company,
+                    snapshot.history,
+                    snapshot.latest_round,
+                    snapshot.latest_date,
+                    json.dumps(snapshot.backers, ensure_ascii=False),
+                    json.dumps(snapshot.source_urls, ensure_ascii=False),
+                    snapshot.source_type,
+                    snapshot.as_of_utc,
+                    float(snapshot.confidence),
+                ),
+            )
+
+    def funding_cache_age_days(self, *, company: str) -> float | None:
+        snapshot = self.get_funding_snapshot(company=company)
+        if snapshot is None:
+            return None
+        try:
+            as_of = datetime.fromisoformat(snapshot.as_of_utc.replace("Z", "+00:00")).astimezone(UTC)
+        except Exception:
+            return None
+        delta = datetime.now(UTC) - as_of
+        return max(0.0, round(delta.total_seconds() / 86400.0, 2))
+
 
 def _normalize_text(text: str, *, max_chars: int = 240) -> str:
     cleaned = re.sub(r"https?://\S+", "", text or "")
@@ -457,27 +692,130 @@ def _stable_hash(text: str) -> str:
     return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
 
 
-def _extract_investment_text(message: str) -> str:
+def _extract_investment_sections(message: str) -> dict[str, list[str]]:
     lines = [line.strip() for line in str(message or "").splitlines() if line.strip()]
-    buckets: dict[str, str] = {}
+    sections: dict[str, list[str]] = {"thesis": [], "context": [], "funding": []}
+    active: str | None = None
     for line in lines:
-        lower = line.lower()
+        lower = line.lower().strip("* ")
+        if lower == "thesis":
+            active = "thesis"
+            continue
+        if lower.endswith(" context"):
+            active = "context"
+            continue
+        if lower == "funding snapshot":
+            active = "funding"
+            continue
         if lower.startswith("- signal:"):
-            buckets["signal"] = line.split(":", 1)[1].strip() if ":" in line else ""
-        elif lower.startswith("- board lens:"):
-            buckets["lens"] = line.split(":", 1)[1].strip() if ":" in line else ""
-        elif lower.startswith("- watchlist:"):
-            buckets["watch"] = line.split(":", 1)[1].strip() if ":" in line else ""
-    if buckets:
-        combined = " | ".join(v for v in [buckets.get("signal"), buckets.get("lens"), buckets.get("watch")] if v)
-        return _normalize_text(combined, max_chars=1200)
+            sections["thesis"].append(line.split(":", 1)[1].strip())
+            active = None
+            continue
+        if lower.startswith("- board lens:") or lower.startswith("- watchlist:"):
+            sections["context"].append(line.split(":", 1)[1].strip())
+            active = None
+            continue
+        if lower.startswith("- team ask:"):
+            active = None
+            continue
+        if active and line.startswith("- "):
+            sections[active].append(line[2:].strip())
+    for key, max_items in (("thesis", MAX_THESIS_BULLETS), ("context", MAX_CONTEXT_BULLETS), ("funding", MAX_FUNDING_BULLETS)):
+        sections[key] = _normalize_bullet_list(sections[key], max_items=max_items)
+    return sections
 
-    fallback = [
-        line
-        for line in lines
-        if "board seat as a service" not in line.lower()
-    ]
-    return _normalize_text(" | ".join(fallback[:3]), max_chars=1200)
+
+def _extract_investment_text(message: str) -> str:
+    sections = _extract_investment_sections(message)
+    combined: list[str] = []
+    combined.extend(sections.get("thesis", []))
+    combined.extend(sections.get("context", []))
+    combined.extend(sections.get("funding", []))
+    if combined:
+        return _normalize_text(" | ".join(combined), max_chars=1200)
+
+    lines = [line for line in str(message or "").splitlines() if line.strip()]
+    fallback = [line.strip() for line in lines if "board seat as a service" not in line.lower()]
+    return _normalize_text(" | ".join(fallback[:4]), max_chars=1200)
+
+
+def _core_investment_text(message: str) -> str:
+    sections = _extract_investment_sections(message)
+    core = [*sections.get("thesis", []), *sections.get("context", [])]
+    if core:
+        return _normalize_text(" | ".join(core), max_chars=1200)
+    return _extract_investment_text(message)
+
+
+def _render_board_seat_message(*, company: str, draft: BoardSeatDraft) -> str:
+    lines = [f"*Board Seat as a Service — {company}*", "*Thesis*"]
+    for bullet in draft.thesis_bullets:
+        lines.append(f"- {bullet}")
+    lines.append(f"*{company} context*")
+    for bullet in draft.context_bullets:
+        lines.append(f"- {bullet}")
+    lines.append("*Funding snapshot*")
+    for bullet in draft.funding_bullets:
+        lines.append(f"- {bullet}")
+    return "\n".join(lines)
+
+
+def _validate_draft(draft: BoardSeatDraft) -> list[str]:
+    errors: list[str] = []
+    if not draft.thesis_bullets:
+        errors.append("missing_thesis")
+    if not draft.context_bullets:
+        errors.append("missing_context")
+    if not draft.funding_bullets:
+        errors.append("missing_funding")
+    if len(draft.thesis_bullets) > MAX_THESIS_BULLETS:
+        errors.append("too_many_thesis_bullets")
+    if len(draft.context_bullets) > MAX_CONTEXT_BULLETS:
+        errors.append("too_many_context_bullets")
+    if len(draft.funding_bullets) > MAX_FUNDING_BULLETS:
+        errors.append("too_many_funding_bullets")
+    total = len(draft.thesis_bullets) + len(draft.context_bullets) + len(draft.funding_bullets)
+    if total > MAX_TOTAL_BULLETS:
+        errors.append("too_many_total_bullets")
+    for section in (draft.thesis_bullets, draft.context_bullets, draft.funding_bullets):
+        for bullet in section:
+            if len(bullet.split()) > MAX_BULLET_WORDS:
+                errors.append("bullet_too_long")
+                break
+    return errors
+
+
+def _sanitize_draft(*, company: str, draft: BoardSeatDraft, funding: FundingSnapshot) -> BoardSeatDraft:
+    thesis = _normalize_bullet_list(draft.thesis_bullets, max_items=MAX_THESIS_BULLETS)
+    context = _normalize_bullet_list(draft.context_bullets, max_items=MAX_CONTEXT_BULLETS)
+    funding_bullets = _normalize_bullet_list(draft.funding_bullets, max_items=MAX_FUNDING_BULLETS)
+
+    if not thesis:
+        thesis = [f"{company} has a board-relevant opportunity with measurable upside and execution risk in the next 12 months."]
+    if not context:
+        context = [f"Anchor this to {company}'s existing products, customer programs, and near-term execution priorities."]
+    if not funding_bullets:
+        funding_bullets = _funding_bullets_from_snapshot(funding)
+
+    total = len(thesis) + len(context) + len(funding_bullets)
+    if total > MAX_TOTAL_BULLETS:
+        overflow = total - MAX_TOTAL_BULLETS
+        while overflow > 0 and len(funding_bullets) > 1:
+            funding_bullets.pop()
+            overflow -= 1
+        while overflow > 0 and len(context) > 1:
+            context.pop()
+            overflow -= 1
+        while overflow > 0 and len(thesis) > 1:
+            thesis.pop()
+            overflow -= 1
+    return BoardSeatDraft(
+        thesis_bullets=thesis[:MAX_THESIS_BULLETS],
+        context_bullets=context[:MAX_CONTEXT_BULLETS],
+        funding_bullets=funding_bullets[:MAX_FUNDING_BULLETS],
+        raw_model_output=draft.raw_model_output,
+        rewrite_reasons=draft.rewrite_reasons,
+    )
 
 
 def _signal_signature_from_investment(investment_text: str) -> str:
@@ -571,7 +909,13 @@ def _detect_repeat_investment(
     return False, None, 0.0
 
 
-def _build_novel_fallback_message(*, company: str, snippets: list[str], recent_pitches: list[dict[str, Any]]) -> str:
+def _build_novel_fallback_draft(
+    *,
+    company: str,
+    snippets: list[str],
+    recent_pitches: list[dict[str, Any]],
+    funding: FundingSnapshot,
+) -> BoardSeatDraft:
     previous_signatures = [str(item.get("investment_signature") or "").strip() for item in recent_pitches]
     chosen = ""
     for snippet in snippets:
@@ -579,22 +923,286 @@ def _build_novel_fallback_message(*, company: str, snippets: list[str], recent_p
         if not sig:
             continue
         if all(_jaccard_similarity(sig, prev) < 0.6 for prev in previous_signatures if prev):
-            chosen = _normalize_text(snippet, max_chars=180)
+            chosen = _limit_words(_normalize_text(snippet, max_chars=220))
             break
     if not chosen:
-        chosen = _normalize_text(snippets[0], max_chars=180) if snippets else f"No high-signal updates surfaced for {company}."
+        chosen = _limit_words(_normalize_text(snippets[0], max_chars=220)) if snippets else f"No high-signal updates surfaced for {company}."
 
-    watch = _normalize_text(snippets[1], max_chars=140) if len(snippets) > 1 else f"Watch pipeline health, gross margin, and delivery risk at {company} this week."
-    ask = _normalize_text(snippets[2], max_chars=140) if len(snippets) > 2 else f"What is one net-new investment angle for {company} we should validate this week?"
-    return "\n".join(
-        [
-            f"*Board Seat as a Service — {company}*",
-            f"- Signal: {chosen}",
-            f"- Board lens: Focus on a net-new angle versus prior recommendations unless the underlying data changed materially.",
-            f"- Watchlist: {watch}",
-            f"- Team ask: {ask}",
-        ]
+    context_line = (
+        _limit_words(_normalize_text(snippets[1], max_chars=220))
+        if len(snippets) > 1
+        else f"Prioritize net-new ideas for {company} unless underlying data changed materially."
     )
+    return _sanitize_draft(
+        company=company,
+        funding=funding,
+        draft=BoardSeatDraft(
+            thesis_bullets=[chosen],
+            context_bullets=[context_line],
+            funding_bullets=_funding_bullets_from_snapshot(funding),
+            raw_model_output="",
+            rewrite_reasons=["novel_fallback"],
+        ),
+    )
+
+
+def _empty_funding_snapshot(*, source_type: str = "unknown") -> FundingSnapshot:
+    return FundingSnapshot(
+        history="",
+        latest_round="",
+        latest_date="",
+        backers=[],
+        source_urls=[],
+        source_type=source_type,
+        as_of_utc=_utc_now_iso(),
+        confidence=0.0,
+    )
+
+
+def _is_funding_snapshot_unknown(snapshot: FundingSnapshot) -> bool:
+    if snapshot.source_type == "unknown":
+        return True
+    if snapshot.history.strip():
+        return False
+    if snapshot.latest_round.strip():
+        return False
+    if snapshot.latest_date.strip():
+        return False
+    return not snapshot.backers
+
+
+def _funding_bullets_from_snapshot(snapshot: FundingSnapshot) -> list[str]:
+    if _is_funding_snapshot_unknown(snapshot):
+        return [UNKNOWN_FUNDING_TEXT]
+
+    history = snapshot.history.strip()
+    latest = snapshot.latest_round.strip()
+    latest_date = snapshot.latest_date.strip()
+    backers = ", ".join(snapshot.backers[:4]).strip()
+
+    bullets: list[str] = []
+    if history:
+        bullets.append(f"History: {_limit_words(history)}")
+    else:
+        bullets.append("History: funding history not confirmed from current sources.")
+    latest_parts: list[str] = []
+    if latest:
+        latest_parts.append(f"Latest round {latest}")
+    if latest_date:
+        latest_parts.append(f"({latest_date})")
+    if backers:
+        latest_parts.append(f"backers: {backers}")
+    if latest_parts:
+        bullets.append(_limit_words(" ".join(latest_parts)))
+    else:
+        bullets.append("Latest round/backers are currently unknown.")
+    return _normalize_bullet_list(bullets, max_items=MAX_FUNDING_BULLETS)
+
+
+def _funding_snapshot_fresh(*, snapshot: FundingSnapshot | None, ttl_days: int) -> bool:
+    if snapshot is None:
+        return False
+    try:
+        as_of = datetime.fromisoformat(snapshot.as_of_utc.replace("Z", "+00:00")).astimezone(UTC)
+    except Exception:
+        return False
+    age_days = (datetime.now(UTC) - as_of).total_seconds() / 86400.0
+    return age_days <= float(ttl_days)
+
+
+def _http_json(*, url: str, headers: dict[str, str], params: dict[str, str]) -> Any:
+    request_url = url + "?" + urlencode(params)
+    request = Request(request_url, headers=headers, method="GET")
+    with urlopen(request, timeout=20) as response:  # nosec B310
+        raw = response.read().decode("utf-8")
+    return json.loads(raw)
+
+
+def _brave_search_rows(company: str) -> list[dict[str, str]]:
+    api_key = _brave_search_api_key()
+    if not api_key:
+        return []
+    headers = {
+        "Accept": "application/json",
+        "X-Subscription-Token": api_key,
+        "User-Agent": "CoatueClaw/1.0",
+    }
+    queries = [
+        f"{company} funding history latest round backers",
+        f"{company} raised series funding investors",
+    ]
+    rows: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for query in queries:
+        try:
+            payload = _http_json(
+                url=WEB_SEARCH_ENDPOINT,
+                headers=headers,
+                params={"q": query, "count": str(BRAVE_SEARCH_RESULTS), "country": "us", "search_lang": "en"},
+            )
+        except Exception:
+            continue
+        web = payload.get("web") if isinstance(payload, dict) else None
+        results = web.get("results") if isinstance(web, dict) else None
+        if not isinstance(results, list):
+            continue
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            url = _normalize_text(str(item.get("url") or ""), max_chars=320)
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            rows.append(
+                {
+                    "title": _normalize_text(str(item.get("title") or ""), max_chars=240),
+                    "snippet": _normalize_text(str(item.get("description") or ""), max_chars=420),
+                    "url": url,
+                }
+            )
+            if len(rows) >= BRAVE_SEARCH_RESULTS:
+                return rows
+    return rows
+
+
+def _extract_funding_with_llm(*, company: str, rows: list[dict[str, str]]) -> FundingSnapshot | None:
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if OpenAI is None or (not api_key) or (not rows):
+        return None
+    model = (os.environ.get("COATUE_CLAW_BOARD_SEAT_MODEL", FUNDING_EXTRACT_MODEL) or FUNDING_EXTRACT_MODEL).strip()
+    client = OpenAI(api_key=api_key)
+    evidence = "\n".join(
+        f"- title: {item.get('title', '')}\n  snippet: {item.get('snippet', '')}\n  url: {item.get('url', '')}"
+        for item in rows[:BRAVE_SEARCH_RESULTS]
+    )
+    prompt = (
+        f"Extract funding facts for {company} from the evidence below.\n"
+        "Return strict JSON with keys: history, latest_round, latest_date, backers (array), confidence.\n"
+        "Use empty strings when unknown. Keep history <= 20 words.\n"
+        "Do not hallucinate; rely only on evidence.\n"
+        f"Evidence:\n{evidence}"
+    )
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            temperature=0.0,
+            messages=[
+                {"role": "system", "content": "Return valid JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+        )
+    except Exception:
+        return None
+    text = ""
+    if response and response.choices:
+        text = str(response.choices[0].message.content or "").strip()
+    if not text:
+        return None
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    try:
+        payload = json.loads(text[start : end + 1])
+    except Exception:
+        return None
+    history = _normalize_text(str(payload.get("history") or ""), max_chars=320)
+    latest_round = _normalize_text(str(payload.get("latest_round") or ""), max_chars=120)
+    latest_date = _normalize_text(str(payload.get("latest_date") or ""), max_chars=80)
+    backers_raw = payload.get("backers")
+    backers = [str(item).strip() for item in backers_raw if str(item).strip()] if isinstance(backers_raw, list) else []
+    confidence = float(payload.get("confidence") or 0.0)
+    return FundingSnapshot(
+        history=history,
+        latest_round=latest_round,
+        latest_date=latest_date,
+        backers=backers[:8],
+        source_urls=[item.get("url", "") for item in rows if item.get("url")][:8],
+        source_type="web_refresh",
+        as_of_utc=_utc_now_iso(),
+        confidence=max(0.0, min(1.0, confidence)),
+    )
+
+
+def _extract_funding_with_regex(*, rows: list[dict[str, str]]) -> FundingSnapshot | None:
+    if not rows:
+        return None
+    text = " ".join(f"{item.get('title', '')}. {item.get('snippet', '')}" for item in rows[:BRAVE_SEARCH_RESULTS]).strip()
+    if not text:
+        return None
+    history_match = re.search(r"([A-Z][^.;]{0,140}\b(raised|funding|valuation|series)\b[^.;]{0,140})", text, flags=re.IGNORECASE)
+    round_match = re.search(r"\b(series\s+[A-Z][\+\-]?|seed|pre-seed|growth|ipo|debt)\b", text, flags=re.IGNORECASE)
+    date_match = re.search(r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}\b|\b20\d{2}\b", text)
+    backers: list[str] = []
+    backers_match = re.search(r"(?:led by|backed by|investors include)\s+([A-Z][^.;]{3,120})", text, flags=re.IGNORECASE)
+    if backers_match:
+        candidate = backers_match.group(1)
+        for piece in re.split(r",| and ", candidate):
+            token = piece.strip(" .")
+            if token and len(token.split()) <= 4:
+                backers.append(token)
+    snapshot = FundingSnapshot(
+        history=_normalize_text(history_match.group(1), max_chars=220) if history_match else "",
+        latest_round=_normalize_text(round_match.group(1), max_chars=50) if round_match else "",
+        latest_date=_normalize_text(date_match.group(0), max_chars=30) if date_match else "",
+        backers=backers[:6],
+        source_urls=[item.get("url", "") for item in rows if item.get("url")][:8],
+        source_type="web_refresh",
+        as_of_utc=_utc_now_iso(),
+        confidence=0.45,
+    )
+    if not snapshot.history and not snapshot.latest_round and not snapshot.latest_date and not snapshot.backers:
+        return None
+    return snapshot
+
+
+def _refresh_funding_snapshot_from_web(*, company: str) -> FundingSnapshot | None:
+    rows = _brave_search_rows(company)
+    if not rows:
+        return None
+    llm_snapshot = _extract_funding_with_llm(company=company, rows=rows)
+    if llm_snapshot and (llm_snapshot.history or llm_snapshot.latest_round or llm_snapshot.latest_date or llm_snapshot.backers):
+        return llm_snapshot
+    return _extract_funding_with_regex(rows=rows)
+
+
+def _resolve_funding_snapshot(*, store: BoardSeatStore, company: str) -> FundingSnapshot:
+    manual = _load_manual_funding_seed()
+    key = _slug_company(company)
+    if key in manual:
+        return manual[key]
+
+    cached = store.get_funding_snapshot(company=company)
+    if _funding_snapshot_fresh(snapshot=cached, ttl_days=_funding_ttl_days()) and cached is not None:
+        return FundingSnapshot(
+            history=cached.history,
+            latest_round=cached.latest_round,
+            latest_date=cached.latest_date,
+            backers=cached.backers,
+            source_urls=cached.source_urls,
+            source_type="cache",
+            as_of_utc=cached.as_of_utc,
+            confidence=cached.confidence,
+        )
+
+    refreshed = _refresh_funding_snapshot_from_web(company=company)
+    if refreshed is not None:
+        store.upsert_funding_snapshot(company=company, snapshot=refreshed)
+        return refreshed
+
+    if cached is not None:
+        return FundingSnapshot(
+            history=cached.history,
+            latest_round=cached.latest_round,
+            latest_date=cached.latest_date,
+            backers=cached.backers,
+            source_urls=cached.source_urls,
+            source_type="cache",
+            as_of_utc=cached.as_of_utc,
+            confidence=cached.confidence,
+        )
+
+    return _empty_funding_snapshot(source_type="unknown")
 
 
 def _iso_from_slack_ts(ts: str | None) -> str:
@@ -771,8 +1379,9 @@ def _backfill_channel_pitches(
         message_ts = str(item.get("ts") or "").strip() or None
         posted_at_utc = _iso_from_slack_ts(message_ts)
         investment_text = _extract_investment_text(text)
-        investment_signature = _token_signature(investment_text)
-        context_snippets = [investment_text] if investment_text else []
+        core_investment_text = _core_investment_text(text)
+        investment_signature = _token_signature(core_investment_text)
+        context_snippets = [core_investment_text] if core_investment_text else []
         context_signature = _context_signature_from_snippets(context_snippets)
         did_insert = store.record_pitch(
             company=company,
@@ -784,7 +1393,7 @@ def _backfill_channel_pitches(
             posted_at_utc=posted_at_utc,
             message_text=text,
             investment_text=investment_text,
-            investment_hash=_stable_hash(investment_signature or investment_text),
+            investment_hash=_stable_hash(investment_signature or core_investment_text or investment_text),
             investment_signature=investment_signature,
             context_signature=context_signature,
             context_snippets=context_snippets,
@@ -795,47 +1404,86 @@ def _backfill_channel_pitches(
     return {"scanned": len(history), "matched": matched, "inserted": inserted}
 
 
-def _fallback_message(*, company: str, snippets: list[str]) -> str:
-    signal = _normalize_text(snippets[0], max_chars=140) if snippets else f"No high-signal channel updates surfaced for {company} in the last 24h."
-    watch = _normalize_text(snippets[1], max_chars=120) if len(snippets) > 1 else f"Monitor {company}'s product velocity, customer traction, and cost discipline this week."
-    ask = _normalize_text(snippets[2], max_chars=120) if len(snippets) > 2 else f"Reply with the single highest-priority board question for {company} today."
-    return "\n".join(
-        [
-            f"*Board Seat as a Service — {company}*",
-            f"- Signal: {signal}",
-            f"- Board lens: For {company}, focus on what changed that can move growth, margin, or risk in the next 1-2 quarters.",
-            f"- Watchlist: {watch}",
-            f"- Team ask: {ask}",
-        ]
+def _fallback_draft(*, company: str, snippets: list[str], funding: FundingSnapshot) -> BoardSeatDraft:
+    thesis = (
+        _limit_words(_normalize_text(snippets[0], max_chars=220))
+        if snippets
+        else f"No high-signal updates surfaced for {company} in the last 24 hours."
+    )
+    context = (
+        _limit_words(_normalize_text(snippets[1], max_chars=220))
+        if len(snippets) > 1
+        else f"Tie this to {company}'s current programs, customer momentum, and execution risk over the next 1-2 quarters."
+    )
+    draft = BoardSeatDraft(
+        thesis_bullets=[thesis],
+        context_bullets=[context],
+        funding_bullets=_funding_bullets_from_snapshot(funding),
+        raw_model_output="",
+        rewrite_reasons=["fallback"],
+    )
+    return _sanitize_draft(company=company, draft=draft, funding=funding)
+
+
+def _parse_llm_draft_payload(payload: Any) -> BoardSeatDraft | None:
+    if not isinstance(payload, dict):
+        return None
+    thesis = payload.get("thesis_bullets")
+    context = payload.get("context_bullets")
+    funding = payload.get("funding_bullets")
+    if not isinstance(thesis, list) or not isinstance(context, list) or not isinstance(funding, list):
+        return None
+    return BoardSeatDraft(
+        thesis_bullets=[str(item) for item in thesis],
+        context_bullets=[str(item) for item in context],
+        funding_bullets=[str(item) for item in funding],
+        raw_model_output=json.dumps(payload, ensure_ascii=False),
+        rewrite_reasons=[],
     )
 
 
-def _llm_message(*, company: str, snippets: list[str], prior_investments: list[str] | None = None) -> str | None:
+def _llm_draft(
+    *,
+    company: str,
+    snippets: list[str],
+    funding: FundingSnapshot,
+    prior_investments: list[str] | None = None,
+) -> BoardSeatDraft | None:
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if OpenAI is None or (not api_key):
         return None
-    if not snippets:
-        return None
     model = (os.environ.get("COATUE_CLAW_BOARD_SEAT_MODEL", "gpt-5.2-chat-latest") or "gpt-5.2-chat-latest").strip()
     client = OpenAI(api_key=api_key)
-    joined = "\n".join(f"- {line}" for line in snippets[:10])
+    joined = "\n".join(f"- {line}" for line in snippets[:10]) if snippets else "- no fresh channel snippets"
+    funding_json = json.dumps(
+        {
+            "history": funding.history,
+            "latest_round": funding.latest_round,
+            "latest_date": funding.latest_date,
+            "backers": funding.backers,
+            "source_type": funding.source_type,
+        },
+        ensure_ascii=False,
+    )
     prompt = (
-        f"Write a daily Slack post for board-seat-as-a-service in the {company} channel.\n"
-        "Style: concise, operator-level, no hype, plain English.\n"
-        "Output format must be exactly 5 lines:\n"
-        f"1) *Board Seat as a Service — {company}*\n"
-        "2) - Signal: ...\n"
-        "3) - Board lens: ...\n"
-        "4) - Watchlist: ...\n"
-        "5) - Team ask: ...\n"
-        "Keep total length under 110 words. No emojis. No numbering.\n"
-        "Use this context from the channel:\n"
+        f"Generate structured board-seat bullets for {company}.\n"
+        "Return strict JSON only with keys: thesis_bullets, context_bullets, funding_bullets.\n"
+        "Constraints:\n"
+        f"- thesis_bullets: 1-{MAX_THESIS_BULLETS} bullets\n"
+        f"- context_bullets: 1-{MAX_CONTEXT_BULLETS} bullets tied to the company's actual domain work\n"
+        f"- funding_bullets: 1-{MAX_FUNDING_BULLETS} bullets grounded only in provided funding snapshot\n"
+        f"- each bullet <= {MAX_BULLET_WORDS} words\n"
+        f"- total bullets <= {MAX_TOTAL_BULLETS}\n"
+        "- short, high skim value, decision-useful.\n"
+        "- do not use legacy labels (Signal/Board lens/Watchlist/Team ask).\n"
+        "Recent channel context:\n"
         f"{joined}\n"
+        f"Funding snapshot input:\n{funding_json}\n"
     )
     if prior_investments:
         prior = "\n".join(f"- {item}" for item in prior_investments[:5] if item.strip())
         prompt += (
-            "Do not repeat these prior investment theses unless the context clearly changed:\n"
+            "Avoid repeating prior theses unless context has materially changed:\n"
             f"{prior}\n"
         )
     try:
@@ -843,7 +1491,7 @@ def _llm_message(*, company: str, snippets: list[str], prior_investments: list[s
             model=model,
             temperature=0.2,
             messages=[
-                {"role": "system", "content": "You write tight board-level daily updates."},
+                {"role": "system", "content": "You write concise, board-ready bullets. Return JSON only."},
                 {"role": "user", "content": prompt},
             ],
         )
@@ -852,20 +1500,39 @@ def _llm_message(*, company: str, snippets: list[str], prior_investments: list[s
             text = str(response.choices[0].message.content or "").strip()
         if not text:
             return None
-        lines = [line.rstrip() for line in text.splitlines() if line.strip()]
-        if len(lines) < 5:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or end <= start:
             return None
-        return "\n".join(lines[:5])
+        payload = json.loads(text[start : end + 1])
+        draft = _parse_llm_draft_payload(payload)
+        if draft is None:
+            return None
+        return BoardSeatDraft(
+            thesis_bullets=draft.thesis_bullets,
+            context_bullets=draft.context_bullets,
+            funding_bullets=draft.funding_bullets,
+            raw_model_output=text,
+            rewrite_reasons=[],
+        )
     except Exception:
         return None
 
 
-def _build_message(*, company: str, snippets: list[str], recent_pitches: list[dict[str, Any]] | None = None) -> str:
+def _build_draft(
+    *,
+    company: str,
+    snippets: list[str],
+    funding: FundingSnapshot,
+    recent_pitches: list[dict[str, Any]] | None = None,
+) -> BoardSeatDraft:
     prior_investments = [str(item.get("investment_text") or "").strip() for item in (recent_pitches or [])]
-    llm = _llm_message(company=company, snippets=snippets, prior_investments=prior_investments)
-    if llm:
-        return llm
-    return _fallback_message(company=company, snippets=snippets)
+    llm = _llm_draft(company=company, snippets=snippets, funding=funding, prior_investments=prior_investments)
+    draft = llm if llm is not None else _fallback_draft(company=company, snippets=snippets, funding=funding)
+    draft = _sanitize_draft(company=company, draft=draft, funding=funding)
+    if _validate_draft(draft):
+        return _fallback_draft(company=company, snippets=snippets, funding=funding)
+    return draft
 
 
 def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
@@ -874,6 +1541,7 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
     portcos = _parse_portcos()
     result: dict[str, Any] = {
         "ok": True,
+        "format_version": BOARD_SEAT_FORMAT_VERSION,
         "run_date_local": run_date,
         "timezone": str(_timezone()),
         "portcos": [{"company": c, "channel_ref": ch} for c, ch in portcos],
@@ -892,8 +1560,25 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
             continue
 
         if dry_run and not clients:
-            message = _build_message(company=company, snippets=[])
-            result["sent"].append({"company": company, "channel_ref": channel_ref, "preview": message})
+            funding = _resolve_funding_snapshot(store=store, company=company)
+            draft = _build_draft(
+                company=company,
+                snippets=[],
+                funding=funding,
+                recent_pitches=store.recent_pitches(company=company, limit=12),
+            )
+            message = _render_board_seat_message(company=company, draft=draft)
+            result["sent"].append(
+                {
+                    "company": company,
+                    "channel_ref": channel_ref,
+                    "preview": message,
+                    "format_version": BOARD_SEAT_FORMAT_VERSION,
+                    "funding_source_type": funding.source_type,
+                    "funding_as_of_utc": funding.as_of_utc,
+                    "funding_unknown": _is_funding_snapshot_unknown(funding),
+                }
+            )
             continue
 
         posted = False
@@ -922,12 +1607,15 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                     )
                 snippets = _fetch_recent_context(client, channel_id=channel_id, company=company)
                 recent_pitches = store.recent_pitches(company=company, limit=12)
-                message = _build_message(company=company, snippets=snippets, recent_pitches=recent_pitches)
+                funding = _resolve_funding_snapshot(store=store, company=company)
+                draft = _build_draft(company=company, snippets=snippets, funding=funding, recent_pitches=recent_pitches)
+                message = _render_board_seat_message(company=company, draft=draft)
                 investment_text = _extract_investment_text(message)
-                investment_signature = _token_signature(investment_text)
+                core_investment_text = _core_investment_text(message)
+                investment_signature = _token_signature(core_investment_text)
                 signal_signature = _signal_signature_from_investment(investment_text)
                 signal_text = _signal_text_from_investment(investment_text)
-                investment_hash = _stable_hash(investment_signature or investment_text)
+                investment_hash = _stable_hash(investment_signature or core_investment_text or investment_text)
                 context_signature = _context_signature_from_snippets(snippets)
                 repeated, matched_pitch, similarity = _detect_repeat_investment(
                     investment_hash=investment_hash,
@@ -939,12 +1627,19 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                 previous_pitch = recent_pitches[0] if recent_pitches else None
                 significant_change = _has_significant_change(previous_pitch=previous_pitch, current_snippets=snippets)
                 if repeated and not significant_change:
-                    message = _build_novel_fallback_message(company=company, snippets=snippets, recent_pitches=recent_pitches)
+                    draft = _build_novel_fallback_draft(
+                        company=company,
+                        snippets=snippets,
+                        recent_pitches=recent_pitches,
+                        funding=funding,
+                    )
+                    message = _render_board_seat_message(company=company, draft=draft)
                     investment_text = _extract_investment_text(message)
-                    investment_signature = _token_signature(investment_text)
+                    core_investment_text = _core_investment_text(message)
+                    investment_signature = _token_signature(core_investment_text)
                     signal_signature = _signal_signature_from_investment(investment_text)
                     signal_text = _signal_text_from_investment(investment_text)
-                    investment_hash = _stable_hash(investment_signature or investment_text)
+                    investment_hash = _stable_hash(investment_signature or core_investment_text or investment_text)
                     repeated, matched_pitch, similarity = _detect_repeat_investment(
                         investment_hash=investment_hash,
                         investment_signature=investment_signature,
@@ -973,6 +1668,10 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                             "channel_id": channel_id,
                             "preview": message,
                             "significant_change": bool(significant_change),
+                            "format_version": BOARD_SEAT_FORMAT_VERSION,
+                            "funding_source_type": funding.source_type,
+                            "funding_as_of_utc": funding.as_of_utc,
+                            "funding_unknown": _is_funding_snapshot_unknown(funding),
                         }
                     )
                     posted = True
@@ -1010,6 +1709,10 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                         "channel_id": channel_id,
                         "ts": ts,
                         "significant_change": bool(significant_change),
+                        "format_version": BOARD_SEAT_FORMAT_VERSION,
+                        "funding_source_type": funding.source_type,
+                        "funding_as_of_utc": funding.as_of_utc,
+                        "funding_unknown": _is_funding_snapshot_unknown(funding),
                     }
                 )
                 posted = True
@@ -1034,8 +1737,22 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
 def status() -> dict[str, Any]:
     store = BoardSeatStore()
     portcos = [{"company": c, "channel_ref": ch} for c, ch in _parse_portcos()]
+    manual_seed = _load_manual_funding_seed()
+    funding_age_days: dict[str, float | None] = {}
+    funding_source_by_company: dict[str, str] = {}
+    for item in portcos:
+        company = item["company"]
+        manual_snapshot = manual_seed.get(_slug_company(company))
+        if manual_snapshot is not None:
+            funding_age_days[company] = 0.0
+            funding_source_by_company[company] = "manual_seed"
+            continue
+        funding_age_days[company] = store.funding_cache_age_days(company=company)
+        snapshot = store.get_funding_snapshot(company=company)
+        funding_source_by_company[company] = str(snapshot.source_type).strip() if snapshot is not None else "unknown"
     return {
         "ok": True,
+        "format_version": BOARD_SEAT_FORMAT_VERSION,
         "timezone": str(_timezone()),
         "run_date_local": _today_key(),
         "portcos": portcos,
@@ -1047,6 +1764,8 @@ def status() -> dict[str, Any]:
                 for item in portcos
             },
         },
+        "funding_cache_age_days_by_company": funding_age_days,
+        "funding_data_source_by_company": funding_source_by_company,
     }
 
 

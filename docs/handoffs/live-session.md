@@ -3,6 +3,58 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-24, Board Seat V2 format + funding snapshot)
+- Implemented Board Seat V2 in `/opt/coatue-claw/src/coatue_claw/board_seat_daily.py`:
+  - deterministic sectioned output for all portcos:
+    - `*Board Seat as a Service — {Company}*`
+    - `*Thesis*` (max 2 bullets)
+    - `*{Company} context*` (max 2 bullets)
+    - `*Funding snapshot*` (max 2 bullets)
+  - hard formatting guardrails:
+    - max 6 bullets total
+    - max 20 words per bullet
+    - legacy labels (`Signal`, `Board lens`, `Watchlist`, `Team ask`) removed from generation/fallback paths
+- Added structured generation and rendering:
+  - new dataclasses: `FundingSnapshot`, `BoardSeatDraft`
+  - model path now generates JSON draft bullets, then deterministic sanitizer/renderer enforces final shape
+- Added funding data pipeline with additive DB cache table:
+  - new SQLite table: `board_seat_funding_cache`
+  - resolver order:
+    1) manual seed JSON (`COATUE_CLAW_BOARD_SEAT_FUNDING_MANUAL_PATH`)
+    2) fresh cache (`COATUE_CLAW_BOARD_SEAT_FUNDING_TTL_DAYS`, default 14)
+    3) Brave web refresh + extraction
+    4) explicit unknown snapshot fallback
+  - source tracking emits `manual_seed` / `cache` / `web_refresh` / `unknown`
+- Preserved and extended repeat guardrail behavior:
+  - repeat detection still blocks stale repeats (`repeat_investment_without_significant_change`)
+  - investment parsing now supports V2 sections; core repeat signal remains thesis/context-focused
+- Added run/status diagnostics:
+  - `run_once(...).sent[*]` now includes:
+    - `format_version`
+    - `funding_source_type`
+    - `funding_as_of_utc`
+    - `funding_unknown`
+  - `status()` now includes:
+    - `format_version`
+    - `funding_cache_age_days_by_company`
+    - `funding_data_source_by_company`
+
+### Validation (this session)
+- Targeted:
+  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_board_seat_daily.py`
+  - Result: `13 passed`
+- Full smoke:
+  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q`
+  - Result: `3` failures outside board-seat module (pre-existing Spencer label defaults):
+    - `tests/test_spencer_change_digest.py::test_run_once_dry_run_includes_carson_label`
+    - `tests/test_spencer_change_log.py::test_is_spencer_user_defaults`
+    - `tests/test_spencer_change_log.py::test_requester_label_defaults`
+
+### Next Steps
+1. Run live `board seat run-once --force` and verify Slack output in `#anduril` matches V2 structure and skim budget.
+2. Add/seed `COATUE_CLAW_BOARD_SEAT_FUNDING_MANUAL_PATH` JSON for top portcos to improve funding quality and reduce web variance.
+3. Separately fix Spencer change-tracker default user mapping to restore full-suite green.
+
 ## Update (2026-02-23, title/takeaway role + sentence integrity)
 - Fixed title/takeaway inversion class in X chart posts:
   - title is now enforced as the concise sentence
