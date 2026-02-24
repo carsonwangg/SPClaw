@@ -697,6 +697,11 @@ def test_best_effort_target_skips_blocked_target() -> None:
     assert board_seat_daily._is_valid_target_name(company="Anduril", target=target) is True
 
 
+def test_is_valid_target_name_rejects_pronoun_placeholders() -> None:
+    assert board_seat_daily._is_valid_target_name(company="OpenAI", target="This") is False
+    assert board_seat_daily._is_valid_target_name(company="OpenAI", target="The") is False
+
+
 def test_validate_rendered_message_format_rejects_numbered_template() -> None:
     bad = "\n".join(
         [

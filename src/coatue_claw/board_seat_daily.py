@@ -242,6 +242,13 @@ TARGET_TOKEN_STOPWORDS = {
     "quarter",
     "trend",
     "market",
+    "this",
+    "that",
+    "these",
+    "those",
+    "the",
+    "a",
+    "an",
 }
 LEGACY_BOARD_SEAT_PATTERNS = (
     "1. idea title",
@@ -1718,6 +1725,9 @@ def _is_valid_target_name(*, company: str, target: str) -> bool:
     if not candidate:
         return False
     key = re.sub(r"[^a-z0-9]+", "", candidate.lower())
+    single_token = re.sub(r"[^a-z0-9]+", "", candidate.lower())
+    if single_token in TARGET_TOKEN_STOPWORDS:
+        return False
     if not key or key in ACQ_PLACEHOLDER_TARGETS:
         return False
     if any(term in candidate.lower() for term in ACQ_INVALID_TARGET_TERMS):
