@@ -48,6 +48,11 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - validation:
     - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `38 passed`
     - `PYTHONPATH=src python3 -m pytest -q` -> `257 passed`
+  - deployed/verified on Mac mini:
+    - `/opt/coatue-claw` updated to `6a62458`
+    - board-seat dry-run no longer emits `[Errno 24] Too many open files` in `ledger`
+    - ledger payload includes expected CSV/JSON/mirror output paths
+    - Slack probe healthy after restart (`ok=true`)
 - Board Seat funding hardening + strict repitch governance merged/deployed:
   - merged commit: `fd8a942` (`Merge board-seat funding hardening and strict repitch governance`)
   - merged-tree validation:

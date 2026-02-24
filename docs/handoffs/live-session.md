@@ -13,6 +13,18 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `38 passed`
   - `PYTHONPATH=src python3 -m pytest -q` -> `257 passed`
 
+### Runtime verification (Mac mini)
+1. Pulled latest `main` (`6a62458`) to `/opt/coatue-claw`, restarted gateway, and re-ran board-seat dry-run:
+   - `/opt/coatue-claw/.venv/bin/python -m coatue_claw.board_seat_daily run-once --force --dry-run`
+2. Confirmed ledger payload no longer reports FD exhaustion:
+   - `ledger_error=None`
+   - `ledger` now includes expected output paths:
+     - `csv_path`
+     - `json_path`
+     - `mirror_csv_path`
+     - `mirror_json_path`
+3. Post-restart Slack probe recovered healthy (`make openclaw-slack-status` -> `probe.ok=true`).
+
 ## Update (2026-02-24, integrator merge + deploy of board-seat funding hardening / strict repitch governance)
 - Integrated `origin/codex/agent-board-seat` into `main`:
   - merge commit: `fd8a942` (`Merge board-seat funding hardening and strict repitch governance`)
