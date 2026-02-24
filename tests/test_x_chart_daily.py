@@ -70,6 +70,12 @@ def test_store_seeds_fiscal_ai(tmp_path: Path, monkeypatch) -> None:
     store = XChartStore()
     handles = {item["handle"] for item in store.list_sources(limit=200)}
     assert "fiscal_AI".lower() in {h.lower() for h in handles}
+    seeded = {h.lower() for h in handles}
+    assert "fiscal_AI".lower() in seeded
+    assert "stock_unlock" in seeded
+    assert "stripe" in seeded
+    assert "mikezaccardi" in seeded
+    assert "oguzerkan" in seeded
 
 
 def test_run_chart_scout_dry_run(tmp_path: Path, monkeypatch) -> None:
@@ -734,6 +740,72 @@ def test_slack_tokens_include_env_then_config(tmp_path: Path, monkeypatch) -> No
         encoding="utf-8",
     )
     assert _slack_tokens() == ["xoxb-env-token", "xoxb-config-token"]
+
+
+def test_score_candidate_boosts_institutional_chart_language() -> None:
+    created_at = "2026-02-24T20:00:00Z"
+    institutional = _score_candidate(
+        title="@stock_unlock: US software growth re-accelerates",
+        text="Chart: US software revenue growth rose to 22% YoY as guidance improved versus consensus.",
+        engagement=200,
+        source_priority=1.0,
+        created_at=created_at,
+        has_image=True,
+    )
+    promo = _score_candidate(
+        title="@randomtrader: stock room alert",
+        text="Best stock trade group out there! Free chatroom link below discord.gg/abc $AMZN $AMD $NVDA $TSLA $AAPL $QQQ",
+        engagement=200,
+        source_priority=1.0,
+        created_at=created_at,
+        has_image=True,
+    )
+    assert institutional > promo
+
+
+def test_score_candidate_penalizes_cashtag_spam_with_cta() -> None:
+    created_at = "2026-02-24T20:00:00Z"
+    baseline = _score_candidate(
+        title="@stripe: card volume trend",
+        text="Chart: US card payment volume climbed 14% YoY through Q4.",
+        engagement=150,
+        source_priority=1.0,
+        created_at=created_at,
+        has_image=True,
+    )
+    spammy = _score_candidate(
+        title="@promobot: alerts",
+        text="Join now free alerts link below $SPY $QQQ $AMD $INTC $TSLA $NVDA $META $MSFT",
+        engagement=150,
+        source_priority=1.0,
+        created_at=created_at,
+        has_image=True,
+    )
+    assert spammy < baseline
+
+
+def test_score_candidate_boosts_preferred_topic_tags() -> None:
+    created_at = "2026-02-24T20:00:00Z"
+    preferred_topics = _score_candidate(
+        title="@oguzerkan: S&P 500 breadth and rotation",
+        text=(
+            "Market breadth and dispersion regime: 60% of S&P 500 stocks are outperforming "
+            "the index year to date while positioning remains underallocated."
+        ),
+        engagement=120,
+        source_priority=1.0,
+        created_at=created_at,
+        has_image=True,
+    )
+    neutral = _score_candidate(
+        title="@generic: market update",
+        text="General market commentary update for today.",
+        engagement=120,
+        source_priority=1.0,
+        created_at=created_at,
+        has_image=True,
+    )
+    assert preferred_topics > neutral
 
 
 def test_parse_x_candidates_filters_non_chart_text() -> None:

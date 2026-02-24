@@ -2186,3 +2186,65 @@ Then confirm bot returns:
    - Carson receives DM immediately
    - queue shows item under `spencer changes memory`
    - request line appears in configured `MEMORY.md`.
+
+## 2026-02-24 - X Chart Winner Selection: 3-Day Source Repeat Cooldown
+- User preference implemented: same source account may repeat, but not within 3 days of its most recent posted chart when alternatives exist.
+- Runtime module updated: `/opt/coatue-claw/src/coatue_claw/x_chart_daily.py`
+  - added `_source_repeat_days()` reading `COATUE_CLAW_X_CHART_SOURCE_REPEAT_DAYS` (default `3`)
+  - `_pick_winner(...)` now:
+    - builds `source_last_posted` from recent posted slots
+    - filters candidates from sources posted within cooldown window
+    - applies existing score-floor source-variety ranking on cooled pool
+    - falls back to original score pool if cooldown would otherwise empty the set
+- Tests updated: `/opt/coatue-claw/tests/test_x_chart_daily.py`
+  - `test_pick_winner_enforces_source_repeat_cooldown_with_alternative`
+  - `test_pick_winner_allows_recent_source_when_no_alternative`
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py -k "pick_winner"` -> `4 passed`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `76 passed`
+
+### Immediate Next Steps
+1. Observe next scheduled chart windows and confirm no same-source repeats within 3 days unless no viable alternative exists.
+2. If too restrictive in live flow, reduce `COATUE_CLAW_X_CHART_SOURCE_REPEAT_DAYS` to `2` in `.env.prod`.
+
+## 2026-02-24 - X Chart Reinforcement: Preferred Sources + Style-Quality Score
+- User input: reinforce chart-of-day scout toward Spencer-preferred chart style and source accounts.
+- Shipped in `src/coatue_claw/x_chart_daily.py`:
+  - added preferred default source seeds:
+    - `stock_unlock` priority `1.45`
+    - `stripe` priority `1.4`
+  - added deterministic `_style_quality_score(...)` integrated into `_score_candidate(...)`:
+    - boosts institutional/data-dense language (YoY/QoQ/CAGR, guidance/consensus, trend framing, quantitative context)
+    - penalizes promo CTA patterns (`discord`, `chatroom`, `link below`, `join`, `free`, etc.)
+    - penalizes cashtag-heavy spam bursts, especially with CTA wording
+- Tests updated in `tests/test_x_chart_daily.py`:
+  - `test_store_seeds_priority_sources`
+  - `test_score_candidate_boosts_institutional_chart_language`
+  - `test_score_candidate_penalizes_cashtag_spam_with_cta`
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `78 passed`
+
+### Immediate Next Steps
+1. Watch next scheduled posts to confirm stronger preference for institutional chart posts over promo-style posts with similar engagement.
+2. If selection is too sensitive, tune the two new source priorities by ±0.1 and re-run `tests/test_x_chart_daily.py`.
+
+## 2026-02-24 - X Chart Reinforcement: Preferred Topic Tags + Source Handles
+- User confirmed preferred examples and requested reinforcement on both topic coverage and account inclusion.
+- Shipped in `src/coatue_claw/x_chart_daily.py`:
+  - added topic-keyword tags across theme/signal/style dictionaries for:
+    - backlog inflection
+    - AI data-center power-demand narratives
+    - market breadth/rotation/dispersion regime signals
+    - positioning/underallocation and stock-picker regimes
+  - added preferred default source handles:
+    - `MikeZaccardi` (`1.3`)
+    - `oguzerkan` (`1.25`)
+- Tests updated in `tests/test_x_chart_daily.py`:
+  - source seeding now asserts `mikezaccardi` and `oguzerkan`
+  - added `test_score_candidate_boosts_preferred_topic_tags`
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `79 passed`
+
+### Immediate Next Steps
+1. Let scheduler run for 2-3 windows and inspect winners for higher hit-rate on preferred topics.
+2. If source concentration climbs, trim handle priorities by small increments while preserving topic-tag weights.

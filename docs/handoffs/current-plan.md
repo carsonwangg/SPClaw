@@ -957,3 +957,68 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
    - in-thread queue acknowledgment
    - Carson DM
    - `spencer changes memory` shows new row.
+
+## 2026-02-24 Plan Update - X Chart Source Repeat Cooldown (3 Days)
+
+### Completed
+- Updated winner selection in `src/coatue_claw/x_chart_daily.py` to enforce source-level repeat cooldown:
+  - same account can be selected again only if its most recent posted chart is older than 3 days.
+  - env knob added: `COATUE_CLAW_X_CHART_SOURCE_REPEAT_DAYS` (default `3`, clamped `0..30`).
+  - cooldown is applied before source-variety ranking.
+  - starvation guard: if all candidates are within cooldown, selection falls back to normal score ordering (post still proceeds).
+- Added regression tests in `tests/test_x_chart_daily.py`:
+  - `test_pick_winner_enforces_source_repeat_cooldown_with_alternative`
+  - `test_pick_winner_allows_recent_source_when_no_alternative`
+
+### Validation
+- `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py -k "pick_winner"` -> `4 passed`
+- `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `76 passed`
+
+### Next
+1. Monitor next scheduled posts and confirm same-source repetition does not occur within 3 days when alternatives exist.
+2. If feed quality drops due to cooldown pressure, tune `COATUE_CLAW_X_CHART_SOURCE_REPEAT_DAYS` to `2` and re-check.
+
+## 2026-02-24 Plan Update - X Chart Preferred Sources + Style-Quality Scoring
+
+### Completed
+- Updated default prioritized X sources in `src/coatue_claw/x_chart_daily.py`:
+  - added `stock_unlock` (1.45)
+  - added `stripe` (1.4)
+- Added deterministic style-quality scoring to candidate ranking:
+  - institutional/data-dense chart language gets a positive boost
+  - promo CTA patterns and cashtag-heavy spam patterns get penalties
+  - integrated into `_score_candidate(...)` as `style_component`
+- Added tests in `tests/test_x_chart_daily.py`:
+  - `test_store_seeds_priority_sources`
+  - `test_score_candidate_boosts_institutional_chart_language`
+  - `test_score_candidate_penalizes_cashtag_spam_with_cta`
+
+### Validation
+- `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `78 passed`
+
+### Next
+1. Monitor the next 1-2 scheduled chart windows and confirm preferred-source quality uplift appears in winner set without overfitting to account priority.
+2. If needed, tune source priorities for `stock_unlock` and `stripe` by ±0.1 based on observed hit rate.
+
+## 2026-02-24 Plan Update - X Chart Topic Tags + Additional Preferred Handles
+
+### Completed
+- Expanded chart-of-day topic tag coverage in `src/coatue_claw/x_chart_daily.py` for Spencer-preferred content themes:
+  - fundamental inflection signals (`backlog`)
+  - AI infra second-order effects (`data center power`, `power demand`)
+  - market internals/regime (`breadth`, `rotation`, `dispersion`, `regime`)
+  - positioning language (`positioning`, `underallocated`, `stock pickers`)
+- Added referenced accounts to default source consideration list:
+  - `MikeZaccardi` (`1.3`)
+  - `oguzerkan` (`1.25`)
+  - (existing preferred list already includes `fiscal_AI`, `stock_unlock`, `stripe`)
+- Updated tests in `tests/test_x_chart_daily.py`:
+  - extended source-seed assertions for `mikezaccardi` and `oguzerkan`
+  - added `test_score_candidate_boosts_preferred_topic_tags`
+
+### Validation
+- `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `79 passed`
+
+### Next
+1. Observe next 2-3 scheduled posts and confirm more winners contain preferred topic tags without reducing diversity too aggressively.
+2. If too concentrated, lower `MikeZaccardi`/`oguzerkan` priority by `0.05-0.1` while keeping tag scoring intact.
