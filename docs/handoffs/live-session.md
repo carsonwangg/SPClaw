@@ -47,9 +47,20 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py`
   - Result: `19 passed`
 
+### Runtime verification (Mac mini)
+- Pulled and deployed commit `8a1a72a` to `/opt/coatue-claw`.
+- Restarted gateway:
+  - `make openclaw-restart`
+- Verified Slack health:
+  - `make openclaw-slack-status` -> `probe.ok=true`
+- Verified board-seat module state:
+  - `make openclaw-board-seat-status` -> `format_version: v5_target_first_confidence_sources`
+- Dry-run verification (OpenAI):
+  - `COATUE_CLAW_BOARD_SEAT_PORTCOS='OpenAI:openai' /opt/coatue-claw/.venv/bin/python -m coatue_claw.board_seat_daily run-once --force --dry-run`
+  - preview includes `*Idea confidence:* ...` and v5 source block.
+
 ### Immediate next steps
-1. Pull latest `main` on Mac mini runtime repo (`/opt/coatue-claw`), restart OpenClaw, and run a board-seat dry run for `OpenAI`.
-2. Validate one live `#openai` post:
+1. Validate one live `#openai` post:
    - has `Idea confidence` line
    - `Sources` are target-first (Browserbase-style evidence), no generic parent funding links.
 

@@ -48,6 +48,10 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - low-signal mode now remains candidate-first with explicit confidence labeling
   - LLM prompt + sanitizer updated so final source composition is deterministic and target-led
   - validation: `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `19 passed`
+  - deployed to Mac mini runtime (`/opt/coatue-claw`) and verified:
+    - `make openclaw-restart`
+    - `make openclaw-slack-status` (`probe.ok=true`)
+    - `make openclaw-board-seat-status` (`format_version: v5_target_first_confidence_sources`)
 - Premium model policy is now defaulted for all OpenAI-backed tasks:
   - board-seat synthesis default: `gpt-5.2-chat-latest`
   - x-chart title/copy synthesis default: `gpt-5.2-chat-latest`
