@@ -3,6 +3,29 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-24, X-chart scheduled slot miss fix for Morning/Afternoon/Evening posts)
+- Root cause identified in `src/coatue_claw/x_chart_daily.py`:
+  - launchd runs scout on `StartInterval=3600`, which drifts by minute offset from service load time.
+  - slot detection previously only posted when runtime minute was within ±20 of `COATUE_CLAW_X_CHART_WINDOWS` (`09:00,12:00,18:00`), so an offset runtime (for example `:34`) could miss all slots.
+- Fixed `_slot_key(...)` behavior:
+  - scheduled runs now map to the most recent elapsed configured window on that local day.
+  - dedupe (`was_slot_posted`) still guarantees one post per slot/day.
+  - effect: if run happens at `09:34`, it still posts `09:00` slot once; same pattern for `12:00` and `18:00`.
+- Test updates in `tests/test_x_chart_daily.py`:
+  - added direct coverage for elapsed-window mapping.
+  - adjusted pool/scout tests to use true pre-first-window times for non-posting behavior.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `74 passed`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `5 passed`
+
+### Immediate runtime steps
+1. Pull and restart on Mac mini:
+   - `cd /opt/coatue-claw && git pull origin main`
+   - `make openclaw-restart`
+2. Verify:
+   - `make openclaw-x-chart-status`
+   - check `recent_posts` and `last_scheduled_posted_at_utc` after next window.
+
 ## Update (2026-02-24, Board Seat V6 target-memory lock + ledger + format guard)
 - Implemented hard target-memory controls in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
   - new SQLite table: `board_seat_target_memory`

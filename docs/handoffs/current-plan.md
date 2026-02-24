@@ -40,6 +40,13 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- X-chart slot posting reliability fix shipped (Morning/Afternoon/Evening not posting):
+  - root cause: `_slot_key` required runtime minute within ±20 of configured windows while launchd scout runs on drifting `StartInterval=3600`.
+  - fix: `_slot_key` now maps each scheduled run to the most recent elapsed configured window (`09:00/12:00/18:00` by default), with existing slot dedupe preserved.
+  - result: offset runs (for example `09:34`) still post the `09:00` slot once instead of skipping all day.
+  - tests:
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `74 passed`
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `5 passed`
 - Board Seat V6 target-memory enforcement + ledger tracking shipped:
   - added `board_seat_target_memory` table and hard target lock window (`COATUE_CLAW_BOARD_SEAT_TARGET_LOCK_DAYS`, default 30 days)
   - repeated targets (for example Epirus for Anduril) are now auto-retargeted or explicitly skipped with `repeat_target_within_lock_window`

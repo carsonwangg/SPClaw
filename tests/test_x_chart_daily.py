@@ -40,6 +40,7 @@ from coatue_claw.x_chart_daily import (
     _render_source_snip_card,
     _select_style_draft,
     _shorten_without_ellipsis,
+    _slot_key,
     _slack_tokens,
     main,
     run_chart_for_post_url,
@@ -51,6 +52,16 @@ def test_parse_windows_defaults_and_custom() -> None:
     assert _parse_windows("09:00,12:00,18:00") == [(9, 0), (12, 0), (18, 0)]
     assert _parse_windows("bad") == [(9, 0), (12, 0), (18, 0)]
     assert _parse_windows("8:30, 21:15") == [(8, 30), (21, 15)]
+
+
+def test_slot_key_maps_to_latest_elapsed_window() -> None:
+    windows = _parse_windows("09:00,12:00,18:00")
+    morning = datetime(2026, 2, 19, 9, 34, 0, tzinfo=UTC)
+    assert _slot_key(now_local=morning, windows=windows, manual=False) == "2026-02-19-09:00"
+    afternoon = datetime(2026, 2, 19, 12, 41, 0, tzinfo=UTC)
+    assert _slot_key(now_local=afternoon, windows=windows, manual=False) == "2026-02-19-12:00"
+    before_open = datetime(2026, 2, 19, 8, 59, 0, tzinfo=UTC)
+    assert _slot_key(now_local=before_open, windows=windows, manual=False) is None
 
 
 def test_store_seeds_fiscal_ai(tmp_path: Path, monkeypatch) -> None:
@@ -106,7 +117,7 @@ def test_run_chart_scout_dry_run(tmp_path: Path, monkeypatch) -> None:
     assert result["winner"]["source"] == "x:fiscal_AI"
 
 
-def test_run_chart_scout_outside_window_updates_pool(tmp_path: Path, monkeypatch) -> None:
+def test_run_chart_scout_before_first_window_updates_pool(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
     monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
@@ -135,7 +146,7 @@ def test_run_chart_scout_outside_window_updates_pool(tmp_path: Path, monkeypatch
     class Frozen(datetime):
         @classmethod
         def now(cls, tz=None):
-            base = datetime(2026, 2, 19, 10, 31, 0, tzinfo=UTC)
+            base = datetime(2026, 2, 19, 8, 31, 0, tzinfo=UTC)
             if tz is None:
                 return base
             return base.astimezone(tz)
@@ -191,7 +202,7 @@ def test_run_chart_scout_window_uses_hourly_pool_since_last_slot(tmp_path: Path,
     )
 
     class Frozen(datetime):
-        current = datetime(2026, 2, 19, 10, 5, 0, tzinfo=UTC)
+        current = datetime(2026, 2, 19, 8, 5, 0, tzinfo=UTC)
 
         @classmethod
         def now(cls, tz=None):
@@ -201,7 +212,7 @@ def test_run_chart_scout_window_uses_hourly_pool_since_last_slot(tmp_path: Path,
             return base.astimezone(tz)
 
     def _fetch_candidates(**kwargs):
-        if Frozen.current.hour == 10:
+        if Frozen.current.hour == 8:
             return [high]
         return [lower]
 

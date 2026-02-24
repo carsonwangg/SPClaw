@@ -3437,10 +3437,16 @@ def _fetch_visualcapitalist_candidates(*, max_items: int = 20) -> list[Candidate
 def _slot_key(*, now_local: datetime, windows: list[tuple[int, int]], manual: bool) -> str | None:
     if manual:
         return f"manual-{now_local.strftime('%Y%m%d-%H%M%S')}"
-    for hour, minute in windows:
-        if now_local.hour == hour and abs(now_local.minute - minute) <= 20:
-            return f"{now_local.strftime('%Y-%m-%d')}-{hour:02d}:{minute:02d}"
-    return None
+    current_minutes = now_local.hour * 60 + now_local.minute
+    eligible: list[tuple[int, int]] = []
+    for hour, minute in sorted(windows):
+        window_minutes = (hour * 60) + minute
+        if current_minutes >= window_minutes:
+            eligible.append((hour, minute))
+    if not eligible:
+        return None
+    hour, minute = eligible[-1]
+    return f"{now_local.strftime('%Y-%m-%d')}-{hour:02d}:{minute:02d}"
 
 
 def _dedupe_candidates(candidates: list[Candidate]) -> list[Candidate]:
