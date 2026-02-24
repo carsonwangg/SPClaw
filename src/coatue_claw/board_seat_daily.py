@@ -120,6 +120,8 @@ ACQ_PLACEHOLDER_TARGETS = {
     "no",
     "stealth",
     "stealthaisystems",
+    "board",
+    "boardseat",
 }
 ACQ_INVALID_TARGET_TERMS = {"startup team", "domain-adjacent", "internal", "in-house"}
 SOURCE_POLICY_DEFAULT = "target_first_3_1"
