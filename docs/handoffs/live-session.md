@@ -267,7 +267,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 ### Immediate runtime steps (Mac mini integrator)
 1. `cd /opt/coatue-claw && git pull origin main`
 2. Set runtime keys in `/opt/coatue-claw/.env.prod` for web-first funding:
-   - `COATUE_CLAW_BRAVE_API_KEY`
+   - `BRAVE_SEARCH_API_KEY`
    - `COATUE_CLAW_BOARD_SEAT_GOOGLE_SERP_API_KEY` (or `SERPAPI_API_KEY`)
    - keep `COATUE_CLAW_BOARD_SEAT_CRUNCHBASE_ENABLED=0` until Crunchbase key is provisioned
 3. `make openclaw-restart`

@@ -587,7 +587,7 @@ def _target_key(text: str) -> str:
 
 
 def _brave_search_api_key() -> str:
-    for key in ("COATUE_CLAW_BRAVE_API_KEY", "BRAVE_SEARCH_API_KEY"):
+    for key in ("BRAVE_SEARCH_API_KEY",):
         value = (os.environ.get(key, "") or "").strip()
         if value:
             return value
