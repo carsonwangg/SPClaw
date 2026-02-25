@@ -2283,3 +2283,25 @@ Then confirm bot returns:
   - `make openclaw-restart` + `make openclaw-slack-status` probe healthy (`ok=true`).
   - `make openclaw-market-daily-run-once FORCE=1` artifact: `/opt/coatue-claw-data/artifacts/market-daily/md-close-20260225-023157.md`.
   - INTC line now: `Likely positioning/flow; no single confirmed catalyst.` (no quote-directory wrapper phrase).
+
+## Update (2026-02-24, integrator merge/deploy of latest Market Daily role-branch fixes)
+- Merged `origin/codex/agent-market-daily` into `main` with merge commit `c5f6eca`.
+  - confirms inclusion of role-branch head `e9ae7d8` (`market-daily: reject quote-directory wrapper headlines for catalysts`).
+- Validation:
+  - exact checklist commands using system python failed because `pytest` is not installed in `/usr/bin/python3` (`No module named pytest`).
+  - equivalent venv validations passed:
+    - `PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_market_daily.py` -> `47 passed`
+    - `PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
+- Runtime checks:
+  - `make openclaw-restart`
+  - `make openclaw-slack-status` -> probe `ok=true`, `status=200`
+  - `make openclaw-market-daily-run-once FORCE=1` -> posted (`artifact: md-close-20260225-023700.md`)
+  - `make openclaw-market-daily-earnings-recap-run-once FORCE=1` -> clean `no_reporters`
+- Acceptance snippets (artifact/debug):
+  - footer: `Data UTC: ... | Sources: Yahoo fast_info + Yahoo news + web search`
+  - INTC line: `- 📈 INTC +5.7% — Likely positioning/flow; no single confirmed catalyst.`
+  - debug (`md debug INTC close` equivalent):
+    - `links_keys: ['news', 'web']`
+    - no `x` link key present
+- Follow-up hardening applied post-merge on main:
+  - expanded quote-wrapper rejection to include `why ... stock/shares ... today|now` phrasing for reason-line safety.

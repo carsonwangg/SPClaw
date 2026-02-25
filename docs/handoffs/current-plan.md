@@ -1046,3 +1046,15 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - runtime check:
     - forced MD close run now shows INTC fallback line instead of wrapper-title phrase
     - MD footer remains no-X (`Yahoo fast_info + Yahoo news + web search`)
+
+- Integrator merged latest Market Daily role branch to `main` (`c5f6eca`), including `e9ae7d8`:
+  - no-X MD output policy remains enforced (`[X]` removed from mover lines, no X in source footer)
+  - quote-directory wrapper hardening merged for catalyst phrase rejection
+- Post-merge runtime verification (Mac mini):
+  - Slack probe healthy after restart
+  - forced MD close run artifact confirms footer and INTC fallback line quality
+  - earnings recap force-run returns clean `no_reporters`
+- Additional main follow-up hardening (same deploy cycle):
+  - reject `why ... stock/shares ... today|now` phrasing as wrapper-like cause text to avoid weak reason lines in direct-evidence path
+- Environment note:
+  - checklist `python3 -m pytest` commands fail on mini due missing global pytest; tests must run via `/opt/coatue-claw/.venv/bin/python -m pytest`.
