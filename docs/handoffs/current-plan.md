@@ -40,6 +40,12 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Market Daily catalyst labeling fix shipped on role branch:
+  - simple-synthesis mover reasons are now free-sentence outputs by default (`COATUE_CLAW_MD_REASON_OUTPUT_MODE=free_sentence`) instead of forced `Shares rose/fell after ...`.
+  - generation is now anchor-first: one primary in-window evidence link plus configurable support context (`COATUE_CLAW_MD_SYNTH_SUPPORT_COUNT`, default `2`).
+  - `[News]/[Web]` links now follow the exact anchor/support evidence used for sentence generation.
+  - post-as-is policy is default (`COATUE_CLAW_MD_POST_AS_IS=1`), with deterministic anchor-based backup sentence when LLM is unavailable.
+  - debug/artifacts now expose `cause_anchor_url`, `cause_anchor_text`, `cause_support_urls`, `generation_format`, and `generation_policy`.
 - Market Daily catalyst quality recovery shipped on role branch:
   - in simple-synthesis mode, DDG web fallback is skipped when Google SERP key is missing (`web:google_serp_required_missing`), reducing noisy fallback evidence.
   - deterministic no-LLM gate now requires strong causal/explainer candidates before rendering a specific line; otherwise uses generic fallback.

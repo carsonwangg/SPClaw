@@ -3,6 +3,23 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-25, MD free-sentence catalyst labeling + anchor-first evidence)
+- Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
+  - simple-synthesis mover reasoning now uses free-sentence generation (no forced `Shares rose/fell after ...` wrapper).
+  - added anchor-first evidence selection with support candidates:
+    - new anchor chooser prefers in-window explainer/causal headlines for the ticker.
+    - LLM prompt receives anchor + up to 2 supports in deterministic order.
+  - link rendering now follows anchor/support evidence order instead of independent source picks.
+  - added post-as-is sentence policy (`COATUE_CLAW_MD_POST_AS_IS=1` default) with minimal normalization.
+  - added deterministic anchor-based sentence backup when LLM is unavailable/errors.
+  - added diagnostics fields:
+    - `cause_anchor_url`, `cause_anchor_text`, `cause_support_urls`
+    - `generation_format`, `generation_policy`
+  - extended status/config:
+    - `COATUE_CLAW_MD_REASON_OUTPUT_MODE` (default `free_sentence`)
+    - `COATUE_CLAW_MD_SYNTH_SUPPORT_COUNT` (default `2`)
+    - `COATUE_CLAW_MD_POST_AS_IS` (default `1`)
+
 ## Update (2026-02-25, MD catalyst quality recovery for no-Google/no-LLM degradation)
 - Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
   - simple synthesis now skips DDG fallback when Google SERP key is missing:

@@ -241,7 +241,10 @@ MD (Market Daily) environment controls:
 - `COATUE_CLAW_MD_SYNTH_MAX_RESULTS`: max evidence candidates passed to simple synthesis (default `5`)
 - `COATUE_CLAW_MD_SYNTH_SOURCE_MODE`: simple synthesis source mix (`google_plus_yahoo` default, `google_only`, `yahoo_only`)
 - `COATUE_CLAW_MD_SYNTH_DOMAIN_GATE`: synthesis domain filter (`soft` default, `quality_only`, `off`)
-- `COATUE_CLAW_MD_SYNTH_FORCE_BEST_GUESS`: when synthesis output is invalid, force deterministic best-guess phrase if any candidate exists (`1` default)
+- `COATUE_CLAW_MD_SYNTH_SUPPORT_COUNT`: max support links passed alongside the anchor evidence in simple synthesis (default `2`)
+- `COATUE_CLAW_MD_SYNTH_FORCE_BEST_GUESS`: legacy compatibility toggle from earlier phrase-based path (`1` default)
+- `COATUE_CLAW_MD_REASON_OUTPUT_MODE`: simple reason rendering mode (`free_sentence` default, `wrapper` optional rollback)
+- `COATUE_CLAW_MD_POST_AS_IS`: in simple mode, accept non-empty LLM sentence with minimal normalization (`1` default)
 - `COATUE_CLAW_MD_REQUIRE_IN_WINDOW_DATES`: require candidate publish timestamps to fall within the active session window (`1` default)
 - `COATUE_CLAW_MD_ALLOW_UNDATED_FALLBACK`: allow undated candidates when timestamp validation fails (`0` default)
 - `COATUE_CLAW_MD_REJECT_HISTORICAL_CALLBACK`: reject headlines/summaries that cite materially older event dates (for example “On January 26 ...”) (`1` default)
@@ -272,8 +275,10 @@ MD (Market Daily) environment controls:
   - rejects quote-directory/generic wrapper items before synthesis
   - enforces strict time-integrity filtering for candidate links and catalyst selection
   - applies soft penalties to technical-analysis and multi-ticker roundup headlines
-  - with LLM unavailable, only deterministic causal candidates may produce specific lines; otherwise fallback line is used
-  - synthesizes one catalyst phrase and renders `Shares rose/fell after <cause>.`
+  - chooses one anchor evidence candidate plus up to `COATUE_CLAW_MD_SYNTH_SUPPORT_COUNT` support candidates for synthesis context
+  - synthesizes one free-sentence catalyst line (not forced `Shares rose/fell after ...` wrapper)
+  - aligns `[News]/[Web]` links to the anchor/support evidence used for that generated sentence
+  - with LLM unavailable/error, uses deterministic anchor-based sentence backup before generic fallback
   - falls back only when no usable time-valid candidates remain
 - Basket coherence rule: if a confirmed `anthropic_claude_cyber` cause is present for one cybersecurity mover in a run, peer cybersecurity selloff movers reuse that same cause phrase.
 - MD fallback line (when corroboration gate fails): `Likely positioning/flow; no single confirmed catalyst.`

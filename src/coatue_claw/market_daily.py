@@ -92,6 +92,11 @@ class CatalystEvidence:
     cause_render_mode: str | None = None
     cause_raw_phrase: str | None = None
     cause_final_phrase: str | None = None
+    cause_anchor_url: str | None = None
+    cause_anchor_text: str | None = None
+    cause_support_urls: tuple[str, ...] = ()
+    generation_format: str | None = None
+    generation_policy: str | None = None
     quality_rejections: tuple[str, ...] = ()
     synth_generation_mode: str | None = None
     synth_model_used: str | None = None
@@ -226,6 +231,27 @@ def _reason_polish_max_chars() -> int:
     except Exception:
         val = 90
     return max(70, min(130, val))
+
+
+def _reason_output_mode() -> str:
+    raw = (os.environ.get("COATUE_CLAW_MD_REASON_OUTPUT_MODE", "free_sentence") or "free_sentence").strip().lower()
+    if raw in {"wrapper", "legacy_wrapper"}:
+        return "wrapper"
+    return "free_sentence"
+
+
+def _synth_support_count() -> int:
+    raw = (os.environ.get("COATUE_CLAW_MD_SYNTH_SUPPORT_COUNT", "2") or "2").strip()
+    try:
+        val = int(raw)
+    except Exception:
+        val = 2
+    return max(0, min(4, val))
+
+
+def _md_post_as_is() -> bool:
+    raw = (os.environ.get("COATUE_CLAW_MD_POST_AS_IS", "1") or "1").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
 
 
 def _catalyst_mode() -> str:
@@ -2017,6 +2043,11 @@ def _has_causal_marker(text: str) -> bool:
     return any(term in lower for term in (" after ", " amid ", " due to ", " because ", " following ", " as "))
 
 
+def _has_strict_causal_marker(text: str) -> bool:
+    lower = _normalize_whitespace(text).lower()
+    return any(term in lower for term in (" after ", " amid ", " due to ", " because ", " following "))
+
+
 def _has_catalyst_vocabulary(text: str) -> bool:
     upper = _normalize_whitespace(text).upper()
     vocab = (
@@ -2755,6 +2786,14 @@ def _build_links_for_mover(*, ev: CatalystEvidence, cat_line: str) -> list[str]:
         if domain:
             seen_domains.add(domain)
 
+    if ev.cause_mode == "simple_synthesis" and ev.cause_anchor_url and not fallback:
+        ordered_urls: list[str] = [ev.cause_anchor_url] + list(ev.cause_support_urls)
+        for url in ordered_urls:
+            label = "News" if url == ev.news_url else ("Web" if url == ev.web_url else ("News" if "/news/" in (url or "") else "Web"))
+            _push(url, label, quality_only=False)
+        if links:
+            return links
+
     if fallback:
         _push(ev.news_url, "News", quality_only=True)
         _push(ev.web_url, "Web", quality_only=True)
@@ -3417,6 +3456,111 @@ def _collect_synthesis_candidates(
     return ranked, gated, notes, web_backend
 
 
+def _is_explainer_headline_for_ticker(*, text: str, ticker: str) -> bool:
+    lower = _normalize_whitespace(text).lower()
+    if not lower:
+        return False
+    t = ticker.lower()
+    patterns = (
+        f"why is {t}",
+        f"why {t}",
+        f"{t} stock soaring today",
+        f"{t} stock up today",
+        f"{t} stock down today",
+    )
+    return any(p in lower for p in patterns) or _has_explainer_today_pattern(lower)
+
+
+def _pick_anchor_candidate(*, candidates: list[_EvidenceCandidate], ticker: str, pct_move: float | None) -> _EvidenceCandidate | None:
+    if not candidates:
+        return None
+
+    def _rank(item: _EvidenceCandidate) -> tuple[float, float]:
+        score = _effective_candidate_score(candidate=item, pct_move=pct_move)
+        headline = _normalize_whitespace(item.text)
+        context = _normalize_whitespace(f"{headline}. {item.context_text}") if item.context_text else headline
+        if _is_explainer_headline_for_ticker(text=headline, ticker=ticker) or _is_explainer_headline_for_ticker(text=context, ticker=ticker):
+            score += 0.24
+        if _has_strict_causal_marker(context):
+            score += 0.12
+        if _has_event_vocab(context):
+            score += 0.05
+        ts = item.published_at_utc.timestamp() if item.published_at_utc else 0.0
+        return (score, ts)
+
+    return sorted(candidates, key=lambda item: _rank(item), reverse=True)[0]
+
+
+def _pick_support_candidates(
+    *,
+    candidates: list[_EvidenceCandidate],
+    anchor: _EvidenceCandidate | None,
+    max_support: int,
+    pct_move: float | None,
+) -> list[_EvidenceCandidate]:
+    if not candidates or anchor is None or max_support <= 0:
+        return []
+    anchor_key = anchor.canonical_url or anchor.url
+    ranked = sorted(
+        candidates,
+        key=lambda c: (
+            -_effective_candidate_score(candidate=c, pct_move=pct_move),
+            -(c.published_at_utc.timestamp() if c.published_at_utc else 0.0),
+        ),
+    )
+    out: list[_EvidenceCandidate] = []
+    seen: set[str] = set()
+    if anchor_key:
+        seen.add(anchor_key)
+    for item in ranked:
+        key = item.canonical_url or item.url or f"{item.source_type}:{item.text}"
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+        if len(out) >= max_support:
+            break
+    return out
+
+
+def _sentence_from_anchor_candidate(*, ticker: str, anchor: _EvidenceCandidate | None, pct_move: float | None) -> str | None:
+    if anchor is None:
+        return None
+    text = _normalize_whitespace(anchor.context_text or anchor.text)
+    if not text:
+        return None
+    clauses = [_normalize_whitespace(x) for x in re.split(r"(?<=[.!?])\s+", text) if _normalize_whitespace(x)]
+    if not clauses:
+        return None
+    chosen = clauses[0]
+    for clause in clauses:
+        if _has_strict_causal_marker(clause):
+            chosen = clause
+            break
+    chosen = _normalize_whitespace(chosen).strip(" .")
+    if not chosen:
+        return None
+    # If anchor is a "why is <ticker>" headline, prefer causal detail from the remaining context.
+    if _is_explainer_headline_for_ticker(text=chosen, ticker=ticker):
+        for clause in clauses[1:]:
+            if _has_causal_marker(clause) or _has_event_vocab(clause):
+                chosen = clause.strip(" .")
+                break
+    chosen = re.sub(r"(?i)^(?:podcast|video|watch|live updates?)\s*:\s*", "", chosen).strip(" .")
+    if not chosen:
+        return None
+    return _shorten(chosen, 220).rstrip(" .") + "."
+
+
+def _normalize_generated_sentence(raw: str, *, max_chars: int = 220) -> str:
+    sentence = _normalize_whitespace(str(raw or ""))
+    if not sentence:
+        return ""
+    if len(sentence) > max_chars:
+        sentence = _shorten(sentence, max_chars)
+    return sentence.rstrip(" .") + "."
+
+
 def _sanitize_synth_phrase(raw: str) -> str:
     phrase = _normalize_whitespace(str(raw or "")).strip().lstrip("-*• ").strip(" \"'`")
     phrase = re.sub(r"(?i)^(?:financialcontent|marketbeat|benzinga|yahoo finance|reuters|bloomberg)\s*[-:]\s*", "", phrase)
@@ -3512,6 +3656,11 @@ def _synthesize_catalyst_phrase_simple(
 
 
 def _render_simple_reason_line(*, pct_move: float | None, phrase: str | None) -> str:
+    if _reason_output_mode() == "free_sentence":
+        sentence = _normalize_generated_sentence(phrase or "", max_chars=220)
+        if not sentence:
+            return FALLBACK_CAUSE_LINE
+        return sentence
     cleaned = _sanitize_synth_phrase(phrase or "")
     if not cleaned:
         return FALLBACK_CAUSE_LINE
@@ -3522,6 +3671,59 @@ def _render_simple_reason_line(*, pct_move: float | None, phrase: str | None) ->
     else:
         line = f"Shares moved after {cleaned}."
     return _shorten(line, 110).rstrip(" .") + "."
+
+
+def _synthesize_catalyst_sentence_simple(
+    *,
+    client: Any | None,
+    ticker: str,
+    pct_move: float | None,
+    anchor: _EvidenceCandidate | None,
+    supports: list[_EvidenceCandidate],
+) -> tuple[str | None, str | None]:
+    if anchor is None:
+        return None, "no_candidates"
+    if client is None:
+        return None, "llm_unavailable"
+
+    pack: list[_EvidenceCandidate] = [anchor] + supports
+    evidence_lines: list[str] = []
+    for idx, item in enumerate(pack, start=1):
+        tag = "A1" if idx == 1 else f"S{idx}"
+        context = _shorten(_normalize_whitespace(item.context_text or item.text), 360)
+        ts = item.published_at_utc.isoformat() if item.published_at_utc else "unknown"
+        evidence_lines.append(
+            f"[{tag}] src={item.source_type} ts={ts} score={_effective_candidate_score(candidate=item, pct_move=pct_move):.2f} text={context} url={item.url or 'n/a'}"
+        )
+    evidence_text = "\n".join(evidence_lines)
+    move = _format_pct(pct_move)
+    prompt = (
+        "Write exactly one complete sentence explaining this stock move.\n"
+        "Use only the evidence below.\n"
+        "Prioritize the anchor [A1] and use support entries only if consistent.\n"
+        "No markdown and no links.\n\n"
+        f"Ticker: {ticker}\n"
+        f"Move: {move}\n"
+        f"Evidence:\n{evidence_text}\n"
+    )
+    try:
+        response = client.chat.completions.create(
+            model=_reason_polish_model(),
+            messages=[
+                {"role": "system", "content": "You write concise, factual market move explanations grounded in sources."},
+                {"role": "user", "content": prompt},
+            ],
+        )
+        raw = str(response.choices[0].message.content or "").strip()  # type: ignore[index]
+    except Exception:
+        logger.exception("simple catalyst sentence synthesis failed for %s", ticker)
+        return None, "llm_exception"
+    if not raw:
+        return None, "llm_empty"
+    if _md_post_as_is():
+        return _normalize_generated_sentence(raw, max_chars=220), None
+    cleaned = _normalize_generated_sentence(raw, max_chars=220)
+    return (cleaned if cleaned else None), ("llm_empty_after_normalize" if not cleaned else None)
 
 
 def _preferred_evidence_text(evidence: CatalystEvidence) -> str:
@@ -3698,7 +3900,10 @@ def _build_message(
             else CatalystEvidence(ticker=mover.ticker, x_text=None, x_url=None, x_engagement=0, news_title=None, news_url=None)
         )
         cat = catalyst_lines[idx] if idx < len(catalyst_lines) else FALLBACK_CAUSE_LINE
-        cat = _ensure_reason_like_line(cat, evidence=ev)
+        if ev.cause_mode == "simple_synthesis" and _reason_output_mode() == "free_sentence":
+            cat = _normalize_generated_sentence(cat, max_chars=220) or FALLBACK_CAUSE_LINE
+        else:
+            cat = _ensure_reason_like_line(cat, evidence=ev)
         links = _build_links_for_mover(ev=ev, cat_line=cat)
         link_text = f" {' '.join(links)}" if links else ""
         emoji = "📈" if (mover.pct_move or 0.0) >= 0 else "📉"
@@ -3767,6 +3972,18 @@ def _write_artifact(
             lines.append(f"  - cause_raw_phrase: {ev.cause_raw_phrase}")
         if ev.cause_final_phrase:
             lines.append(f"  - cause_final_phrase: {ev.cause_final_phrase}")
+        if ev.cause_anchor_url:
+            lines.append(f"  - cause_anchor_url: {ev.cause_anchor_url}")
+        if ev.cause_anchor_text:
+            lines.append(f"  - cause_anchor_text: {ev.cause_anchor_text}")
+        if ev.cause_support_urls:
+            lines.append("  - cause_support_urls:")
+            for entry in ev.cause_support_urls:
+                lines.append(f"    - {entry}")
+        if ev.generation_format:
+            lines.append(f"  - generation_format: {ev.generation_format}")
+        if ev.generation_policy:
+            lines.append(f"  - generation_policy: {ev.generation_policy}")
         if ev.quality_rejections:
             lines.append(f"  - quality_rejections: {', '.join(ev.quality_rejections)}")
         if ev.synth_generation_mode:
@@ -3897,6 +4114,8 @@ def _build_catalyst_for_mover_simple(*, mover: QuoteSnapshot, slot_name: str, si
             web_backend=web_backend,
             cause_mode="simple_synthesis",
             cause_render_mode="fallback",
+            generation_format="free_sentence",
+            generation_policy=("post_as_is" if _md_post_as_is() else "normalized"),
             quality_rejections=("no_candidates",),
             synth_generation_mode="simple_synthesis",
             synth_model_used=(_reason_polish_model() if _openai_client() is not None else None),
@@ -3910,38 +4129,43 @@ def _build_catalyst_for_mover_simple(*, mover: QuoteSnapshot, slot_name: str, si
         )
         return evidence, FALLBACK_CAUSE_LINE
 
-    best = selected[0]
+    anchor = _pick_anchor_candidate(candidates=selected, ticker=mover.ticker, pct_move=mover.pct_move) or selected[0]
+    supports = _pick_support_candidates(
+        candidates=selected,
+        anchor=anchor,
+        max_support=_synth_support_count(),
+        pct_move=mover.pct_move,
+    )
+    used = [anchor] + supports
     client = _openai_client()
-    phrase, llm_error = _synthesize_catalyst_phrase_simple(
+    sentence, llm_error = _synthesize_catalyst_sentence_simple(
         client=client,
         ticker=mover.ticker,
         pct_move=mover.pct_move,
-        candidates=selected,
+        anchor=anchor,
+        supports=supports,
     )
     render_mode = "simple_llm"
     quality_rejections: list[str] = []
     if llm_error:
         quality_rejections.append(llm_error)
         rejected.append(llm_error)
-    if not phrase:
-        if _synth_force_best_guess():
-            phrase = _best_guess_phrase_from_candidates(selected, pct_move=mover.pct_move)
-            if phrase:
-                render_mode = "simple_best_guess"
-                rejected.append("fallback_to_top_candidate")
-            else:
-                quality_rejections.append("fallback_to_top_candidate_failed")
+    if not sentence:
+        sentence = _sentence_from_anchor_candidate(ticker=mover.ticker, anchor=anchor, pct_move=mover.pct_move)
+        if sentence:
+            render_mode = "simple_anchor_backup"
+            rejected.append("fallback_to_anchor_backup")
         else:
-            quality_rejections.append("llm_no_phrase")
+            quality_rejections.append("anchor_backup_failed")
 
-    line = _render_simple_reason_line(pct_move=mover.pct_move, phrase=phrase)
+    line = _render_simple_reason_line(pct_move=mover.pct_move, phrase=sentence)
     if line == FALLBACK_CAUSE_LINE:
         quality_rejections.append("line_builder_rejected")
         render_mode = "fallback"
 
-    best_news = _pick_best_by_source(selected, "yahoo_news", pct_move=mover.pct_move)
-    best_web = _pick_best_by_source(selected, "web", pct_move=mover.pct_move)
-    confidence = _effective_candidate_score(candidate=best, pct_move=mover.pct_move)
+    best_news = _pick_best_by_source(used, "yahoo_news", pct_move=mover.pct_move) or _pick_best_by_source(selected, "yahoo_news", pct_move=mover.pct_move)
+    best_web = _pick_best_by_source(used, "web", pct_move=mover.pct_move) or _pick_best_by_source(selected, "web", pct_move=mover.pct_move)
+    confidence = _effective_candidate_score(candidate=anchor, pct_move=mover.pct_move)
     evidence = CatalystEvidence(
         ticker=mover.ticker,
         x_text=None,
@@ -3952,24 +4176,29 @@ def _build_catalyst_for_mover_simple(*, mover: QuoteSnapshot, slot_name: str, si
         web_title=best_web.text if best_web else None,
         web_url=best_web.url if best_web else None,
         confidence=confidence,
-        chosen_source=best.source_type,
+        chosen_source=anchor.source_type,
         top_evidence=tuple(_candidate_debug_entry(item=c, pct_move=mover.pct_move) for c in considered[:5]),
         rejected_reasons=tuple(rejected),
         since_utc=since_utc.replace(microsecond=0).isoformat(),
         web_backend=web_backend,
-        cause_source_type=best.source_type,
-        cause_source_url=best.url,
+        cause_source_type=anchor.source_type,
+        cause_source_url=anchor.url,
         cause_mode="simple_synthesis",
         cause_render_mode=render_mode,
-        cause_raw_phrase=phrase,
-        cause_final_phrase=(phrase if line != FALLBACK_CAUSE_LINE else None),
-        confirmed_cause_phrase=(phrase if line != FALLBACK_CAUSE_LINE else None),
+        cause_raw_phrase=sentence,
+        cause_final_phrase=(line if line != FALLBACK_CAUSE_LINE else None),
+        cause_anchor_url=anchor.url,
+        cause_anchor_text=_shorten(_normalize_whitespace(anchor.context_text or anchor.text), 220),
+        cause_support_urls=tuple([c.url for c in supports if c.url]),
+        generation_format="free_sentence",
+        generation_policy=("post_as_is" if _md_post_as_is() else "normalized"),
+        confirmed_cause_phrase=(line if line != FALLBACK_CAUSE_LINE else None),
         quality_rejections=tuple(quality_rejections),
         synth_generation_mode="simple_synthesis",
         synth_model_used=(_reason_polish_model() if client is not None else None),
         synth_candidates_considered=tuple(_candidate_debug_entry(item=c, pct_move=mover.pct_move) for c in considered[:5]),
-        synth_candidates_used=tuple(_candidate_debug_entry(item=c, pct_move=mover.pct_move) for c in selected[: _synth_max_results()]),
-        synth_chosen_urls=tuple([c.url for c in selected[: _synth_max_results()] if c.url]),
+        synth_candidates_used=tuple(_candidate_debug_entry(item=c, pct_move=mover.pct_move) for c in used[: 1 + _synth_support_count()]),
+        synth_chosen_urls=tuple([c.url for c in used[: 1 + _synth_support_count()] if c.url]),
         time_integrity_mode="strict_in_window" if _require_in_window_dates() else "off",
         publish_time_rejections=publish_time_rejections,
         candidate_publish_times=candidate_publish_times,
@@ -4266,6 +4495,11 @@ def debug_catalyst(*, ticker: str, slot_name: str = "open") -> dict[str, Any]:
         "cause_render_mode": evidence.cause_render_mode,
         "cause_raw_phrase": evidence.cause_raw_phrase,
         "cause_final_phrase": evidence.cause_final_phrase,
+        "cause_anchor_url": evidence.cause_anchor_url,
+        "cause_anchor_text": evidence.cause_anchor_text,
+        "cause_support_urls": list(evidence.cause_support_urls),
+        "generation_format": evidence.generation_format,
+        "generation_policy": evidence.generation_policy,
         "quality_rejections": list(evidence.quality_rejections),
         "synth_generation_mode": evidence.synth_generation_mode,
         "synth_model_used": evidence.synth_model_used,
@@ -4635,6 +4869,8 @@ def _synthesize_earnings_bullets(*, client: Any | None, row: EarningsRecapRow) -
 
 def _hydrate_recap_row(*, row: EarningsRecapRow, since_utc: datetime, client: Any | None) -> EarningsRecapRow:
     aliases = _company_aliases(row.ticker)
+    anchor: _EvidenceCandidate | None = None
+    supports: list[_EvidenceCandidate] = []
     if _catalyst_mode() == "simple_synthesis":
         considered, selected, _, _ = _collect_synthesis_candidates(
             ticker=row.ticker,
@@ -4643,6 +4879,13 @@ def _hydrate_recap_row(*, row: EarningsRecapRow, since_utc: datetime, client: An
             pct_move=row.since_close_pct,
         )
         candidates = selected or considered
+        anchor = _pick_anchor_candidate(candidates=candidates, ticker=row.ticker, pct_move=row.since_close_pct)
+        supports = _pick_support_candidates(
+            candidates=candidates,
+            anchor=anchor,
+            max_support=_synth_support_count(),
+            pct_move=row.since_close_pct,
+        )
     else:
         collected = _collect_evidence_for_ticker(
             ticker=row.ticker,
@@ -4656,7 +4899,11 @@ def _hydrate_recap_row(*, row: EarningsRecapRow, since_utc: datetime, client: An
             candidates = collected[0]  # type: ignore[index]
     evidence_lines: list[str] = []
     links: list[str] = []
-    for item in candidates[:4]:
+    if _catalyst_mode() == "simple_synthesis" and anchor is not None:
+        ordered = [anchor] + supports
+    else:
+        ordered = candidates[:4]
+    for item in ordered[:4]:
         evidence_lines.append(_shorten(f"{item.source_type}: {item.text}", 180))
         if item.url:
             links.append(item.url)
@@ -4667,17 +4914,18 @@ def _hydrate_recap_row(*, row: EarningsRecapRow, since_utc: datetime, client: An
     )
     bullets = list(_synthesize_earnings_bullets(client=client, row=hydrated))
     if _catalyst_mode() == "simple_synthesis":
-        phrase, llm_error = _synthesize_catalyst_phrase_simple(
+        sentence, llm_error = _synthesize_catalyst_sentence_simple(
             client=client,
             ticker=row.ticker,
             pct_move=row.since_close_pct,
-            candidates=candidates[: _synth_max_results()],
+            anchor=anchor,
+            supports=supports,
         )
-        if not phrase and _synth_force_best_guess():
-            phrase = _best_guess_phrase_from_candidates(candidates[: _synth_max_results()], pct_move=row.since_close_pct)
-            if phrase:
+        if not sentence:
+            sentence = _sentence_from_anchor_candidate(ticker=row.ticker, anchor=anchor, pct_move=row.since_close_pct)
+            if sentence:
                 llm_error = None
-        line = _render_simple_reason_line(pct_move=row.since_close_pct, phrase=phrase)
+        line = _render_simple_reason_line(pct_move=row.since_close_pct, phrase=sentence)
         if line != FALLBACK_CAUSE_LINE:
             ref = " [S1]" if links else ""
             catalyst_bullet = f"Key catalyst: {line.rstrip('.')}{ref}."
@@ -5041,7 +5289,10 @@ def status() -> dict[str, Any]:
         "synth_max_results": _synth_max_results(),
         "synth_source_mode": _synth_source_mode(),
         "synth_domain_gate": _synth_domain_gate(),
+        "synth_support_count": _synth_support_count(),
         "synth_force_best_guess": _synth_force_best_guess(),
+        "reason_output_mode": _reason_output_mode(),
+        "post_as_is": _md_post_as_is(),
         "require_in_window_dates": _require_in_window_dates(),
         "allow_undated_fallback": _allow_undated_fallback(),
         "reject_historical_callback": _reject_historical_callback(),
