@@ -1117,3 +1117,15 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - on mini, use `/opt/coatue-claw/.venv/bin/python -m pytest` for Market Daily validation; host `python3` lacks pytest.
 - Next quality follow-up (if needed):
   - enforce rendered link preference to exactly the selected anchor URL when an in-window anchor is present, rather than allowing support URL substitution in `links.web`.
+
+- Market Daily INTC catalyst correction (consensus event + no attribution) is now deployed on `main`:
+  - consensus-first winner replaces anchor-first for simple synthesis sentence selection.
+  - publisher attribution stripping is enforced in final mover sentence output.
+  - sentence-family consistency guard prevents outlier narrative drift.
+  - support links are filtered/aligned to the consensus event family.
+- Debug contract additions on `debug-catalyst` payload:
+  - `consensus_event_family`, `consensus_winner_url`, `attribution_stripped`
+- Current acceptance status:
+  - INTC close line now surfaces partnership catalyst (SambaNova) without Reuters attribution.
+  - footer stays no-X (`Yahoo fast_info + Yahoo news + web search`).
+  - market daily + launchd runtime test suites pass on mini venv (`72 passed`, `8 passed`).

@@ -2450,3 +2450,37 @@ Then confirm bot returns:
   - `COATUE_CLAW_MD_POST_AS_IS=1`
 - Follow-up note:
   - debug output still shows INTC rendered `links.web` on a support URL while anchor/source URL is Yahoo in-window; quality is improved but link-to-anchor strictness may need one more deterministic tie-break rule.
+
+## Update (2026-02-25, Market Daily consensus-event + no-attribution catalyst correction)
+- Implemented INTC catalyst correction in `src/coatue_claw/market_daily.py` on `main`:
+  - replaced anchor-first sentence behavior with consensus-first winner selection (`_pick_consensus_winner`) over top synthesis candidates.
+  - added deterministic event-family classification (`deal_partnership`, `pricing`, `guidance`, `analyst_move`, `regulatory`, `earnings`, `other`).
+  - enforced no-publisher-attribution sentence output via `_strip_publisher_attribution`.
+  - added sentence-family consistency guard: if generated line conflicts with consensus family, fallback to deterministic consensus-anchor sentence.
+  - aligned support links to consensus family and preserved broad source ingestion.
+- New debug observability fields shipped:
+  - `consensus_event_family`
+  - `consensus_winner_url`
+  - `attribution_stripped`
+- Tests:
+  - `PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_market_daily.py` -> `72 passed`
+  - `PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
+- Runtime checks:
+  - `make openclaw-restart`
+  - `make openclaw-slack-status` healthy (`ok=true`, status `200`) after restart
+  - `make openclaw-market-daily-run-once FORCE=1` posted close artifact:
+    - `/opt/coatue-claw-data/artifacts/market-daily/md-close-20260225-071156.md`
+  - `make openclaw-market-daily-earnings-recap-run-once FORCE=1` posted recap artifact:
+    - `/opt/coatue-claw-data/artifacts/market-daily/md-earnings-recap-20260225-071334.md`
+- INTC verification snippets (post-fix):
+  - close line now uses catalyst-only partnership framing (no Reuters attribution):
+    - `Intel shares rose about 5.7% after the company announced a multiyear AI partnership with SambaNova ...`
+  - close footer remains no-X:
+    - `Sources: Yahoo fast_info + Yahoo news + web search`
+  - debug INTC close:
+    - `consensus_event_family=deal_partnership`
+    - `consensus_winner_url=https://www.bez-kabli.pl/intel-stock-price-jumps-as-intc-bets-on-sambanova-ai-tie-up-what-investors-watch-next/`
+    - `cause_anchor_url` matches consensus winner URL
+    - `generation_format=free_sentence`, `generation_policy=post_as_is`
+- Recap footer remains no-X:
+  - `Sources: Yahoo earnings calendar/history + Yahoo fast_info + Google web + Yahoo news evidence`

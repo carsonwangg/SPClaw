@@ -1523,9 +1523,11 @@ def test_post_as_is_policy_keeps_non_empty_llm_sentence(monkeypatch) -> None:
         slot_name="close",
         since_utc=datetime(2026, 2, 25, 13, 30, 0, tzinfo=UTC),
     )
-    assert line == "According to Reuters, Intel and peers rose as semiconductor sentiment improved."
+    assert line == "Intel and peers rose as semiconductor sentiment improved."
+    assert "Reuters" not in line
     assert evidence.cause_render_mode == "simple_llm"
     assert evidence.generation_policy == "post_as_is"
+    assert evidence.attribution_stripped is True
 
 
 def test_simple_synthesis_no_candidates_uses_fallback(monkeypatch) -> None:
@@ -1752,82 +1754,121 @@ def test_intc_regression_prefers_in_window_why_stock_soaring_link(monkeypatch) -
     assert any("historical_callback_reject" in n for n in notes)
 
 
-def test_anchor_first_prefers_in_window_why_stock_explainer_for_intc_case(monkeypatch) -> None:
+def test_consensus_support_prefers_deal_family_for_intc_case(monkeypatch) -> None:
     from coatue_claw import market_daily as md
 
     monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
     mover = QuoteSnapshot("INTC", 100.0, 105.7, 100.0, 0.057, "2026-02-25T22:00:00+00:00")
-    stale = md._EvidenceCandidate(
+    pricing = md._EvidenceCandidate(
         source_type="web",
-        text="Intel shares rise on near-term foundry commentary",
-        context_text="Intel shares rose after upbeat foundry commentary from analysts.",
-        url="https://www.reuters.com/world/us/intel-foundry-commentary-2026-02-25/",
-        published_at_utc=datetime(2026, 2, 25, 20, 0, 0, tzinfo=UTC),
-        score=0.89,
-        domain="reuters.com",
-    )
-    explainer = md._EvidenceCandidate(
-        source_type="yahoo_news",
         text="Why Is Intel (INTC) Stock Soaring Today",
         context_text=(
-            "Shares of Intel jumped 5.4% after the semiconductor sector got a boost as AMD secured a large AI chip deal with Meta."
+            "According to a Reuters report, Intel and a key rival planned to raise server CPU prices by as much as 10% in China."
         ),
         url="https://finance.yahoo.com/news/why-intel-intc-stock-soaring-210238819.html",
         published_at_utc=datetime(2026, 2, 25, 21, 2, 38, tzinfo=UTC),
-        score=0.75,
+        score=0.94,
         domain="finance.yahoo.com",
+    )
+    deal_anchor = md._EvidenceCandidate(
+        source_type="web",
+        text="Intel stock price jumps as INTC bets on SambaNova AI tie-up",
+        context_text="Intel shares jumped close to 6% Tuesday after the company announced a multi-year AI partnership with SambaNova.",
+        url="https://www.bez-kabli.pl/intel-stock-price-jumps-as-intc-bets-on-sambanova-ai-tie-up-what-investors-watch-next/",
+        published_at_utc=datetime(2026, 2, 25, 20, 29, 0, tzinfo=UTC),
+        score=1.0,
+        domain="bez-kabli.pl",
+    )
+    deal_support = md._EvidenceCandidate(
+        source_type="web",
+        text="Why Intel Rallied Today",
+        context_text="Intel rallied after announcing a multi-year AI partnership with SambaNova and broader semiconductor momentum.",
+        url="https://www.fool.com/investing/2026/02/24/why-intel-rallied-today/",
+        published_at_utc=datetime(2026, 2, 25, 19, 29, 0, tzinfo=UTC),
+        score=1.0,
+        domain="fool.com",
     )
     monkeypatch.setattr(
         "coatue_claw.market_daily._collect_synthesis_candidates",
-        lambda ticker, aliases, since_utc, pct_move=None: ([stale, explainer], [stale, explainer], [], "google_serp"),
+        lambda ticker, aliases, since_utc, pct_move=None: (
+            [deal_anchor, deal_support, pricing],
+            [pricing, deal_anchor, deal_support],
+            [],
+            "google_serp",
+        ),
     )
     monkeypatch.setattr(
         "coatue_claw.market_daily._synthesize_catalyst_sentence_simple",
         lambda client, ticker, pct_move, anchor, supports: (
-            "Intel rose with semiconductor peers after AMD's AI-chip agreement with Meta improved sentiment.",
+            "According to Reuters, Intel shares rose after server CPU pricing headlines.",
             None,
         ),
     )
     monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: object())
+
     evidence, line = md._build_catalyst_for_mover(
         mover=mover,
         slot_name="close",
         since_utc=datetime(2026, 2, 25, 14, 30, 0, tzinfo=UTC),
     )
-    assert line != md.FALLBACK_CAUSE_LINE
-    assert evidence.cause_anchor_url == "https://finance.yahoo.com/news/why-intel-intc-stock-soaring-210238819.html"
+
+    assert "SambaNova" in line
+    assert "Reuters" not in line
+    assert evidence.consensus_event_family == "deal_partnership"
+    assert evidence.consensus_winner_url == deal_anchor.url
+    assert evidence.cause_anchor_url == deal_anchor.url
+    assert evidence.attribution_stripped is True
+    assert any("consensus_family_mismatch" in reason for reason in evidence.rejected_reasons)
 
 
-def test_links_follow_anchor_selection(monkeypatch) -> None:
+def test_links_follow_consensus_family_alignment(monkeypatch) -> None:
     from coatue_claw import market_daily as md
 
     monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
     mover = QuoteSnapshot("INTC", 100.0, 105.7, 100.0, 0.057, "2026-02-25T22:00:00+00:00")
-    anchor = md._EvidenceCandidate(
-        source_type="yahoo_news",
+    deal_anchor = md._EvidenceCandidate(
+        source_type="web",
+        text="Intel stock price jumps as INTC bets on SambaNova AI tie-up",
+        context_text="Intel shares jumped close to 6% Tuesday after the company announced a multi-year AI partnership with SambaNova.",
+        url="https://www.bez-kabli.pl/intel-stock-price-jumps-as-intc-bets-on-sambanova-ai-tie-up-what-investors-watch-next/",
+        published_at_utc=datetime(2026, 2, 25, 20, 29, 0, tzinfo=UTC),
+        score=1.0,
+        domain="bez-kabli.pl",
+    )
+    deal_support = md._EvidenceCandidate(
+        source_type="web",
+        text="Why Intel Rallied Today",
+        context_text="Intel rallied after announcing a multi-year AI partnership with SambaNova.",
+        url="https://www.fool.com/investing/2026/02/24/why-intel-rallied-today/",
+        published_at_utc=datetime(2026, 2, 25, 19, 29, 0, tzinfo=UTC),
+        score=1.0,
+        domain="fool.com",
+    )
+    pricing_outlier = md._EvidenceCandidate(
+        source_type="web",
         text="Why Is Intel (INTC) Stock Soaring Today",
-        context_text="Intel rose with semis after AMD's Meta chip deal.",
+        context_text="According to Reuters, Intel and peers plan to raise server CPU prices in China.",
         url="https://finance.yahoo.com/news/why-intel-intc-stock-soaring-210238819.html",
         published_at_utc=datetime(2026, 2, 25, 21, 2, 38, tzinfo=UTC),
-        score=0.88,
+        score=0.94,
         domain="finance.yahoo.com",
     )
-    support = md._EvidenceCandidate(
-        source_type="web",
-        text="Semiconductor shares climb after AMD- Meta AI chip agreement",
-        context_text="Semiconductor shares climbed after AMD announced a major chip agreement with Meta.",
-        url="https://www.reuters.com/world/us/amd-meta-ai-chip-deal-2026-02-25/",
-        published_at_utc=datetime(2026, 2, 25, 21, 10, 0, tzinfo=UTC),
-        score=0.79,
-        domain="reuters.com",
-    )
+
     monkeypatch.setattr(
         "coatue_claw.market_daily._collect_synthesis_candidates",
-        lambda ticker, aliases, since_utc, pct_move=None: ([anchor, support], [anchor, support], [], "google_serp"),
+        lambda ticker, aliases, since_utc, pct_move=None: (
+            [deal_anchor, deal_support, pricing_outlier],
+            [pricing_outlier, deal_anchor, deal_support],
+            [],
+            "google_serp",
+        ),
     )
     monkeypatch.setattr(
         "coatue_claw.market_daily._synthesize_catalyst_sentence_simple",
-        lambda client, ticker, pct_move, anchor, supports: ("Intel rose with semiconductor peers after AMD's Meta chip deal.", None),
+        lambda client, ticker, pct_move, anchor, supports: (
+            "Intel shares jumped close to 6% Tuesday after the company announced a multi-year AI partnership with SambaNova.",
+            None,
+        ),
     )
     monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: object())
     evidence, line = md._build_catalyst_for_mover(
@@ -1843,8 +1884,46 @@ def test_links_follow_anchor_selection(monkeypatch) -> None:
         catalyst_rows=[evidence],
         catalyst_lines=[line],
     )
-    assert "<https://finance.yahoo.com/news/why-intel-intc-stock-soaring-210238819.html|[News]>" in text
-    assert "<https://www.reuters.com/world/us/amd-meta-ai-chip-deal-2026-02-25/|[Web]>" in text
+
+    assert "<https://www.bez-kabli.pl/intel-stock-price-jumps-as-intc-bets-on-sambanova-ai-tie-up-what-investors-watch-next/|[Web]>" in text
+    assert "<https://www.fool.com/investing/2026/02/24/why-intel-rallied-today/|[Web]>" in text
+    assert "<https://finance.yahoo.com/news/why-intel-intc-stock-soaring-210238819.html|[News]>" not in text
+
+
+
+def test_debug_payload_includes_consensus_fields(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    mover = QuoteSnapshot("INTC", 100.0, 105.7, 100.0, 0.057, "2026-02-25T22:00:00+00:00")
+    evidence = CatalystEvidence(
+        ticker="INTC",
+        x_text=None,
+        x_url=None,
+        x_engagement=0,
+        news_title="Intel moves on partnership catalyst",
+        news_url="https://finance.yahoo.com/news/why-intel-intc-stock-soaring-210238819.html",
+        web_title="Intel stock price jumps as INTC bets on SambaNova AI tie-up",
+        web_url="https://www.bez-kabli.pl/intel-stock-price-jumps-as-intc-bets-on-sambanova-ai-tie-up-what-investors-watch-next/",
+        confidence=0.91,
+        chosen_source="web",
+        cause_mode="simple_synthesis",
+        cause_render_mode="simple_consensus_backup",
+        cause_anchor_url="https://www.bez-kabli.pl/intel-stock-price-jumps-as-intc-bets-on-sambanova-ai-tie-up-what-investors-watch-next/",
+        cause_support_urls=("https://www.fool.com/investing/2026/02/24/why-intel-rallied-today/",),
+        consensus_event_family="deal_partnership",
+        consensus_winner_url="https://www.bez-kabli.pl/intel-stock-price-jumps-as-intc-bets-on-sambanova-ai-tie-up-what-investors-watch-next/",
+        attribution_stripped=True,
+        generation_format="free_sentence",
+        generation_policy="post_as_is",
+    )
+
+    monkeypatch.setattr("coatue_claw.market_daily._fetch_quote_snapshots", lambda tickers: [mover])
+    monkeypatch.setattr("coatue_claw.market_daily._build_catalyst_for_mover", lambda mover, slot_name, since_utc: (evidence, "Intel shares jumped on a SambaNova AI partnership catalyst."))
+
+    payload = md.debug_catalyst(ticker="INTC", slot_name="close")
+    assert payload["consensus_event_family"] == "deal_partnership"
+    assert payload["consensus_winner_url"] == evidence.consensus_winner_url
+    assert payload["attribution_stripped"] is True
 
 
 def test_links_only_emit_time_valid_urls(monkeypatch) -> None:

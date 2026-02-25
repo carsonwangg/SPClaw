@@ -95,6 +95,9 @@ class CatalystEvidence:
     cause_anchor_url: str | None = None
     cause_anchor_text: str | None = None
     cause_support_urls: tuple[str, ...] = ()
+    consensus_event_family: str | None = None
+    consensus_winner_url: str | None = None
+    attribution_stripped: bool = False
     generation_format: str | None = None
     generation_policy: str | None = None
     quality_rejections: tuple[str, ...] = ()
@@ -2997,6 +3000,65 @@ def _has_event_vocab(text: str) -> bool:
     return any(term in lower for term in event_terms)
 
 
+def _event_family(text: str) -> str:
+    lower = _normalize_whitespace(text).lower()
+    if not lower:
+        return "other"
+
+    if any(term in lower for term in ("sec", "investigation", "regulatory", "probe", "lawsuit", "antitrust", "doj", "ftc")):
+        return "regulatory"
+    if any(term in lower for term in ("upgrade", "downgrade", "price target", "analyst", "rating")):
+        return "analyst_move"
+    if any(term in lower for term in ("guidance", "outlook", "forecast", "raised guidance", "cut guidance")):
+        return "guidance"
+    if any(term in lower for term in ("earnings", "eps", "revenue", "quarter", "q1", "q2", "q3", "q4", "beat", "miss")):
+        return "earnings"
+    if any(term in lower for term in ("price increase", "raise prices", "raised prices", "price hike", "pricing", "cut prices", "price cut")):
+        return "pricing"
+    if any(
+        term in lower
+        for term in (
+            "partnership",
+            "deal",
+            "agreement",
+            "contract",
+            "collaboration",
+            "joint venture",
+            "tie-up",
+            "tie up",
+            "signed",
+            "inked",
+            "investment round",
+            "funding round",
+        )
+    ):
+        return "deal_partnership"
+    return "other"
+
+
+def _sentence_family(text: str) -> str:
+    return _event_family(text)
+
+
+def _strip_publisher_attribution(sentence: str) -> tuple[str, bool]:
+    cleaned = _normalize_whitespace(str(sentence or ""))
+    if not cleaned:
+        return "", False
+
+    original = _normalize_generated_sentence(cleaned, max_chars=220)
+    patterns = (
+        r"(?i)^\s*(?:according to|per)\s+(?:a\s+)?(?:reuters|bloomberg|the wall street journal|wsj|cnbc|marketwatch|yahoo finance)\s*[,:-]?\s*",
+        r"(?i)^\s*(?:a\s+)?(?:reuters|bloomberg|the wall street journal|wsj|cnbc|marketwatch|yahoo finance)\s+report(?:ed)?\s+(?:that\s+)?",
+        r"(?i)\b(?:a|an)\s+(?:reuters|bloomberg|the wall street journal|wsj|cnbc|marketwatch|yahoo finance)\s+report\s+(?:said|says|noted)\s+(?:that\s+)?",
+        r"(?i)\b(?:reuters|bloomberg|the wall street journal|wsj|cnbc|marketwatch|yahoo finance)\s+(?:reported|reports|said|says|noted|notes)\s+(?:that\s+)?",
+    )
+    for pattern in patterns:
+        cleaned = re.sub(pattern, "", cleaned)
+    cleaned = re.sub(r"(?i)^\s*that\s+", "", cleaned).strip(" ,.-")
+    normalized = _normalize_generated_sentence(cleaned, max_chars=220) if cleaned else ""
+    return normalized, (normalized != original)
+
+
 def _strip_publisher_suffix(text: str) -> str:
     cleaned = _normalize_whitespace(text)
     if not cleaned:
@@ -3491,6 +3553,61 @@ def _pick_anchor_candidate(*, candidates: list[_EvidenceCandidate], ticker: str,
     return sorted(candidates, key=lambda item: _rank(item), reverse=True)[0]
 
 
+def _candidate_event_family(item: _EvidenceCandidate) -> str:
+    headline = _normalize_whitespace(item.text)
+    context = _normalize_whitespace(f"{headline}. {item.context_text}") if item.context_text else headline
+    family = _event_family(context)
+    if family == "other":
+        family = _event_family(headline)
+    return family
+
+
+def _pick_consensus_winner(
+    *,
+    candidates: list[_EvidenceCandidate],
+    ticker: str,
+    pct_move: float | None,
+    top_k: int,
+) -> tuple[_EvidenceCandidate | None, str | None]:
+    if not candidates:
+        return None, None
+
+    window = candidates[: max(1, top_k)]
+    buckets: dict[str, dict[str, float]] = {}
+    for item in window:
+        family = _candidate_event_family(item)
+        if family == "other":
+            continue
+        score = _effective_candidate_score(candidate=item, pct_move=pct_move)
+        ts = item.published_at_utc.timestamp() if item.published_at_utc else 0.0
+        slot = buckets.setdefault(family, {"count": 0.0, "score_sum": 0.0, "newest_ts": 0.0})
+        slot["count"] += 1.0
+        slot["score_sum"] += score
+        slot["newest_ts"] = max(slot["newest_ts"], ts)
+
+    if not buckets:
+        return None, None
+
+    winner_family, winner_stats = sorted(
+        buckets.items(),
+        key=lambda kv: (-kv[1]["count"], -kv[1]["score_sum"], -kv[1]["newest_ts"], kv[0]),
+    )[0]
+    if int(winner_stats["count"]) < 2:
+        return None, None
+
+    members = [item for item in window if _candidate_event_family(item) == winner_family]
+    if not members:
+        return None, None
+    winner = sorted(
+        members,
+        key=lambda item: (
+            -_effective_candidate_score(candidate=item, pct_move=pct_move),
+            -(item.published_at_utc.timestamp() if item.published_at_utc else 0.0),
+        ),
+    )[0]
+    return winner, winner_family
+
+
 def _pick_support_candidates(
     *,
     candidates: list[_EvidenceCandidate],
@@ -3521,6 +3638,18 @@ def _pick_support_candidates(
         if len(out) >= max_support:
             break
     return out
+
+
+def _filter_support_candidates_by_family(
+    *,
+    supports: list[_EvidenceCandidate],
+    family: str | None,
+) -> list[_EvidenceCandidate]:
+    if not supports:
+        return []
+    if (not family) or family == "other":
+        return supports
+    return [item for item in supports if _candidate_event_family(item) == family]
 
 
 def _sentence_from_anchor_candidate(*, ticker: str, anchor: _EvidenceCandidate | None, pct_move: float | None) -> str | None:
@@ -3700,7 +3829,9 @@ def _synthesize_catalyst_sentence_simple(
     prompt = (
         "Write exactly one complete sentence explaining this stock move.\n"
         "Use only the evidence below.\n"
-        "Prioritize the anchor [A1] and use support entries only if consistent.\n"
+        "Prioritize the consensus event from [A1] and keep support entries only when they corroborate that same event.\n"
+        "Do not mention publisher names or attribution (Reuters/Bloomberg/WSJ/CNBC/MarketWatch/Yahoo Finance).\n"
+        "Do not use phrases like 'according to' or 'report said'.\n"
         "No markdown and no links.\n\n"
         f"Ticker: {ticker}\n"
         f"Move: {move}\n"
@@ -3984,6 +4115,12 @@ def _write_artifact(
             lines.append(f"  - generation_format: {ev.generation_format}")
         if ev.generation_policy:
             lines.append(f"  - generation_policy: {ev.generation_policy}")
+        if ev.consensus_event_family:
+            lines.append(f"  - consensus_event_family: {ev.consensus_event_family}")
+        if ev.consensus_winner_url:
+            lines.append(f"  - consensus_winner_url: {ev.consensus_winner_url}")
+        if ev.attribution_stripped:
+            lines.append("  - attribution_stripped: true")
         if ev.quality_rejections:
             lines.append(f"  - quality_rejections: {', '.join(ev.quality_rejections)}")
         if ev.synth_generation_mode:
@@ -4129,14 +4266,27 @@ def _build_catalyst_for_mover_simple(*, mover: QuoteSnapshot, slot_name: str, si
         )
         return evidence, FALLBACK_CAUSE_LINE
 
-    anchor = _pick_anchor_candidate(candidates=selected, ticker=mover.ticker, pct_move=mover.pct_move) or selected[0]
+    consensus_top_k = max(3, 1 + _synth_support_count())
+    consensus_anchor, consensus_family = _pick_consensus_winner(
+        candidates=selected,
+        ticker=mover.ticker,
+        pct_move=mover.pct_move,
+        top_k=consensus_top_k,
+    )
+    anchor = consensus_anchor or _pick_anchor_candidate(candidates=selected, ticker=mover.ticker, pct_move=mover.pct_move) or selected[0]
+    if consensus_anchor is None:
+        rejected.append("consensus_not_established")
+    consensus_family = consensus_family or _candidate_event_family(anchor)
+
     supports = _pick_support_candidates(
         candidates=selected,
         anchor=anchor,
         max_support=_synth_support_count(),
         pct_move=mover.pct_move,
     )
+    supports = _filter_support_candidates_by_family(supports=supports, family=consensus_family)
     used = [anchor] + supports
+
     client = _openai_client()
     sentence, llm_error = _synthesize_catalyst_sentence_simple(
         client=client,
@@ -4147,12 +4297,38 @@ def _build_catalyst_for_mover_simple(*, mover: QuoteSnapshot, slot_name: str, si
     )
     render_mode = "simple_llm"
     quality_rejections: list[str] = []
+    attribution_stripped = False
     if llm_error:
         quality_rejections.append(llm_error)
         rejected.append(llm_error)
+
+    if sentence:
+        stripped_sentence, did_strip = _strip_publisher_attribution(sentence)
+        if did_strip:
+            rejected.append("publisher_attribution_stripped")
+            attribution_stripped = True
+        sentence = stripped_sentence or None
+
+    if sentence and consensus_family and consensus_family != "other":
+        sentence_family = _sentence_family(sentence)
+        if sentence_family not in {consensus_family, "other"}:
+            rejected.append(f"consensus_family_mismatch:{sentence_family}->{consensus_family}")
+            quality_rejections.append("consensus_family_mismatch")
+            sentence = _sentence_from_anchor_candidate(ticker=mover.ticker, anchor=anchor, pct_move=mover.pct_move)
+            if sentence:
+                stripped_sentence, did_strip = _strip_publisher_attribution(sentence)
+                sentence = stripped_sentence or None
+                attribution_stripped = attribution_stripped or did_strip
+                render_mode = "simple_consensus_backup"
+            else:
+                quality_rejections.append("consensus_backup_failed")
+
     if not sentence:
         sentence = _sentence_from_anchor_candidate(ticker=mover.ticker, anchor=anchor, pct_move=mover.pct_move)
         if sentence:
+            stripped_sentence, did_strip = _strip_publisher_attribution(sentence)
+            sentence = stripped_sentence or None
+            attribution_stripped = attribution_stripped or did_strip
             render_mode = "simple_anchor_backup"
             rejected.append("fallback_to_anchor_backup")
         else:
@@ -4190,6 +4366,9 @@ def _build_catalyst_for_mover_simple(*, mover: QuoteSnapshot, slot_name: str, si
         cause_anchor_url=anchor.url,
         cause_anchor_text=_shorten(_normalize_whitespace(anchor.context_text or anchor.text), 220),
         cause_support_urls=tuple([c.url for c in supports if c.url]),
+        consensus_event_family=consensus_family,
+        consensus_winner_url=anchor.url,
+        attribution_stripped=attribution_stripped,
         generation_format="free_sentence",
         generation_policy=("post_as_is" if _md_post_as_is() else "normalized"),
         confirmed_cause_phrase=(line if line != FALLBACK_CAUSE_LINE else None),
@@ -4500,6 +4679,9 @@ def debug_catalyst(*, ticker: str, slot_name: str = "open") -> dict[str, Any]:
         "cause_support_urls": list(evidence.cause_support_urls),
         "generation_format": evidence.generation_format,
         "generation_policy": evidence.generation_policy,
+        "consensus_event_family": evidence.consensus_event_family,
+        "consensus_winner_url": evidence.consensus_winner_url,
+        "attribution_stripped": evidence.attribution_stripped,
         "quality_rejections": list(evidence.quality_rejections),
         "synth_generation_mode": evidence.synth_generation_mode,
         "synth_model_used": evidence.synth_model_used,
@@ -4869,8 +5051,10 @@ def _synthesize_earnings_bullets(*, client: Any | None, row: EarningsRecapRow) -
 
 def _hydrate_recap_row(*, row: EarningsRecapRow, since_utc: datetime, client: Any | None) -> EarningsRecapRow:
     aliases = _company_aliases(row.ticker)
+    candidates: list[_EvidenceCandidate] = []
     anchor: _EvidenceCandidate | None = None
     supports: list[_EvidenceCandidate] = []
+    consensus_family: str | None = None
     if _catalyst_mode() == "simple_synthesis":
         considered, selected, _, _ = _collect_synthesis_candidates(
             ticker=row.ticker,
@@ -4879,13 +5063,24 @@ def _hydrate_recap_row(*, row: EarningsRecapRow, since_utc: datetime, client: An
             pct_move=row.since_close_pct,
         )
         candidates = selected or considered
-        anchor = _pick_anchor_candidate(candidates=candidates, ticker=row.ticker, pct_move=row.since_close_pct)
+        consensus_top_k = max(3, 1 + _synth_support_count())
+        anchor, consensus_family = _pick_consensus_winner(
+            candidates=candidates,
+            ticker=row.ticker,
+            pct_move=row.since_close_pct,
+            top_k=consensus_top_k,
+        )
+        if anchor is None:
+            anchor = _pick_anchor_candidate(candidates=candidates, ticker=row.ticker, pct_move=row.since_close_pct)
+        if anchor is not None and consensus_family is None:
+            consensus_family = _candidate_event_family(anchor)
         supports = _pick_support_candidates(
             candidates=candidates,
             anchor=anchor,
             max_support=_synth_support_count(),
             pct_move=row.since_close_pct,
         )
+        supports = _filter_support_candidates_by_family(supports=supports, family=consensus_family)
     else:
         collected = _collect_evidence_for_ticker(
             ticker=row.ticker,
@@ -4897,6 +5092,7 @@ def _hydrate_recap_row(*, row: EarningsRecapRow, since_utc: datetime, client: An
             candidates = collected[0]
         else:
             candidates = collected[0]  # type: ignore[index]
+
     evidence_lines: list[str] = []
     links: list[str] = []
     if _catalyst_mode() == "simple_synthesis" and anchor is not None:
@@ -4921,9 +5117,18 @@ def _hydrate_recap_row(*, row: EarningsRecapRow, since_utc: datetime, client: An
             anchor=anchor,
             supports=supports,
         )
+        if sentence:
+            sentence, _ = _strip_publisher_attribution(sentence)
+        if sentence and consensus_family and consensus_family != "other":
+            sentence_family = _sentence_family(sentence)
+            if sentence_family not in {consensus_family, "other"}:
+                sentence = _sentence_from_anchor_candidate(ticker=row.ticker, anchor=anchor, pct_move=row.since_close_pct)
+                if sentence:
+                    sentence, _ = _strip_publisher_attribution(sentence)
         if not sentence:
             sentence = _sentence_from_anchor_candidate(ticker=row.ticker, anchor=anchor, pct_move=row.since_close_pct)
             if sentence:
+                sentence, _ = _strip_publisher_attribution(sentence)
                 llm_error = None
         line = _render_simple_reason_line(pct_move=row.since_close_pct, phrase=sentence)
         if line != FALLBACK_CAUSE_LINE:
