@@ -2420,3 +2420,33 @@ Then confirm bot returns:
   - this produced INTC web link to Yahoo in-window explainer (`.../why-intel-intc-stock-soaring-210238819.html`) in latest debug checks.
 - Quick fallback simulation (LLM unavailable + weak evidence):
   - `OPENAI_API_KEY=""` + missing SERP key => line falls back to `Likely positioning/flow; no single confirmed catalyst.`
+
+## Update (2026-02-25, MD anchor-first free-sentence catalyst labeling runbook)
+- Main already contains role-branch merge commit `d8bf379` (`Merge MD anchor-first free-sentence catalyst labeling`), including role patch `8193c58`.
+- Validation on Mac mini:
+  - runbook `python3 -m pytest` commands fail on host interpreter (`No module named pytest`).
+  - runtime-equivalent checks pass via venv:
+    - `tests/test_market_daily.py` -> `71 passed`
+    - `tests/test_launchd_runtime.py` -> `8 passed`
+- Runtime orchestration:
+  - `make openclaw-restart` completed.
+  - first Slack probe returned transient gateway close (`1006`), subsequent probe healthy (`ok=true`, `status=200`).
+  - forced runs posted:
+    - close artifact: `/opt/coatue-claw-data/artifacts/market-daily/md-close-20260225-062530.md`
+    - earnings recap artifact: `/opt/coatue-claw-data/artifacts/market-daily/md-earnings-recap-20260225-062849.md`
+- Slack/diagnostic verification:
+  - close mover lines are free-sentence style and do not contain malformed `after According to ...` fragments in this run.
+  - no `[X]` links and no X footer text.
+  - close footer: `Sources: Yahoo fast_info + Yahoo news + web search`.
+  - `debug-catalyst INTC --slot close` includes:
+    - `cause_anchor_url`
+    - `cause_support_urls`
+    - `generation_format=free_sentence`
+    - `generation_policy=post_as_is`
+  - INTC stale Morgan callback is rejected under time-integrity gates.
+- Production env defaults confirmed in `.env.prod`:
+  - `COATUE_CLAW_MD_REASON_OUTPUT_MODE=free_sentence`
+  - `COATUE_CLAW_MD_SYNTH_SUPPORT_COUNT=2`
+  - `COATUE_CLAW_MD_POST_AS_IS=1`
+- Follow-up note:
+  - debug output still shows INTC rendered `links.web` on a support URL while anchor/source URL is Yahoo in-window; quality is improved but link-to-anchor strictness may need one more deterministic tie-break rule.

@@ -1106,3 +1106,14 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - prefer top selected in-window source URL for rendered link selection in simple synthesis to avoid weak TA/roundup link wins over stronger explainers.
 - Operational note:
   - use `/opt/coatue-claw/.venv/bin/python` for tests/CLI on mini (system `python3` is not runtime-compatible for this module).
+
+- Market Daily anchor-first free-sentence catalyst labeling is live on `main` (`d8bf379`, includes `8193c58`).
+- Current verified behavior:
+  - close mover lines render as free sentences (`post_as_is`), not forced wrapper phrasing.
+  - no `[X]` links and no X footer mention in close/recap outputs.
+  - INTC debug exposes anchor/support diagnostics and strict time-integrity rejections (including stale historical callback rejection).
+  - production defaults active: `reason_output_mode=free_sentence`, `synth_support_count=2`, `post_as_is=1`.
+- Operational guardrail:
+  - on mini, use `/opt/coatue-claw/.venv/bin/python -m pytest` for Market Daily validation; host `python3` lacks pytest.
+- Next quality follow-up (if needed):
+  - enforce rendered link preference to exactly the selected anchor URL when an in-window anchor is present, rather than allowing support URL substitution in `links.web`.
