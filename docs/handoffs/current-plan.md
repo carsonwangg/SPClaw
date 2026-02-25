@@ -40,6 +40,38 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Board-seat API-key compatibility + health diagnosis update:
+  - `_brave_search_api_key()` now reads both `COATUE_CLAW_BRAVE_API_KEY` and `BRAVE_SEARCH_API_KEY`.
+  - `.env.example` now documents `COATUE_CLAW_BRAVE_API_KEY`.
+  - regression test added:
+    - `tests/test_board_seat_daily.py::test_brave_api_key_accepts_coatue_claw_alias`
+  - environment diagnosis during live checks:
+    - Brave path now active with provided key alias
+    - SerpAPI currently returns HTTP `429` (rate-limited), so Google rows are empty until quota resets/plan changes
+  - validation:
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `46 passed`
+    - `PYTHONPATH=src python3 -m pytest -q` -> `310 passed`
+- Board-seat posting now enforces strict new-target quality gate across all active portcos:
+  - skip post unless target is both **new** (not already in target memory for that company) and **High confidence** from source scoring.
+  - skip reason contract:
+    - `reason=no_high_confidence_new_target`
+    - `gate_reason` in `{invalid_target,target_not_new,target_confidence_not_high}`
+  - env control added (default enabled):
+    - `COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET=1`
+  - status payload now includes:
+    - `require_high_conf_new_target`
+  - validation:
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `45 passed`
+    - `PYTHONPATH=src python3 -m pytest -q` -> `309 passed`
+- Board-seat target hardening shipped to block conceptual/non-company targets (for example `AI-first`, `ROI`) and possessive/pluralized self-target leakage (for example `OpenAIs` for OpenAI):
+  - updated target filters in `src/coatue_claw/board_seat_daily.py` (`ACQ_PLACEHOLDER_TARGETS`, `ACQ_INVALID_TARGET_TERMS`, `TARGET_TOKEN_STOPWORDS`, `_canonical_target_key(...)`).
+  - regression tests added in `tests/test_board_seat_daily.py`:
+    - `test_is_valid_target_name_rejects_ai_first_placeholder`
+    - `test_is_valid_target_name_rejects_possessive_company_variant`
+    - `test_is_valid_target_name_rejects_metric_token`
+  - validation:
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `42 passed`
+    - `PYTHONPATH=src python3 -m pytest -q` -> `306 passed`
 - Board-seat sqlite connection lifecycle fix shipped for ledger FD stability:
   - `BoardSeatStore._connect()` now commits/rolls back and always closes sqlite connections.
   - this resolves descriptor accumulation that surfaced as `[Errno 24] Too many open files` in board-seat ledger export path.

@@ -3,6 +3,57 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-25, board-seat API health + Brave key alias support)
+- Diagnosed OpenAI board-seat quality degradation causes:
+  - `COATUE_CLAW_BRAVE_API_KEY` was set, but resolver only read `BRAVE_SEARCH_API_KEY`; Brave rows were effectively disabled.
+  - SerpAPI endpoint currently responds `HTTP 429 Too Many Requests` for board-seat queries in this environment, yielding zero Google rows.
+- Implemented key resolver compatibility in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
+  - `_brave_search_api_key()` now accepts both:
+    - `COATUE_CLAW_BRAVE_API_KEY`
+    - `BRAVE_SEARCH_API_KEY`
+- Added regression test:
+  - `/Users/carsonwang/CoatueClaw/tests/test_board_seat_daily.py::test_brave_api_key_accepts_coatue_claw_alias`
+- Updated env sample:
+  - `/Users/carsonwang/CoatueClaw/.env.example` now lists `COATUE_CLAW_BRAVE_API_KEY`.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `46 passed`
+  - `PYTHONPATH=src python3 -m pytest -q` -> `310 passed`
+
+## Update (2026-02-25, strict new-target gate: skip when no high-confidence new target)
+- Implemented a strict board-seat post gate in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
+  - posts now require both:
+    - a **new target** (not already in target memory for that company)
+    - **High confidence** target evidence (`High` from source-confidence scoring)
+  - otherwise run result is skipped with:
+    - `reason=no_high_confidence_new_target`
+    - `gate_reason` in `{invalid_target,target_not_new,target_confidence_not_high}`
+- Added env control (default enabled):
+  - `COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET=1`
+- Status payload now surfaces the gate mode:
+  - `require_high_conf_new_target`
+- Added regression coverage in `/Users/carsonwang/CoatueClaw/tests/test_board_seat_daily.py`:
+  - low-confidence target gets rejected by gate
+  - non-new target gets rejected even when source confidence is high
+  - run-once dry-run skips when gate is not satisfied
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `45 passed`
+  - `PYTHONPATH=src python3 -m pytest -q` -> `309 passed`
+
+## Update (2026-02-25, board-seat target hardening to reject conceptual/non-company targets)
+- Fixed board-seat target selection in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py` so conceptual labels do not pass as acquisition targets:
+  - added `aifirst` to `ACQ_PLACEHOLDER_TARGETS`
+  - added `ai-first` / `ai first` to `ACQ_INVALID_TARGET_TERMS`
+  - added `roi` to `TARGET_TOKEN_STOPWORDS`
+  - introduced `_canonical_target_key(...)` and used it in target validation/candidate filtering to reject possessive/pluralized self-target variants (for example `OpenAIs` for `OpenAI`)
+- Added regression coverage in `/Users/carsonwang/CoatueClaw/tests/test_board_seat_daily.py`:
+  - `test_is_valid_target_name_rejects_ai_first_placeholder`
+  - `test_is_valid_target_name_rejects_possessive_company_variant`
+  - `test_is_valid_target_name_rejects_metric_token`
+  - existing rewrite test confirms fallback to a concrete target (`Browserbase`) when seed target is conceptual (`AI-first`)
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `42 passed`
+  - `PYTHONPATH=src python3 -m pytest -q` -> `306 passed`
+
 ## Update (2026-02-24, board-seat sqlite connection lifecycle fix for ledger FD exhaustion)
 - Fixed file-descriptor leak in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
   - `BoardSeatStore._connect()` is now a context manager that always commits/rolls back and closes the sqlite connection.

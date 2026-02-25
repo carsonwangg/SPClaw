@@ -314,6 +314,7 @@ Board Seat daily environment controls:
 - `COATUE_CLAW_BOARD_SEAT_FUNDING_MIN_DOMAINS`: minimum corroborating domains required for `verified` funding status (default `2`)
 - `COATUE_CLAW_BOARD_SEAT_FUNDING_LOW_CONF_THRESHOLD`: confidence threshold below which funding is treated as `low` band (default `0.55`)
 - `COATUE_CLAW_BOARD_SEAT_FUNDING_WARNING_MODE`: include explicit low-confidence funding warning line in Board Seat output (`1` default)
+- `COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET`: require each post to be both a new target and `High` confidence; otherwise skip with `no_high_confidence_new_target` (`1` default)
 - `COATUE_CLAW_BOARD_SEAT_TARGET_LOCK_DAYS`: target-memory lock window (default `14`, minimum enforced `14`)
 - `COATUE_CLAW_BOARD_SEAT_ALLOW_REPEAT_TARGETS`: set `1` to bypass only the configurable lock window above 14 days; cannot bypass the hard 14-day no-repeat rule (default `0`)
 - `COATUE_CLAW_BOARD_SEAT_EVENT_TRACK_TARGETS_PER_COMPANY`: number of promising targets to track event flow for per company run (default `4`)
