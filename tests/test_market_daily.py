@@ -1421,10 +1421,11 @@ def test_catalyst_mode_defaults_to_simple(monkeypatch) -> None:
     assert md._catalyst_mode() == "simple_synthesis"
 
 
-def test_simple_synthesis_happy_path_generates_specific_line(monkeypatch) -> None:
+def test_simple_mode_outputs_full_sentence_not_after_wrapper(monkeypatch) -> None:
     from coatue_claw import market_daily as md
 
     monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.setenv("COATUE_CLAW_MD_REASON_OUTPUT_MODE", "free_sentence")
     mover = QuoteSnapshot("AMD", 100.0, 108.8, 100.0, 0.088, "2026-02-25T22:00:00+00:00")
     candidates = [
         md._EvidenceCandidate(
@@ -1454,8 +1455,8 @@ def test_simple_synthesis_happy_path_generates_specific_line(monkeypatch) -> Non
         lambda ticker, aliases, since_utc, pct_move=None: (candidates, candidates, [], "google_serp"),
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._synthesize_catalyst_phrase_simple",
-        lambda client, ticker, pct_move, candidates: ("Meta signed an AI chip supply deal with AMD", None),
+        "coatue_claw.market_daily._synthesize_catalyst_sentence_simple",
+        lambda client, ticker, pct_move, anchor, supports: ("AMD rose as Meta agreed to buy up to $60 billion of AMD AI chips.", None),
     )
     monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: object())
     evidence, line = md._build_catalyst_for_mover(
@@ -1463,10 +1464,11 @@ def test_simple_synthesis_happy_path_generates_specific_line(monkeypatch) -> Non
         slot_name="close",
         since_utc=datetime(2026, 2, 25, 13, 30, 0, tzinfo=UTC),
     )
-    assert line.startswith("Shares rose after")
-    assert "Meta signed an AI chip supply deal with AMD" in line
+    assert line == "AMD rose as Meta agreed to buy up to $60 billion of AMD AI chips."
+    assert not line.startswith("Shares rose after ")
     assert evidence.cause_mode == "simple_synthesis"
     assert evidence.synth_generation_mode == "simple_synthesis"
+    assert evidence.generation_format == "free_sentence"
     assert evidence.synth_candidates_used
 
 
@@ -1484,21 +1486,24 @@ def test_simple_synthesis_soft_domain_gate_prefers_quality(monkeypatch) -> None:
     assert [x.domain for x in out][:2] == ["reuters.com", "finance.yahoo.com"]
 
 
-def test_simple_synthesis_force_best_guess_on_invalid_llm(monkeypatch) -> None:
+def test_post_as_is_policy_keeps_non_empty_llm_sentence(monkeypatch) -> None:
     from coatue_claw import market_daily as md
 
     monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
-    monkeypatch.setenv("COATUE_CLAW_MD_SYNTH_FORCE_BEST_GUESS", "1")
+    monkeypatch.setenv("COATUE_CLAW_MD_POST_AS_IS", "1")
     mover = QuoteSnapshot("INTC", 100.0, 105.7, 100.0, 0.057, "2026-02-25T22:00:00+00:00")
     candidates = [
         md._EvidenceCandidate(
             source_type="web",
-            text="Morgan Stanley lifts Intel to $41 and flags foundry constraints",
-            url="https://www.reuters.com/world/us/morgan-stanley-intel-2026-02-25/",
+            text="Why Is Intel (INTC) Stock Soaring Today - Yahoo Finance",
+            context_text=(
+                "Shares of Intel jumped as the semiconductor sector got a boost after AMD secured a large AI chip deal with Meta."
+            ),
+            url="https://finance.yahoo.com/news/why-intel-intc-stock-soaring-210238819.html",
             published_at_utc=datetime(2026, 2, 25, 21, 0, 0, tzinfo=UTC),
-            score=0.76,
-            canonical_url="https://www.reuters.com/world/us/morgan-stanley-intel-2026-02-25/",
-            domain="reuters.com",
+            score=0.86,
+            canonical_url="https://finance.yahoo.com/news/why-intel-intc-stock-soaring-210238819.html",
+            domain="finance.yahoo.com",
         ),
     ]
     monkeypatch.setattr(
@@ -1506,12 +1511,11 @@ def test_simple_synthesis_force_best_guess_on_invalid_llm(monkeypatch) -> None:
         lambda ticker, aliases, since_utc, pct_move=None: (candidates, candidates, [], "google_serp"),
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._synthesize_catalyst_phrase_simple",
-        lambda client, ticker, pct_move, candidates: (None, "llm_invalid_output:low_overlap"),
-    )
-    monkeypatch.setattr(
-        "coatue_claw.market_daily._best_guess_phrase_from_candidates",
-        lambda candidates, pct_move=None: "Morgan Stanley lifted Intel and flagged foundry constraints",
+        "coatue_claw.market_daily._synthesize_catalyst_sentence_simple",
+        lambda client, ticker, pct_move, anchor, supports: (
+            "According to Reuters, Intel and peers rose as semiconductor sentiment improved.",
+            None,
+        ),
     )
     monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: object())
     evidence, line = md._build_catalyst_for_mover(
@@ -1519,9 +1523,9 @@ def test_simple_synthesis_force_best_guess_on_invalid_llm(monkeypatch) -> None:
         slot_name="close",
         since_utc=datetime(2026, 2, 25, 13, 30, 0, tzinfo=UTC),
     )
-    assert line != md.FALLBACK_CAUSE_LINE
-    assert evidence.cause_render_mode == "simple_best_guess"
-    assert "fallback_to_top_candidate" in evidence.rejected_reasons
+    assert line == "According to Reuters, Intel and peers rose as semiconductor sentiment improved."
+    assert evidence.cause_render_mode == "simple_llm"
+    assert evidence.generation_policy == "post_as_is"
 
 
 def test_simple_synthesis_no_candidates_uses_fallback(monkeypatch) -> None:
@@ -1563,8 +1567,8 @@ def test_simple_hydrate_recap_prepends_key_catalyst(monkeypatch) -> None:
         lambda ticker, aliases, since_utc, pct_move=None: (candidates, candidates, [], "google_serp"),
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._synthesize_catalyst_phrase_simple",
-        lambda client, ticker, pct_move, candidates: ("Meta signed an AI chip supply deal with AMD", None),
+        "coatue_claw.market_daily._synthesize_catalyst_sentence_simple",
+        lambda client, ticker, pct_move, anchor, supports: ("AMD rose after the Meta AI-chip procurement announcement.", None),
     )
     monkeypatch.setattr(
         "coatue_claw.market_daily._synthesize_earnings_bullets",
@@ -1576,7 +1580,7 @@ def test_simple_hydrate_recap_prepends_key_catalyst(monkeypatch) -> None:
         client=None,
     )
     assert hydrated.bullets
-    assert hydrated.bullets[0].startswith("Key catalyst: Shares rose after")
+    assert hydrated.bullets[0].startswith("Key catalyst: AMD rose after the Meta AI-chip procurement announcement")
 
 
 def test_web_candidate_without_publish_time_is_rejected_when_strict_enabled(monkeypatch) -> None:
@@ -1748,6 +1752,101 @@ def test_intc_regression_prefers_in_window_why_stock_soaring_link(monkeypatch) -
     assert any("historical_callback_reject" in n for n in notes)
 
 
+def test_anchor_first_prefers_in_window_why_stock_explainer_for_intc_case(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    mover = QuoteSnapshot("INTC", 100.0, 105.7, 100.0, 0.057, "2026-02-25T22:00:00+00:00")
+    stale = md._EvidenceCandidate(
+        source_type="web",
+        text="Intel shares rise on near-term foundry commentary",
+        context_text="Intel shares rose after upbeat foundry commentary from analysts.",
+        url="https://www.reuters.com/world/us/intel-foundry-commentary-2026-02-25/",
+        published_at_utc=datetime(2026, 2, 25, 20, 0, 0, tzinfo=UTC),
+        score=0.89,
+        domain="reuters.com",
+    )
+    explainer = md._EvidenceCandidate(
+        source_type="yahoo_news",
+        text="Why Is Intel (INTC) Stock Soaring Today",
+        context_text=(
+            "Shares of Intel jumped 5.4% after the semiconductor sector got a boost as AMD secured a large AI chip deal with Meta."
+        ),
+        url="https://finance.yahoo.com/news/why-intel-intc-stock-soaring-210238819.html",
+        published_at_utc=datetime(2026, 2, 25, 21, 2, 38, tzinfo=UTC),
+        score=0.75,
+        domain="finance.yahoo.com",
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._collect_synthesis_candidates",
+        lambda ticker, aliases, since_utc, pct_move=None: ([stale, explainer], [stale, explainer], [], "google_serp"),
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._synthesize_catalyst_sentence_simple",
+        lambda client, ticker, pct_move, anchor, supports: (
+            "Intel rose with semiconductor peers after AMD's AI-chip agreement with Meta improved sentiment.",
+            None,
+        ),
+    )
+    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: object())
+    evidence, line = md._build_catalyst_for_mover(
+        mover=mover,
+        slot_name="close",
+        since_utc=datetime(2026, 2, 25, 14, 30, 0, tzinfo=UTC),
+    )
+    assert line != md.FALLBACK_CAUSE_LINE
+    assert evidence.cause_anchor_url == "https://finance.yahoo.com/news/why-intel-intc-stock-soaring-210238819.html"
+
+
+def test_links_follow_anchor_selection(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    mover = QuoteSnapshot("INTC", 100.0, 105.7, 100.0, 0.057, "2026-02-25T22:00:00+00:00")
+    anchor = md._EvidenceCandidate(
+        source_type="yahoo_news",
+        text="Why Is Intel (INTC) Stock Soaring Today",
+        context_text="Intel rose with semis after AMD's Meta chip deal.",
+        url="https://finance.yahoo.com/news/why-intel-intc-stock-soaring-210238819.html",
+        published_at_utc=datetime(2026, 2, 25, 21, 2, 38, tzinfo=UTC),
+        score=0.88,
+        domain="finance.yahoo.com",
+    )
+    support = md._EvidenceCandidate(
+        source_type="web",
+        text="Semiconductor shares climb after AMD- Meta AI chip agreement",
+        context_text="Semiconductor shares climbed after AMD announced a major chip agreement with Meta.",
+        url="https://www.reuters.com/world/us/amd-meta-ai-chip-deal-2026-02-25/",
+        published_at_utc=datetime(2026, 2, 25, 21, 10, 0, tzinfo=UTC),
+        score=0.79,
+        domain="reuters.com",
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._collect_synthesis_candidates",
+        lambda ticker, aliases, since_utc, pct_move=None: ([anchor, support], [anchor, support], [], "google_serp"),
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._synthesize_catalyst_sentence_simple",
+        lambda client, ticker, pct_move, anchor, supports: ("Intel rose with semiconductor peers after AMD's Meta chip deal.", None),
+    )
+    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: object())
+    evidence, line = md._build_catalyst_for_mover(
+        mover=mover,
+        slot_name="close",
+        since_utc=datetime(2026, 2, 25, 14, 30, 0, tzinfo=UTC),
+    )
+    text = md._build_message(
+        slot_name="close",
+        now_local=datetime(2026, 2, 25, 22, 0, 0, tzinfo=UTC),
+        universe_count=40,
+        movers=[mover],
+        catalyst_rows=[evidence],
+        catalyst_lines=[line],
+    )
+    assert "<https://finance.yahoo.com/news/why-intel-intc-stock-soaring-210238819.html|[News]>" in text
+    assert "<https://www.reuters.com/world/us/amd-meta-ai-chip-deal-2026-02-25/|[Web]>" in text
+
+
 def test_links_only_emit_time_valid_urls(monkeypatch) -> None:
     from coatue_claw import market_daily as md
 
@@ -1756,6 +1855,7 @@ def test_links_only_emit_time_valid_urls(monkeypatch) -> None:
     valid = md._EvidenceCandidate(
         source_type="web",
         text="Why Is Intel (INTC) Stock Soaring Today - Yahoo Finance",
+        context_text="Shares of Intel jumped after AMD's large AI chip deal with Meta lifted semiconductor sentiment.",
         url="https://finance.yahoo.com/news/why-intel-intc-stock-soaring-210238819.html",
         published_at_utc=datetime(2026, 2, 25, 21, 2, 38, tzinfo=UTC),
         score=0.8,
@@ -1765,8 +1865,8 @@ def test_links_only_emit_time_valid_urls(monkeypatch) -> None:
         lambda ticker, aliases, since_utc, pct_move=None: ([valid], [valid], [], "google_serp"),
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._synthesize_catalyst_phrase_simple",
-        lambda client, ticker, pct_move, candidates: ("Intel gained on fresh catalyst coverage", None),
+        "coatue_claw.market_daily._synthesize_catalyst_sentence_simple",
+        lambda client, ticker, pct_move, anchor, supports: ("Intel gained as AMD's Meta deal boosted semiconductor sentiment.", None),
     )
     monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: object())
     evidence, line = md._build_catalyst_for_mover(
@@ -1807,8 +1907,8 @@ def test_recap_uses_time_valid_evidence_only(monkeypatch) -> None:
         lambda client, row: ("Shares traded higher after hours.", "Initial sentiment improved on fresh headlines."),
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._synthesize_catalyst_phrase_simple",
-        lambda client, ticker, pct_move, candidates: ("fresh bullish Intel catalyst headlines", None),
+        "coatue_claw.market_daily._synthesize_catalyst_sentence_simple",
+        lambda client, ticker, pct_move, anchor, supports: ("Intel traded higher as semiconductor sentiment improved after AMD's Meta chip deal.", None),
     )
     hydrated = md._hydrate_recap_row(
         row=row,
@@ -1816,7 +1916,7 @@ def test_recap_uses_time_valid_evidence_only(monkeypatch) -> None:
         client=None,
     )
     assert hydrated.source_links == ("https://finance.yahoo.com/news/why-intel-intc-stock-soaring-210238819.html",)
-    assert hydrated.bullets[0].startswith("Key catalyst: Shares rose after")
+    assert hydrated.bullets[0].startswith("Key catalyst: Intel traded higher as semiconductor sentiment improved")
 
 
 def test_simple_synthesis_google_missing_uses_yahoo_only_not_ddg(monkeypatch) -> None:
@@ -1857,22 +1957,25 @@ def test_simple_synthesis_google_missing_uses_yahoo_only_not_ddg(monkeypatch) ->
     assert "web:google_serp_required_missing" in notes
 
 
-def test_llm_unavailable_weak_candidate_falls_back(monkeypatch) -> None:
+def test_model_unavailable_uses_anchor_backup_sentence(monkeypatch) -> None:
     from coatue_claw import market_daily as md
 
     monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
-    monkeypatch.setenv("COATUE_CLAW_MD_SYNTH_FORCE_BEST_GUESS", "1")
     mover = QuoteSnapshot("INTC", 100.0, 105.7, 100.0, 0.057, "2026-02-25T22:00:00+00:00")
-    weak = md._EvidenceCandidate(
+    anchor = md._EvidenceCandidate(
         source_type="web",
-        text="Intel (INTC) Price Forecast: Breakout Holds as Bulls Defend Support",
-        url="https://www.fxempire.com/forecasts/article/intel-intc-price-forecast-breakout-holds-as-bulls-defend-support-1581660",
+        text="Why Is Intel (INTC) Stock Soaring Today - Yahoo Finance",
+        context_text=(
+            "Shares of computer processor maker Intel jumped 5.4% in the afternoon session after the semiconductor sector "
+            "received a major boost as AMD secured a large AI chip deal with Meta over five years."
+        ),
+        url="https://finance.yahoo.com/news/why-intel-intc-stock-soaring-210238819.html",
         published_at_utc=datetime(2026, 2, 25, 21, 0, 0, tzinfo=UTC),
         score=0.95,
     )
     monkeypatch.setattr(
         "coatue_claw.market_daily._collect_synthesis_candidates",
-        lambda ticker, aliases, since_utc, pct_move=None: ([weak], [weak], [], "google_serp"),
+        lambda ticker, aliases, since_utc, pct_move=None: ([anchor], [anchor], [], "google_serp"),
     )
     monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: None)
     evidence, line = md._build_catalyst_for_mover(
@@ -1880,9 +1983,9 @@ def test_llm_unavailable_weak_candidate_falls_back(monkeypatch) -> None:
         slot_name="close",
         since_utc=datetime(2026, 2, 25, 14, 30, 0, tzinfo=UTC),
     )
-    assert line == md.FALLBACK_CAUSE_LINE
-    assert evidence.cause_render_mode == "fallback"
-    assert "fallback_to_top_candidate_failed" in evidence.quality_rejections
+    assert line != md.FALLBACK_CAUSE_LINE
+    assert "after the semiconductor sector received a major boost" in line
+    assert evidence.cause_render_mode == "simple_anchor_backup"
 
 
 def test_llm_unavailable_strong_causal_candidate_still_specific(monkeypatch) -> None:
@@ -1909,7 +2012,7 @@ def test_llm_unavailable_strong_causal_candidate_still_specific(monkeypatch) -> 
         since_utc=datetime(2026, 2, 25, 14, 30, 0, tzinfo=UTC),
     )
     assert line != md.FALLBACK_CAUSE_LINE
-    assert evidence.cause_render_mode == "simple_best_guess"
+    assert evidence.cause_render_mode == "simple_anchor_backup"
 
 
 def test_technical_analysis_soft_penalty_lowers_rank() -> None:
