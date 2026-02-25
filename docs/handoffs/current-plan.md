@@ -40,6 +40,23 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Board-seat candidate quality recovery shipped on `codex/agent-board-seat`:
+  - confidence model now defaults to `broad_weighted_v1` (deterministic weighted scoring over top target evidence), replacing allowlist-heavy gating behavior.
+  - new confidence env knobs:
+    - `COATUE_CLAW_BOARD_SEAT_CONFIDENCE_MODEL=broad_weighted_v1`
+    - `COATUE_CLAW_BOARD_SEAT_CONFIDENCE_HIGH_MIN=2.40`
+    - `COATUE_CLAW_BOARD_SEAT_CONFIDENCE_MEDIUM_MIN=1.35`
+    - `COATUE_CLAW_BOARD_SEAT_ALLOW_MEDIUM_NEW_TARGET=1`
+  - gate behavior now allows **new + Medium/High** target confidence (still requires new target; 14-day no-repeat unchanged).
+  - conceptual target filtering expanded (`LLMs`, `ROI`, `workflow`, `platform`, etc.) and applied across:
+    - `_is_valid_target_name`
+    - `_is_valid_acquisition_idea_line`
+    - `_target_candidates_from_seed`
+  - run payload observability expanded for target gating diagnostics:
+    - `target_confidence_score`
+    - `target_confidence_reasons`
+    - `target_validation_reason`
+  - no Slack command/interface changes.
 - Board-seat API-key compatibility + health diagnosis update:
   - `_brave_search_api_key()` now reads both `COATUE_CLAW_BRAVE_API_KEY` and `BRAVE_SEARCH_API_KEY`.
   - `.env.example` now documents `COATUE_CLAW_BRAVE_API_KEY`.
@@ -1171,3 +1188,52 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - deterministic backup path remains coherent when LLM is unavailable.
 - Remaining runtime nuance to monitor:
   - when recap evidence hydration yields `none`, citation-handle bullets (`[S1]/[S2]/[S3]`) cannot be emitted for those rows in that run.
+
+## Board Seat - Company-Only Target Enforcement (2026-02-25)
+- Status: implemented on `codex/agent-board-seat`, validated.
+- Completed scope:
+  - strict company-target resolution layer added before target gating/rendering.
+  - default alias map includes `next.js -> Vercel`; env JSON override/extension supported.
+  - non-company target shapes (product/framework forms) are deterministically retargeted via alias first, then fallback rotation/default.
+  - run payload observability now includes `target_original` and `target_resolution_reason`.
+  - `.env.example` updated with:
+    - `COATUE_CLAW_BOARD_SEAT_REQUIRE_COMPANY_TARGET=1`
+    - `COATUE_CLAW_BOARD_SEAT_TARGET_COMPANY_ALIAS_JSON={"next.js":"Vercel"}`
+- Governance unchanged:
+  - high/medium confidence policy, new-target requirement, hard 14-day no-repeat, repitch significance.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `55 passed`.
+
+## Board Seat - Truncation Readability Fix (2026-02-25)
+- Status: implemented on `codex/agent-board-seat`, validated.
+- Completed scope:
+  - line normalization now trims incomplete short trailing sentence fragments introduced by strict word caps.
+  - prevents clipped outputs like `... Vercel. Migrate` while keeping existing 18-word cap and format contract.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `57 passed`.
+
+## Board Seat - Writing Quality Recovery (2026-02-25)
+- Status: implemented on `codex/agent-board-seat`, validated.
+- Completed scope:
+  - default no-cap line policy via `COATUE_CLAW_BOARD_SEAT_MAX_LINE_WORDS=0` (legacy capped behavior still available with positive values).
+  - writing mode/env controls added: passthrough mode + obvious artifact stripping.
+  - LLM draft path now receives a concrete evidence pack from target/acquisition/funding retrieval before generation.
+  - prompt updated to request field-specific, non-duplicative thesis writing and removed hard 18-word instruction.
+  - sanitize path now:
+    - strips obvious artifacts from LLM fields
+    - applies exact duplicate-field guard across thesis lines
+    - records `writing_artifact_cleanups` + `writing_field_dedup_fixes`.
+  - run payload rows (`sent` and gate-based `skipped`) now include writing observability fields.
+- Governance unchanged:
+  - company-only target enforcement, confidence/new-target gate, hard 14-day no-repeat, and repitch significance.
+
+## Board Seat - Target Extractor Hardening (2026-02-25)
+- Status: in progress on `codex/agent-board-seat` (shipped tests), pending integrator merge.
+- Completed in this update:
+  - expanded non-company target rejection for leaked placeholders and business-model acronyms (`there`, `d2c`, `director`, etc.).
+  - added conceptual adjective rejection for `ai/llm/model` + `focused/first/native/driven`.
+  - added regression tests covering these failure patterns.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `63 passed`.
+- Next:
+  - add a post-sanitize target-lock re-check so retargeted outputs cannot bypass cooldown/new-target governance when final target differs from initial extraction.

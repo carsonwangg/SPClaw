@@ -3,6 +3,29 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-25, board-seat candidate quality recovery: medium+new + broad weighted scoring)
+- Implemented candidate quality recovery in `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/board_seat_daily.py`:
+  - target confidence model now defaults to `broad_weighted_v1` with deterministic score bands:
+    - `COATUE_CLAW_BOARD_SEAT_CONFIDENCE_HIGH_MIN` (default `2.40`)
+    - `COATUE_CLAW_BOARD_SEAT_CONFIDENCE_MEDIUM_MIN` (default `1.35`)
+  - gate policy now allows **new + High/Medium** when enabled:
+    - `COATUE_CLAW_BOARD_SEAT_ALLOW_MEDIUM_NEW_TARGET=1` (default)
+  - conceptual target rejection expanded via `_is_conceptual_target_name(...)` and shared validation:
+    - blocks generic targets like `LLMs`, `ROI`, `workflow`, `platform`
+    - preserves concrete startup names like `Browserbase`, `Scale AI`
+  - target gate payload now emits debug fields:
+    - `target_confidence_score`
+    - `target_confidence_reasons`
+    - `target_validation_reason`
+  - dry-run/live `sent` + `skipped` rows now include the confidence debug fields for diagnosis.
+- Added/updated regression coverage in `/Users/carsonwang/worktrees/coatue-claw/board-seat/tests/test_board_seat_daily.py`:
+  - conceptual `LLMs` target rejected and retargeted to concrete company
+  - medium-confidence new target allowed under broad weighted model
+  - low-score target still rejected
+  - non-new target still rejected even with high confidence
+  - run-once payload includes new confidence debug fields
+  - run-once dry-run retarget path confirms no conceptual target leakage
+
 ## Update (2026-02-25, board-seat API health + Brave key alias support)
 - Diagnosed OpenAI board-seat quality degradation causes:
   - `COATUE_CLAW_BRAVE_API_KEY` was set, but resolver only read `BRAVE_SEARCH_API_KEY`; Brave rows were effectively disabled.
@@ -2563,3 +2586,56 @@ Then confirm bot returns:
   - Limitation in this run: no source evidence rows were available (`evidence: none`), so `[S1]/[S2]` citation handles and `Sources:` URL-handle mapping were not present for ticker bullets.
 - Integrator note:
   - dry-run recap invocation in this environment can stall intermittently; force-run path completed and was used for production verification.
+
+## Update (2026-02-25, board-seat company-only target enforcement)
+- Implemented global company-only target resolution in `src/coatue_claw/board_seat_daily.py` on `codex/agent-board-seat`.
+- New behavior:
+  - `Idea` targets are resolved as company entities before gating/render.
+  - deterministic alias mapping defaults include `next.js -> Vercel` (extendable via env JSON).
+  - non-company product shapes are rejected/retargeted via alias, then rotation/default fallback.
+  - governance gates remain unchanged (new-target requirement, confidence policy, 14-day no-repeat, repitch significance).
+- New observability in run payload rows:
+  - `target_original`
+  - `target_resolution_reason` (`as_extracted`, `alias_mapped`, `fallback_rotation`, `fallback_default`, `invalid_after_resolution`)
+- Additional implementation details:
+  - company-target requirement env reader: `COATUE_CLAW_BOARD_SEAT_REQUIRE_COMPANY_TARGET` (default on)
+  - alias map env reader: `COATUE_CLAW_BOARD_SEAT_TARGET_COMPANY_ALIAS_JSON`
+  - source selection in sanitize path now uses resolved `idea_line` so target-confidence/source classification aligns with final company target.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `55 passed`
+
+## Update (2026-02-25, board-seat line truncation cleanup)
+- Fixed Board Seat line normalization so strict word-cap clipping no longer leaves partial second-sentence fragments (example fixed: `... Vercel. Migrate`).
+- Implementation:
+  - added sentence-tail cleanup in `_limit_words` to trim incomplete short trailing sentence fragments.
+  - preserved existing word-cap behavior and all governance gates.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `57 passed`
+
+## Update (2026-02-25, board-seat writing quality recovery)
+- Implemented LLM-passthrough writing recovery with evidence-grounded prompting:
+  - new env controls:
+    - `COATUE_CLAW_BOARD_SEAT_MAX_LINE_WORDS=0` (default: no hard cap)
+    - `COATUE_CLAW_BOARD_SEAT_WRITING_MODE=llm_passthrough`
+    - `COATUE_CLAW_BOARD_SEAT_STRIP_OBVIOUS_ARTIFACTS=1`
+  - `_build_draft` now builds and passes an explicit evidence pack (target rows + acquisition rows + funding summary) to `_llm_draft`.
+  - prompt now requires field-specific outputs (`target_does`, `why_now`, `whats_different`, `mos_risks`) and removes the old `<=18 words` constraint.
+- Added minimal passthrough cleanup and dedup guards:
+  - strips obvious non-human artifacts (`<strong>`, `Get the full list`, `Read more`, ellipsis/menu crumbs).
+  - prevents exact duplicate thesis-field bodies by replacing duplicated later fields with deterministic safe fallback lines.
+  - never skips posting solely due writing cleanup.
+- Added run payload observability fields:
+  - `writing_mode`
+  - `writing_artifact_cleanups`
+  - `writing_field_dedup_fixes`
+
+## Update (2026-02-25, board-seat target extractor hardening)
+- Hardened target validation to reject additional non-company tokens that leaked into `Idea` targets:
+  - added stopword rejects: `there`, `here`, `d2c`, `b2b`, `b2c`, `plg`, `director`.
+  - added non-company shape reject for conceptual adjective forms (e.g., `ai-focused`, `llm-native`, `model-driven`).
+- Regression tests added for invalid targets:
+  - `There`, `D2C`, `Director`, `AI-focused`.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `63 passed`.
+- Operational note:
+  - Posted a manual real-research board-seat message to `#openai` at Slack ts `1772060668.808919` while extractor hardening is being stabilized for fully automated target selection.
