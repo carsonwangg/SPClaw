@@ -98,6 +98,10 @@ class CatalystEvidence:
     synth_candidates_considered: tuple[str, ...] = ()
     synth_candidates_used: tuple[str, ...] = ()
     synth_chosen_urls: tuple[str, ...] = ()
+    time_integrity_mode: str | None = None
+    publish_time_rejections: tuple[str, ...] = ()
+    candidate_publish_times: tuple[str, ...] = ()
+    historical_callback_rejections: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -261,6 +265,35 @@ def _synth_domain_gate() -> str:
 def _synth_force_best_guess() -> bool:
     raw = (os.environ.get("COATUE_CLAW_MD_SYNTH_FORCE_BEST_GUESS", "1") or "1").strip().lower()
     return raw in {"1", "true", "yes", "on"}
+
+
+def _require_in_window_dates() -> bool:
+    raw = (os.environ.get("COATUE_CLAW_MD_REQUIRE_IN_WINDOW_DATES", "1") or "1").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _allow_undated_fallback() -> bool:
+    raw = (os.environ.get("COATUE_CLAW_MD_ALLOW_UNDATED_FALLBACK", "0") or "0").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _reject_historical_callback() -> bool:
+    raw = (os.environ.get("COATUE_CLAW_MD_REJECT_HISTORICAL_CALLBACK", "1") or "1").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _publish_time_enrich_enabled() -> bool:
+    raw = (os.environ.get("COATUE_CLAW_MD_PUBLISH_TIME_ENRICH_ENABLED", "1") or "1").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _publish_time_enrich_timeout_ms() -> int:
+    raw = (os.environ.get("COATUE_CLAW_MD_PUBLISH_TIME_ENRICH_TIMEOUT_MS", "1200") or "1200").strip()
+    try:
+        val = int(raw)
+    except Exception:
+        val = 1200
+    return max(200, min(10000, val))
 
 
 def _top_n() -> int:
@@ -1368,6 +1401,9 @@ class _EvidenceCandidate:
     canonical_url: str | None = None
     domain: str | None = None
     backend: str | None = None
+    context_text: str | None = None
+    published_confidence: str = "none"
+    published_source: str | None = None
 
 
 def _company_aliases(ticker: str) -> list[str]:
@@ -1473,6 +1509,243 @@ def _parse_datetime_utc(value: Any) -> datetime | None:
     except Exception:
         return None
     return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+
+_MONTH_NAME_TO_NUM: dict[str, int] = {
+    "jan": 1,
+    "january": 1,
+    "feb": 2,
+    "february": 2,
+    "mar": 3,
+    "march": 3,
+    "apr": 4,
+    "april": 4,
+    "may": 5,
+    "jun": 6,
+    "june": 6,
+    "jul": 7,
+    "july": 7,
+    "aug": 8,
+    "august": 8,
+    "sep": 9,
+    "sept": 9,
+    "september": 9,
+    "oct": 10,
+    "october": 10,
+    "nov": 11,
+    "november": 11,
+    "dec": 12,
+    "december": 12,
+}
+_PUBLISH_TIME_CACHE: dict[str, tuple[datetime | None, str]] = {}
+
+
+def _parse_relative_time_utc(raw: str, *, now_utc: datetime) -> datetime | None:
+    text = _normalize_whitespace(raw).lower()
+    m = re.search(r"\b(\d+)\s*(minute|minutes|min|mins|hour|hours|day|days|week|weeks)\s+ago\b", text)
+    if not m:
+        return None
+    qty = int(m.group(1))
+    unit = m.group(2)
+    if unit.startswith("min"):
+        return now_utc - timedelta(minutes=qty)
+    if unit.startswith("hour"):
+        return now_utc - timedelta(hours=qty)
+    if unit.startswith("day"):
+        return now_utc - timedelta(days=qty)
+    if unit.startswith("week"):
+        return now_utc - timedelta(days=(7 * qty))
+    return None
+
+
+def _parse_month_day_date_utc(raw: str, *, now_utc: datetime) -> datetime | None:
+    text = _normalize_whitespace(raw)
+    m = re.search(r"\b([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:,\s*(\d{4}))?\b", text)
+    if not m:
+        return None
+    month_raw = m.group(1).strip().lower()
+    month = _MONTH_NAME_TO_NUM.get(month_raw)
+    day = int(m.group(2))
+    if month is None:
+        return None
+    year = int(m.group(3)) if m.group(3) else now_utc.year
+    try:
+        dt = datetime(year, month, day, tzinfo=UTC)
+    except Exception:
+        return None
+    if dt > (now_utc + timedelta(days=2)):
+        try:
+            dt = dt.replace(year=(dt.year - 1))
+        except Exception:
+            return None
+    return dt
+
+
+def _extract_explicit_dates_from_text(text: str, *, now_utc: datetime) -> list[datetime]:
+    cleaned = _normalize_whitespace(text)
+    if not cleaned:
+        return []
+    out: list[datetime] = []
+    for m in re.finditer(r"\b([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:,\s*(\d{4}))?\b", cleaned):
+        parsed = _parse_month_day_date_utc(m.group(0), now_utc=now_utc)
+        if parsed is not None:
+            out.append(parsed)
+    uniq: list[datetime] = []
+    seen: set[str] = set()
+    for item in out:
+        key = item.date().isoformat()
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(item)
+    return uniq
+
+
+def _is_historical_callback(*, text: str, since_utc: datetime, now_utc: datetime) -> bool:
+    if not _reject_historical_callback():
+        return False
+    if not text:
+        return False
+    dates = _extract_explicit_dates_from_text(text, now_utc=now_utc)
+    if not dates:
+        return False
+    cutoff = (since_utc - timedelta(days=1)).date()
+    return any(item.date() < cutoff for item in dates)
+
+
+def _parse_candidate_published_at_from_serp_row(row: dict[str, Any], *, now_utc: datetime) -> tuple[datetime | None, str, str]:
+    checks: list[tuple[Any, str]] = [
+        (row.get("published_at"), "serp_published_at"),
+        (row.get("date"), "serp_date"),
+        (row.get("time"), "serp_time"),
+    ]
+    for value, source in checks:
+        if value is None:
+            continue
+        raw = _normalize_whitespace(str(value))
+        if not raw:
+            continue
+        parsed = _parse_datetime_utc(raw)
+        if parsed is None:
+            parsed = _parse_relative_time_utc(raw, now_utc=now_utc)
+        if parsed is None:
+            parsed = _parse_month_day_date_utc(raw, now_utc=now_utc)
+        if parsed is not None:
+            confidence = "high" if source == "serp_published_at" else "medium"
+            return parsed.astimezone(UTC), confidence, source
+    return None, "none", "none"
+
+
+def _fetch_text_with_timeout(url: str, *, headers: dict[str, str], timeout_sec: float) -> str:
+    req = Request(url, headers=headers, method="GET")
+    try:
+        with urlopen(req, timeout=timeout_sec) as response:
+            payload = response.read()
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise MarketDailyError(f"HTTP error {exc.code} for {url}: {detail[:300]}") from exc
+    except URLError as exc:
+        raise MarketDailyError(f"Network error for {url}: {exc.reason}") from exc
+    return payload.decode("utf-8", errors="ignore")
+
+
+def _parse_published_at_from_article_html(url: str | None) -> tuple[datetime | None, str]:
+    canonical = _canonicalize_url(url) or (url or "")
+    if not canonical:
+        return None, "none"
+    cached = _PUBLISH_TIME_CACHE.get(canonical)
+    if cached is not None:
+        return cached
+    if not _publish_time_enrich_enabled():
+        _PUBLISH_TIME_CACHE[canonical] = (None, "none")
+        return None, "none"
+    headers = {"User-Agent": "Mozilla/5.0", "Accept": "text/html,application/xhtml+xml"}
+    timeout_sec = _publish_time_enrich_timeout_ms() / 1000.0
+    try:
+        html = _fetch_text_with_timeout(canonical, headers=headers, timeout_sec=timeout_sec)
+    except Exception:
+        _PUBLISH_TIME_CACHE[canonical] = (None, "none")
+        return None, "none"
+    patterns: list[tuple[re.Pattern[str], str]] = [
+        (re.compile(r'property=["\']article:published_time["\'][^>]*content=["\']([^"\']+)["\']', flags=re.IGNORECASE), "article_meta"),
+        (re.compile(r'property=["\']og:published_time["\'][^>]*content=["\']([^"\']+)["\']', flags=re.IGNORECASE), "og_meta"),
+        (re.compile(r'"datePublished"\s*:\s*"([^"]+)"', flags=re.IGNORECASE), "jsonld"),
+    ]
+    for pattern, source in patterns:
+        m = pattern.search(html)
+        if not m:
+            continue
+        parsed = _parse_datetime_utc(m.group(1))
+        if parsed is None:
+            continue
+        out = (parsed.astimezone(UTC), source)
+        _PUBLISH_TIME_CACHE[canonical] = out
+        return out
+    _PUBLISH_TIME_CACHE[canonical] = (None, "none")
+    return None, "none"
+
+
+def _is_in_session_window(*, published_at_utc: datetime | None, since_utc: datetime, now_utc: datetime) -> bool:
+    if published_at_utc is None:
+        return False
+    return since_utc <= published_at_utc <= now_utc
+
+
+def _enforce_time_integrity(
+    *,
+    candidates: list[_EvidenceCandidate],
+    since_utc: datetime,
+    pct_move: float | None = None,
+    enrich_limit: int | None = None,
+    now_utc: datetime | None = None,
+) -> tuple[list[_EvidenceCandidate], list[str]]:
+    now = now_utc or datetime.now(UTC)
+    limit = enrich_limit if isinstance(enrich_limit, int) and enrich_limit >= 0 else max(6, (_synth_max_results() * 2))
+    out: list[_EvidenceCandidate] = []
+    notes: list[str] = []
+    for idx, item in enumerate(candidates):
+        context = _normalize_whitespace(item.context_text or item.text)
+        if _is_historical_callback(text=context, since_utc=since_utc, now_utc=now):
+            notes.append(f"historical_callback_reject:{item.source_type}:{item.url or 'no-url'}")
+            continue
+
+        published = item.published_at_utc
+        confidence = item.published_confidence
+        source = item.published_source
+        if published is None and idx < limit:
+            enriched_dt, enriched_source = _parse_published_at_from_article_html(item.url)
+            if enriched_dt is not None:
+                published = enriched_dt
+                confidence = "high" if enriched_source in {"article_meta", "og_meta"} else "medium"
+                source = enriched_source
+            elif _require_in_window_dates() and (not _allow_undated_fallback()):
+                notes.append(f"publish_time_reject:undated_unverified:{item.source_type}:{item.url or 'no-url'}")
+                continue
+
+        if _require_in_window_dates() and (published is not None) and (not _is_in_session_window(published_at_utc=published, since_utc=since_utc, now_utc=now)):
+            notes.append(f"publish_time_reject:out_of_window:{item.source_type}:{item.url or 'no-url'}")
+            continue
+
+        if _require_in_window_dates() and (published is None) and (not _allow_undated_fallback()):
+            notes.append(f"publish_time_reject:publish_time_parse_failed:{item.source_type}:{item.url or 'no-url'}")
+            continue
+
+        out.append(
+            replace(
+                item,
+                published_at_utc=published,
+                published_confidence=confidence or "none",
+                published_source=source,
+            )
+        )
+    ranked = sorted(
+        out,
+        key=lambda c: (
+            -_effective_candidate_score(candidate=c, pct_move=pct_move),
+            _source_rank(c.source_type),
+        ),
+    )
+    return ranked, notes
 
 
 def _domain_weight(url: str | None) -> float:
@@ -1953,7 +2226,7 @@ def _is_relevant_ticker_headline(*, text: str, ticker: str, aliases: list[str] |
     return has_cashtag or has_symbol or has_alias
 
 
-def _yahoo_item_title_url_published(item: dict[str, Any]) -> tuple[str, str, datetime | None]:
+def _yahoo_item_title_url_published(item: dict[str, Any]) -> tuple[str, str, datetime | None, str]:
     content = item.get("content") if isinstance(item.get("content"), dict) else {}
     legacy_ts = item.get("providerPublishTime")
     legacy_title = item.get("title")
@@ -1961,10 +2234,13 @@ def _yahoo_item_title_url_published(item: dict[str, Any]) -> tuple[str, str, dat
 
     pub_date_raw = content.get("pubDate") if isinstance(content, dict) else None
     title_raw = content.get("title") if isinstance(content, dict) else None
+    summary_raw = content.get("summary") if isinstance(content, dict) else None
+    desc_raw = content.get("description") if isinstance(content, dict) else None
     click_raw = content.get("clickThroughUrl") if isinstance(content, dict) else None
     canonical_raw = content.get("canonicalUrl") if isinstance(content, dict) else None
 
     title = _normalize_whitespace(str(title_raw or legacy_title or ""))
+    summary = _normalize_whitespace(str(summary_raw or desc_raw or ""))
     url = ""
     if isinstance(click_raw, dict):
         url = str(click_raw.get("url") or "").strip()
@@ -1980,7 +2256,8 @@ def _yahoo_item_title_url_published(item: dict[str, Any]) -> tuple[str, str, dat
         except Exception:
             pass
     published = _parse_datetime_utc(pub_date_raw) or _parse_datetime_utc(legacy_ts)
-    return (title, url, published)
+    context = _normalize_whitespace(f"{title}. {summary}") if summary else title
+    return (title, url, published, context)
 
 
 def _fetch_yahoo_news_candidates(*, ticker: str, aliases: list[str], since_utc: datetime) -> list[_EvidenceCandidate]:
@@ -1993,7 +2270,7 @@ def _fetch_yahoo_news_candidates(*, ticker: str, aliases: list[str], since_utc: 
     for item in news:
         if not isinstance(item, dict):
             continue
-        title, link, published = _yahoo_item_title_url_published(item)
+        title, link, published, context = _yahoo_item_title_url_published(item)
         if not title or not link:
             continue
         if not _is_relevant_ticker_headline(text=title, ticker=ticker, aliases=aliases):
@@ -2017,6 +2294,9 @@ def _fetch_yahoo_news_candidates(*, ticker: str, aliases: list[str], since_utc: 
                 published_at_utc=published,
                 score=score,
                 driver_keywords=_extract_driver_keywords(title),
+                context_text=context,
+                published_confidence=("high" if published is not None else "none"),
+                published_source=("yahoo_feed" if published is not None else None),
             )
         )
     return sorted(out, key=lambda x: (-x.score, -(x.published_at_utc.timestamp() if x.published_at_utc else 0.0)))
@@ -2109,6 +2389,7 @@ def _fetch_web_evidence_google_serp(*, ticker: str, aliases: list[str], since_ut
     max_results = _web_max_results()
     headers = {"Accept": "application/json", "User-Agent": "CoatueClaw/1.0"}
 
+    now_utc = datetime.now(UTC)
     for query in _web_queries_for_ticker(ticker=ticker, aliases=aliases, pct_move=pct_move):
         if len(out) >= max_results:
             break
@@ -2136,6 +2417,7 @@ def _fetch_web_evidence_google_serp(*, ticker: str, aliases: list[str], since_ut
             a_url = str(answer_box.get("link") or answer_box.get("source") or "").strip()
             text = _google_serp_candidate_text(title=a_title, snippet=a_snippet)
             if text:
+                parsed_dt, parsed_conf, parsed_source = _parse_candidate_published_at_from_serp_row(answer_box, now_utc=now_utc)
                 if a_url:
                     a_url = _canonicalize_url(a_url) or a_url
                 if (not a_url) or (a_url not in seen_urls):
@@ -2154,12 +2436,15 @@ def _fetch_web_evidence_google_serp(*, ticker: str, aliases: list[str], since_ut
                                 source_type="web",
                                 text=text,
                                 url=a_url,
-                                published_at_utc=None,
+                                published_at_utc=parsed_dt,
                                 score=max(0.0, min(1.0, score + 0.1)),
                                 driver_keywords=_extract_driver_keywords(text),
                                 canonical_url=a_url,
                                 domain=_domain_from_url(a_url),
                                 backend="google_serp",
+                                context_text=text,
+                                published_confidence=parsed_conf,
+                                published_source=parsed_source,
                             )
                         )
                         if a_url:
@@ -2194,12 +2479,13 @@ def _fetch_web_evidence_google_serp(*, ticker: str, aliases: list[str], since_ut
                     continue
                 if not _is_relevant_ticker_headline(text=text, ticker=ticker, aliases=aliases):
                     continue
+                parsed_dt, parsed_conf, parsed_source = _parse_candidate_published_at_from_serp_row(row, now_utc=now_utc)
                 seen_urls.add(article_url)
                 score = _compute_evidence_score(
                     source_type="web",
                     text=text,
                     url=article_url,
-                    published_at_utc=None,
+                    published_at_utc=parsed_dt,
                     since_utc=since_utc,
                     ticker=ticker,
                     aliases=aliases,
@@ -2211,12 +2497,15 @@ def _fetch_web_evidence_google_serp(*, ticker: str, aliases: list[str], since_ut
                         source_type="web",
                         text=text,
                         url=article_url,
-                        published_at_utc=None,
+                        published_at_utc=parsed_dt,
                         score=score,
                         driver_keywords=_extract_driver_keywords(text),
                         canonical_url=article_url,
                         domain=_domain_from_url(article_url),
                         backend="google_serp",
+                        context_text=text,
+                        published_confidence=parsed_conf,
+                        published_source=parsed_source,
                     )
                 )
                 if len(out) >= max_results:
@@ -2280,6 +2569,7 @@ def _fetch_web_evidence_ddg(*, ticker: str, aliases: list[str], since_utc: datet
                     canonical_url=article_url,
                     domain=_domain_from_url(article_url),
                     backend="ddg_html",
+                    context_text=title,
                 )
             )
             if len(out) >= max_results:
@@ -2912,6 +3202,15 @@ def _collect_evidence_for_ticker(
             rejected.append("web:no_relevant_results")
     allowed_sources = _md_allowed_evidence_sources()
     filtered = [c for c in combined if c.source_type in allowed_sources]
+    filtered = sorted(
+        filtered,
+        key=lambda c: (
+            -_effective_candidate_score(candidate=c, pct_move=pct_move),
+            _source_rank(c.source_type),
+        ),
+    )
+    filtered, time_notes = _enforce_time_integrity(candidates=filtered, since_utc=since_utc, pct_move=pct_move)
+    rejected.extend(time_notes)
     if combined and (not filtered):
         rejected.append("all_sources:filtered_to_empty")
     if not filtered:
@@ -2928,6 +3227,24 @@ def _candidate_debug_entry(*, item: _EvidenceCandidate, pct_move: float | None) 
         f"{item.source_type}({_effective_candidate_score(candidate=item, pct_move=pct_move):.2f}): {item.text} [{item.url or 'no-url'}]",
         180,
     )
+
+
+def _candidate_publish_debug(item: _EvidenceCandidate) -> str:
+    ts = item.published_at_utc.isoformat() if item.published_at_utc is not None else "none"
+    conf = item.published_confidence or "none"
+    src = item.published_source or "none"
+    return _shorten(f"{item.source_type}: {ts} ({conf}:{src}) [{item.url or 'no-url'}]", 220)
+
+
+def _split_time_integrity_notes(notes: list[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    publish: list[str] = []
+    historical: list[str] = []
+    for note in notes:
+        if note.startswith("publish_time_reject:"):
+            publish.append(note)
+        elif note.startswith("historical_callback_reject:"):
+            historical.append(note)
+    return tuple(publish), tuple(historical)
 
 
 def _apply_synth_domain_gate(*, candidates: list[_EvidenceCandidate], max_results: int) -> list[_EvidenceCandidate]:
@@ -2980,13 +3297,16 @@ def _collect_synthesis_candidates(
     normalized = _normalize_evidence_candidates(candidates=merged, ticker=ticker, aliases=aliases)
     allowed = _md_allowed_evidence_sources()
     normalized = [c for c in normalized if c.source_type in allowed]
-    ranked = sorted(
+    normalized = sorted(
         normalized,
         key=lambda c: (
             -_effective_candidate_score(candidate=c, pct_move=pct_move),
             _source_rank(c.source_type),
         ),
     )
+    normalized, time_notes = _enforce_time_integrity(candidates=normalized, since_utc=since_utc, pct_move=pct_move)
+    notes.extend(time_notes)
+    ranked = normalized
     usable = [
         c
         for c in ranked
@@ -3367,6 +3687,20 @@ def _write_artifact(
             lines.append("  - synth_chosen_urls:")
             for url in ev.synth_chosen_urls:
                 lines.append(f"    - {url}")
+        if ev.time_integrity_mode:
+            lines.append(f"  - time_integrity_mode: {ev.time_integrity_mode}")
+        if ev.publish_time_rejections:
+            lines.append("  - publish_time_rejections:")
+            for entry in ev.publish_time_rejections:
+                lines.append(f"    - {entry}")
+        if ev.historical_callback_rejections:
+            lines.append("  - historical_callback_rejections:")
+            for entry in ev.historical_callback_rejections:
+                lines.append(f"    - {entry}")
+        if ev.candidate_publish_times:
+            lines.append("  - candidate_publish_times:")
+            for entry in ev.candidate_publish_times:
+                lines.append(f"    - {entry}")
         if ev.cause_source_type:
             lines.append(f"  - cause_source_type: {ev.cause_source_type}")
         if ev.cause_source_url:
@@ -3444,6 +3778,8 @@ def _build_catalyst_for_mover_simple(*, mover: QuoteSnapshot, slot_name: str, si
         since_utc=since_utc,
         pct_move=mover.pct_move,
     )
+    publish_time_rejections, historical_callback_rejections = _split_time_integrity_notes(rejected)
+    candidate_publish_times = tuple(_candidate_publish_debug(item) for item in considered[:10])
     if not selected:
         rejected = list(rejected) + ["no_candidates"]
         evidence = CatalystEvidence(
@@ -3469,6 +3805,10 @@ def _build_catalyst_for_mover_simple(*, mover: QuoteSnapshot, slot_name: str, si
             synth_candidates_considered=tuple(_candidate_debug_entry(item=c, pct_move=mover.pct_move) for c in considered[:5]),
             synth_candidates_used=(),
             synth_chosen_urls=(),
+            time_integrity_mode="strict_in_window" if _require_in_window_dates() else "off",
+            publish_time_rejections=publish_time_rejections,
+            candidate_publish_times=candidate_publish_times,
+            historical_callback_rejections=historical_callback_rejections,
         )
         return evidence, FALLBACK_CAUSE_LINE
 
@@ -3532,6 +3872,10 @@ def _build_catalyst_for_mover_simple(*, mover: QuoteSnapshot, slot_name: str, si
         synth_candidates_considered=tuple(_candidate_debug_entry(item=c, pct_move=mover.pct_move) for c in considered[:5]),
         synth_candidates_used=tuple(_candidate_debug_entry(item=c, pct_move=mover.pct_move) for c in selected[: _synth_max_results()]),
         synth_chosen_urls=tuple([c.url for c in selected[: _synth_max_results()] if c.url]),
+        time_integrity_mode="strict_in_window" if _require_in_window_dates() else "off",
+        publish_time_rejections=publish_time_rejections,
+        candidate_publish_times=candidate_publish_times,
+        historical_callback_rejections=historical_callback_rejections,
     )
     return evidence, line
 
@@ -3549,6 +3893,7 @@ def _build_catalyst_for_mover_legacy(*, mover: QuoteSnapshot, slot_name: str, si
     else:  # backwards-compatible for patched tests/mocks returning legacy shape
         candidates, rejected = collected  # type: ignore[misc]
         web_backend = None
+    publish_time_rejections, historical_callback_rejections = _split_time_integrity_notes(list(rejected))
     candidates = [c for c in candidates if c.source_type in _md_allowed_evidence_sources()]
     if not candidates:
         rejected = list(rejected) + ["all_sources:empty_after_filter"]
@@ -3680,6 +4025,7 @@ def _build_catalyst_for_mover_legacy(*, mover: QuoteSnapshot, slot_name: str, si
         )
         for c in ranked[:5]
     )
+    candidate_publish_times = tuple(_candidate_publish_debug(item) for item in ranked[:10])
 
     evidence = CatalystEvidence(
         ticker=mover.ticker,
@@ -3714,6 +4060,10 @@ def _build_catalyst_for_mover_legacy(*, mover: QuoteSnapshot, slot_name: str, si
         cause_raw_phrase=cause_raw_phrase,
         cause_final_phrase=cause_final_phrase,
         quality_rejections=quality_rejections,
+        time_integrity_mode="strict_in_window" if _require_in_window_dates() else "off",
+        publish_time_rejections=publish_time_rejections,
+        candidate_publish_times=candidate_publish_times,
+        historical_callback_rejections=historical_callback_rejections,
     )
     return evidence, line
 
@@ -3824,6 +4174,10 @@ def debug_catalyst(*, ticker: str, slot_name: str = "open") -> dict[str, Any]:
         "synth_candidates_considered": list(evidence.synth_candidates_considered),
         "synth_candidates_used": list(evidence.synth_candidates_used),
         "synth_chosen_urls": list(evidence.synth_chosen_urls),
+        "time_integrity_mode": evidence.time_integrity_mode,
+        "publish_time_rejections": list(evidence.publish_time_rejections),
+        "historical_callback_rejections": list(evidence.historical_callback_rejections),
+        "candidate_publish_times": list(evidence.candidate_publish_times),
         "cause_source_type": evidence.cause_source_type,
         "cause_source_url": evidence.cause_source_url,
         "corroborated_sources": evidence.corroborated_sources,
@@ -4590,6 +4944,11 @@ def status() -> dict[str, Any]:
         "synth_source_mode": _synth_source_mode(),
         "synth_domain_gate": _synth_domain_gate(),
         "synth_force_best_guess": _synth_force_best_guess(),
+        "require_in_window_dates": _require_in_window_dates(),
+        "allow_undated_fallback": _allow_undated_fallback(),
+        "reject_historical_callback": _reject_historical_callback(),
+        "publish_time_enrich_enabled": _publish_time_enrich_enabled(),
+        "publish_time_enrich_timeout_ms": _publish_time_enrich_timeout_ms(),
         "reason_quality_mode": _reason_quality_mode(),
         "reason_polish_enabled": _reason_polish_enabled(),
         "reason_polish_model": _reason_polish_model(),

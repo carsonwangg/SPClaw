@@ -3,6 +3,24 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-25, MD time-integrity guardrails for stale-catalyst prevention)
+- Implemented strict candidate time-integrity in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
+  - added env controls:
+    - `COATUE_CLAW_MD_REQUIRE_IN_WINDOW_DATES` (default `1`)
+    - `COATUE_CLAW_MD_ALLOW_UNDATED_FALLBACK` (default `0`)
+    - `COATUE_CLAW_MD_REJECT_HISTORICAL_CALLBACK` (default `1`)
+    - `COATUE_CLAW_MD_PUBLISH_TIME_ENRICH_ENABLED` (default `1`)
+    - `COATUE_CLAW_MD_PUBLISH_TIME_ENRICH_TIMEOUT_MS` (default `1200`)
+  - added publish-time parsing from SERP fields and metadata enrichment from article HTML (`article:published_time`, `og:published_time`, JSON-LD `datePublished`).
+  - applied strict in-window filtering in both `simple_synthesis` and legacy evidence collection paths.
+  - added historical callback rejection for explicit old-date references in headline context (for example “On January 26 ...”).
+  - extended catalyst/debug/artifact diagnostics:
+    - `time_integrity_mode`
+    - `publish_time_rejections`
+    - `candidate_publish_times`
+    - `historical_callback_rejections`
+  - ensured mover links come only from time-valid candidates.
+
 ## Update (2026-02-25, MD simple synthesis catalyst mode)
 - Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
   - Added new default catalyst mode: `COATUE_CLAW_MD_CATALYST_MODE=simple_synthesis`.

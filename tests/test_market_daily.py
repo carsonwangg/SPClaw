@@ -903,7 +903,7 @@ def test_collect_evidence_triggers_web_when_directional_signal_missing(monkeypat
             source_type="web",
             text="Why did CRWD OKTA NET PANW cyber security stocks fall today",
             url="https://stocktwits.com/news/example",
-            published_at_utc=None,
+            published_at_utc=datetime(2026, 2, 20, 11, 0, 0, tzinfo=UTC),
             score=0.7,
             driver_keywords=("anthropic_claude", "cybersecurity_competition"),
         )
@@ -1576,4 +1576,242 @@ def test_simple_hydrate_recap_prepends_key_catalyst(monkeypatch) -> None:
         client=None,
     )
     assert hydrated.bullets
+    assert hydrated.bullets[0].startswith("Key catalyst: Shares rose after")
+
+
+def test_web_candidate_without_publish_time_is_rejected_when_strict_enabled(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.setenv("COATUE_CLAW_MD_REQUIRE_IN_WINDOW_DATES", "1")
+    monkeypatch.setenv("COATUE_CLAW_MD_ALLOW_UNDATED_FALLBACK", "0")
+    monkeypatch.setenv("COATUE_CLAW_MD_PUBLISH_TIME_ENRICH_ENABLED", "0")
+    monkeypatch.setattr("coatue_claw.market_daily._fetch_yahoo_news_candidates", lambda ticker, aliases, since_utc: [])
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._fetch_web_evidence",
+        lambda ticker, aliases, since_utc, pct_move=None: (
+            [
+                md._EvidenceCandidate(
+                    source_type="web",
+                    text="Why Intel (INTC) Stock Is Soaring Today - Yahoo Finance",
+                    url="https://finance.yahoo.com/news/why-intel-intc-stock-soaring-210238819.html",
+                    published_at_utc=None,
+                    score=0.9,
+                )
+            ],
+            "google_serp",
+            [],
+        ),
+    )
+    _, selected, notes, _ = md._collect_synthesis_candidates(
+        ticker="INTC",
+        aliases=["Intel"],
+        since_utc=datetime(2026, 2, 25, 14, 30, 0, tzinfo=UTC),
+        pct_move=0.05,
+    )
+    assert not selected
+    assert any("publish_time_reject:undated_unverified" in n for n in notes)
+
+
+def test_web_candidate_accepts_html_enriched_publish_time_in_window(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    monkeypatch.setenv("COATUE_CLAW_MD_REQUIRE_IN_WINDOW_DATES", "1")
+    monkeypatch.setenv("COATUE_CLAW_MD_ALLOW_UNDATED_FALLBACK", "0")
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._parse_published_at_from_article_html",
+        lambda url: (datetime(2026, 2, 25, 20, 15, 0, tzinfo=UTC), "article_meta"),
+    )
+    rows, notes = md._enforce_time_integrity(
+        candidates=[
+            md._EvidenceCandidate(
+                source_type="web",
+                text="Why Intel (INTC) Stock Is Soaring Today - Yahoo Finance",
+                url="https://finance.yahoo.com/news/why-intel-intc-stock-soaring-210238819.html",
+                published_at_utc=None,
+                score=0.8,
+            )
+        ],
+        since_utc=datetime(2026, 2, 25, 14, 30, 0, tzinfo=UTC),
+        pct_move=0.05,
+        now_utc=datetime(2026, 2, 25, 22, 0, 0, tzinfo=UTC),
+    )
+    assert rows
+    assert rows[0].published_at_utc == datetime(2026, 2, 25, 20, 15, 0, tzinfo=UTC)
+    assert rows[0].published_source == "article_meta"
+    assert not notes
+
+
+def test_out_of_window_candidate_rejected_even_if_high_score(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    monkeypatch.setenv("COATUE_CLAW_MD_REQUIRE_IN_WINDOW_DATES", "1")
+    rows, notes = md._enforce_time_integrity(
+        candidates=[
+            md._EvidenceCandidate(
+                source_type="yahoo_news",
+                text="Morgan Stanley Lifts Intel (INTC) to $41, Flags Near-Term Foundry Constraints",
+                url="https://finance.yahoo.com/news/morgan-stanley-lifts-intel-intc-022928697.html",
+                published_at_utc=datetime(2026, 1, 26, 20, 0, 0, tzinfo=UTC),
+                score=1.0,
+            )
+        ],
+        since_utc=datetime(2026, 2, 25, 14, 30, 0, tzinfo=UTC),
+        pct_move=0.05,
+    )
+    assert not rows
+    assert any("publish_time_reject:out_of_window" in n for n in notes)
+
+
+def test_historical_callback_text_rejected(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    monkeypatch.setenv("COATUE_CLAW_MD_REJECT_HISTORICAL_CALLBACK", "1")
+    rows, notes = md._enforce_time_integrity(
+        candidates=[
+            md._EvidenceCandidate(
+                source_type="yahoo_news",
+                text="Morgan Stanley Lifts Intel (INTC) to $41, Flags Near-Term Foundry Constraints",
+                context_text=(
+                    "Morgan Stanley Lifts Intel. On January 26, Morgan Stanley raised its price target "
+                    "while maintaining Equal Weight."
+                ),
+                url="https://finance.yahoo.com/news/morgan-stanley-lifts-intel-intc-022928697.html",
+                published_at_utc=datetime(2026, 2, 25, 2, 29, 28, tzinfo=UTC),
+                score=0.95,
+            )
+        ],
+        since_utc=datetime(2026, 2, 25, 14, 30, 0, tzinfo=UTC),
+        pct_move=0.05,
+        now_utc=datetime(2026, 2, 25, 22, 0, 0, tzinfo=UTC),
+    )
+    assert not rows
+    assert any("historical_callback_reject" in n for n in notes)
+
+
+def test_intc_regression_prefers_in_window_why_stock_soaring_link(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.setenv("COATUE_CLAW_MD_REQUIRE_IN_WINDOW_DATES", "1")
+    monkeypatch.setenv("COATUE_CLAW_MD_ALLOW_UNDATED_FALLBACK", "0")
+    monkeypatch.setenv("COATUE_CLAW_MD_REJECT_HISTORICAL_CALLBACK", "1")
+    monkeypatch.setenv("COATUE_CLAW_MD_PUBLISH_TIME_ENRICH_ENABLED", "0")
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = datetime(2026, 2, 25, 22, 30, 0, tzinfo=UTC)
+            if tz is None:
+                return base
+            return base.astimezone(tz)
+
+    monkeypatch.setattr("coatue_claw.market_daily.datetime", Frozen)
+
+    stale = md._EvidenceCandidate(
+        source_type="yahoo_news",
+        text="Morgan Stanley Lifts Intel (INTC) to $41, Flags Near-Term Foundry Constraints",
+        context_text=(
+            "On January 26, Morgan Stanley raised its price target on Intel to $41 from $38."
+        ),
+        url="https://finance.yahoo.com/news/morgan-stanley-lifts-intel-intc-022928697.html",
+        published_at_utc=datetime(2026, 2, 25, 2, 29, 28, tzinfo=UTC),
+        score=1.0,
+        published_confidence="high",
+        published_source="yahoo_feed",
+    )
+    fresh = md._EvidenceCandidate(
+        source_type="web",
+        text="Why Is Intel (INTC) Stock Soaring Today - Yahoo Finance",
+        context_text="Why Is Intel (INTC) Stock Soaring Today - Yahoo Finance",
+        url="https://finance.yahoo.com/news/why-intel-intc-stock-soaring-210238819.html",
+        published_at_utc=datetime(2026, 2, 25, 21, 2, 38, tzinfo=UTC),
+        score=0.8,
+        published_confidence="high",
+        published_source="serp_date",
+    )
+    monkeypatch.setattr("coatue_claw.market_daily._fetch_yahoo_news_candidates", lambda ticker, aliases, since_utc: [stale])
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._fetch_web_evidence",
+        lambda ticker, aliases, since_utc, pct_move=None: ([fresh], "google_serp", []),
+    )
+    considered, selected, notes, _ = md._collect_synthesis_candidates(
+        ticker="INTC",
+        aliases=["Intel"],
+        since_utc=datetime(2026, 2, 25, 14, 30, 0, tzinfo=UTC),
+        pct_move=0.057,
+    )
+    assert considered
+    assert selected
+    assert selected[0].url == "https://finance.yahoo.com/news/why-intel-intc-stock-soaring-210238819.html"
+    assert any("historical_callback_reject" in n for n in notes)
+
+
+def test_links_only_emit_time_valid_urls(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    mover = QuoteSnapshot("INTC", 100.0, 105.7, 100.0, 0.057, "2026-02-25T22:00:00+00:00")
+    valid = md._EvidenceCandidate(
+        source_type="web",
+        text="Why Is Intel (INTC) Stock Soaring Today - Yahoo Finance",
+        url="https://finance.yahoo.com/news/why-intel-intc-stock-soaring-210238819.html",
+        published_at_utc=datetime(2026, 2, 25, 21, 2, 38, tzinfo=UTC),
+        score=0.8,
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._collect_synthesis_candidates",
+        lambda ticker, aliases, since_utc, pct_move=None: ([valid], [valid], [], "google_serp"),
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._synthesize_catalyst_phrase_simple",
+        lambda client, ticker, pct_move, candidates: ("Intel gained on fresh catalyst coverage", None),
+    )
+    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: object())
+    evidence, line = md._build_catalyst_for_mover(
+        mover=mover,
+        slot_name="close",
+        since_utc=datetime(2026, 2, 25, 14, 30, 0, tzinfo=UTC),
+    )
+    text = md._build_message(
+        slot_name="close",
+        now_local=datetime(2026, 2, 25, 22, 0, 0, tzinfo=UTC),
+        universe_count=40,
+        movers=[mover],
+        catalyst_rows=[evidence],
+        catalyst_lines=[line],
+    )
+    assert "why-intel-intc-stock-soaring-210238819" in text
+
+
+def test_recap_uses_time_valid_evidence_only(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    row = EarningsRecapRow("INTC", "Intel", "2026-02-25", "after_close", 100.0, 105.7, 100.0, 0.057)
+    fresh = md._EvidenceCandidate(
+        source_type="web",
+        text="Why Is Intel (INTC) Stock Soaring Today - Yahoo Finance",
+        context_text="Why Is Intel (INTC) Stock Soaring Today - Yahoo Finance",
+        url="https://finance.yahoo.com/news/why-intel-intc-stock-soaring-210238819.html",
+        published_at_utc=datetime(2026, 2, 25, 21, 2, 38, tzinfo=UTC),
+        score=0.8,
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._collect_synthesis_candidates",
+        lambda ticker, aliases, since_utc, pct_move=None: ([fresh], [fresh], [], "google_serp"),
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._synthesize_earnings_bullets",
+        lambda client, row: ("Shares traded higher after hours.", "Initial sentiment improved on fresh headlines."),
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._synthesize_catalyst_phrase_simple",
+        lambda client, ticker, pct_move, candidates: ("fresh bullish Intel catalyst headlines", None),
+    )
+    hydrated = md._hydrate_recap_row(
+        row=row,
+        since_utc=datetime(2026, 2, 25, 21, 0, 0, tzinfo=UTC),
+        client=None,
+    )
+    assert hydrated.source_links == ("https://finance.yahoo.com/news/why-intel-intc-stock-soaring-210238819.html",)
     assert hydrated.bullets[0].startswith("Key catalyst: Shares rose after")

@@ -242,6 +242,11 @@ MD (Market Daily) environment controls:
 - `COATUE_CLAW_MD_SYNTH_SOURCE_MODE`: simple synthesis source mix (`google_plus_yahoo` default, `google_only`, `yahoo_only`)
 - `COATUE_CLAW_MD_SYNTH_DOMAIN_GATE`: synthesis domain filter (`soft` default, `quality_only`, `off`)
 - `COATUE_CLAW_MD_SYNTH_FORCE_BEST_GUESS`: when synthesis output is invalid, force deterministic best-guess phrase if any candidate exists (`1` default)
+- `COATUE_CLAW_MD_REQUIRE_IN_WINDOW_DATES`: require candidate publish timestamps to fall within the active session window (`1` default)
+- `COATUE_CLAW_MD_ALLOW_UNDATED_FALLBACK`: allow undated candidates when timestamp validation fails (`0` default)
+- `COATUE_CLAW_MD_REJECT_HISTORICAL_CALLBACK`: reject headlines/summaries that cite materially older event dates (for example “On January 26 ...”) (`1` default)
+- `COATUE_CLAW_MD_PUBLISH_TIME_ENRICH_ENABLED`: attempt publish-time enrichment from article metadata when feed/search timestamp is missing (`1` default)
+- `COATUE_CLAW_MD_PUBLISH_TIME_ENRICH_TIMEOUT_MS`: per-url publish-time enrichment timeout in milliseconds (default `1200`)
 - `COATUE_CLAW_MD_MAX_LOOKBACK_HOURS`: max evidence lookback cap for session windows (default `96`)
 - `COATUE_CLAW_MD_WEB_SEARCH_ENABLED`: enable web fallback retrieval (`1`/`0`, default `1`)
 - `COATUE_CLAW_MD_WEB_SEARCH_BACKEND`: web backend (`google_serp` primary with `ddg_html` fallback, default `google_serp`)
@@ -264,8 +269,9 @@ MD (Market Daily) environment controls:
 - `simple_synthesis` mode behavior:
   - collects top Google web + Yahoo ticker evidence
   - rejects quote-directory/generic wrapper items before synthesis
+  - enforces strict time-integrity filtering for candidate links and catalyst selection
   - synthesizes one catalyst phrase and renders `Shares rose/fell after <cause>.`
-  - falls back only when no usable candidates remain
+  - falls back only when no usable time-valid candidates remain
 - Basket coherence rule: if a confirmed `anthropic_claude_cyber` cause is present for one cybersecurity mover in a run, peer cybersecurity selloff movers reuse that same cause phrase.
 - MD fallback line (when corroboration gate fails): `Likely positioning/flow; no single confirmed catalyst.`
 

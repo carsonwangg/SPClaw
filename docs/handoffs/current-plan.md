@@ -40,6 +40,17 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Market Daily time-integrity guardrails shipped on role branch:
+  - strict in-window date enforcement now gates catalyst evidence and links.
+  - undated candidates are rejected by default unless explicitly allowed.
+  - timestamp enrichment from article metadata is enabled by default for missing publish dates.
+  - explicit historical callback phrasing (for example “On January 26 ...”) is rejected when it predates the current session window.
+  - applies to both simple-synthesis and legacy evidence collection paths, including recap hydration.
+  - debug/artifacts now expose:
+    - `time_integrity_mode`
+    - `publish_time_rejections`
+    - `candidate_publish_times`
+    - `historical_callback_rejections`
 - Market Daily simplified catalyst mode shipped on role branch:
   - default catalyst path is now `simple_synthesis` (`COATUE_CLAW_MD_CATALYST_MODE`).
   - retrieval path is Google web + Yahoo ticker headlines with `top-5` cap (`COATUE_CLAW_MD_SYNTH_MAX_RESULTS=5`).
