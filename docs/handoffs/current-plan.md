@@ -1188,3 +1188,18 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - deterministic backup path remains coherent when LLM is unavailable.
 - Remaining runtime nuance to monitor:
   - when recap evidence hydration yields `none`, citation-handle bullets (`[S1]/[S2]/[S3]`) cannot be emitted for those rows in that run.
+
+## Board Seat - Company-Only Target Enforcement (2026-02-25)
+- Status: implemented on `codex/agent-board-seat`, validated.
+- Completed scope:
+  - strict company-target resolution layer added before target gating/rendering.
+  - default alias map includes `next.js -> Vercel`; env JSON override/extension supported.
+  - non-company target shapes (product/framework forms) are deterministically retargeted via alias first, then fallback rotation/default.
+  - run payload observability now includes `target_original` and `target_resolution_reason`.
+  - `.env.example` updated with:
+    - `COATUE_CLAW_BOARD_SEAT_REQUIRE_COMPANY_TARGET=1`
+    - `COATUE_CLAW_BOARD_SEAT_TARGET_COMPANY_ALIAS_JSON={"next.js":"Vercel"}`
+- Governance unchanged:
+  - high/medium confidence policy, new-target requirement, hard 14-day no-repeat, repitch significance.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `55 passed`.

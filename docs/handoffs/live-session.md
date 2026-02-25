@@ -2586,3 +2586,20 @@ Then confirm bot returns:
   - Limitation in this run: no source evidence rows were available (`evidence: none`), so `[S1]/[S2]` citation handles and `Sources:` URL-handle mapping were not present for ticker bullets.
 - Integrator note:
   - dry-run recap invocation in this environment can stall intermittently; force-run path completed and was used for production verification.
+
+## Update (2026-02-25, board-seat company-only target enforcement)
+- Implemented global company-only target resolution in `src/coatue_claw/board_seat_daily.py` on `codex/agent-board-seat`.
+- New behavior:
+  - `Idea` targets are resolved as company entities before gating/render.
+  - deterministic alias mapping defaults include `next.js -> Vercel` (extendable via env JSON).
+  - non-company product shapes are rejected/retargeted via alias, then rotation/default fallback.
+  - governance gates remain unchanged (new-target requirement, confidence policy, 14-day no-repeat, repitch significance).
+- New observability in run payload rows:
+  - `target_original`
+  - `target_resolution_reason` (`as_extracted`, `alias_mapped`, `fallback_rotation`, `fallback_default`, `invalid_after_resolution`)
+- Additional implementation details:
+  - company-target requirement env reader: `COATUE_CLAW_BOARD_SEAT_REQUIRE_COMPANY_TARGET` (default on)
+  - alias map env reader: `COATUE_CLAW_BOARD_SEAT_TARGET_COMPANY_ALIAS_JSON`
+  - source selection in sanitize path now uses resolved `idea_line` so target-confidence/source classification aligns with final company target.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `55 passed`

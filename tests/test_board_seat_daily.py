@@ -824,6 +824,37 @@ def test_best_effort_target_skips_blocked_target() -> None:
     assert board_seat_daily._is_valid_target_name(company="Anduril", target=target) is True
 
 
+def test_resolve_target_to_company_alias_maps_nextjs_to_vercel() -> None:
+    target, reason = board_seat_daily._resolve_target_to_company(
+        company="OpenAI",
+        extracted_target="Next.js",
+        blocked_keys=set(),
+    )
+    assert target == "Vercel"
+    assert reason == "alias_mapped"
+
+
+def test_resolve_target_to_company_non_company_unknown_falls_back_to_company() -> None:
+    target, reason = board_seat_daily._resolve_target_to_company(
+        company="OpenAI",
+        extracted_target="Browser SDK",
+        blocked_keys=set(),
+    )
+    assert board_seat_daily._is_valid_target_name(company="OpenAI", target=target) is True
+    assert board_seat_daily._is_non_company_target_shape(target) is False
+    assert reason in {"fallback_rotation", "fallback_default"}
+
+
+def test_resolve_target_to_company_valid_company_remains_as_extracted() -> None:
+    target, reason = board_seat_daily._resolve_target_to_company(
+        company="OpenAI",
+        extracted_target="Browserbase",
+        blocked_keys=set(),
+    )
+    assert target == "Browserbase"
+    assert reason == "as_extracted"
+
+
 def test_is_valid_target_name_rejects_pronoun_placeholders() -> None:
     assert board_seat_daily._is_valid_target_name(company="OpenAI", target="This") is False
     assert board_seat_daily._is_valid_target_name(company="OpenAI", target="The") is False
@@ -863,6 +894,32 @@ def test_sanitize_draft_retargets_conceptual_llms_target_to_concrete_company() -
     assert clean.idea_line.startswith("Acquire ")
     assert "LLMs" not in clean.idea_line
     assert board_seat_daily._extract_acquisition_target(clean.idea_line) == "Browserbase"
+
+
+def test_sanitize_draft_alias_maps_nextjs_target_to_vercel() -> None:
+    draft = board_seat_daily.BoardSeatDraft(
+        idea_line="Acquire Next.js to accelerate OpenAI execution in a strategic wedge.",
+        target_does="Next.js provides framework leverage.",
+        why_now="Over the past month, enterprise demand shifted toward developer platform speed.",
+        whats_different="A target can close distribution and execution gaps quickly.",
+        mos_risks="Execution and integration quality remain key risks.",
+        bottom_line="A focused target can improve deployment reliability.",
+        context_current_efforts="OpenAI has active product distribution channels.",
+        context_domain_fit_gaps="Developer ecosystem reach remains a gap.",
+        funding_history="Unknown.",
+        funding_latest_round_backers="Unknown.",
+        source_refs=[
+            board_seat_daily.SourceRef(
+                name_or_publisher="Vercel",
+                title="Towards the AI Cloud: Our Series F",
+                url="https://vercel.com/blog/towards-the-ai-cloud-our-series-f",
+            )
+        ],
+    )
+    clean = board_seat_daily._sanitize_draft(company="OpenAI", draft=draft, funding=_funding(), acquisition_rows=[])
+    assert board_seat_daily._extract_acquisition_target(clean.idea_line) == "Vercel"
+    assert clean.target_original == "Next.js"
+    assert clean.target_resolution_reason == "alias_mapped"
 
 
 def test_high_conf_new_target_gate_allows_medium_new_target_broad_weighted_model(tmp_path: Path, monkeypatch) -> None:
@@ -1027,6 +1084,8 @@ def test_run_once_skips_when_no_high_confidence_new_target(tmp_path: Path, monke
     assert "target_confidence_score" in payload["skipped"][0]
     assert "target_confidence_reasons" in payload["skipped"][0]
     assert "target_validation_reason" in payload["skipped"][0]
+    assert "target_original" in payload["skipped"][0]
+    assert "target_resolution_reason" in payload["skipped"][0]
 
 
 def test_run_once_dry_run_retargets_conceptual_target_before_gating(tmp_path: Path, monkeypatch) -> None:
@@ -1051,7 +1110,13 @@ def test_run_once_dry_run_retargets_conceptual_target_before_gating(tmp_path: Pa
             context_domain_fit_gaps="Browser reliability and controls remain a gap.",
             funding_history="Unknown.",
             funding_latest_round_backers="Unknown.",
-            source_refs=[],
+            source_refs=[
+                board_seat_daily.SourceRef(
+                    name_or_publisher="TechCrunch",
+                    title="Browserbase raises Series A",
+                    url="https://techcrunch.com/browserbase-series-a",
+                )
+            ],
         ),
     )
     payload = board_seat_daily.run_once(force=True, dry_run=True)
@@ -1059,6 +1124,62 @@ def test_run_once_dry_run_retargets_conceptual_target_before_gating(tmp_path: Pa
     assert len(payload["sent"]) == 1
     assert payload["sent"][0]["target"] == "Browserbase"
     assert "LLMs" not in payload["sent"][0]["preview"]
+    assert "target_original" in payload["sent"][0]
+    assert payload["sent"][0]["target_original"]
+    assert payload["sent"][0]["target_resolution_reason"] in {
+        "as_extracted",
+        "alias_mapped",
+        "fallback_rotation",
+        "fallback_default",
+        "invalid_after_resolution",
+    }
+
+
+def test_run_once_dry_run_payload_includes_target_resolution_fields(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_PORTCOS", "OpenAI:openai")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", "0")
+    monkeypatch.setattr(board_seat_daily, "WebClient", None)
+    monkeypatch.setattr(board_seat_daily, "_resolve_funding_snapshot", lambda **kwargs: _funding(source_type="cache"))
+    monkeypatch.setattr(board_seat_daily, "_acquisition_search_rows", lambda **kwargs: [])
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_llm_draft",
+        lambda **kwargs: board_seat_daily.BoardSeatDraft(
+            idea_line="Acquire Next.js to accelerate OpenAI execution in a strategic wedge.",
+            target_does="Next.js provides frontend framework distribution leverage.",
+            why_now="Over the past month, enterprise demand shifted toward developer platform speed.",
+            whats_different="A focused target can close distribution and execution gaps quickly.",
+            mos_risks="Execution and integration quality remain key risks.",
+            bottom_line="A focused target can improve deployment reliability.",
+            context_current_efforts="OpenAI has active product distribution channels.",
+            context_domain_fit_gaps="Developer ecosystem reach remains a gap.",
+            funding_history="Unknown.",
+            funding_latest_round_backers="Unknown.",
+            source_refs=[
+                board_seat_daily.SourceRef(
+                    name_or_publisher="Vercel",
+                    title="Towards the AI Cloud: Our Series F",
+                    url="https://vercel.com/blog/towards-the-ai-cloud-our-series-f",
+                )
+            ],
+        ),
+    )
+    payload = board_seat_daily.run_once(force=True, dry_run=True)
+    assert payload["ok"] is True
+    assert len(payload["sent"]) == 1
+    row = payload["sent"][0]
+    assert "target_original" in row
+    assert row["target_original"]
+    assert "target_resolution_reason" in row
+    assert row["target_resolution_reason"] in {
+        "as_extracted",
+        "alias_mapped",
+        "fallback_rotation",
+        "fallback_default",
+        "invalid_after_resolution",
+    }
 
 
 def test_best_effort_idea_line_rewrites_ai_first_to_concrete_target() -> None:

@@ -184,6 +184,21 @@ TARGET_ROTATION_BY_COMPANY: dict[str, tuple[str, ...]] = {
     "stripe": ("Modern Treasury", "Adyen", "Plaid"),
     "sundayrobotics": ("Viam", "Realtime Robotics", "Skild AI"),
 }
+TARGET_COMPANY_ALIAS_DEFAULTS: dict[str, str] = {
+    "next.js": "Vercel",
+    "nextjs": "Vercel",
+}
+NON_COMPANY_TARGET_SUFFIX_TOKENS = {
+    "sdk",
+    "api",
+    "framework",
+    "library",
+    "cli",
+    "plugin",
+    "toolkit",
+    "module",
+    "runtime",
+}
 FUNDING_CONTEXT_TERMS = {
     "funding",
     "series ",
@@ -373,6 +388,8 @@ class BoardSeatDraft:
     source_refs: list[SourceRef] = field(default_factory=list)
     raw_model_output: str = ""
     rewrite_reasons: list[str] = field(default_factory=list)
+    target_original: str = ""
+    target_resolution_reason: str = "as_extracted"
 
 
 def _utc_now_iso() -> str:
@@ -539,6 +556,35 @@ def _allow_medium_new_target() -> bool:
 
 def _allowed_new_target_confidences() -> set[str]:
     return {"High", "Medium"} if _allow_medium_new_target() else {"High"}
+
+
+def _require_company_target() -> bool:
+    return _env_flag("COATUE_CLAW_BOARD_SEAT_REQUIRE_COMPANY_TARGET", True)
+
+
+def _target_company_aliases() -> dict[str, str]:
+    merged: dict[str, str] = {}
+    for raw_key, raw_value in TARGET_COMPANY_ALIAS_DEFAULTS.items():
+        key = _target_key(raw_key)
+        value = _normalize_source_text(raw_value, max_chars=100)
+        if key and value:
+            merged[key] = value
+    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_TARGET_COMPANY_ALIAS_JSON", "") or "").strip()
+    if not raw:
+        return merged
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return merged
+    if not isinstance(payload, dict):
+        return merged
+    for raw_key, raw_value in payload.items():
+        key = _target_key(str(raw_key or ""))
+        value = _normalize_source_text(str(raw_value or ""), max_chars=100)
+        if not key or not value:
+            continue
+        merged[key] = value
+    return merged
 
 
 def _theme_lookback_days() -> int:
@@ -1234,6 +1280,8 @@ def _high_conf_new_target_gate(
 ) -> dict[str, Any]:
     target = _extract_acquisition_target(draft.idea_line)
     target_key = _target_key(target)
+    target_original = _normalize_source_text(draft.target_original, max_chars=100) or target
+    target_resolution_reason = _normalize_text(draft.target_resolution_reason, max_chars=64) or "as_extracted"
     confidence_payload = _target_confidence_from_draft_sources(company=company, draft=draft)
     confidence = str(confidence_payload.get("confidence") or "Low")
     confidence_score = round(float(confidence_payload.get("score") or 0.0), 4)
@@ -1246,6 +1294,8 @@ def _high_conf_new_target_gate(
             "allow": True,
             "reason": "gate_disabled",
             "target": target,
+            "target_original": target_original,
+            "target_resolution_reason": target_resolution_reason,
             "target_key": target_key,
             "target_confidence": confidence,
             "target_confidence_score": confidence_score,
@@ -1259,6 +1309,8 @@ def _high_conf_new_target_gate(
             "allow": False,
             "reason": "invalid_target",
             "target": target,
+            "target_original": target_original,
+            "target_resolution_reason": target_resolution_reason,
             "target_key": target_key,
             "target_confidence": confidence,
             "target_confidence_score": confidence_score,
@@ -1278,6 +1330,8 @@ def _high_conf_new_target_gate(
         "allow": allow,
         "reason": reason if not allow else "ok",
         "target": target,
+        "target_original": target_original,
+        "target_resolution_reason": target_resolution_reason,
         "target_key": target_key,
         "target_confidence": confidence,
         "target_confidence_score": confidence_score,
@@ -2449,6 +2503,23 @@ def _is_conceptual_target_name(target: str) -> bool:
     return False
 
 
+def _is_non_company_target_shape(target: str) -> bool:
+    candidate = _normalize_text(str(target or ""), max_chars=100).strip()
+    if not candidate:
+        return True
+    lowered = candidate.lower()
+    tokens = [item for item in re.findall(r"[a-z0-9]+", lowered) if item]
+    if lowered.startswith("@"):
+        return True
+    if "/" in candidate:
+        return True
+    if "." in candidate and any(tok in {"js", "ts", "py", "go", "rb"} for tok in tokens):
+        return True
+    if tokens and tokens[-1] in NON_COMPANY_TARGET_SUFFIX_TOKENS:
+        return True
+    return False
+
+
 def _target_validation_reason(*, company: str, target: str) -> str:
     candidate = _normalize_text(str(target or ""), max_chars=100).strip()
     if not candidate:
@@ -2465,6 +2536,8 @@ def _target_validation_reason(*, company: str, target: str) -> str:
         return "target_invalid_term"
     if _is_conceptual_target_name(candidate):
         return "target_conceptual"
+    if _require_company_target() and _is_non_company_target_shape(candidate):
+        return "target_not_company_shape"
     if company and _canonical_target_key(company) == _canonical_target_key(candidate):
         return "target_same_as_company"
     return "ok"
@@ -2537,12 +2610,32 @@ def _target_candidates_from_seed(*, company: str, seed_text: str) -> list[str]:
             continue
         if _is_conceptual_target_name(candidate):
             continue
+        if _require_company_target() and _is_non_company_target_shape(candidate):
+            continue
         out.append(candidate)
     return out
 
 
 def _is_valid_target_name(*, company: str, target: str) -> bool:
     return _target_validation_reason(company=company, target=target) == "ok"
+
+
+def _target_fallback_reason(*, company: str, target: str) -> str:
+    company_key = _slug_company(company)
+    target_key = _target_key(target)
+    if not target_key:
+        return "fallback_default"
+    manual = _manual_default_targets()
+    manual_target = manual.get(company_key, "")
+    if _target_key(manual_target) == target_key:
+        return "fallback_default"
+    rotation_keys = {_target_key(item) for item in TARGET_ROTATION_BY_COMPANY.get(company_key, ())}
+    if target_key in rotation_keys:
+        return "fallback_rotation"
+    default_target = DEFAULT_TARGET_BY_COMPANY.get(company_key, "")
+    if _target_key(default_target) == target_key:
+        return "fallback_default"
+    return "fallback_default"
 
 
 def _default_target_for_company(company: str, *, blocked_keys: set[str] | None = None) -> str:
@@ -2585,17 +2678,60 @@ def _best_effort_target(*, company: str, seed_text: str, blocked_keys: set[str] 
     return _default_target_for_company(company, blocked_keys=blocked)
 
 
+def _resolve_target_to_company(
+    *,
+    company: str,
+    extracted_target: str,
+    blocked_keys: set[str] | None = None,
+) -> tuple[str, str]:
+    blocked = {item for item in (blocked_keys or set()) if item}
+    candidate = _normalize_source_text(extracted_target, max_chars=100)
+    candidate_key = _target_key(candidate)
+    if candidate and candidate_key and (candidate_key not in blocked):
+        if _target_validation_reason(company=company, target=candidate) == "ok":
+            return candidate, "as_extracted"
+    aliases = _target_company_aliases()
+    alias_target = aliases.get(candidate_key, "") if candidate_key else ""
+    alias_target = _normalize_source_text(alias_target, max_chars=100)
+    alias_key = _target_key(alias_target)
+    if alias_target and alias_key and (alias_key not in blocked):
+        if _target_validation_reason(company=company, target=alias_target) == "ok":
+            return alias_target, "alias_mapped"
+    fallback = _best_effort_target(company=company, seed_text=candidate or company, blocked_keys=blocked)
+    fallback_key = _target_key(fallback)
+    if fallback and fallback_key and (fallback_key not in blocked):
+        if _target_validation_reason(company=company, target=fallback) == "ok":
+            return fallback, _target_fallback_reason(company=company, target=fallback)
+    return "", "invalid_after_resolution"
+
+
+def _rewrite_idea_line_target(*, idea_line: str, target: str, replacement: str, company: str) -> str:
+    line = _normalize_line(idea_line)
+    if not line:
+        return line
+    verb = _acquisition_verb(line) or "Acquire"
+    current = _normalize_source_text(target, max_chars=100)
+    updated = _normalize_source_text(replacement, max_chars=100)
+    if current and updated:
+        pattern = re.compile(rf"\b(?:acquihire|acquire)\s+{re.escape(current)}\b", flags=re.IGNORECASE)
+        rewritten = pattern.sub(f"{verb} {updated}", line, count=1)
+        if rewritten != line:
+            return _normalize_line(rewritten)
+    if updated:
+        return _normalize_line(f"{verb} {updated} to accelerate {company} execution in a strategic wedge.")
+    return line
+
+
 def _best_effort_idea_line(*, company: str, seed_text: str, blocked_keys: set[str] | None = None) -> str:
     blocked = {item for item in (blocked_keys or set()) if item}
     extracted = _extract_acquisition_target(seed_text)
-    extracted_key = _target_key(extracted)
-    if extracted_key and extracted_key in blocked:
-        extracted = ""
-    target = (
-        extracted
-        if _is_valid_target_name(company=company, target=extracted)
-        else _best_effort_target(company=company, seed_text=seed_text, blocked_keys=blocked)
+    target, _resolution_reason = _resolve_target_to_company(
+        company=company,
+        extracted_target=extracted,
+        blocked_keys=blocked,
     )
+    if not target:
+        target = _best_effort_target(company=company, seed_text=seed_text, blocked_keys=blocked)
     line = f"Acquire {target} to accelerate {company} execution in a strategic wedge."
     return _normalize_line(line)
 
@@ -2801,18 +2937,69 @@ def _sanitize_draft(
     funding_history, funding_latest_round_backers = _funding_lines_from_snapshot(funding)
     funding_warning = _funding_warning_line(funding)
     acq_rows = acquisition_rows or []
+    seed_text = " ".join(
+        [
+            str(draft.idea_line or ""),
+            str(draft.why_now or ""),
+            str(draft.whats_different or ""),
+            " ".join(str(row.get("title") or "") for row in acq_rows[:2]),
+        ]
+    )
     idea_line = _normalize_line(draft.idea_line)
-    if not _is_valid_acquisition_idea_line(idea_line, company=company):
-        seed_text = " ".join(
-            [
-                str(draft.idea_line or ""),
-                str(draft.why_now or ""),
-                str(draft.whats_different or ""),
-                " ".join(str(row.get("title") or "") for row in acq_rows[:2]),
-            ]
+    target_original = _normalize_source_text(draft.target_original, max_chars=100) or _extract_acquisition_target(
+        str(draft.idea_line or "")
+    )
+    target_resolution_reason = "as_extracted"
+    resolved_target = target_original
+    if _require_company_target():
+        resolved_target, target_resolution_reason = _resolve_target_to_company(
+            company=company,
+            extracted_target=target_original,
+            blocked_keys=set(),
         )
-        idea_line = _best_effort_idea_line(company=company, seed_text=seed_text)
-    source_selection = _build_source_refs(company=company, draft=draft, funding=funding, acquisition_rows=acq_rows)
+    elif resolved_target and _target_validation_reason(company=company, target=resolved_target) != "ok":
+        resolved_target = ""
+        target_resolution_reason = "invalid_after_resolution"
+    if resolved_target:
+        if _is_valid_acquisition_idea_line(idea_line, company=company):
+            idea_line = _rewrite_idea_line_target(
+                idea_line=idea_line,
+                target=target_original,
+                replacement=resolved_target,
+                company=company,
+            )
+        else:
+            idea_line = _normalize_line(f"Acquire {resolved_target} to accelerate {company} execution in a strategic wedge.")
+    else:
+        target_resolution_reason = "invalid_after_resolution"
+    if not _is_valid_acquisition_idea_line(idea_line, company=company):
+        fallback_target = _best_effort_target(company=company, seed_text=seed_text, blocked_keys=set())
+        idea_line = _normalize_line(f"Acquire {fallback_target} to accelerate {company} execution in a strategic wedge.")
+        if _target_validation_reason(company=company, target=fallback_target) == "ok":
+            target_resolution_reason = _target_fallback_reason(company=company, target=fallback_target)
+        else:
+            target_resolution_reason = "invalid_after_resolution"
+    source_draft = BoardSeatDraft(
+        idea_line=idea_line,
+        target_does=draft.target_does,
+        why_now=draft.why_now,
+        whats_different=draft.whats_different,
+        mos_risks=draft.mos_risks,
+        bottom_line=draft.bottom_line,
+        context_current_efforts=draft.context_current_efforts,
+        context_domain_fit_gaps=draft.context_domain_fit_gaps,
+        funding_history=draft.funding_history,
+        funding_latest_round_backers=draft.funding_latest_round_backers,
+        funding_warning=draft.funding_warning,
+        repitch_note=draft.repitch_note,
+        repitch_new_evidence=draft.repitch_new_evidence,
+        source_refs=draft.source_refs,
+        raw_model_output=draft.raw_model_output,
+        rewrite_reasons=draft.rewrite_reasons,
+        target_original=target_original,
+        target_resolution_reason=target_resolution_reason,
+    )
+    source_selection = _build_source_refs(company=company, draft=source_draft, funding=funding, acquisition_rows=acq_rows)
     target = _extract_acquisition_target(idea_line) or _default_target_for_company(company, blocked_keys=set())
     default_why_now = f"Over the past month, buyer demand and deployment urgency in {company}'s category have shifted toward measurable ROI."
     default_whats_different = f"{target} adds a differentiated wedge through product depth, integration velocity, and enterprise execution."
@@ -2840,6 +3027,8 @@ def _sanitize_draft(
         source_refs=source_selection.refs,
         raw_model_output=draft.raw_model_output,
         rewrite_reasons=draft.rewrite_reasons,
+        target_original=target_original,
+        target_resolution_reason=target_resolution_reason,
     )
 
 
@@ -4649,6 +4838,8 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                         "target_confidence_score": target_gate.get("target_confidence_score"),
                         "target_confidence_reasons": target_gate.get("target_confidence_reasons"),
                         "target_validation_reason": target_gate.get("target_validation_reason"),
+                        "target_original": target_gate.get("target_original"),
+                        "target_resolution_reason": target_gate.get("target_resolution_reason"),
                         "is_new_target": bool(target_gate.get("is_new_target")),
                         "gate_reason": target_gate.get("reason"),
                         "matched_posted_at_utc": target_gate.get("matched_posted_at_utc"),
@@ -4688,6 +4879,8 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                     "target_confidence_score": target_gate.get("target_confidence_score"),
                     "target_confidence_reasons": target_gate.get("target_confidence_reasons"),
                     "target_validation_reason": target_gate.get("target_validation_reason"),
+                    "target_original": target_gate.get("target_original"),
+                    "target_resolution_reason": target_gate.get("target_resolution_reason"),
                 }
             )
             continue
@@ -4813,6 +5006,8 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                             "target_confidence_score": target_gate.get("target_confidence_score"),
                             "target_confidence_reasons": target_gate.get("target_confidence_reasons"),
                             "target_validation_reason": target_gate.get("target_validation_reason"),
+                            "target_original": target_gate.get("target_original"),
+                            "target_resolution_reason": target_gate.get("target_resolution_reason"),
                             "is_new_target": bool(target_gate.get("is_new_target")),
                             "gate_reason": target_gate.get("reason"),
                             "matched_posted_at_utc": target_gate.get("matched_posted_at_utc"),
@@ -5014,6 +5209,8 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                             "target_confidence_score": target_gate.get("target_confidence_score"),
                             "target_confidence_reasons": target_gate.get("target_confidence_reasons"),
                             "target_validation_reason": target_gate.get("target_validation_reason"),
+                            "target_original": target_gate.get("target_original"),
+                            "target_resolution_reason": target_gate.get("target_resolution_reason"),
                         }
                     )
                     posted = True
@@ -5096,6 +5293,8 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                         "target_confidence_score": target_gate.get("target_confidence_score"),
                         "target_confidence_reasons": target_gate.get("target_confidence_reasons"),
                         "target_validation_reason": target_gate.get("target_validation_reason"),
+                        "target_original": target_gate.get("target_original"),
+                        "target_resolution_reason": target_gate.get("target_resolution_reason"),
                     }
                 )
                 posted = True
