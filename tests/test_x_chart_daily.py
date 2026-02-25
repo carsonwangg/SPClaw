@@ -15,6 +15,7 @@ from coatue_claw.x_chart_daily import (
     _build_x_title,
     _compute_y_ticks,
     _convention_name,
+    _candidate_pool_for_post,
     _enforce_title_takeaway_roles,
     _fallback_bar_labels,
     _extract_rebuilt_bars_via_vision,
@@ -65,12 +66,11 @@ def test_slot_key_maps_to_latest_elapsed_window() -> None:
     assert _slot_key(now_local=before_open, windows=windows, manual=False) is None
 
 
-def test_store_seeds_fiscal_ai(tmp_path: Path, monkeypatch) -> None:
+def test_store_seeds_priority_sources(tmp_path: Path, monkeypatch) -> None:
     db = tmp_path / "x_chart.sqlite"
     monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(db))
     store = XChartStore()
     handles = {item["handle"] for item in store.list_sources(limit=200)}
-    assert "fiscal_AI".lower() in {h.lower() for h in handles}
     seeded = {h.lower() for h in handles}
     assert "fiscal_AI".lower() in seeded
     assert "stock_unlock" in seeded
@@ -644,6 +644,124 @@ def test_pick_winner_keeps_top_when_alternative_too_low(monkeypatch) -> None:
     picked = _pick_winner(store=_Store(), candidates=[kobeissi, fiscal])
     assert picked is not None
     assert picked.source_id == "KobeissiLetter"
+
+
+def test_pick_winner_enforces_source_repeat_cooldown_with_alternative(monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_SOURCE_REPEAT_DAYS", "3")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_SOURCE_VARIETY_LOOKBACK", "6")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_SOURCE_VARIETY_SCORE_FLOOR", "0.90")
+    recent_iso = datetime.now(UTC).isoformat()
+
+    class _Store:
+        def was_item_posted_recently(self, candidate_key: str, *, days: int = 30) -> bool:
+            return False
+
+        def latest_posts(self, *, limit: int = 10):
+            return [
+                {"source": "x:KobeissiLetter", "posted_at_utc": recent_iso},
+                {"source": "x:fiscal_AI", "posted_at_utc": "2026-01-01T00:00:00+00:00"},
+            ][:limit]
+
+    kobeissi = Candidate(
+        candidate_key="x:top-cooldown",
+        source_type="x",
+        source_id="KobeissiLetter",
+        author="@KobeissiLetter",
+        title="Top cooldown",
+        text="Top cooldown",
+        url="https://x.com/KobeissiLetter/status/top-cooldown",
+        image_url="https://example.com/top-cooldown.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=1200,
+        source_priority=1.3,
+        score=100.0,
+    )
+    fiscal = Candidate(
+        candidate_key="x:alt-cooldown",
+        source_type="x",
+        source_id="fiscal_AI",
+        author="@fiscal_AI",
+        title="Alt cooldown",
+        text="Alt cooldown",
+        url="https://x.com/fiscal_AI/status/alt-cooldown",
+        image_url="https://example.com/alt-cooldown.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=1100,
+        source_priority=1.6,
+        score=93.0,
+    )
+    picked = _pick_winner(store=_Store(), candidates=[kobeissi, fiscal])
+    assert picked is not None
+    assert picked.source_id == "fiscal_AI"
+
+
+def test_pick_winner_allows_recent_source_when_no_alternative(monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_SOURCE_REPEAT_DAYS", "3")
+    recent_iso = datetime.now(UTC).isoformat()
+
+    class _Store:
+        def was_item_posted_recently(self, candidate_key: str, *, days: int = 30) -> bool:
+            return False
+
+        def latest_posts(self, *, limit: int = 10):
+            return [{"source": "x:KobeissiLetter", "posted_at_utc": recent_iso}][:limit]
+
+    kobeissi = Candidate(
+        candidate_key="x:only-cooldown",
+        source_type="x",
+        source_id="KobeissiLetter",
+        author="@KobeissiLetter",
+        title="Only cooldown",
+        text="Only cooldown",
+        url="https://x.com/KobeissiLetter/status/only-cooldown",
+        image_url="https://example.com/only-cooldown.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=900,
+        source_priority=1.3,
+        score=100.0,
+    )
+    picked = _pick_winner(store=_Store(), candidates=[kobeissi])
+    assert picked is not None
+    assert picked.source_id == "KobeissiLetter"
+
+
+def test_candidate_pool_permanently_excludes_posted_candidate(tmp_path: Path, monkeypatch) -> None:
+    db = tmp_path / "x_chart.sqlite"
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(db))
+    store = XChartStore()
+
+    already_posted = Candidate(
+        candidate_key="x:never-repeat-me",
+        source_type="x",
+        source_id="fiscal_AI",
+        author="@fiscal_AI",
+        title="Posted once",
+        text="Posted once",
+        url="https://x.com/fiscal_AI/status/never-repeat-me",
+        image_url="https://example.com/posted.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=200,
+        source_priority=1.6,
+        score=90.0,
+    )
+    fresh = Candidate(
+        candidate_key="x:fresh-candidate",
+        source_type="x",
+        source_id="KobeissiLetter",
+        author="@KobeissiLetter",
+        title="Fresh candidate",
+        text="Fresh candidate",
+        url="https://x.com/KobeissiLetter/status/fresh-candidate",
+        image_url="https://example.com/fresh.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=180,
+        source_priority=1.3,
+        score=88.0,
+    )
+
+    store.record_post(slot_key="manual-20260224-120000", channel="C123", candidate=already_posted)
+    pool = _candidate_pool_for_post(store=store, candidates=[already_posted, fresh])
+    assert [item.candidate_key for item in pool] == ["x:fresh-candidate"]
 
 
 def test_cli_run_post_url_command(monkeypatch, capsys) -> None:

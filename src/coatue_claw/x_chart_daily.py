@@ -2745,6 +2745,14 @@ class XChartStore:
             row = conn.execute("SELECT 1 FROM posted_slots WHERE slot_key = ? LIMIT 1", (slot_key,)).fetchone()
         return row is not None
 
+    def was_item_posted(self, candidate_key: str) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM posted_items WHERE candidate_key = ? LIMIT 1",
+                (candidate_key,),
+            ).fetchone()
+        return row is not None
+
     def was_item_posted_recently(self, candidate_key: str, *, days: int = 30) -> bool:
         cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
         with self._connect() as conn:
@@ -3369,6 +3377,52 @@ def _keyword_score(text: str) -> float:
     return min(14.0, score)
 
 
+def _style_quality_score(*, title: str, text: str) -> float:
+    combined = f"{title} {text}".strip()
+    lower = combined.lower()
+    if not lower:
+        return 0.0
+
+    style_hits = 0
+    for token in INSTITUTIONAL_STYLE_KEYWORDS:
+        if token in lower:
+            style_hits += 1
+
+    quantitative_hits = 0
+    if re.search(r"\b\d+(?:\.\d+)?%\b", lower):
+        quantitative_hits += 1
+    if re.search(r"\b\d+(?:\.\d+)?x\b", lower):
+        quantitative_hits += 1
+    if re.search(r"\b\d{1,3}(?:,\d{3})+\b", lower):
+        quantitative_hits += 1
+    if re.search(r"\b(?:vs|versus|since|through|from|to)\b", lower):
+        quantitative_hits += 1
+
+    promo_hits = 0
+    for token in PROMO_SPAM_KEYWORDS:
+        if token in lower:
+            promo_hits += 1
+
+    cashtag_count = len(re.findall(r"(?<!\w)\$[a-z]{1,8}\b", lower))
+    has_chart_language = any(token in lower for token in CHART_SIGNAL_KEYWORDS)
+
+    bonus = min(8.0, style_hits * 1.15) + min(5.0, quantitative_hits * 1.25)
+
+    penalty = 0.0
+    if promo_hits:
+        penalty += min(14.0, promo_hits * 3.0)
+    if cashtag_count >= 6:
+        penalty += min(12.0, float(cashtag_count - 5) * 2.0)
+    if cashtag_count >= 3 and promo_hits:
+        penalty += 4.0
+    if promo_hits and style_hits == 0:
+        penalty += 3.0
+    if cashtag_count >= 6 and (not has_chart_language):
+        penalty += 4.0
+
+    return max(-24.0, bonus - penalty)
+
+
 def _freshness_score(created_at: str | None) -> float:
     if not created_at:
         return 0.0
@@ -3394,7 +3448,8 @@ def _score_candidate(
     keyword_component = _keyword_score(f"{title} {text}")
     freshness_component = _freshness_score(created_at)
     image_component = 5.0 if has_image else 0.0
-    return priority_component + engagement_component + keyword_component + freshness_component + image_component
+    style_component = _style_quality_score(title=title, text=text)
+    return priority_component + engagement_component + keyword_component + freshness_component + image_component + style_component
 
 
 def _chunks(items: list[str], size: int) -> list[list[str]]:
@@ -3565,28 +3620,85 @@ def _source_variety_params() -> tuple[int, float]:
     return lookback, floor
 
 
+def _source_repeat_days() -> int:
+    raw = (os.environ.get("COATUE_CLAW_X_CHART_SOURCE_REPEAT_DAYS", "3") or "3").strip()
+    try:
+        days = int(raw)
+    except Exception:
+        days = 3
+    return max(0, min(30, days))
+
+
+def _was_candidate_posted_ever(*, store: Any, candidate_key: str) -> bool:
+    posted_ever = getattr(store, "was_item_posted", None)
+    if callable(posted_ever):
+        try:
+            return bool(posted_ever(candidate_key))
+        except Exception:
+            pass
+    posted_recently = getattr(store, "was_item_posted_recently", None)
+    if callable(posted_recently):
+        try:
+            return bool(posted_recently(candidate_key, days=36500))
+        except Exception:
+            return False
+    return False
+
+
 def _pick_winner(*, store: XChartStore, candidates: list[Candidate]) -> Candidate | None:
     pool: list[Candidate] = []
     for item in candidates:
-        if store.was_item_posted_recently(item.candidate_key, days=30):
+        if _was_candidate_posted_ever(store=store, candidate_key=item.candidate_key):
             continue
         pool.append(item)
     if not pool:
         return None
 
-    # Keep "highest score" behavior but add source variety when alternatives are near the top score.
-    top = pool[0]
+    repeat_days = _source_repeat_days()
     lookback, floor = _source_variety_params()
-    recent = store.latest_posts(limit=lookback)
-    counts: dict[str, int] = {}
+    # Pull enough recent rows to support both "variety lookback" and source cooldown checks.
+    recent = store.latest_posts(limit=max(lookback, 120))
+    source_last_posted: dict[str, datetime] = {}
     for row in recent:
+        key = _normalize_posted_source(str(row.get("source") or ""))
+        if not key:
+            continue
+        raw_posted = str(row.get("posted_at_utc") or "").strip()
+        if not raw_posted:
+            continue
+        try:
+            posted_dt = datetime.fromisoformat(raw_posted.replace("Z", "+00:00")).astimezone(UTC)
+        except Exception:
+            continue
+        prev = source_last_posted.get(key)
+        if prev is None or posted_dt > prev:
+            source_last_posted[key] = posted_dt
+
+    selection_pool = pool
+    if repeat_days > 0:
+        cutoff = datetime.now(UTC) - timedelta(days=repeat_days)
+        cooled_pool: list[Candidate] = []
+        for item in pool:
+            source_key = _canonical_handle(item.source_id) or item.source_id.lower()
+            last_posted = source_last_posted.get(source_key)
+            if last_posted is None or last_posted <= cutoff:
+                cooled_pool.append(item)
+        # Avoid starvation: if everything is within cooldown, fall back to normal score ordering.
+        if cooled_pool:
+            selection_pool = cooled_pool
+
+    # Keep "highest score" behavior but add source variety when alternatives are near the top score.
+    top = selection_pool[0]
+    recent_for_variety = recent[:lookback]
+    counts: dict[str, int] = {}
+    for row in recent_for_variety:
         key = _normalize_posted_source(str(row.get("source") or ""))
         if not key:
             continue
         counts[key] = int(counts.get(key, 0)) + 1
 
     score_floor = float(top.score) * float(floor)
-    near_top = [c for c in pool if float(c.score) >= score_floor]
+    near_top = [c for c in selection_pool if float(c.score) >= score_floor]
     if len(near_top) <= 1:
         return top
 
@@ -3736,7 +3848,7 @@ def _style_copy_publish_issues(style_draft: StyleDraft) -> list[str]:
 def _candidate_pool_for_post(*, store: XChartStore, candidates: list[Candidate]) -> list[Candidate]:
     pool: list[Candidate] = []
     for item in sorted(candidates, key=lambda c: float(c.score), reverse=True):
-        if store.was_item_posted_recently(item.candidate_key, days=30):
+        if _was_candidate_posted_ever(store=store, candidate_key=item.candidate_key):
             continue
         pool.append(item)
     return pool
