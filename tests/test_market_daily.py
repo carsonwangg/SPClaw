@@ -1315,7 +1315,10 @@ def test_infer_expected_session_from_history() -> None:
     assert md._infer_expected_session(earnings_history=before_open) == "before_open"
 
 
-def test_synthesize_earnings_bullets_fallback_shape() -> None:
+def test_recap_llm_unavailable_uses_deterministic_backup_bullets(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
     row = EarningsRecapRow(
         ticker="NVDA",
         company="NVIDIA",
@@ -1328,12 +1331,28 @@ def test_synthesize_earnings_bullets_fallback_shape() -> None:
         eps_estimate=1.2,
         reported_eps=1.3,
         surprise_pct=8.0,
-        evidence=("Analysts highlighted stronger datacenter demand.",),
-        source_links=("https://example.com/nvda",),
     )
-    bullets = _synthesize_earnings_bullets(client=None, row=row)
-    assert 2 <= len(bullets) <= 4
-    assert any("Shares traded" in x for x in bullets)
+    anchor = md._EvidenceCandidate(
+        source_type="web",
+        text="NVIDIA rises after data-center demand commentary",
+        context_text="NVIDIA shares climbed after strong datacenter demand commentary and upbeat AI spending signals.",
+        url="https://example.com/nvda-anchor",
+        published_at_utc=datetime(2026, 2, 20, 21, 0, 0, tzinfo=UTC),
+        score=0.86,
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._collect_synthesis_candidates",
+        lambda ticker, aliases, since_utc, pct_move=None: ([anchor], [anchor], [], "google_serp"),
+    )
+    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: None)
+    hydrated = md._hydrate_recap_row(
+        row=row,
+        since_utc=datetime(2026, 2, 20, 20, 0, 0, tzinfo=UTC),
+        client=None,
+    )
+    assert 2 <= len(hydrated.bullets) <= 4
+    assert hydrated.recap_generation_mode == "deterministic_backup"
+    assert any("[S1]" in b for b in hydrated.bullets if "Key catalyst:" in b or "Since regular close" in b)
 
 
 def test_run_earnings_recap_skips_when_no_reporters(tmp_path: Path, monkeypatch) -> None:
@@ -1548,41 +1567,59 @@ def test_simple_synthesis_no_candidates_uses_fallback(monkeypatch) -> None:
     assert "no_candidates" in evidence.rejected_reasons
 
 
-def test_simple_hydrate_recap_prepends_key_catalyst(monkeypatch) -> None:
+def test_recap_end_to_end_uses_anchor_first_for_all_bullets(monkeypatch) -> None:
     from coatue_claw import market_daily as md
 
     monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
     row = EarningsRecapRow("AMD", "AMD", "2026-02-25", "after_close", 100.0, 108.8, 100.0, 0.088)
-    candidates = [
-        md._EvidenceCandidate(
-            source_type="yahoo_news",
-            text="AMD shares rise after Meta signs AI accelerator supply deal",
-            url="https://finance.yahoo.com/news/amd-meta-deal",
-            published_at_utc=datetime(2026, 2, 25, 20, 0, 0, tzinfo=UTC),
-            score=0.8,
-            canonical_url="https://finance.yahoo.com/news/amd-meta-deal",
-            domain="finance.yahoo.com",
-        )
-    ]
+    anchor = md._EvidenceCandidate(
+        source_type="yahoo_news",
+        text="AMD shares rise after Meta signs AI accelerator supply deal",
+        context_text="AMD climbed after Meta agreed to a multi-year AI chip procurement arrangement.",
+        url="https://finance.yahoo.com/news/amd-meta-deal",
+        published_at_utc=datetime(2026, 2, 25, 20, 0, 0, tzinfo=UTC),
+        score=0.8,
+        canonical_url="https://finance.yahoo.com/news/amd-meta-deal",
+        domain="finance.yahoo.com",
+    )
+    support = md._EvidenceCandidate(
+        source_type="web",
+        text="Semiconductor peers rose as AMD deal reinforced AI demand outlook",
+        context_text="Semiconductor peers moved higher as the AMD-Meta agreement reinforced AI infrastructure demand expectations.",
+        url="https://www.reuters.com/world/us/amd-meta-ai-2026-02-25/",
+        published_at_utc=datetime(2026, 2, 25, 20, 30, 0, tzinfo=UTC),
+        score=0.75,
+        canonical_url="https://www.reuters.com/world/us/amd-meta-ai-2026-02-25/",
+        domain="reuters.com",
+    )
     monkeypatch.setattr(
         "coatue_claw.market_daily._collect_synthesis_candidates",
-        lambda ticker, aliases, since_utc, pct_move=None: (candidates, candidates, [], "google_serp"),
+        lambda ticker, aliases, since_utc, pct_move=None: ([anchor, support], [anchor, support], [], "google_serp"),
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._synthesize_catalyst_sentence_simple",
-        lambda client, ticker, pct_move, anchor, supports: ("AMD rose after the Meta AI-chip procurement announcement.", None),
-    )
-    monkeypatch.setattr(
-        "coatue_claw.market_daily._synthesize_earnings_bullets",
-        lambda client, row: ("Shares traded higher after hours.", "Guidance comments were constructive."),
+        "coatue_claw.market_daily._synthesize_earnings_recap_blocks",
+        lambda client, row, anchor, supports: (
+            (
+                "Key catalyst: AMD rose after Meta committed to a multi-year AI chip program [S1].",
+                "Since regular close, shares traded +8.8% as the market priced stronger AI demand [S1].",
+                "Investor sentiment improved with read-through to AI infrastructure beneficiaries [S2].",
+            ),
+            "llm",
+            (),
+        ),
     )
     hydrated = md._hydrate_recap_row(
         row=row,
         since_utc=datetime(2026, 2, 25, 21, 0, 0, tzinfo=UTC),
         client=None,
     )
-    assert hydrated.bullets
-    assert hydrated.bullets[0].startswith("Key catalyst: AMD rose after the Meta AI-chip procurement announcement")
+    assert len(hydrated.bullets) == 3
+    assert all("[S" in b for b in hydrated.bullets)
+    assert hydrated.source_links == (
+        "https://finance.yahoo.com/news/amd-meta-deal",
+        "https://www.reuters.com/world/us/amd-meta-ai-2026-02-25/",
+    )
+    assert hydrated.recap_anchor_url == "https://finance.yahoo.com/news/amd-meta-deal"
 
 
 def test_web_candidate_without_publish_time_is_rejected_when_strict_enabled(monkeypatch) -> None:
@@ -1981,21 +2018,108 @@ def test_recap_uses_time_valid_evidence_only(monkeypatch) -> None:
         "coatue_claw.market_daily._collect_synthesis_candidates",
         lambda ticker, aliases, since_utc, pct_move=None: ([fresh], [fresh], [], "google_serp"),
     )
-    monkeypatch.setattr(
-        "coatue_claw.market_daily._synthesize_earnings_bullets",
-        lambda client, row: ("Shares traded higher after hours.", "Initial sentiment improved on fresh headlines."),
-    )
-    monkeypatch.setattr(
-        "coatue_claw.market_daily._synthesize_catalyst_sentence_simple",
-        lambda client, ticker, pct_move, anchor, supports: ("Intel traded higher as semiconductor sentiment improved after AMD's Meta chip deal.", None),
-    )
+    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: None)
     hydrated = md._hydrate_recap_row(
         row=row,
         since_utc=datetime(2026, 2, 25, 21, 0, 0, tzinfo=UTC),
         client=None,
     )
     assert hydrated.source_links == ("https://finance.yahoo.com/news/why-intel-intc-stock-soaring-210238819.html",)
-    assert hydrated.bullets[0].startswith("Key catalyst: Intel traded higher as semiconductor sentiment improved")
+    assert hydrated.bullets[0].startswith("Key catalyst:")
+    assert hydrated.recap_generation_mode == "deterministic_backup"
+
+
+def test_recap_citations_align_with_used_sources(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    row = EarningsRecapRow("INTC", "Intel", "2026-02-25", "after_close", 100.0, 105.7, 100.0, 0.057)
+    anchor = md._EvidenceCandidate(
+        source_type="yahoo_news",
+        text="Why Is Intel (INTC) Stock Soaring Today",
+        context_text="Intel rose with semis after AMD's deal with Meta.",
+        url="https://finance.yahoo.com/news/why-intel-intc-stock-soaring-210238819.html",
+        published_at_utc=datetime(2026, 2, 25, 21, 2, 38, tzinfo=UTC),
+        score=0.82,
+    )
+    support = md._EvidenceCandidate(
+        source_type="web",
+        text="Semiconductor stocks rise with AMD/Meta deal enthusiasm",
+        context_text="Semiconductor peers moved higher as investors reacted to AMD's AI chip arrangement with Meta.",
+        url="https://www.reuters.com/world/us/amd-meta-ai-chip-deal-2026-02-25/",
+        published_at_utc=datetime(2026, 2, 25, 21, 10, 0, tzinfo=UTC),
+        score=0.78,
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._collect_synthesis_candidates",
+        lambda ticker, aliases, since_utc, pct_move=None: ([anchor, support], [anchor, support], [], "google_serp"),
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._synthesize_earnings_recap_blocks",
+        lambda client, row, anchor, supports: (
+            (
+                "Key catalyst: Intel rose with semiconductor peers after AMD's Meta chip agreement [S1].",
+                "Since regular close, shares traded +5.7% as momentum broadened across semis [S1].",
+                "Investor sentiment improved as market participants leaned into AI supply-chain beneficiaries [S2].",
+            ),
+            "llm",
+            (),
+        ),
+    )
+    hydrated = md._hydrate_recap_row(
+        row=row,
+        since_utc=datetime(2026, 2, 25, 21, 0, 0, tzinfo=UTC),
+        client=object(),
+    )
+    message = md._build_earnings_recap_message(rows=[hydrated], now_local=datetime(2026, 2, 25, 22, 0, 0, tzinfo=UTC))
+    assert all(any(tag in b for tag in ("[S1]", "[S2]")) for b in hydrated.bullets)
+    assert "<https://finance.yahoo.com/news/why-intel-intc-stock-soaring-210238819.html|[S1]>" in message
+    assert "<https://www.reuters.com/world/us/amd-meta-ai-chip-deal-2026-02-25/|[S2]>" in message
+
+
+def test_recap_avoids_wrapper_text_in_bullets(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    wrapper = md._normalize_recap_sentence(
+        "Intel stock price, news, quote & history [S1].",
+        source_count=2,
+        preferred_idx=1,
+    )
+    clean = md._normalize_recap_sentence(
+        "Since regular close, shares traded +5.7% as semiconductor sentiment improved [S1].",
+        source_count=2,
+        preferred_idx=1,
+    )
+    assert wrapper is None
+    assert clean is not None and "quote & history" not in clean.lower()
+
+
+def test_recap_intc_like_sector_sympathy_reason_is_captured(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    row = EarningsRecapRow("INTC", "Intel", "2026-02-25", "after_close", 100.0, 105.7, 100.0, 0.057)
+    anchor = md._EvidenceCandidate(
+        source_type="yahoo_news",
+        text="Why Is Intel (INTC) Stock Soaring Today",
+        context_text=(
+            "Shares of Intel jumped after the semiconductor sector got a boost as AMD secured a major AI chip deal with Meta."
+        ),
+        url="https://finance.yahoo.com/news/why-intel-intc-stock-soaring-210238819.html",
+        published_at_utc=datetime(2026, 2, 25, 21, 2, 38, tzinfo=UTC),
+        score=0.88,
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._collect_synthesis_candidates",
+        lambda ticker, aliases, since_utc, pct_move=None: ([anchor], [anchor], [], "google_serp"),
+    )
+    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: None)
+    hydrated = md._hydrate_recap_row(
+        row=row,
+        since_utc=datetime(2026, 2, 25, 21, 0, 0, tzinfo=UTC),
+        client=None,
+    )
+    assert any("amd" in b.lower() and "meta" in b.lower() for b in hydrated.bullets)
 
 
 def test_simple_synthesis_google_missing_uses_yahoo_only_not_ddg(monkeypatch) -> None:

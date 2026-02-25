@@ -136,6 +136,10 @@ class EarningsRecapRow:
     evidence: tuple[str, ...] = ()
     source_links: tuple[str, ...] = ()
     bullets: tuple[str, ...] = ()
+    recap_anchor_url: str | None = None
+    recap_support_urls: tuple[str, ...] = ()
+    recap_generation_mode: str | None = None
+    recap_quality_rejections: tuple[str, ...] = ()
 
 
 def _utc_now_iso() -> str:
@@ -254,6 +258,24 @@ def _synth_support_count() -> int:
 
 def _md_post_as_is() -> bool:
     raw = (os.environ.get("COATUE_CLAW_MD_POST_AS_IS", "1") or "1").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _recap_support_count() -> int:
+    raw = (os.environ.get("COATUE_CLAW_MD_RECAP_SUPPORT_COUNT", "") or "").strip()
+    if not raw:
+        return _synth_support_count()
+    try:
+        val = int(raw)
+    except Exception:
+        return _synth_support_count()
+    return max(0, min(4, val))
+
+
+def _recap_post_as_is() -> bool:
+    raw = (os.environ.get("COATUE_CLAW_MD_RECAP_POST_AS_IS", "") or "").strip().lower()
+    if not raw:
+        return _md_post_as_is()
     return raw in {"1", "true", "yes", "on"}
 
 
@@ -4954,23 +4976,87 @@ def _collect_reported_today_rows(*, universe: list[QuoteSnapshot], now_utc: date
     return rows
 
 
-def _fallback_earnings_bullets(*, row: EarningsRecapRow) -> tuple[str, ...]:
-    bullets: list[str] = []
-    bullets.append(
-        f"Shares traded {_format_pct(row.since_close_pct)} vs regular close ({row.regular_close if row.regular_close is not None else 'n/a'} -> {row.last_price if row.last_price is not None else 'n/a'})."
-    )
+def _recap_citation(*, source_count: int, preferred_idx: int = 1) -> str:
+    if source_count <= 0:
+        return ""
+    idx = max(1, min(source_count, preferred_idx))
+    return f"[S{idx}]"
+
+
+def _normalize_recap_sentence(text: str, *, source_count: int, preferred_idx: int = 1, max_chars: int = 220) -> str | None:
+    cleaned = _normalize_generated_sentence(text, max_chars=max_chars)
+    if not cleaned:
+        return None
+    if _is_quote_directory_title(cleaned) or _contains_disallowed_reason_phrasing(cleaned):
+        return None
+    refs = re.findall(r"\[S(\d+)\]", cleaned, flags=re.IGNORECASE)
+    if refs:
+        def _keep_ref(match: re.Match[str]) -> str:
+            try:
+                idx = int(match.group(1))
+            except Exception:
+                return ""
+            if source_count > 0 and 1 <= idx <= source_count:
+                return f"[S{idx}]"
+            return ""
+        cleaned = re.sub(r"\[S(\d+)\]", _keep_ref, cleaned, flags=re.IGNORECASE)
+        cleaned = _normalize_whitespace(cleaned)
+    valid_ref_found = False
+    if refs and source_count > 0:
+        for raw in refs:
+            try:
+                idx = int(raw)
+            except Exception:
+                continue
+            if 1 <= idx <= source_count:
+                valid_ref_found = True
+                break
+    if source_count > 0 and not valid_ref_found:
+        marker = _recap_citation(source_count=source_count, preferred_idx=preferred_idx)
+        cleaned = f"{cleaned.rstrip('.')} {marker}."
+    return cleaned
+
+
+def _deterministic_recap_blocks(
+    *,
+    row: EarningsRecapRow,
+    anchor: _EvidenceCandidate | None,
+    supports: list[_EvidenceCandidate],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    source_count = 1 + len(supports) if anchor is not None else 0
+    catalyst_sentence = _sentence_from_anchor_candidate(ticker=row.ticker, anchor=anchor, pct_move=row.since_close_pct)
+    if not catalyst_sentence:
+        catalyst_sentence = "Coverage remains mixed on the immediate driver behind the post-earnings move."
+    key = _normalize_recap_sentence(
+        f"Key catalyst: {catalyst_sentence}",
+        source_count=source_count,
+        preferred_idx=1,
+    ) or f"Key catalyst remains mixed across early coverage. {_recap_citation(source_count=source_count, preferred_idx=1)}".strip()
+
+    reaction = _normalize_recap_sentence(
+        (
+            f"Since regular close, shares traded {_format_pct(row.since_close_pct)} "
+            f"({row.regular_close if row.regular_close is not None else 'n/a'} -> {row.last_price if row.last_price is not None else 'n/a'})."
+        ),
+        source_count=source_count,
+        preferred_idx=1,
+    ) or "Since regular close, shares showed a notable reaction as results and commentary were digested."
+
     if row.reported_eps is not None and row.eps_estimate is not None:
         surprise = f"{row.surprise_pct:.1f}%" if row.surprise_pct is not None else "n/a"
-        bullets.append(
-            f"EPS print was {row.reported_eps:.2f} vs {row.eps_estimate:.2f} est (surprise {surprise})."
+        takeaway_raw = f"EPS was {row.reported_eps:.2f} vs {row.eps_estimate:.2f} estimate (surprise {surprise})."
+    else:
+        takeaway_raw = (
+            "Initial investor sentiment is tracking early headline read-through, with guidance and call commentary driving the next leg."
         )
-    else:
-        bullets.append("Earnings are on deck today; full EPS details are still being digested in early coverage.")
-    if row.evidence:
-        bullets.append(f"Early sentiment reads: {_shorten(row.evidence[0], 150)} [S1].")
-    else:
-        bullets.append("Initial sentiment is mixed; monitor guidance and call commentary for confirmation.")
-    return tuple(bullets[:4])
+    takeaway = _normalize_recap_sentence(
+        takeaway_raw,
+        source_count=source_count,
+        preferred_idx=2 if source_count >= 2 else 1,
+    ) or takeaway_raw
+
+    bullets = tuple([key, reaction, takeaway][:4])
+    return bullets, ("llm_unavailable",)
 
 
 def _openai_client() -> Any | None:
@@ -4999,23 +5085,38 @@ def _extract_bullets(text: str) -> list[str]:
     return out
 
 
-def _synthesize_earnings_bullets(*, client: Any | None, row: EarningsRecapRow) -> tuple[str, ...]:
+def _synthesize_earnings_recap_blocks(
+    *,
+    client: Any | None,
+    row: EarningsRecapRow,
+    anchor: _EvidenceCandidate | None,
+    supports: list[_EvidenceCandidate],
+) -> tuple[tuple[str, ...], str, tuple[str, ...]]:
+    if anchor is None:
+        bullets, rejections = _deterministic_recap_blocks(row=row, anchor=anchor, supports=supports)
+        return bullets, "deterministic_backup", tuple(list(rejections) + ["no_anchor"])
+
+    source_rows = [anchor] + supports
+    source_count = len(source_rows)
     if client is None:
-        return _fallback_earnings_bullets(row=row)
+        bullets, rejections = _deterministic_recap_blocks(row=row, anchor=anchor, supports=supports)
+        return bullets, "deterministic_backup", rejections
+
     source_lines: list[str] = []
-    for idx, entry in enumerate(row.evidence, start=1):
-        url = row.source_links[idx - 1] if idx - 1 < len(row.source_links) else "n/a"
-        source_lines.append(f"[S{idx}] {entry} ({url})")
-    evidence_block = "\n".join(source_lines) if source_lines else "No external evidence candidates were found."
+    for idx, item in enumerate(source_rows, start=1):
+        ts = item.published_at_utc.isoformat() if item.published_at_utc else "unknown"
+        context = _shorten(_normalize_whitespace(item.context_text or item.text), 300)
+        source_lines.append(f"[S{idx}] {context} ({item.url or 'n/a'}) ts={ts}")
+    evidence_block = "\n".join(source_lines)
     prompt = (
-        "Write 2-4 concise bullet points for an equity earnings recap.\n"
-        "Rules:\n"
-        "- Mention how the stock traded versus regular close.\n"
-        "- Mention key earnings/guidance takeaway when available.\n"
-        "- Mention investor sentiment or narrative.\n"
-        "- Keep each bullet <= 28 words.\n"
-        "- Include citations with [S1], [S2], ... where relevant.\n"
-        "- No fluff.\n\n"
+        "Write exactly 3 bullets for an earnings recap using only the provided evidence.\n"
+        "Bullet requirements:\n"
+        "- Bullet 1: key catalyst for the move.\n"
+        "- Bullet 2: reaction since regular close.\n"
+        "- Bullet 3: takeaway on earnings/guidance/investor sentiment.\n"
+        "- Each bullet must be one complete sentence.\n"
+        "- Include citations like [S1], [S2], [S3].\n"
+        "- No links and no markdown headers.\n\n"
         f"Ticker: {row.ticker}\n"
         f"Company: {row.company}\n"
         f"Since close move: {_format_pct(row.since_close_pct)}\n"
@@ -5033,20 +5134,49 @@ def _synthesize_earnings_bullets(*, client: Any | None, row: EarningsRecapRow) -
         response = client.chat.completions.create(
             model=_md_model(),
             messages=[
-                {"role": "system", "content": "You write trader-facing earnings recaps with source-aware precision."},
+                {"role": "system", "content": "You write concise, source-grounded earnings recap bullets for traders."},
                 {"role": "user", "content": prompt},
             ],
         )
         text = str(response.choices[0].message.content or "").strip()  # type: ignore[index]
     except Exception:
-        logger.exception("earnings recap LLM synthesis failed for %s", row.ticker)
-        return _fallback_earnings_bullets(row=row)
-    bullets = _extract_bullets(text)
-    if len(bullets) < 2:
-        return _fallback_earnings_bullets(row=row)
-    if len(bullets) > 4:
-        bullets = bullets[:4]
-    return tuple(bullets)
+        logger.exception("earnings recap block synthesis failed for %s", row.ticker)
+        bullets, rejections = _deterministic_recap_blocks(row=row, anchor=anchor, supports=supports)
+        return bullets, "deterministic_backup", tuple(list(rejections) + ["llm_exception"])
+
+    raw_bullets = _extract_bullets(text)
+    normalized: list[str] = []
+    rejections: list[str] = []
+    for idx, bullet in enumerate(raw_bullets[:4], start=1):
+        normalized_bullet = _normalize_recap_sentence(
+            bullet,
+            source_count=source_count,
+            preferred_idx=min(idx, source_count),
+            max_chars=240,
+        )
+        if normalized_bullet is None:
+            rejections.append(f"invalid_bullet_{idx}")
+            continue
+        normalized.append(normalized_bullet)
+    if len(normalized) < 2:
+        bullets, det_rejections = _deterministic_recap_blocks(row=row, anchor=anchor, supports=supports)
+        return bullets, "deterministic_backup", tuple(rejections + list(det_rejections) + ["llm_insufficient_bullets"])
+
+    if len(normalized) > 4:
+        normalized = normalized[:4]
+    if _recap_post_as_is():
+        return tuple(normalized), "llm", tuple(rejections)
+
+    normalized = [(_normalize_generated_sentence(b, max_chars=220) or b) for b in normalized]
+    return tuple(normalized), "llm", tuple(rejections)
+
+
+# compatibility wrapper for older direct tests/paths; recap runtime now uses _synthesize_earnings_recap_blocks
+def _synthesize_earnings_bullets(*, client: Any | None, row: EarningsRecapRow) -> tuple[str, ...]:
+    anchor = None
+    supports: list[_EvidenceCandidate] = []
+    bullets, _, _ = _synthesize_earnings_recap_blocks(client=client, row=row, anchor=anchor, supports=supports)
+    return bullets
 
 
 def _hydrate_recap_row(*, row: EarningsRecapRow, since_utc: datetime, client: Any | None) -> EarningsRecapRow:
@@ -5077,7 +5207,7 @@ def _hydrate_recap_row(*, row: EarningsRecapRow, since_utc: datetime, client: An
         supports = _pick_support_candidates(
             candidates=candidates,
             anchor=anchor,
-            max_support=_synth_support_count(),
+            max_support=_recap_support_count(),
             pct_move=row.since_close_pct,
         )
         supports = _filter_support_candidates_by_family(supports=supports, family=consensus_family)
@@ -5107,41 +5237,28 @@ def _hydrate_recap_row(*, row: EarningsRecapRow, since_utc: datetime, client: An
         row,
         evidence=tuple(evidence_lines),
         source_links=tuple(links),
+        recap_anchor_url=(anchor.url if anchor is not None else None),
+        recap_support_urls=tuple([x.url for x in supports if x.url]),
     )
-    bullets = list(_synthesize_earnings_bullets(client=client, row=hydrated))
-    if _catalyst_mode() == "simple_synthesis":
-        sentence, llm_error = _synthesize_catalyst_sentence_simple(
-            client=client,
-            ticker=row.ticker,
-            pct_move=row.since_close_pct,
-            anchor=anchor,
-            supports=supports,
-        )
-        if sentence:
-            sentence, _ = _strip_publisher_attribution(sentence)
-        if sentence and consensus_family and consensus_family != "other":
-            sentence_family = _sentence_family(sentence)
-            if sentence_family not in {consensus_family, "other"}:
-                sentence = _sentence_from_anchor_candidate(ticker=row.ticker, anchor=anchor, pct_move=row.since_close_pct)
-                if sentence:
-                    sentence, _ = _strip_publisher_attribution(sentence)
-        if not sentence:
-            sentence = _sentence_from_anchor_candidate(ticker=row.ticker, anchor=anchor, pct_move=row.since_close_pct)
-            if sentence:
-                sentence, _ = _strip_publisher_attribution(sentence)
-                llm_error = None
-        line = _render_simple_reason_line(pct_move=row.since_close_pct, phrase=sentence)
-        if line != FALLBACK_CAUSE_LINE:
-            ref = " [S1]" if links else ""
-            catalyst_bullet = f"Key catalyst: {line.rstrip('.')}{ref}."
-            bullets = [catalyst_bullet] + [b for b in bullets if not b.lower().startswith("key catalyst:")]
-        elif llm_error:
-            bullets.insert(0, "Key catalyst remains mixed across early coverage; monitor updates.")
-    if len(bullets) > 4:
-        bullets = bullets[:4]
-    if len(bullets) < 2:
-        bullets = list(_fallback_earnings_bullets(row=hydrated))
-    return replace(hydrated, bullets=tuple(bullets))
+    bullets, generation_mode, quality_rejections = _synthesize_earnings_recap_blocks(
+        client=client,
+        row=hydrated,
+        anchor=anchor,
+        supports=supports,
+    )
+    cleaned_bullets = tuple([b for b in bullets if _normalize_whitespace(b)])
+    if len(cleaned_bullets) < 2:
+        cleaned_bullets, fallback_rejections = _deterministic_recap_blocks(row=hydrated, anchor=anchor, supports=supports)
+        generation_mode = "deterministic_backup"
+        quality_rejections = tuple(list(quality_rejections) + list(fallback_rejections) + ["empty_or_short_bullets"])
+    if len(cleaned_bullets) > 4:
+        cleaned_bullets = cleaned_bullets[:4]
+    return replace(
+        hydrated,
+        bullets=cleaned_bullets,
+        recap_generation_mode=generation_mode,
+        recap_quality_rejections=quality_rejections,
+    )
 
 
 def _build_earnings_recap_message(*, rows: list[EarningsRecapRow], now_local: datetime) -> str:
@@ -5184,6 +5301,16 @@ def _write_earnings_recap_artifact(*, now_local: datetime, rows: list[EarningsRe
         lines.append(f"  - eps_estimate: `{row.eps_estimate}`")
         lines.append(f"  - reported_eps: `{row.reported_eps}`")
         lines.append(f"  - surprise_pct: `{row.surprise_pct}`")
+        if row.recap_anchor_url:
+            lines.append(f"  - recap_anchor_url: `{row.recap_anchor_url}`")
+        if row.recap_support_urls:
+            lines.append("  - recap_support_urls:")
+            for url in row.recap_support_urls:
+                lines.append(f"    - `{url}`")
+        if row.recap_generation_mode:
+            lines.append(f"  - recap_generation_mode: `{row.recap_generation_mode}`")
+        if row.recap_quality_rejections:
+            lines.append(f"  - recap_quality_rejections: `{', '.join(row.recap_quality_rejections)}`")
         lines.append("  - bullets:")
         for bullet in row.bullets:
             lines.append(f"    - {bullet}")
@@ -5498,6 +5625,8 @@ def status() -> dict[str, Any]:
         "synth_force_best_guess": _synth_force_best_guess(),
         "reason_output_mode": _reason_output_mode(),
         "post_as_is": _md_post_as_is(),
+        "recap_support_count": _recap_support_count(),
+        "recap_post_as_is": _recap_post_as_is(),
         "require_in_window_dates": _require_in_window_dates(),
         "allow_undated_fallback": _allow_undated_fallback(),
         "reject_historical_callback": _reject_historical_callback(),

@@ -245,6 +245,8 @@ MD (Market Daily) environment controls:
 - `COATUE_CLAW_MD_SYNTH_FORCE_BEST_GUESS`: legacy compatibility toggle from earlier phrase-based path (`1` default)
 - `COATUE_CLAW_MD_REASON_OUTPUT_MODE`: simple reason rendering mode (`free_sentence` default, `wrapper` optional rollback)
 - `COATUE_CLAW_MD_POST_AS_IS`: in simple mode, accept non-empty LLM sentence with minimal normalization (`1` default)
+- `COATUE_CLAW_MD_RECAP_SUPPORT_COUNT`: earnings recap support evidence count (defaults to `COATUE_CLAW_MD_SYNTH_SUPPORT_COUNT`; default effective value `2`)
+- `COATUE_CLAW_MD_RECAP_POST_AS_IS`: earnings recap post-as-is policy (defaults to `COATUE_CLAW_MD_POST_AS_IS`; default effective value `1`)
 - `COATUE_CLAW_MD_REQUIRE_IN_WINDOW_DATES`: require candidate publish timestamps to fall within the active session window (`1` default)
 - `COATUE_CLAW_MD_ALLOW_UNDATED_FALLBACK`: allow undated candidates when timestamp validation fails (`0` default)
 - `COATUE_CLAW_MD_REJECT_HISTORICAL_CALLBACK`: reject headlines/summaries that cite materially older event dates (for example “On January 26 ...”) (`1` default)
@@ -280,6 +282,16 @@ MD (Market Daily) environment controls:
   - aligns `[News]/[Web]` links to the anchor/support evidence used for that generated sentence
   - with LLM unavailable/error, uses deterministic anchor-based sentence backup before generic fallback
   - falls back only when no usable time-valid candidates remain
+- `run-earnings-recap` behavior:
+  - uses the same anchor-first evidence policy as simple-synthesis mover reasoning
+  - recap bullets are now generated end-to-end from anchor + support evidence (2–4 bullets total)
+  - every recap bullet is citation-tagged (`[S1]`, `[S2]`, ...) and must align with row `Sources:` links
+  - deterministic recap backup path generates coherent bullets when LLM is unavailable/fails
+  - recap artifacts include observability fields:
+    - `recap_anchor_url`
+    - `recap_support_urls`
+    - `recap_generation_mode`
+    - `recap_quality_rejections`
 - Basket coherence rule: if a confirmed `anthropic_claude_cyber` cause is present for one cybersecurity mover in a run, peer cybersecurity selloff movers reuse that same cause phrase.
 - MD fallback line (when corroboration gate fails): `Likely positioning/flow; no single confirmed catalyst.`
 
