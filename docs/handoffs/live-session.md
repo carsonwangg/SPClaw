@@ -3,6 +3,29 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-25, INTC quote-directory headline hardening)
+- Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
+  - added deterministic quote-directory wrapper detection for both title text and URL path:
+    - title patterns (for example `Stock Price, News, Quote & History`, `latest stock news & headlines`)
+    - URL paths (for example `finance.yahoo.com/quote/*`, `cnbc.com/quotes/*`)
+  - wired wrapper rejection into evidence normalization so those candidates are marked `generic_wrapper`.
+  - blocked quote-directory wrappers in direct-evidence candidate selection.
+  - blocked quote-directory wrappers from cluster/decisive phrase construction.
+  - enforced fallback when a generated phrase still matches quote-directory title patterns.
+- Tests updated in `/Users/carsonwang/worktrees/coatue-claw/market-daily/tests/test_market_daily.py`:
+  - quote-directory title wrapper detection
+  - quote-directory URL wrapper rejection
+  - direct-evidence fallback skips wrapper and chooses causal headline
+  - reason-line fallback for quote-directory phrase
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_market_daily.py` -> `44 passed`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `6 passed`
+
+### Immediate next steps
+1. Integrator merge this branch and deploy on `main`.
+2. On Mac mini, run `make openclaw-market-daily-run-once FORCE=1`.
+3. Verify INTC line is causal or fallback, never `Stock Price, News, Quote & History`.
+
 ## Update (2026-02-24, Market Daily hard removes X evidence/links)
 - Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
   - removed X from MD catalyst evidence collection path; Yahoo news + web only.

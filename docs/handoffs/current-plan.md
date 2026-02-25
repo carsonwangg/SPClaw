@@ -40,6 +40,15 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- INTC quote-directory headline regression hardened for Market Daily:
+  - Added deterministic wrapper detection for quote-directory titles and URLs.
+  - Quote-directory candidates are now marked `generic_wrapper` during normalization.
+  - Direct-evidence fallback now skips quote-directory wrappers.
+  - Cluster/deci-primary phrase generation now suppresses quote-directory wrapper phrases.
+  - If a quote-directory phrase still reaches reason-line construction, output falls back to uncertainty line.
+  - validation:
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_market_daily.py` -> `44 passed`
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `6 passed`
 - Market Daily hard-removed X evidence/links for headline + recap quality:
   - MD catalyst evidence collection now uses only Yahoo news + web evidence.
   - MD mover links now render `[News]`/`[Web]` only; `[X]` is never emitted.

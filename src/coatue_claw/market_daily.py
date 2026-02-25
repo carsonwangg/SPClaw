@@ -1467,11 +1467,53 @@ def _canonicalize_url(url: str | None) -> str | None:
     return urlunparse(cleaned)
 
 
+def _is_quote_directory_title(text: str) -> bool:
+    lower = _normalize_whitespace(text).lower()
+    if not lower:
+        return False
+    if re.search(r"\bnews,\s*quote\s*(?:&|and)\s*history\b", lower):
+        return True
+    if re.search(r"\bstock price,\s*news,\s*quote\s*(?:&|and)\s*history\b", lower):
+        return True
+    if "latest stock news & headlines" in lower or "latest stock news and headlines" in lower:
+        return True
+    if re.search(r"\bfind the latest\b.*\bstock quote,\s*history,\s*news\b", lower):
+        return True
+    if re.search(r"\bstock quote,\s*history,\s*news\b", lower):
+        return True
+    if ("stock price" in lower) and ("quote" in lower) and ("history" in lower):
+        return True
+    return False
+
+
+def _is_quote_directory_url(url: str | None) -> bool:
+    raw = _canonicalize_url(url) or _normalize_whitespace(url or "")
+    if not raw:
+        return False
+    try:
+        parsed = urlparse(raw)
+    except Exception:
+        return False
+    domain = (parsed.netloc or "").lower()
+    path = (parsed.path or "").lower()
+    if (domain == "finance.yahoo.com" or domain.endswith(".finance.yahoo.com")) and path.startswith("/quote/"):
+        return True
+    if (domain == "cnbc.com" or domain.endswith(".cnbc.com")) and path.startswith("/quotes/"):
+        return True
+    return False
+
+
+def _is_quote_directory_wrapper(*, text: str, url: str | None) -> bool:
+    return _is_quote_directory_title(text) or _is_quote_directory_url(url)
+
+
 def _is_generic_headline_wrapper(*, text: str, ticker: str, aliases: list[str]) -> bool:
     if not _generic_headline_blocklist_enabled():
         return False
     cleaned = _normalize_whitespace(text)
     if not cleaned:
+        return True
+    if _is_quote_directory_title(cleaned):
         return True
     lower = cleaned.lower()
     specific_event_terms = (
@@ -1528,7 +1570,14 @@ def _normalize_evidence_candidates(*, candidates: list[_EvidenceCandidate], tick
                 url=canonical_url or item.url,
                 canonical_url=canonical_url or item.url,
                 domain=domain,
-                reject_reason=("generic_wrapper" if _is_generic_headline_wrapper(text=item.text, ticker=ticker, aliases=aliases) else item.reject_reason),
+                reject_reason=(
+                    "generic_wrapper"
+                    if (
+                        _is_generic_headline_wrapper(text=item.text, ticker=ticker, aliases=aliases)
+                        or _is_quote_directory_wrapper(text=item.text, url=(canonical_url or item.url))
+                    )
+                    else item.reject_reason
+                ),
             )
         )
     return deduped
@@ -2283,6 +2332,8 @@ def _pick_direct_cause_candidate(*, candidates: list[_EvidenceCandidate], pct_mo
     for item in candidates:
         if item.source_type not in {"yahoo_news", "web"}:
             continue
+        if _is_quote_directory_wrapper(text=item.text, url=item.url):
+            continue
         if item.reject_reason == "generic_wrapper":
             continue
         if not _is_quality_domain(item.domain or item.url):
@@ -2384,6 +2435,8 @@ def _cluster_event_phrase(cluster: str, *, candidate: _EvidenceCandidate | None)
         return fixed
     if candidate is None:
         return None
+    if _is_quote_directory_wrapper(text=candidate.text, url=candidate.url):
+        return None
     if candidate.reject_reason == "generic_wrapper":
         return None
     cleaned = _strip_non_md_artifacts(candidate.text)
@@ -2447,6 +2500,8 @@ def _build_reason_line_from_phrase(*, pct_move: float | None, phrase: str | None
     cleaned_phrase = _shorten(_strip_non_md_artifacts(phrase).strip(), 90).rstrip(".")
     if not cleaned_phrase:
         return FALLBACK_CAUSE_LINE
+    if _is_quote_directory_title(cleaned_phrase):
+        return FALLBACK_CAUSE_LINE
     if pct_move is not None and pct_move < 0:
         line = f"Shares fell after {cleaned_phrase}."
     elif pct_move is not None and pct_move > 0:
@@ -2461,6 +2516,8 @@ def _build_reason_line_from_phrase(*, pct_move: float | None, phrase: str | None
 
 def _contains_disallowed_reason_phrasing(text: str) -> bool:
     lower = _normalize_whitespace(text).lower()
+    if _is_quote_directory_title(lower):
+        return True
     if ("stock is down today" in lower) or ("news today" in lower):
         return True
     return any(pattern.search(lower) for pattern in _GENERIC_WRAPPER_PATTERNS)
