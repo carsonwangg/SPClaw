@@ -40,6 +40,23 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Board-seat candidate quality recovery shipped on `codex/agent-board-seat`:
+  - confidence model now defaults to `broad_weighted_v1` (deterministic weighted scoring over top target evidence), replacing allowlist-heavy gating behavior.
+  - new confidence env knobs:
+    - `COATUE_CLAW_BOARD_SEAT_CONFIDENCE_MODEL=broad_weighted_v1`
+    - `COATUE_CLAW_BOARD_SEAT_CONFIDENCE_HIGH_MIN=2.40`
+    - `COATUE_CLAW_BOARD_SEAT_CONFIDENCE_MEDIUM_MIN=1.35`
+    - `COATUE_CLAW_BOARD_SEAT_ALLOW_MEDIUM_NEW_TARGET=1`
+  - gate behavior now allows **new + Medium/High** target confidence (still requires new target; 14-day no-repeat unchanged).
+  - conceptual target filtering expanded (`LLMs`, `ROI`, `workflow`, `platform`, etc.) and applied across:
+    - `_is_valid_target_name`
+    - `_is_valid_acquisition_idea_line`
+    - `_target_candidates_from_seed`
+  - run payload observability expanded for target gating diagnostics:
+    - `target_confidence_score`
+    - `target_confidence_reasons`
+    - `target_validation_reason`
+  - no Slack command/interface changes.
 - Board-seat API-key compatibility + health diagnosis update:
   - `_brave_search_api_key()` now reads both `COATUE_CLAW_BRAVE_API_KEY` and `BRAVE_SEARCH_API_KEY`.
   - `.env.example` now documents `COATUE_CLAW_BRAVE_API_KEY`.

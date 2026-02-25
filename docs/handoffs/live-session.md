@@ -3,6 +3,29 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-25, board-seat candidate quality recovery: medium+new + broad weighted scoring)
+- Implemented candidate quality recovery in `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/board_seat_daily.py`:
+  - target confidence model now defaults to `broad_weighted_v1` with deterministic score bands:
+    - `COATUE_CLAW_BOARD_SEAT_CONFIDENCE_HIGH_MIN` (default `2.40`)
+    - `COATUE_CLAW_BOARD_SEAT_CONFIDENCE_MEDIUM_MIN` (default `1.35`)
+  - gate policy now allows **new + High/Medium** when enabled:
+    - `COATUE_CLAW_BOARD_SEAT_ALLOW_MEDIUM_NEW_TARGET=1` (default)
+  - conceptual target rejection expanded via `_is_conceptual_target_name(...)` and shared validation:
+    - blocks generic targets like `LLMs`, `ROI`, `workflow`, `platform`
+    - preserves concrete startup names like `Browserbase`, `Scale AI`
+  - target gate payload now emits debug fields:
+    - `target_confidence_score`
+    - `target_confidence_reasons`
+    - `target_validation_reason`
+  - dry-run/live `sent` + `skipped` rows now include the confidence debug fields for diagnosis.
+- Added/updated regression coverage in `/Users/carsonwang/worktrees/coatue-claw/board-seat/tests/test_board_seat_daily.py`:
+  - conceptual `LLMs` target rejected and retargeted to concrete company
+  - medium-confidence new target allowed under broad weighted model
+  - low-score target still rejected
+  - non-new target still rejected even with high confidence
+  - run-once payload includes new confidence debug fields
+  - run-once dry-run retarget path confirms no conceptual target leakage
+
 ## Update (2026-02-25, board-seat API health + Brave key alias support)
 - Diagnosed OpenAI board-seat quality degradation causes:
   - `COATUE_CLAW_BRAVE_API_KEY` was set, but resolver only read `BRAVE_SEARCH_API_KEY`; Brave rows were effectively disabled.

@@ -136,6 +136,9 @@ SOURCE_POLICY_DEFAULT = "target_first_3_1"
 LOW_SIGNAL_MODE_DEFAULT = "candidate_with_confidence"
 TARGET_CONFIDENCE_LEVELS = {"High", "Medium", "Low"}
 REQUIRED_NEW_TARGET_CONFIDENCE = "High"
+CONFIDENCE_MODEL_DEFAULT = "broad_weighted_v1"
+CONFIDENCE_HIGH_MIN_DEFAULT = 2.40
+CONFIDENCE_MEDIUM_MIN_DEFAULT = 1.35
 DEFAULT_THEME_LOOKBACK_DAYS = 30
 GOOGLE_SERP_ENDPOINT_DEFAULT = "https://serpapi.com/search.json"
 GENERIC_LINE_PATTERNS: tuple[re.Pattern[str], ...] = (
@@ -144,6 +147,11 @@ GENERIC_LINE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bdifferentiate on speed to deployment\b", re.IGNORECASE),
     re.compile(r"\bprioritize one high-conviction move\b", re.IGNORECASE),
     re.compile(r"\bkey risks are execution bandwidth\b", re.IGNORECASE),
+)
+GENERIC_SOURCE_WRAPPER_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\b(stock price|quote(?:\s*&\s*|\s+and\s+)history|news,\s*quote)\b", re.IGNORECASE),
+    re.compile(r"\b(latest stock news(?:\s*&\s*headlines)?)\b", re.IGNORECASE),
+    re.compile(r"\b(roundup|top\s+\d+|best\s+\d+|watchlist)\b", re.IGNORECASE),
 )
 MONTHLY_TREND_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\b(last|past|over)\s+(month|30 days|4 weeks)\b", re.IGNORECASE),
@@ -259,6 +267,24 @@ TARGET_TOKEN_STOPWORDS = {
     "a",
     "an",
     "roi",
+}
+CONCEPTUAL_TARGET_TERMS = {
+    "ai",
+    "llm",
+    "llms",
+    "model",
+    "models",
+    "roi",
+    "automation",
+    "infrastructure",
+    "platform",
+    "platforms",
+    "agent",
+    "agents",
+    "workflow",
+    "workflows",
+    "security",
+    "governance",
 }
 LEGACY_BOARD_SEAT_PATTERNS = (
     "1. idea title",
@@ -483,6 +509,36 @@ def _target_min_total_sources() -> int:
 
 def _low_signal_mode() -> str:
     return (os.environ.get("COATUE_CLAW_BOARD_SEAT_LOW_SIGNAL_MODE", LOW_SIGNAL_MODE_DEFAULT) or LOW_SIGNAL_MODE_DEFAULT).strip()
+
+
+def _target_confidence_model() -> str:
+    return (os.environ.get("COATUE_CLAW_BOARD_SEAT_CONFIDENCE_MODEL", CONFIDENCE_MODEL_DEFAULT) or CONFIDENCE_MODEL_DEFAULT).strip().lower()
+
+
+def _target_confidence_high_min() -> float:
+    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_CONFIDENCE_HIGH_MIN", str(CONFIDENCE_HIGH_MIN_DEFAULT)) or str(CONFIDENCE_HIGH_MIN_DEFAULT)).strip()
+    try:
+        value = float(raw)
+    except Exception:
+        value = CONFIDENCE_HIGH_MIN_DEFAULT
+    return max(0.1, min(10.0, value))
+
+
+def _target_confidence_medium_min() -> float:
+    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_CONFIDENCE_MEDIUM_MIN", str(CONFIDENCE_MEDIUM_MIN_DEFAULT)) or str(CONFIDENCE_MEDIUM_MIN_DEFAULT)).strip()
+    try:
+        value = float(raw)
+    except Exception:
+        value = CONFIDENCE_MEDIUM_MIN_DEFAULT
+    return max(0.0, min(_target_confidence_high_min(), value))
+
+
+def _allow_medium_new_target() -> bool:
+    return _env_flag("COATUE_CLAW_BOARD_SEAT_ALLOW_MEDIUM_NEW_TARGET", True)
+
+
+def _allowed_new_target_confidences() -> set[str]:
+    return {"High", "Medium"} if _allow_medium_new_target() else {"High"}
 
 
 def _theme_lookback_days() -> int:
@@ -1042,7 +1098,14 @@ def _target_search_rows(*, target: str, company: str, snippets: list[str]) -> li
     return rows
 
 
-def _source_selection_confidence(candidates: list[SourceCandidate]) -> str:
+def _is_generic_source_wrapper(text: str) -> bool:
+    normalized = _normalize_line_text(text)
+    if not normalized:
+        return False
+    return any(pattern.search(normalized) for pattern in GENERIC_SOURCE_WRAPPER_PATTERNS)
+
+
+def _legacy_source_selection_confidence(candidates: list[SourceCandidate]) -> str:
     target_candidates = [item for item in candidates if item.category in {"target_direct", "target_proxy"}]
     quality_target = [item for item in target_candidates if item.quality > 0]
     quality_domains = {_source_domain(item.ref.url) for item in quality_target}
@@ -1054,10 +1117,78 @@ def _source_selection_confidence(candidates: list[SourceCandidate]) -> str:
     return "Low"
 
 
-def _target_confidence_from_draft_sources(*, company: str, draft: BoardSeatDraft) -> str:
+def _target_confidence_score(candidates: list[SourceCandidate]) -> dict[str, Any]:
+    considered = list(candidates[:4])
+    if not considered:
+        return {"confidence": "Low", "score": 0.0, "reasons": ["no_candidates"]}
+
+    category_weights = {
+        "target_direct": 1.0,
+        "target_proxy": 0.7,
+        "parent_context": 0.2,
+        "funding_context": -0.4,
+    }
+    score = 0.0
+    reasons: list[str] = []
+    distinct_domains: set[str] = set()
+    for idx, candidate in enumerate(considered, start=1):
+        candidate_score = 0.0
+        cat_weight = category_weights.get(candidate.category, 0.0)
+        candidate_score += cat_weight
+        quality_weight = 0.6 if candidate.quality > 0 else (-0.6 if candidate.quality < 0 else 0.0)
+        candidate_score += quality_weight
+        specificity_weight = 0.4 if candidate.category == "target_direct" else 0.0
+        candidate_score += specificity_weight
+        wrapper_weight = -0.3 if _is_generic_source_wrapper(candidate.text_blob) else 0.0
+        candidate_score += wrapper_weight
+        score += candidate_score
+        domain = _source_domain(candidate.ref.url)
+        if domain:
+            distinct_domains.add(domain)
+        reasons.append(
+            "candidate_{idx}:{category}:cat={cat:+.2f},quality={quality:+.2f},specificity={specificity:+.2f},wrapper={wrapper:+.2f},total={total:+.2f}".format(
+                idx=idx,
+                category=candidate.category,
+                cat=cat_weight,
+                quality=quality_weight,
+                specificity=specificity_weight,
+                wrapper=wrapper_weight,
+                total=candidate_score,
+            )
+        )
+
+    diversity_bonus = min(0.6, max(0.0, 0.2 * float(max(0, len(distinct_domains) - 1))))
+    score += diversity_bonus
+    reasons.append(f"diversity_bonus={diversity_bonus:+.2f} domains={len(distinct_domains)}")
+    high_min = _target_confidence_high_min()
+    medium_min = _target_confidence_medium_min()
+    if score >= high_min:
+        confidence = "High"
+    elif score >= medium_min:
+        confidence = "Medium"
+    else:
+        confidence = "Low"
+    reasons.append(f"thresholds high>={high_min:.2f} medium>={medium_min:.2f} score={score:.2f}")
+    return {
+        "confidence": confidence,
+        "score": round(score, 4),
+        "reasons": reasons,
+    }
+
+
+def _source_selection_confidence(candidates: list[SourceCandidate]) -> str:
+    model = _target_confidence_model()
+    if model != "broad_weighted_v1":
+        return _legacy_source_selection_confidence(candidates)
+    scored = _target_confidence_score(candidates)
+    confidence = str(scored.get("confidence") or "Low")
+    return confidence if confidence in TARGET_CONFIDENCE_LEVELS else "Low"
+
+
+def _target_confidence_from_draft_sources(*, company: str, draft: BoardSeatDraft) -> dict[str, Any]:
     refs = _normalize_source_refs(draft.source_refs, max_items=4)
     if not refs:
-        return "Low"
+        return {"confidence": "Low", "score": 0.0, "reasons": ["no_source_refs"], "model": _target_confidence_model()}
     target, target_tokens = _extract_target_tokens_from_idea(draft.idea_line)
     candidates: list[SourceCandidate] = []
     for ref in refs:
@@ -1076,7 +1207,23 @@ def _target_confidence_from_draft_sources(*, company: str, draft: BoardSeatDraft
                 text_blob=blob,
             )
         )
-    return _source_selection_confidence(candidates)
+    model = _target_confidence_model()
+    if model != "broad_weighted_v1":
+        confidence = _legacy_source_selection_confidence(candidates)
+        baseline_score = {"High": _target_confidence_high_min(), "Medium": _target_confidence_medium_min(), "Low": 0.0}
+        return {
+            "confidence": confidence,
+            "score": round(float(baseline_score.get(confidence, 0.0)), 4),
+            "reasons": ["legacy_model"],
+            "model": model,
+        }
+    scored = _target_confidence_score(candidates)
+    return {
+        "confidence": scored.get("confidence", "Low"),
+        "score": round(float(scored.get("score") or 0.0), 4),
+        "reasons": list(scored.get("reasons") or []),
+        "model": model,
+    }
 
 
 def _high_conf_new_target_gate(
@@ -1087,7 +1234,11 @@ def _high_conf_new_target_gate(
 ) -> dict[str, Any]:
     target = _extract_acquisition_target(draft.idea_line)
     target_key = _target_key(target)
-    confidence = _target_confidence_from_draft_sources(company=company, draft=draft)
+    confidence_payload = _target_confidence_from_draft_sources(company=company, draft=draft)
+    confidence = str(confidence_payload.get("confidence") or "Low")
+    confidence_score = round(float(confidence_payload.get("score") or 0.0), 4)
+    confidence_reasons = [str(item) for item in list(confidence_payload.get("reasons") or [])]
+    target_validation_reason = _target_validation_reason(company=company, target=target)
     latest = store.latest_target_pitch(company=company, target_key=target_key) if target_key else None
     is_new_target = bool(target_key) and latest is None
     if not _require_high_conf_new_target():
@@ -1097,24 +1248,31 @@ def _high_conf_new_target_gate(
             "target": target,
             "target_key": target_key,
             "target_confidence": confidence,
+            "target_confidence_score": confidence_score,
+            "target_confidence_reasons": confidence_reasons,
+            "target_validation_reason": target_validation_reason,
             "is_new_target": is_new_target,
             "matched_posted_at_utc": str((latest or {}).get("posted_at_utc") or ""),
         }
-    if not target_key:
+    if (not target_key) or (target_validation_reason != "ok"):
         return {
             "allow": False,
             "reason": "invalid_target",
             "target": target,
             "target_key": target_key,
             "target_confidence": confidence,
+            "target_confidence_score": confidence_score,
+            "target_confidence_reasons": confidence_reasons,
+            "target_validation_reason": target_validation_reason,
             "is_new_target": is_new_target,
             "matched_posted_at_utc": "",
         }
-    allow = is_new_target and confidence == REQUIRED_NEW_TARGET_CONFIDENCE
+    allowed_confidence = _allowed_new_target_confidences()
+    allow = is_new_target and confidence in allowed_confidence
     reason = ""
     if not is_new_target:
         reason = "target_not_new"
-    elif confidence != REQUIRED_NEW_TARGET_CONFIDENCE:
+    elif confidence not in allowed_confidence:
         reason = "target_confidence_not_high"
     return {
         "allow": allow,
@@ -1122,6 +1280,9 @@ def _high_conf_new_target_gate(
         "target": target,
         "target_key": target_key,
         "target_confidence": confidence,
+        "target_confidence_score": confidence_score,
+        "target_confidence_reasons": confidence_reasons,
+        "target_validation_reason": target_validation_reason,
         "is_new_target": is_new_target,
         "matched_posted_at_utc": str((latest or {}).get("posted_at_utc") or ""),
     }
@@ -2270,7 +2431,46 @@ def _extract_acquisition_target(text: str) -> str:
     return ""
 
 
-def _is_valid_acquisition_idea_line(text: str) -> bool:
+def _is_conceptual_target_name(target: str) -> bool:
+    tokens = [item for item in re.findall(r"[a-z0-9]+", str(target or "").lower()) if item]
+    if not tokens:
+        return True
+    significant_tokens = [
+        tok
+        for tok in tokens
+        if tok not in {"inc", "corp", "corporation", "company", "llc", "ltd", "co", "group", "systems", "technologies"}
+    ]
+    if not significant_tokens:
+        return True
+    if len(significant_tokens) == 1 and significant_tokens[0] in CONCEPTUAL_TARGET_TERMS:
+        return True
+    if all(tok in CONCEPTUAL_TARGET_TERMS for tok in significant_tokens):
+        return True
+    return False
+
+
+def _target_validation_reason(*, company: str, target: str) -> str:
+    candidate = _normalize_text(str(target or ""), max_chars=100).strip()
+    if not candidate:
+        return "empty_target"
+    key = re.sub(r"[^a-z0-9]+", "", candidate.lower())
+    single_token = re.sub(r"[^a-z0-9]+", "", candidate.lower())
+    if single_token in TARGET_TOKEN_STOPWORDS:
+        return "target_stopword"
+    if not key:
+        return "empty_target"
+    if key in ACQ_PLACEHOLDER_TARGETS:
+        return "target_placeholder"
+    if any(term in candidate.lower() for term in ACQ_INVALID_TARGET_TERMS):
+        return "target_invalid_term"
+    if _is_conceptual_target_name(candidate):
+        return "target_conceptual"
+    if company and _canonical_target_key(company) == _canonical_target_key(candidate):
+        return "target_same_as_company"
+    return "ok"
+
+
+def _is_valid_acquisition_idea_line(text: str, *, company: str = "") -> bool:
     line = _normalize_line(text)
     if not line:
         return False
@@ -2279,13 +2479,7 @@ def _is_valid_acquisition_idea_line(text: str) -> bool:
     target = _extract_acquisition_target(line)
     if not target:
         return False
-    target_key = re.sub(r"[^a-z0-9]+", "", target.lower())
-    if target_key in ACQ_PLACEHOLDER_TARGETS:
-        return False
-    lowered_target = target.lower()
-    if any(term in lowered_target for term in ACQ_INVALID_TARGET_TERMS):
-        return False
-    return True
+    return _target_validation_reason(company=company, target=target) == "ok"
 
 
 def _target_candidates_from_seed(*, company: str, seed_text: str) -> list[str]:
@@ -2341,25 +2535,14 @@ def _target_candidates_from_seed(*, company: str, seed_text: str) -> list[str]:
             continue
         if any(term in candidate.lower() for term in ACQ_INVALID_TARGET_TERMS):
             continue
+        if _is_conceptual_target_name(candidate):
+            continue
         out.append(candidate)
     return out
 
 
 def _is_valid_target_name(*, company: str, target: str) -> bool:
-    candidate = _normalize_text(str(target or ""), max_chars=100).strip()
-    if not candidate:
-        return False
-    key = re.sub(r"[^a-z0-9]+", "", candidate.lower())
-    single_token = re.sub(r"[^a-z0-9]+", "", candidate.lower())
-    if single_token in TARGET_TOKEN_STOPWORDS:
-        return False
-    if not key or key in ACQ_PLACEHOLDER_TARGETS:
-        return False
-    if any(term in candidate.lower() for term in ACQ_INVALID_TARGET_TERMS):
-        return False
-    if _canonical_target_key(company) == _canonical_target_key(candidate):
-        return False
-    return True
+    return _target_validation_reason(company=company, target=target) == "ok"
 
 
 def _default_target_for_company(company: str, *, blocked_keys: set[str] | None = None) -> str:
@@ -2619,7 +2802,7 @@ def _sanitize_draft(
     funding_warning = _funding_warning_line(funding)
     acq_rows = acquisition_rows or []
     idea_line = _normalize_line(draft.idea_line)
-    if not _is_valid_acquisition_idea_line(idea_line):
+    if not _is_valid_acquisition_idea_line(idea_line, company=company):
         seed_text = " ".join(
             [
                 str(draft.idea_line or ""),
@@ -4463,6 +4646,9 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                         "target": target_gate.get("target"),
                         "target_key": target_gate.get("target_key"),
                         "target_confidence": target_gate.get("target_confidence"),
+                        "target_confidence_score": target_gate.get("target_confidence_score"),
+                        "target_confidence_reasons": target_gate.get("target_confidence_reasons"),
+                        "target_validation_reason": target_gate.get("target_validation_reason"),
                         "is_new_target": bool(target_gate.get("is_new_target")),
                         "gate_reason": target_gate.get("reason"),
                         "matched_posted_at_utc": target_gate.get("matched_posted_at_utc"),
@@ -4498,6 +4684,10 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                     "funding_confidence_band": _funding_confidence_band(funding),
                     "funding_warning": _funding_warning_line(funding),
                     "target": _extract_acquisition_target(draft.idea_line),
+                    "target_confidence": target_gate.get("target_confidence"),
+                    "target_confidence_score": target_gate.get("target_confidence_score"),
+                    "target_confidence_reasons": target_gate.get("target_confidence_reasons"),
+                    "target_validation_reason": target_gate.get("target_validation_reason"),
                 }
             )
             continue
@@ -4620,6 +4810,9 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                             "target": target_gate.get("target"),
                             "target_key": target_gate.get("target_key"),
                             "target_confidence": target_gate.get("target_confidence"),
+                            "target_confidence_score": target_gate.get("target_confidence_score"),
+                            "target_confidence_reasons": target_gate.get("target_confidence_reasons"),
+                            "target_validation_reason": target_gate.get("target_validation_reason"),
                             "is_new_target": bool(target_gate.get("is_new_target")),
                             "gate_reason": target_gate.get("reason"),
                             "matched_posted_at_utc": target_gate.get("matched_posted_at_utc"),
@@ -4817,6 +5010,10 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                             "repitch_prev_posted_at_utc": repitch_prev_posted_at_utc,
                             "repitch_similarity": round(float(repitch_similarity), 3),
                             "repitch_new_evidence": repitch_new_evidence,
+                            "target_confidence": target_gate.get("target_confidence"),
+                            "target_confidence_score": target_gate.get("target_confidence_score"),
+                            "target_confidence_reasons": target_gate.get("target_confidence_reasons"),
+                            "target_validation_reason": target_gate.get("target_validation_reason"),
                         }
                     )
                     posted = True
@@ -4895,6 +5092,10 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                         "repitch_prev_posted_at_utc": repitch_prev_posted_at_utc,
                         "repitch_similarity": round(float(repitch_similarity), 3),
                         "repitch_new_evidence": repitch_new_evidence,
+                        "target_confidence": target_gate.get("target_confidence"),
+                        "target_confidence_score": target_gate.get("target_confidence_score"),
+                        "target_confidence_reasons": target_gate.get("target_confidence_reasons"),
+                        "target_validation_reason": target_gate.get("target_validation_reason"),
                     }
                 )
                 posted = True
@@ -4983,6 +5184,10 @@ def status() -> dict[str, Any]:
         "target_lock_days": _target_lock_days(),
         "hard_no_repitch_days": HARD_NO_REPITCH_DAYS,
         "require_high_conf_new_target": _require_high_conf_new_target(),
+        "allow_medium_new_target": _allow_medium_new_target(),
+        "target_confidence_model": _target_confidence_model(),
+        "target_confidence_high_min": _target_confidence_high_min(),
+        "target_confidence_medium_min": _target_confidence_medium_min(),
         "portcos": portcos,
         "recent_runs": store.recent_runs(limit=20),
         "pitch_counts": {

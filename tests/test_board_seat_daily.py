@@ -841,6 +841,70 @@ def test_is_valid_target_name_rejects_metric_token() -> None:
     assert board_seat_daily._is_valid_target_name(company="OpenAI", target="ROI") is False
 
 
+def test_is_valid_target_name_rejects_conceptual_llms_token() -> None:
+    assert board_seat_daily._is_valid_target_name(company="OpenAI", target="LLMs") is False
+
+
+def test_sanitize_draft_retargets_conceptual_llms_target_to_concrete_company() -> None:
+    draft = board_seat_daily.BoardSeatDraft(
+        idea_line="Acquire LLMs to accelerate OpenAI execution in a strategic wedge.",
+        target_does="LLMs provide model capability depth.",
+        why_now="Over the past month, enterprise demand shifted toward reliable browser automation.",
+        whats_different="A target can close runtime and governance gaps quickly.",
+        mos_risks="Execution and integration quality remain key risks.",
+        bottom_line="A focused target can improve deployment reliability.",
+        context_current_efforts="OpenAI has active product distribution channels.",
+        context_domain_fit_gaps="Browser reliability and controls remain a gap.",
+        funding_history="Unknown.",
+        funding_latest_round_backers="Unknown.",
+        source_refs=[],
+    )
+    clean = board_seat_daily._sanitize_draft(company="OpenAI", draft=draft, funding=_funding(), acquisition_rows=[])
+    assert clean.idea_line.startswith("Acquire ")
+    assert "LLMs" not in clean.idea_line
+    assert board_seat_daily._extract_acquisition_target(clean.idea_line) == "Browserbase"
+
+
+def test_high_conf_new_target_gate_allows_medium_new_target_broad_weighted_model(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", "1")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_ALLOW_MEDIUM_NEW_TARGET", "1")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_CONFIDENCE_MODEL", "broad_weighted_v1")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_CONFIDENCE_HIGH_MIN", "2.40")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_CONFIDENCE_MEDIUM_MIN", "1.35")
+    store = board_seat_daily.BoardSeatStore()
+    draft = board_seat_daily.BoardSeatDraft(
+        idea_line="Acquire Browserbase to accelerate OpenAI execution in a strategic wedge.",
+        target_does="Browserbase builds enterprise browser automation infrastructure.",
+        why_now="Over the past month, enterprise demand shifted toward reliable browser automation.",
+        whats_different="Browserbase can close runtime and governance gaps quickly.",
+        mos_risks="Execution and integration quality remain key risks.",
+        bottom_line="A focused target can improve deployment reliability.",
+        context_current_efforts="OpenAI has active product distribution channels.",
+        context_domain_fit_gaps="Browser reliability and controls remain a gap.",
+        funding_history="Unknown.",
+        funding_latest_round_backers="Unknown.",
+        source_refs=[
+            board_seat_daily.SourceRef(
+                name_or_publisher="Startup News",
+                title="Browserbase launches enterprise browser automation controls",
+                url="https://startupnews.dev/browserbase-launch-controls",
+            ),
+            board_seat_daily.SourceRef(
+                name_or_publisher="Builder Stack",
+                title="Enterprise browser automation reliability guide",
+                url="https://builderstack.dev/runtime-reliability-guide",
+            ),
+        ],
+    )
+    gate = board_seat_daily._high_conf_new_target_gate(store=store, company="OpenAI", draft=draft)
+    assert gate["allow"] is True
+    assert gate["reason"] == "ok"
+    assert gate["target_confidence"] == "Medium"
+    assert 1.35 <= float(gate["target_confidence_score"]) < 2.4
+
+
 def test_high_conf_new_target_gate_rejects_low_confidence_target(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
@@ -869,6 +933,7 @@ def test_high_conf_new_target_gate_rejects_low_confidence_target(tmp_path: Path,
     assert gate["allow"] is False
     assert gate["reason"] == "target_confidence_not_high"
     assert gate["is_new_target"] is True
+    assert float(gate["target_confidence_score"]) < 1.35
 
 
 def test_high_conf_new_target_gate_rejects_non_new_target_even_if_high_conf(tmp_path: Path, monkeypatch) -> None:
@@ -919,6 +984,7 @@ def test_high_conf_new_target_gate_rejects_non_new_target_even_if_high_conf(tmp_
     assert gate["allow"] is False
     assert gate["reason"] == "target_not_new"
     assert gate["is_new_target"] is False
+    assert gate["target_confidence"] == "High"
 
 
 def test_run_once_skips_when_no_high_confidence_new_target(tmp_path: Path, monkeypatch) -> None:
@@ -926,15 +992,73 @@ def test_run_once_skips_when_no_high_confidence_new_target(tmp_path: Path, monke
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_PORTCOS", "OpenAI:openai")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", "1")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_ALLOW_MEDIUM_NEW_TARGET", "0")
     monkeypatch.setattr(board_seat_daily, "WebClient", None)
     monkeypatch.setattr(board_seat_daily, "_resolve_funding_snapshot", lambda **kwargs: _funding(source_type="cache"))
-    monkeypatch.setattr(board_seat_daily, "_llm_draft", lambda **kwargs: _v6_draft())
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_llm_draft",
+        lambda **kwargs: board_seat_daily.BoardSeatDraft(
+            idea_line="Acquire Browserbase to accelerate OpenAI execution in a strategic wedge.",
+            target_does="Browserbase builds enterprise browser automation infrastructure.",
+            why_now="Over the past month, enterprise demand shifted toward reliable browser automation.",
+            whats_different="Browserbase can close runtime and governance gaps quickly.",
+            mos_risks="Execution and integration quality remain key risks.",
+            bottom_line="A focused target can improve deployment reliability.",
+            context_current_efforts="OpenAI has active product distribution channels.",
+            context_domain_fit_gaps="Browser reliability and controls remain a gap.",
+            funding_history="Unknown.",
+            funding_latest_round_backers="Unknown.",
+            source_refs=[
+                board_seat_daily.SourceRef(
+                    name_or_publisher="Example",
+                    title="Automation trends",
+                    url="https://example.com/automation-trends",
+                )
+            ],
+        ),
+    )
     monkeypatch.setattr(board_seat_daily, "_acquisition_search_rows", lambda **kwargs: [])
     payload = board_seat_daily.run_once(force=True, dry_run=True)
     assert payload["ok"] is True
     assert payload["sent"] == []
     assert payload["skipped"][0]["reason"] == "no_high_confidence_new_target"
     assert payload["skipped"][0]["gate_reason"] in {"target_confidence_not_high", "target_not_new", "invalid_target"}
+    assert "target_confidence_score" in payload["skipped"][0]
+    assert "target_confidence_reasons" in payload["skipped"][0]
+    assert "target_validation_reason" in payload["skipped"][0]
+
+
+def test_run_once_dry_run_retargets_conceptual_target_before_gating(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_PORTCOS", "OpenAI:openai")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", "0")
+    monkeypatch.setattr(board_seat_daily, "WebClient", None)
+    monkeypatch.setattr(board_seat_daily, "_resolve_funding_snapshot", lambda **kwargs: _funding(source_type="cache"))
+    monkeypatch.setattr(board_seat_daily, "_acquisition_search_rows", lambda **kwargs: [])
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_llm_draft",
+        lambda **kwargs: board_seat_daily.BoardSeatDraft(
+            idea_line="Acquire LLMs to accelerate OpenAI execution in a strategic wedge.",
+            target_does="LLMs provide model capability depth.",
+            why_now="Over the past month, enterprise demand shifted toward reliable browser automation.",
+            whats_different="A target can close runtime and governance gaps quickly.",
+            mos_risks="Execution and integration quality remain key risks.",
+            bottom_line="A focused target can improve deployment reliability.",
+            context_current_efforts="OpenAI has active product distribution channels.",
+            context_domain_fit_gaps="Browser reliability and controls remain a gap.",
+            funding_history="Unknown.",
+            funding_latest_round_backers="Unknown.",
+            source_refs=[],
+        ),
+    )
+    payload = board_seat_daily.run_once(force=True, dry_run=True)
+    assert payload["ok"] is True
+    assert len(payload["sent"]) == 1
+    assert payload["sent"][0]["target"] == "Browserbase"
+    assert "LLMs" not in payload["sent"][0]["preview"]
 
 
 def test_best_effort_idea_line_rewrites_ai_first_to_concrete_target() -> None:
