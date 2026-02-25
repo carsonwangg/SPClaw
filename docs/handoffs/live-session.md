@@ -3,6 +3,26 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-25, strict new-target gate: skip when no high-confidence new target)
+- Implemented a strict board-seat post gate in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
+  - posts now require both:
+    - a **new target** (not already in target memory for that company)
+    - **High confidence** target evidence (`High` from source-confidence scoring)
+  - otherwise run result is skipped with:
+    - `reason=no_high_confidence_new_target`
+    - `gate_reason` in `{invalid_target,target_not_new,target_confidence_not_high}`
+- Added env control (default enabled):
+  - `COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET=1`
+- Status payload now surfaces the gate mode:
+  - `require_high_conf_new_target`
+- Added regression coverage in `/Users/carsonwang/CoatueClaw/tests/test_board_seat_daily.py`:
+  - low-confidence target gets rejected by gate
+  - non-new target gets rejected even when source confidence is high
+  - run-once dry-run skips when gate is not satisfied
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `45 passed`
+  - `PYTHONPATH=src python3 -m pytest -q` -> `309 passed`
+
 ## Update (2026-02-25, board-seat target hardening to reject conceptual/non-company targets)
 - Fixed board-seat target selection in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py` so conceptual labels do not pass as acquisition targets:
   - added `aifirst` to `ACQ_PLACEHOLDER_TARGETS`

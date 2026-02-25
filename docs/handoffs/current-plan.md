@@ -40,6 +40,18 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Board-seat posting now enforces strict new-target quality gate across all active portcos:
+  - skip post unless target is both **new** (not already in target memory for that company) and **High confidence** from source scoring.
+  - skip reason contract:
+    - `reason=no_high_confidence_new_target`
+    - `gate_reason` in `{invalid_target,target_not_new,target_confidence_not_high}`
+  - env control added (default enabled):
+    - `COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET=1`
+  - status payload now includes:
+    - `require_high_conf_new_target`
+  - validation:
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `45 passed`
+    - `PYTHONPATH=src python3 -m pytest -q` -> `309 passed`
 - Board-seat target hardening shipped to block conceptual/non-company targets (for example `AI-first`, `ROI`) and possessive/pluralized self-target leakage (for example `OpenAIs` for OpenAI):
   - updated target filters in `src/coatue_claw/board_seat_daily.py` (`ACQ_PLACEHOLDER_TARGETS`, `ACQ_INVALID_TARGET_TERMS`, `TARGET_TOKEN_STOPWORDS`, `_canonical_target_key(...)`).
   - regression tests added in `tests/test_board_seat_daily.py`:

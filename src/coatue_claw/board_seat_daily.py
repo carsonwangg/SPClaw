@@ -135,6 +135,7 @@ ACQ_INVALID_TARGET_TERMS = {"startup team", "domain-adjacent", "internal", "in-h
 SOURCE_POLICY_DEFAULT = "target_first_3_1"
 LOW_SIGNAL_MODE_DEFAULT = "candidate_with_confidence"
 TARGET_CONFIDENCE_LEVELS = {"High", "Medium", "Low"}
+REQUIRED_NEW_TARGET_CONFIDENCE = "High"
 DEFAULT_THEME_LOOKBACK_DAYS = 30
 GOOGLE_SERP_ENDPOINT_DEFAULT = "https://serpapi.com/search.json"
 GENERIC_LINE_PATTERNS: tuple[re.Pattern[str], ...] = (
@@ -526,6 +527,10 @@ def _funding_low_conf_threshold() -> float:
 
 def _funding_warning_mode() -> bool:
     return _env_flag("COATUE_CLAW_BOARD_SEAT_FUNDING_WARNING_MODE", True)
+
+
+def _require_high_conf_new_target() -> bool:
+    return _env_flag("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", True)
 
 
 def _crunchbase_enabled() -> bool:
@@ -1047,6 +1052,79 @@ def _source_selection_confidence(candidates: list[SourceCandidate]) -> str:
     if len(direct_quality) >= _target_min_quality_sources() and len(target_candidates) >= _target_min_total_sources():
         return "Medium"
     return "Low"
+
+
+def _target_confidence_from_draft_sources(*, company: str, draft: BoardSeatDraft) -> str:
+    refs = _normalize_source_refs(draft.source_refs, max_items=4)
+    if not refs:
+        return "Low"
+    target, target_tokens = _extract_target_tokens_from_idea(draft.idea_line)
+    candidates: list[SourceCandidate] = []
+    for ref in refs:
+        blob = " ".join([ref.name_or_publisher, ref.title, ref.url])
+        candidates.append(
+            SourceCandidate(
+                ref=ref,
+                category=_classify_source_ref(
+                    company=company,
+                    target=target,
+                    target_tokens=target_tokens,
+                    text_blob=blob,
+                ),
+                quality=1 if _is_quality_source(ref.url) else (-1 if _is_low_quality_source(ref.url) else 0),
+                score=0.0,
+                text_blob=blob,
+            )
+        )
+    return _source_selection_confidence(candidates)
+
+
+def _high_conf_new_target_gate(
+    *,
+    store: BoardSeatStore,
+    company: str,
+    draft: BoardSeatDraft,
+) -> dict[str, Any]:
+    target = _extract_acquisition_target(draft.idea_line)
+    target_key = _target_key(target)
+    confidence = _target_confidence_from_draft_sources(company=company, draft=draft)
+    latest = store.latest_target_pitch(company=company, target_key=target_key) if target_key else None
+    is_new_target = bool(target_key) and latest is None
+    if not _require_high_conf_new_target():
+        return {
+            "allow": True,
+            "reason": "gate_disabled",
+            "target": target,
+            "target_key": target_key,
+            "target_confidence": confidence,
+            "is_new_target": is_new_target,
+            "matched_posted_at_utc": str((latest or {}).get("posted_at_utc") or ""),
+        }
+    if not target_key:
+        return {
+            "allow": False,
+            "reason": "invalid_target",
+            "target": target,
+            "target_key": target_key,
+            "target_confidence": confidence,
+            "is_new_target": is_new_target,
+            "matched_posted_at_utc": "",
+        }
+    allow = is_new_target and confidence == REQUIRED_NEW_TARGET_CONFIDENCE
+    reason = ""
+    if not is_new_target:
+        reason = "target_not_new"
+    elif confidence != REQUIRED_NEW_TARGET_CONFIDENCE:
+        reason = "target_confidence_not_high"
+    return {
+        "allow": allow,
+        "reason": reason if not allow else "ok",
+        "target": target,
+        "target_key": target_key,
+        "target_confidence": confidence,
+        "is_new_target": is_new_target,
+        "matched_posted_at_utc": str((latest or {}).get("posted_at_utc") or ""),
+    }
 
 
 def _is_generic_line(text: str) -> bool:
@@ -4375,6 +4453,22 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
             )
             funding = _resolve_funding_snapshot(store=store, company=_funding_entity_for_draft(company=company, draft=draft))
             draft = _sanitize_draft(company=company, draft=draft, funding=funding, acquisition_rows=[])
+            target_gate = _high_conf_new_target_gate(store=store, company=company, draft=draft)
+            if not bool(target_gate.get("allow")):
+                result["skipped"].append(
+                    {
+                        "company": company,
+                        "channel_ref": channel_ref,
+                        "reason": "no_high_confidence_new_target",
+                        "target": target_gate.get("target"),
+                        "target_key": target_gate.get("target_key"),
+                        "target_confidence": target_gate.get("target_confidence"),
+                        "is_new_target": bool(target_gate.get("is_new_target")),
+                        "gate_reason": target_gate.get("reason"),
+                        "matched_posted_at_utc": target_gate.get("matched_posted_at_utc"),
+                    }
+                )
+                continue
             message = _render_board_seat_message(company=company, draft=draft)
             format_errors = _validate_rendered_message_format(company=company, message=message)
             if format_errors:
@@ -4515,6 +4609,24 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                 )
                 funding = _resolve_funding_snapshot(store=store, company=_funding_entity_for_draft(company=company, draft=draft))
                 draft = _sanitize_draft(company=company, draft=draft, funding=funding, acquisition_rows=[])
+                target_gate = _high_conf_new_target_gate(store=store, company=company, draft=draft)
+                if not bool(target_gate.get("allow")):
+                    result["skipped"].append(
+                        {
+                            "company": company,
+                            "channel_ref": channel_ref,
+                            "channel_id": channel_id,
+                            "reason": "no_high_confidence_new_target",
+                            "target": target_gate.get("target"),
+                            "target_key": target_gate.get("target_key"),
+                            "target_confidence": target_gate.get("target_confidence"),
+                            "is_new_target": bool(target_gate.get("is_new_target")),
+                            "gate_reason": target_gate.get("reason"),
+                            "matched_posted_at_utc": target_gate.get("matched_posted_at_utc"),
+                        }
+                    )
+                    posted = True
+                    break
                 message = _render_board_seat_message(company=company, draft=draft)
                 format_errors = _validate_rendered_message_format(company=company, message=message)
                 if format_errors:
@@ -4870,6 +4982,7 @@ def status() -> dict[str, Any]:
         "run_date_local": _today_key(),
         "target_lock_days": _target_lock_days(),
         "hard_no_repitch_days": HARD_NO_REPITCH_DAYS,
+        "require_high_conf_new_target": _require_high_conf_new_target(),
         "portcos": portcos,
         "recent_runs": store.recent_runs(limit=20),
         "pitch_counts": {

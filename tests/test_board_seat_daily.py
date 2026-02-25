@@ -268,6 +268,7 @@ def test_repeat_guardrail_v5_still_blocks_duplicate_without_significant_change(t
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_TZ", "UTC")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_PORTCOS", "Anduril:anduril")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_BACKFILL_ENABLED", "0")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", "0")
     monkeypatch.setattr(board_seat_daily, "_slack_tokens", lambda: ["xoxb-test"])
 
     store = board_seat_daily.BoardSeatStore()
@@ -344,6 +345,7 @@ def test_repeat_guardrail_v5_allows_with_significant_change(tmp_path: Path, monk
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_TZ", "UTC")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_PORTCOS", "Anduril:anduril")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_BACKFILL_ENABLED", "0")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", "0")
     monkeypatch.setattr(board_seat_daily, "_slack_tokens", lambda: ["xoxb-test"])
 
     store = board_seat_daily.BoardSeatStore()
@@ -431,6 +433,7 @@ def test_repeat_with_significant_change_rejected_when_assessment_not_exceptional
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_TZ", "UTC")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_PORTCOS", "Anduril:anduril")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_BACKFILL_ENABLED", "0")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", "0")
     monkeypatch.setattr(board_seat_daily, "_slack_tokens", lambda: ["xoxb-test"])
 
     store = board_seat_daily.BoardSeatStore()
@@ -525,6 +528,7 @@ def test_run_once_dry_run_v5_contains_hierarchy_sections(tmp_path: Path, monkeyp
     monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_PORTCOS", "Cursor:cursor")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", "0")
     monkeypatch.setattr(board_seat_daily, "WebClient", None)
     monkeypatch.setattr(board_seat_daily, "_resolve_funding_snapshot", lambda **kwargs: _funding(source_type="cache"))
     monkeypatch.setattr(board_seat_daily, "_acquisition_search_rows", lambda **kwargs: [])
@@ -837,6 +841,102 @@ def test_is_valid_target_name_rejects_metric_token() -> None:
     assert board_seat_daily._is_valid_target_name(company="OpenAI", target="ROI") is False
 
 
+def test_high_conf_new_target_gate_rejects_low_confidence_target(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", "1")
+    store = board_seat_daily.BoardSeatStore()
+    draft = board_seat_daily.BoardSeatDraft(
+        idea_line="Acquire Browserbase to accelerate OpenAI execution in a strategic wedge.",
+        target_does="Browserbase builds enterprise browser automation infrastructure.",
+        why_now="Over the past month, enterprise demand shifted toward reliable browser automation.",
+        whats_different="Browserbase can close runtime and governance gaps quickly.",
+        mos_risks="Execution and integration quality remain key risks.",
+        bottom_line="A focused target can improve deployment reliability.",
+        context_current_efforts="OpenAI has active product distribution channels.",
+        context_domain_fit_gaps="Browser reliability and controls remain a gap.",
+        funding_history="Unknown.",
+        funding_latest_round_backers="Unknown.",
+        source_refs=[
+            board_seat_daily.SourceRef(
+                name_or_publisher="Example",
+                title="Automation trends",
+                url="https://example.com/automation-trends",
+            )
+        ],
+    )
+    gate = board_seat_daily._high_conf_new_target_gate(store=store, company="OpenAI", draft=draft)
+    assert gate["allow"] is False
+    assert gate["reason"] == "target_confidence_not_high"
+    assert gate["is_new_target"] is True
+
+
+def test_high_conf_new_target_gate_rejects_non_new_target_even_if_high_conf(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", "1")
+    store = board_seat_daily.BoardSeatStore()
+    store.record_target(
+        company="OpenAI",
+        target="Browserbase",
+        channel_ref="openai",
+        channel_id="C_OPENAI",
+        source="seed",
+        posted_at_utc=datetime.now(UTC).isoformat(),
+        run_date_local="2026-02-25",
+        message_ts=None,
+    )
+    draft = board_seat_daily.BoardSeatDraft(
+        idea_line="Acquire Browserbase to accelerate OpenAI execution in a strategic wedge.",
+        target_does="Browserbase builds enterprise browser automation infrastructure.",
+        why_now="Over the past month, enterprise demand shifted toward reliable browser automation.",
+        whats_different="Browserbase can close runtime and governance gaps quickly.",
+        mos_risks="Execution and integration quality remain key risks.",
+        bottom_line="A focused target can improve deployment reliability.",
+        context_current_efforts="OpenAI has active product distribution channels.",
+        context_domain_fit_gaps="Browser reliability and controls remain a gap.",
+        funding_history="Unknown.",
+        funding_latest_round_backers="Unknown.",
+        source_refs=[
+            board_seat_daily.SourceRef(
+                name_or_publisher="Browserbase",
+                title="Browserbase enterprise automation platform",
+                url="https://www.browserbase.com/",
+            ),
+            board_seat_daily.SourceRef(
+                name_or_publisher="TechCrunch",
+                title="Browserbase raises Series A",
+                url="https://techcrunch.com/browserbase-series-a",
+            ),
+            board_seat_daily.SourceRef(
+                name_or_publisher="Axios",
+                title="OpenAI evaluates Browserbase integrations",
+                url="https://www.axios.com/browserbase-openai",
+            ),
+        ],
+    )
+    gate = board_seat_daily._high_conf_new_target_gate(store=store, company="OpenAI", draft=draft)
+    assert gate["allow"] is False
+    assert gate["reason"] == "target_not_new"
+    assert gate["is_new_target"] is False
+
+
+def test_run_once_skips_when_no_high_confidence_new_target(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_PORTCOS", "OpenAI:openai")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", "1")
+    monkeypatch.setattr(board_seat_daily, "WebClient", None)
+    monkeypatch.setattr(board_seat_daily, "_resolve_funding_snapshot", lambda **kwargs: _funding(source_type="cache"))
+    monkeypatch.setattr(board_seat_daily, "_llm_draft", lambda **kwargs: _v6_draft())
+    monkeypatch.setattr(board_seat_daily, "_acquisition_search_rows", lambda **kwargs: [])
+    payload = board_seat_daily.run_once(force=True, dry_run=True)
+    assert payload["ok"] is True
+    assert payload["sent"] == []
+    assert payload["skipped"][0]["reason"] == "no_high_confidence_new_target"
+    assert payload["skipped"][0]["gate_reason"] in {"target_confidence_not_high", "target_not_new", "invalid_target"}
+
+
 def test_best_effort_idea_line_rewrites_ai_first_to_concrete_target() -> None:
     line = board_seat_daily._best_effort_idea_line(
         company="OpenAI",
@@ -1082,4 +1182,5 @@ def test_status_reports_funding_quality_metrics(tmp_path: Path, monkeypatch) -> 
     assert metrics["total_companies"] == 1
     assert metrics["verified_count"] == 1
     assert metrics["low_confidence_count"] == 0
+    assert payload["require_high_conf_new_target"] is True
     assert payload["funding_verification_by_company"]["Anduril"]["verification_status"] == "verified"
