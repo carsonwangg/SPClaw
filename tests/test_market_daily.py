@@ -357,6 +357,29 @@ def test_reason_line_uses_generic_fallback_for_vague_x_only_text() -> None:
     assert "no single confirmed catalyst" in line.lower()
 
 
+def test_extract_causal_clause_prefers_causal_segment() -> None:
+    from coatue_claw import market_daily as md
+
+    source = (
+        "Intel Corporation (INTC) Stock Price, News, Quote & History - Yahoo Finance. "
+        "Shares rose after management raised foundry margin outlook."
+    )
+    phrase = md._extract_causal_clause(source)
+    assert phrase is not None
+    assert "after management raised foundry margin outlook" in phrase.lower()
+    assert "quote & history" not in phrase.lower()
+
+
+def test_reason_quality_rejects_fragment_and_menu_text() -> None:
+    from coatue_claw import market_daily as md
+
+    menu_reasons = md._reason_phrase_quality_rejections("Intel stock price, news, quote & history")
+    fragment_reasons = md._reason_phrase_quality_rejections("after guidance and")
+    assert "quote_directory_title" in menu_reasons
+    assert "dangling_ending" in fragment_reasons
+    assert "too_short" in fragment_reasons
+
+
 def test_fetch_yahoo_news_parses_nested_schema(monkeypatch) -> None:
     class FakeTicker:
         news = [
@@ -587,6 +610,204 @@ def test_reason_line_falls_back_when_phrase_is_quote_directory_wrapper() -> None
         phrase="Intel Corporation (INTC) Stock Price, News, Quote & History - Yahoo Finance",
     )
     assert line == md.FALLBACK_CAUSE_LINE
+
+
+def test_hybrid_polish_accepts_clean_rewrite_when_deterministic_is_awkward(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    class _FakeCompletions:
+        @staticmethod
+        def create(*args, **kwargs):
+            return type(
+                "Resp",
+                (),
+                {
+                    "choices": [
+                        type(
+                            "Choice",
+                            (),
+                            {"message": type("Msg", (), {"content": "management raised foundry margin outlook"})()},
+                        )()
+                    ]
+                },
+            )()
+
+    class _FakeChat:
+        completions = _FakeCompletions()
+
+    class _FakeClient:
+        chat = _FakeChat()
+
+    monkeypatch.setenv("COATUE_CLAW_MD_REASON_QUALITY_MODE", "hybrid")
+    monkeypatch.setenv("COATUE_CLAW_MD_REASON_POLISH_ENABLED", "1")
+    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: _FakeClient())
+
+    def _fake_collect(ticker, aliases, since_utc, pct_move=None):
+        return (
+            [
+                md._EvidenceCandidate(
+                    source_type="web",
+                    text="Intel shares rose after margin outlook and",
+                    url="https://www.reuters.com/world/us/intel-update-2026-02-24/",
+                    published_at_utc=datetime(2026, 2, 24, 14, 0, 0, tzinfo=UTC),
+                    score=0.82,
+                    driver_keywords=(),
+                    canonical_url="https://www.reuters.com/world/us/intel-update-2026-02-24/",
+                    domain="reuters.com",
+                )
+            ],
+            [],
+            "google_serp",
+        )
+
+    monkeypatch.setattr("coatue_claw.market_daily._collect_evidence_for_ticker", _fake_collect)
+    monkeypatch.setattr("coatue_claw.market_daily._company_aliases", lambda ticker: ["Intel", "Intel Corporation"])
+    monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 24, 0, 0, 0, tzinfo=UTC))
+
+    movers = [QuoteSnapshot("INTC", 100.0, 105.7, 100.0, 0.057, "2026-02-24T22:05:00+00:00")]
+    rows, lines = md._build_catalyst_rows(movers=movers, slot_name="close")
+    assert rows[0].cause_render_mode == "llm_polish"
+    assert lines[0] != md.FALLBACK_CAUSE_LINE
+    assert "shares rose after" in lines[0].lower()
+
+
+def test_hybrid_polish_falls_back_on_invalid_rewrite(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    class _FakeCompletions:
+        @staticmethod
+        def create(*args, **kwargs):
+            return type(
+                "Resp",
+                (),
+                {"choices": [type("Choice", (), {"message": type("Msg", (), {"content": "and for with to"})()})()]},
+            )()
+
+    class _FakeChat:
+        completions = _FakeCompletions()
+
+    class _FakeClient:
+        chat = _FakeChat()
+
+    monkeypatch.setenv("COATUE_CLAW_MD_REASON_QUALITY_MODE", "hybrid")
+    monkeypatch.setenv("COATUE_CLAW_MD_REASON_POLISH_ENABLED", "1")
+    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: _FakeClient())
+
+    def _fake_collect(ticker, aliases, since_utc, pct_move=None):
+        return (
+            [
+                md._EvidenceCandidate(
+                    source_type="web",
+                    text="Intel shares after outlook and",
+                    url="https://www.reuters.com/world/us/intel-update-2026-02-24/",
+                    published_at_utc=datetime(2026, 2, 24, 14, 0, 0, tzinfo=UTC),
+                    score=0.8,
+                    driver_keywords=(),
+                    canonical_url="https://www.reuters.com/world/us/intel-update-2026-02-24/",
+                    domain="reuters.com",
+                )
+            ],
+            [],
+            "google_serp",
+        )
+
+    monkeypatch.setattr("coatue_claw.market_daily._collect_evidence_for_ticker", _fake_collect)
+    monkeypatch.setattr("coatue_claw.market_daily._company_aliases", lambda ticker: ["Intel"])
+    monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 24, 0, 0, 0, tzinfo=UTC))
+
+    movers = [QuoteSnapshot("INTC", 100.0, 105.7, 100.0, 0.057, "2026-02-24T22:05:00+00:00")]
+    rows, lines = md._build_catalyst_rows(movers=movers, slot_name="close")
+    assert rows[0].cause_render_mode == "fallback"
+    assert lines[0] == md.FALLBACK_CAUSE_LINE
+
+
+def test_no_hallucination_guard_rejects_entity_drift(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    class _FakeCompletions:
+        @staticmethod
+        def create(*args, **kwargs):
+            return type(
+                "Resp",
+                (),
+                {
+                    "choices": [
+                        type("Choice", (), {"message": type("Msg", (), {"content": "NVIDIA raised margin outlook"})()})()
+                    ]
+                },
+            )()
+
+    class _FakeChat:
+        completions = _FakeCompletions()
+
+    class _FakeClient:
+        chat = _FakeChat()
+
+    monkeypatch.setenv("COATUE_CLAW_MD_REASON_QUALITY_MODE", "hybrid")
+    monkeypatch.setenv("COATUE_CLAW_MD_REASON_POLISH_ENABLED", "1")
+    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: _FakeClient())
+
+    def _fake_collect(ticker, aliases, since_utc, pct_move=None):
+        return (
+            [
+                md._EvidenceCandidate(
+                    source_type="web",
+                    text="INTC shares rose after margin outlook and",
+                    url="https://www.reuters.com/world/us/intel-update-2026-02-24/",
+                    published_at_utc=datetime(2026, 2, 24, 14, 0, 0, tzinfo=UTC),
+                    score=0.82,
+                    driver_keywords=(),
+                    canonical_url="https://www.reuters.com/world/us/intel-update-2026-02-24/",
+                    domain="reuters.com",
+                )
+            ],
+            [],
+            "google_serp",
+        )
+
+    monkeypatch.setattr("coatue_claw.market_daily._collect_evidence_for_ticker", _fake_collect)
+    monkeypatch.setattr("coatue_claw.market_daily._company_aliases", lambda ticker: ["Intel"])
+    monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 24, 0, 0, 0, tzinfo=UTC))
+
+    movers = [QuoteSnapshot("INTC", 100.0, 105.7, 100.0, 0.057, "2026-02-24T22:05:00+00:00")]
+    rows, lines = md._build_catalyst_rows(movers=movers, slot_name="close")
+    assert rows[0].cause_render_mode == "fallback"
+    assert lines[0] == md.FALLBACK_CAUSE_LINE
+
+
+def test_direct_evidence_line_is_fallback_when_only_low_quality_phrase_exists(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    monkeypatch.setenv("COATUE_CLAW_MD_REASON_QUALITY_MODE", "deterministic")
+    monkeypatch.setenv("COATUE_CLAW_MD_REASON_POLISH_ENABLED", "0")
+
+    def _fake_collect(ticker, aliases, since_utc, pct_move=None):
+        return (
+            [
+                md._EvidenceCandidate(
+                    source_type="web",
+                    text="Intel shares after outlook and",
+                    url="https://www.reuters.com/world/us/intel-update-2026-02-24/",
+                    published_at_utc=datetime(2026, 2, 24, 14, 0, 0, tzinfo=UTC),
+                    score=0.81,
+                    driver_keywords=(),
+                    canonical_url="https://www.reuters.com/world/us/intel-update-2026-02-24/",
+                    domain="reuters.com",
+                )
+            ],
+            [],
+            "google_serp",
+        )
+
+    monkeypatch.setattr("coatue_claw.market_daily._collect_evidence_for_ticker", _fake_collect)
+    monkeypatch.setattr("coatue_claw.market_daily._company_aliases", lambda ticker: ["Intel"])
+    monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 24, 0, 0, 0, tzinfo=UTC))
+
+    movers = [QuoteSnapshot("INTC", 100.0, 105.7, 100.0, 0.057, "2026-02-24T22:05:00+00:00")]
+    rows, lines = md._build_catalyst_rows(movers=movers, slot_name="close")
+    assert rows[0].cause_mode == "direct_evidence"
+    assert rows[0].cause_render_mode == "fallback"
+    assert lines[0] == md.FALLBACK_CAUSE_LINE
 
 
 def test_debug_catalyst_returns_expected_shape(monkeypatch) -> None:

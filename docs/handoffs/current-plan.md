@@ -40,6 +40,20 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Market Daily grammar hardening shipped on role branch:
+  - Added deterministic causal phrase extraction and phrase-quality gates for MD mover lines.
+  - Added optional hybrid LLM polish pass with source-lock, lexical overlap, and entity/number drift guards.
+  - Enforced aggressive fallback when phrase quality is low or polish output is unusable.
+  - Added runtime controls:
+    - `COATUE_CLAW_MD_REASON_QUALITY_MODE`
+    - `COATUE_CLAW_MD_REASON_POLISH_ENABLED`
+    - `COATUE_CLAW_MD_REASON_POLISH_MODEL`
+    - `COATUE_CLAW_MD_REASON_POLISH_MAX_CHARS`
+  - Extended debug/artifact trace fields:
+    - `cause_render_mode`, `cause_raw_phrase`, `cause_final_phrase`, `quality_rejections`.
+  - validation:
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_market_daily.py` -> `50 passed`
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `6 passed`
 - INTC quote-directory headline regression hardened for Market Daily:
   - Added deterministic wrapper detection for quote-directory titles and URLs.
   - Quote-directory candidates are now marked `generic_wrapper` during normalization.

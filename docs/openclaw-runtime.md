@@ -252,6 +252,10 @@ MD (Market Daily) environment controls:
 - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_ENABLED`: allow decisive single-source event phrasing when one high-quality source is dominant (`1`/`0`, default `1`)
 - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_SCORE`: minimum effective evidence score for decisive-primary override (default `0.60`)
 - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_MARGIN`: minimum top-cluster score gap vs runner-up for decisive-primary override (default `0.03`)
+- `COATUE_CLAW_MD_REASON_QUALITY_MODE`: reason rendering mode (`hybrid` default, `deterministic` optional)
+- `COATUE_CLAW_MD_REASON_POLISH_ENABLED`: enable optional LLM polish pass for awkward phrases (`1`/`0`, default `1`)
+- `COATUE_CLAW_MD_REASON_POLISH_MODEL`: optional model override for reason polish (default follows `COATUE_CLAW_MD_MODEL`)
+- `COATUE_CLAW_MD_REASON_POLISH_MAX_CHARS`: max chars for polished reason phrase (default `90`)
 - Basket coherence rule: if a confirmed `anthropic_claude_cyber` cause is present for one cybersecurity mover in a run, peer cybersecurity selloff movers reuse that same cause phrase.
 - MD fallback line (when corroboration gate fails): `Likely positioning/flow; no single confirmed catalyst.`
 

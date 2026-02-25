@@ -3,6 +3,38 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-25, MD grammar hardening with hybrid polish + aggressive fallback)
+- Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
+  - Added reason-quality runtime controls:
+    - `COATUE_CLAW_MD_REASON_QUALITY_MODE` (`deterministic|hybrid`, default `hybrid`)
+    - `COATUE_CLAW_MD_REASON_POLISH_ENABLED` (default `1`)
+    - `COATUE_CLAW_MD_REASON_POLISH_MODEL` (default follows `COATUE_CLAW_MD_MODEL`)
+    - `COATUE_CLAW_MD_REASON_POLISH_MAX_CHARS` (default `90`)
+  - Added deterministic causal-clause extraction and phrase quality gates:
+    - strips publisher/menu suffixes
+    - rejects dangling fragments and metadata/menu text
+    - requires action/event signal before specific phrasing is allowed
+  - Added optional source-locked LLM polish pass (hybrid mode only):
+    - lexical-overlap guard
+    - entity/number drift guard
+    - deterministic fallback on any invalid output/failure
+  - Extended catalyst diagnostics:
+    - `cause_render_mode` (`deterministic|llm_polish|fallback`)
+    - `cause_raw_phrase`
+    - `cause_final_phrase`
+    - `quality_rejections`
+  - Aggressive fallback now applies whenever phrase-quality checks fail.
+- Tests updated in `/Users/carsonwang/worktrees/coatue-claw/market-daily/tests/test_market_daily.py`:
+  - causal-clause extraction preference
+  - reason-quality rejection for fragments/menu text
+  - hybrid polish success path
+  - hybrid polish invalid-output fallback
+  - hallucination/entity-drift fallback
+  - deterministic-mode fallback for low-quality direct-evidence phrasing
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_market_daily.py` -> `50 passed`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `6 passed`
+
 ## Update (2026-02-25, INTC quote-directory headline hardening)
 - Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
   - added deterministic quote-directory wrapper detection for both title text and URL path:
