@@ -2248,3 +2248,19 @@ Then confirm bot returns:
 ### Immediate Next Steps
 1. Let scheduler run for 2-3 windows and inspect winners for higher hit-rate on preferred topics.
 2. If source concentration climbs, trim handle priorities by small increments while preserving topic-tag weights.
+
+## Update (2026-02-24, integrator deploy: Market Daily no-X patch on main)
+- Integrated `origin/codex/agent-market-daily` into `main` (merge commit: `d6c2bdd`).
+- Phase A validation/deploy completed on `/opt/coatue-claw`:
+  - `PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_market_daily.py` -> `40 passed`
+  - `PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
+  - `make openclaw-restart`
+  - `make openclaw-slack-status` -> probe recovered healthy (`ok=true`, `status=200`)
+  - `make openclaw-market-daily-run-once FORCE=1` -> posted (`run_id=7`)
+  - `make openclaw-market-daily-earnings-recap-run-once FORCE=1` -> `no_reporters` cleanly (`run_id=8`)
+- No-X checks confirmed from artifact/debug output:
+  - `/opt/coatue-claw-data/artifacts/market-daily/md-close-20260225-022458.md` footer now reads:
+    - `Sources: Yahoo fast_info + Yahoo news + web search`
+  - mover lines include `[News]` / `[Web]` only (no `[X]`).
+  - `debug-catalyst INTC --slot close` returns links map with only `news`/`web` fields (no `x`).
+- Follow-up required (Phase B): reject quote-directory wrapper titles from catalyst phrase selection (INTC currently still picks Yahoo quote-page style wrapper title).

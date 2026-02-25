@@ -1022,3 +1022,16 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 ### Next
 1. Observe next 2-3 scheduled posts and confirm more winners contain preferred topic tags without reducing diversity too aggressively.
 2. If too concentrated, lower `MikeZaccardi`/`oguzerkan` priority by `0.05-0.1` while keeping tag scoring intact.
+
+- Integrator deploy completed for Market Daily no-X patch on `main` (merge: `d6c2bdd`):
+  - merged role-branch commit `f0e13f1` (`market-daily: remove X evidence and links from MD outputs`).
+  - MD production behavior now excludes X evidence/links from MD outputs:
+    - mover lines render `[News]/[Web]` only
+    - MD footer text: `Yahoo fast_info + Yahoo news + web search`
+    - debug links payload excludes `x`
+    - earnings recap path remains no-X and handles `no_reporters` cleanly
+  - post-merge runtime checks passed on Mac mini:
+    - `tests/test_market_daily.py` (`40 passed`)
+    - `tests/test_launchd_runtime.py` (`8 passed`)
+    - `openclaw` Slack probe healthy after restart
+  - immediate next patch: Intel headline-quality hardening to reject generic quote-wrapper titles as catalyst phrases.
