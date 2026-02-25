@@ -825,6 +825,27 @@ def test_is_valid_target_name_rejects_pronoun_placeholders() -> None:
     assert board_seat_daily._is_valid_target_name(company="OpenAI", target="The") is False
 
 
+def test_is_valid_target_name_rejects_ai_first_placeholder() -> None:
+    assert board_seat_daily._is_valid_target_name(company="OpenAI", target="AI-first") is False
+
+
+def test_is_valid_target_name_rejects_possessive_company_variant() -> None:
+    assert board_seat_daily._is_valid_target_name(company="OpenAI", target="OpenAIs") is False
+
+
+def test_is_valid_target_name_rejects_metric_token() -> None:
+    assert board_seat_daily._is_valid_target_name(company="OpenAI", target="ROI") is False
+
+
+def test_best_effort_idea_line_rewrites_ai_first_to_concrete_target() -> None:
+    line = board_seat_daily._best_effort_idea_line(
+        company="OpenAI",
+        seed_text="Acquire AI-first to accelerate OpenAI execution in a strategic wedge.",
+    )
+    assert "Acquire Browserbase" in line
+    assert "AI-first" not in line
+
+
 def test_validate_rendered_message_format_rejects_numbered_template() -> None:
     bad = "\n".join(
         [

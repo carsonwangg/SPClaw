@@ -40,6 +40,15 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Board-seat target hardening shipped to block conceptual/non-company targets (for example `AI-first`, `ROI`) and possessive/pluralized self-target leakage (for example `OpenAIs` for OpenAI):
+  - updated target filters in `src/coatue_claw/board_seat_daily.py` (`ACQ_PLACEHOLDER_TARGETS`, `ACQ_INVALID_TARGET_TERMS`, `TARGET_TOKEN_STOPWORDS`, `_canonical_target_key(...)`).
+  - regression tests added in `tests/test_board_seat_daily.py`:
+    - `test_is_valid_target_name_rejects_ai_first_placeholder`
+    - `test_is_valid_target_name_rejects_possessive_company_variant`
+    - `test_is_valid_target_name_rejects_metric_token`
+  - validation:
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `42 passed`
+    - `PYTHONPATH=src python3 -m pytest -q` -> `306 passed`
 - Board-seat sqlite connection lifecycle fix shipped for ledger FD stability:
   - `BoardSeatStore._connect()` now commits/rolls back and always closes sqlite connections.
   - this resolves descriptor accumulation that surfaced as `[Errno 24] Too many open files` in board-seat ledger export path.

@@ -3,6 +3,21 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-25, board-seat target hardening to reject conceptual/non-company targets)
+- Fixed board-seat target selection in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py` so conceptual labels do not pass as acquisition targets:
+  - added `aifirst` to `ACQ_PLACEHOLDER_TARGETS`
+  - added `ai-first` / `ai first` to `ACQ_INVALID_TARGET_TERMS`
+  - added `roi` to `TARGET_TOKEN_STOPWORDS`
+  - introduced `_canonical_target_key(...)` and used it in target validation/candidate filtering to reject possessive/pluralized self-target variants (for example `OpenAIs` for `OpenAI`)
+- Added regression coverage in `/Users/carsonwang/CoatueClaw/tests/test_board_seat_daily.py`:
+  - `test_is_valid_target_name_rejects_ai_first_placeholder`
+  - `test_is_valid_target_name_rejects_possessive_company_variant`
+  - `test_is_valid_target_name_rejects_metric_token`
+  - existing rewrite test confirms fallback to a concrete target (`Browserbase`) when seed target is conceptual (`AI-first`)
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `42 passed`
+  - `PYTHONPATH=src python3 -m pytest -q` -> `306 passed`
+
 ## Update (2026-02-24, board-seat sqlite connection lifecycle fix for ledger FD exhaustion)
 - Fixed file-descriptor leak in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
   - `BoardSeatStore._connect()` is now a context manager that always commits/rolls back and closes the sqlite connection.

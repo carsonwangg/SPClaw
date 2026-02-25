@@ -129,8 +129,9 @@ ACQ_PLACEHOLDER_TARGETS = {
     "stealthaisystems",
     "board",
     "boardseat",
+    "aifirst",
 }
-ACQ_INVALID_TARGET_TERMS = {"startup team", "domain-adjacent", "internal", "in-house"}
+ACQ_INVALID_TARGET_TERMS = {"startup team", "domain-adjacent", "internal", "in-house", "ai-first", "ai first"}
 SOURCE_POLICY_DEFAULT = "target_first_3_1"
 LOW_SIGNAL_MODE_DEFAULT = "candidate_with_confidence"
 TARGET_CONFIDENCE_LEVELS = {"High", "Medium", "Low"}
@@ -256,6 +257,7 @@ TARGET_TOKEN_STOPWORDS = {
     "the",
     "a",
     "an",
+    "roi",
 }
 LEGACY_BOARD_SEAT_PATTERNS = (
     "1. idea title",
@@ -584,6 +586,13 @@ def _slug_company(text: str) -> str:
 
 def _target_key(text: str) -> str:
     return _slug_company(str(text or ""))
+
+
+def _canonical_target_key(text: str) -> str:
+    key = _target_key(text)
+    if len(key) > 4 and key.endswith("s"):
+        return key[:-1]
+    return key
 
 
 def _brave_search_api_key() -> str:
@@ -2204,7 +2213,7 @@ def _is_valid_acquisition_idea_line(text: str) -> bool:
 def _target_candidates_from_seed(*, company: str, seed_text: str) -> list[str]:
     cleaned = re.sub(r"[“”\"'`]", "", str(seed_text or ""))
     matches = re.findall(r"\b[A-Z][A-Za-z0-9&.\-]{1,30}(?:\s+[A-Z][A-Za-z0-9&.\-]{1,30}){0,2}\b", cleaned)
-    company_key = _slug(company)
+    company_key = _canonical_target_key(company)
     blocked = {
         "reuters",
         "techcrunch",
@@ -2248,7 +2257,7 @@ def _target_candidates_from_seed(*, company: str, seed_text: str) -> list[str]:
             continue
         if key in blocked:
             continue
-        if company_key and key == company_key:
+        if company_key and _canonical_target_key(candidate) == company_key:
             continue
         if "stealth" in candidate.lower():
             continue
@@ -2270,7 +2279,7 @@ def _is_valid_target_name(*, company: str, target: str) -> bool:
         return False
     if any(term in candidate.lower() for term in ACQ_INVALID_TARGET_TERMS):
         return False
-    if _slug_company(company) == _slug_company(candidate):
+    if _canonical_target_key(company) == _canonical_target_key(candidate):
         return False
     return True
 
