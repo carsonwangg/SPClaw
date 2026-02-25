@@ -1203,3 +1203,11 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - high/medium confidence policy, new-target requirement, hard 14-day no-repeat, repitch significance.
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `55 passed`.
+
+## Board Seat - Truncation Readability Fix (2026-02-25)
+- Status: implemented on `codex/agent-board-seat`, validated.
+- Completed scope:
+  - line normalization now trims incomplete short trailing sentence fragments introduced by strict word caps.
+  - prevents clipped outputs like `... Vercel. Migrate` while keeping existing 18-word cap and format contract.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `57 passed`.

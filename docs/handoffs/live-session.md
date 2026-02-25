@@ -2603,3 +2603,11 @@ Then confirm bot returns:
   - source selection in sanitize path now uses resolved `idea_line` so target-confidence/source classification aligns with final company target.
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `55 passed`
+
+## Update (2026-02-25, board-seat line truncation cleanup)
+- Fixed Board Seat line normalization so strict word-cap clipping no longer leaves partial second-sentence fragments (example fixed: `... Vercel. Migrate`).
+- Implementation:
+  - added sentence-tail cleanup in `_limit_words` to trim incomplete short trailing sentence fragments.
+  - preserved existing word-cap behavior and all governance gates.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `57 passed`

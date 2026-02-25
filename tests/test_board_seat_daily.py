@@ -524,6 +524,24 @@ def test_line_word_caps_enforced_for_v5_fields() -> None:
     assert all(len(item.split()) <= board_seat_daily.MAX_LINE_WORDS for item in fields)
 
 
+def test_normalize_line_truncation_drops_partial_second_sentence_fragment() -> None:
+    line = board_seat_daily._normalize_line(
+        "As the creators of Next.js, no company is more integrated with both Next.js and React than Vercel. Migrate"
+    )
+    assert len(line.split()) <= board_seat_daily.MAX_LINE_WORDS
+    assert "Migrate" not in line
+    assert "Vercel" in line
+
+
+def test_normalize_line_truncation_removes_dangling_tail_token() -> None:
+    line = board_seat_daily._normalize_line(
+        "Platform fit improves execution quality with stronger developer adoption and retention with",
+        max_words=10,
+    )
+    assert len(line.split()) <= 10
+    assert not line.lower().endswith(" with")
+
+
 def test_run_once_dry_run_v5_contains_hierarchy_sections(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))

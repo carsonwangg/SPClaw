@@ -770,11 +770,84 @@ def _normalize_line_text(text: str) -> str:
     return cleaned
 
 
+_DANGLING_TAIL_TOKENS = {
+    "and",
+    "or",
+    "but",
+    "with",
+    "without",
+    "to",
+    "for",
+    "of",
+    "in",
+    "on",
+    "at",
+    "by",
+    "from",
+    "into",
+    "onto",
+    "over",
+    "under",
+    "than",
+    "that",
+    "which",
+    "who",
+    "whose",
+    "when",
+    "while",
+    "where",
+    "because",
+    "since",
+    "if",
+    "then",
+    "as",
+}
+
+
+def _trim_line_tail(text: str) -> str:
+    cleaned = str(text or "").strip(" ,;:-")
+    if not cleaned:
+        return ""
+    words = cleaned.split()
+    while words:
+        token = re.sub(r"[^a-z0-9]+", "", words[-1].lower())
+        if token and token in _DANGLING_TAIL_TOKENS:
+            words.pop()
+            continue
+        break
+    return " ".join(words).strip(" ,;:-")
+
+
+def _trim_incomplete_sentence_tail(text: str) -> str:
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return ""
+    if re.search(r"[.!?]\s*$", cleaned):
+        return cleaned
+    matches = list(re.finditer(r"[.!?](?=\s+\S)", cleaned))
+    if not matches:
+        return cleaned
+    last = matches[-1]
+    tail = cleaned[last.end() :].strip()
+    if 0 < len(tail.split()) <= 4:
+        return cleaned[: last.end()].strip()
+    return cleaned
+
+
 def _limit_words(text: str, *, max_words: int = MAX_LINE_WORDS) -> str:
     words = str(text or "").split()
     if len(words) <= max_words:
-        return " ".join(words).strip()
-    return " ".join(words[:max_words]).strip()
+        candidate = " ".join(words)
+    else:
+        candidate = " ".join(words[:max_words]).strip()
+    sentence_ends = [m.end() for m in re.finditer(r"[.!?](?=\s|$)", candidate)]
+    if sentence_ends:
+        cutoff = sentence_ends[-1]
+        sentence_only = candidate[:cutoff].strip()
+        if len(sentence_only.split()) >= max(6, max_words // 3):
+            candidate = sentence_only
+    candidate = _trim_incomplete_sentence_tail(candidate)
+    return _trim_line_tail(candidate)
 
 def _normalize_line(text: str, *, max_words: int = MAX_LINE_WORDS) -> str:
     return _limit_words(_normalize_line_text(text), max_words=max_words)
