@@ -1069,3 +1069,16 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - earnings recap force-run returned clean `no_reporters`
 - Ops note:
   - system `python3` lacks pytest; validation on mini must use `/opt/coatue-claw/.venv/bin/python -m pytest`.
+
+- Integrator deployed Market Daily `simple_synthesis` from role branch (`f71eaa1`) to `main` via merge `c862aaf`.
+- Active MD catalyst policy on main:
+  - default `simple_synthesis` generation path
+  - no-X output/link policy preserved
+  - quote-directory wrapper rejection preserved
+  - hybrid polish + aggressive fallback diagnostics exposed in debug payloads
+- Production checks:
+  - status reports synthesis defaults (`mode=max_results/source_mode/domain_gate/force_best_guess`)
+  - forced close run outputs clean causal/fallback lines with no X links
+  - INTC no longer emits quote-directory catalyst text
+- Ops note:
+  - mini system `python3` is not the runtime interpreter for this module/tests; use `/opt/coatue-claw/.venv/bin/python` for validation/CLI.

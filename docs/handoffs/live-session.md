@@ -2329,3 +2329,32 @@ Then confirm bot returns:
   - `debug-catalyst INTC --slot close` keys include `cause_render_mode=fallback`, `cause_raw_phrase`, `cause_final_phrase`; links are only `news`/`web`.
 - Rollback flag:
   - `COATUE_CLAW_MD_REASON_QUALITY_MODE=deterministic` was **not** required.
+
+## Update (2026-02-24, integrator deploy of Market Daily simple catalyst synthesis)
+- Merged `origin/codex/agent-market-daily` into `main` at merge commit `c862aaf` (includes `f71eaa1`).
+- Feature now active by default: `simple_synthesis` catalyst mode (Google+Yahoo top-5 evidence with one-line LLM cause and aggressive best-guess fallback).
+- Validation:
+  - checklist `python3 -m pytest` failed on mini due missing global pytest / Python 3.9 compatibility (`datetime.UTC` import).
+  - venv validation passed:
+    - `PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_market_daily.py` -> `56 passed`
+    - `PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
+- Status confirms new defaults:
+  - `catalyst_mode='simple_synthesis'`
+  - `synth_max_results=5`
+  - `synth_source_mode='google_plus_yahoo'`
+  - `synth_domain_gate='soft'`
+  - `synth_force_best_guess=True`
+- Runtime verification:
+  - `make openclaw-restart` and `make openclaw-slack-status` probe healthy (`ok=true`).
+  - forced MD close post succeeded (`md-close-20260225-041445.md`).
+  - forced earnings recap returned clean `no_reporters`.
+- Acceptance snippets:
+  - footer: `Sources: Yahoo fast_info + Yahoo news + web search`
+  - INTC line is causal sentence (no quote-directory wrapper text).
+  - no `[X]` links or X footer text.
+  - debug INTC includes synth diagnostics:
+    - `synth_generation_mode='simple_synthesis'`
+    - `synth_candidates_considered` / `synth_candidates_used` / `synth_chosen_urls`
+    - `cause_render_mode='simple_best_guess'`
+- Rollback flag was not needed. Legacy rollback remains available via:
+  - `COATUE_CLAW_MD_CATALYST_MODE=legacy_heuristic`
