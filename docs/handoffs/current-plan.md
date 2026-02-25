@@ -1058,3 +1058,14 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - reject `why ... stock/shares ... today|now` phrasing as wrapper-like cause text to avoid weak reason lines in direct-evidence path
 - Environment note:
   - checklist `python3 -m pytest` commands fail on mini due missing global pytest; tests must run via `/opt/coatue-claw/.venv/bin/python -m pytest`.
+
+- Integrator deployed latest Market Daily role-branch updates to `main` (merge `6c5f51d`, includes `94b8180`):
+  - no-X policy enforced in MD post lines/footer/debug link map
+  - quote-directory wrapper catalyst rejection enforced (INTC quality hardening)
+  - grammar hardening active with render diagnostics (`cause_render_mode`, raw/final cause phrase fields)
+- Verification state on Mac mini:
+  - forced MD run shows no `[X]` and footer `Yahoo fast_info + Yahoo news + web search`
+  - INTC rendered as fallback instead of quote-directory text
+  - earnings recap force-run returned clean `no_reporters`
+- Ops note:
+  - system `python3` lacks pytest; validation on mini must use `/opt/coatue-claw/.venv/bin/python -m pytest`.

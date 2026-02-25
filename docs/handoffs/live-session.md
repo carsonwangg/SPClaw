@@ -2305,3 +2305,27 @@ Then confirm bot returns:
     - no `x` link key present
 - Follow-up hardening applied post-merge on main:
   - expanded quote-wrapper rejection to include `why ... stock/shares ... today|now` phrasing for reason-line safety.
+
+## Update (2026-02-24, integrator merge/deploy of Market Daily grammar hardening)
+- Merged `origin/codex/agent-market-daily` into `main` at merge commit `6c5f51d`, including role commit `94b8180`.
+- Integrated scope:
+  - no-X MD output policy
+  - quote-directory wrapper rejection for catalyst phrases
+  - grammar hardening with hybrid polish + aggressive fallback diagnostics
+- Validation:
+  - checklist `python3 -m pytest` commands failed on mini (`No module named pytest`)
+  - venv validation passed:
+    - `PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_market_daily.py` -> `53 passed`
+    - `PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
+- Runtime verification:
+  - `make openclaw-restart`
+  - `make openclaw-slack-status` -> probe `ok=true`
+  - `make openclaw-market-daily-run-once FORCE=1` -> posted (`md-close-20260225-031016.md`)
+  - `make openclaw-market-daily-earnings-recap-run-once FORCE=1` -> `no_reporters`
+- Acceptance snippets:
+  - footer: `Sources: Yahoo fast_info + Yahoo news + web search`
+  - INTC line: `Likely positioning/flow; no single confirmed catalyst.`
+  - AMD line: `Shares rose after Meta inks deal with AMD for chips—and equity.`
+  - `debug-catalyst INTC --slot close` keys include `cause_render_mode=fallback`, `cause_raw_phrase`, `cause_final_phrase`; links are only `news`/`web`.
+- Rollback flag:
+  - `COATUE_CLAW_MD_REASON_QUALITY_MODE=deterministic` was **not** required.
