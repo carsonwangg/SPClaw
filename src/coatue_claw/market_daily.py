@@ -1995,8 +1995,20 @@ def _compute_evidence_score(
     ):
         causal_bonus += 0.06
     generic_penalty = -0.18 if _is_generic_headline_wrapper(text=text, ticker=ticker, aliases=aliases) else 0.0
+    ta_penalty = -0.16 if _is_technical_analysis_style(text) else 0.0
+    roundup_penalty = -0.08 if _is_multi_ticker_roundup(text=text, ticker=ticker, aliases=aliases) else 0.0
     source_bonus = {"yahoo_news": 0.18, "x": 0.12, "web": 0.1}.get(source_type, 0.0)
-    score = (0.35 * recency) + (0.3 * domain) + mention + keyword_score + source_bonus + causal_bonus + generic_penalty
+    score = (
+        (0.35 * recency)
+        + (0.3 * domain)
+        + mention
+        + keyword_score
+        + source_bonus
+        + causal_bonus
+        + generic_penalty
+        + ta_penalty
+        + roundup_penalty
+    )
     return max(0.0, min(1.0, score))
 
 
@@ -3247,6 +3259,90 @@ def _split_time_integrity_notes(notes: list[str]) -> tuple[tuple[str, ...], tupl
     return tuple(publish), tuple(historical)
 
 
+def _is_technical_analysis_style(text: str) -> bool:
+    lower = _normalize_whitespace(text).lower()
+    if not lower:
+        return False
+    ta_terms = (
+        "price forecast",
+        "breakout",
+        "support",
+        "resistance",
+        "rsi",
+        "macd",
+        "chart pattern",
+        "bulls defend support",
+        "technical analysis",
+        "moving average",
+        "candlestick",
+    )
+    return any(term in lower for term in ta_terms)
+
+
+def _is_multi_ticker_roundup(*, text: str, ticker: str, aliases: list[str]) -> bool:
+    lower = _normalize_whitespace(text).lower()
+    if not lower:
+        return False
+    roundup_terms = (
+        "top analyst calls",
+        "upgraded:",
+        "downgraded:",
+        "stocks to watch",
+        "best stocks",
+        "market movers today",
+    )
+    has_roundup = any(term in lower for term in roundup_terms)
+    if has_roundup:
+        return True
+    tokens = re.findall(r"\b[A-Z]{2,5}\b", text)
+    if len({t for t in tokens if t != ticker.upper()}) >= 2:
+        return True
+    company_mentions = sum(1 for alias in aliases if alias and alias.lower() in lower)
+    if company_mentions == 0:
+        comma_chunks = [x.strip() for x in lower.split(",") if x.strip()]
+        if len(comma_chunks) >= 3:
+            return True
+    return False
+
+
+def _has_explainer_today_pattern(text: str) -> bool:
+    lower = _normalize_whitespace(text).lower()
+    if not lower:
+        return False
+    patterns = (
+        "why is",
+        "why did",
+        "stock is up today",
+        "stock is down today",
+        "shares are up today",
+        "shares are down today",
+        "trading higher today",
+        "trading lower today",
+    )
+    return any(p in lower for p in patterns)
+
+
+def _is_deterministic_causal_candidate(item: _EvidenceCandidate, *, pct_move: float | None) -> bool:
+    text = _normalize_whitespace(item.text)
+    if not text:
+        return False
+    if item.reject_reason == "generic_wrapper":
+        return False
+    if _is_quote_directory_wrapper(text=text, url=item.url):
+        return False
+    if _contains_disallowed_reason_phrasing(text):
+        return False
+    if _is_technical_analysis_style(text):
+        return False
+    if _effective_candidate_score(candidate=item, pct_move=pct_move) < _min_evidence_confidence():
+        return False
+    if _has_causal_marker(text):
+        return True
+    if _has_explainer_today_pattern(text):
+        return True
+    return False
+
+
 def _apply_synth_domain_gate(*, candidates: list[_EvidenceCandidate], max_results: int) -> list[_EvidenceCandidate]:
     gate = _synth_domain_gate()
     if gate == "off":
@@ -3280,19 +3376,22 @@ def _collect_synthesis_candidates(
         merged.extend(yahoo)
 
     if source_mode in {"google_plus_yahoo", "google_only"}:
-        web_rows, backend, web_notes = _fetch_web_evidence(
-            ticker=ticker,
-            aliases=aliases,
-            since_utc=since_utc,
-            pct_move=pct_move,
-        )
-        web_backend = backend
-        notes.extend(web_notes)
-        if web_rows:
-            notes.append(f"web:backend={backend}")
+        if not _google_serp_api_key():
+            notes.append("web:google_serp_required_missing")
         else:
-            notes.append("web:no_relevant_results")
-        merged.extend(web_rows)
+            web_rows, backend, web_notes = _fetch_web_evidence(
+                ticker=ticker,
+                aliases=aliases,
+                since_utc=since_utc,
+                pct_move=pct_move,
+            )
+            web_backend = backend
+            notes.extend(web_notes)
+            if web_rows:
+                notes.append(f"web:backend={backend}")
+            else:
+                notes.append("web:no_relevant_results")
+            merged.extend(web_rows)
 
     normalized = _normalize_evidence_candidates(candidates=merged, ticker=ticker, aliases=aliases)
     allowed = _md_allowed_evidence_sources()
@@ -3320,6 +3419,7 @@ def _collect_synthesis_candidates(
 
 def _sanitize_synth_phrase(raw: str) -> str:
     phrase = _normalize_whitespace(str(raw or "")).strip().lstrip("-*• ").strip(" \"'`")
+    phrase = re.sub(r"(?i)^(?:financialcontent|marketbeat|benzinga|yahoo finance|reuters|bloomberg)\s*[-:]\s*", "", phrase)
     phrase = re.sub(r"https?://\S+", "", phrase, flags=re.IGNORECASE)
     phrase = re.sub(r"\[[^\]]+\]\([^)]+\)", "", phrase)
     phrase = phrase.strip(" .")
@@ -3346,11 +3446,9 @@ def _synth_phrase_invalid_reason(*, phrase: str, evidence_text: str) -> str | No
     return None
 
 
-def _best_guess_phrase_from_candidates(candidates: list[_EvidenceCandidate]) -> str | None:
+def _best_guess_phrase_from_candidates(candidates: list[_EvidenceCandidate], *, pct_move: float | None = None) -> str | None:
     for item in candidates:
-        if item.reject_reason == "generic_wrapper":
-            continue
-        if _is_quote_directory_wrapper(text=item.text, url=item.url):
+        if not _is_deterministic_causal_candidate(item, pct_move=pct_move):
             continue
         phrase = _extract_causal_clause(item.text)
         if phrase:
@@ -3827,7 +3925,7 @@ def _build_catalyst_for_mover_simple(*, mover: QuoteSnapshot, slot_name: str, si
         rejected.append(llm_error)
     if not phrase:
         if _synth_force_best_guess():
-            phrase = _best_guess_phrase_from_candidates(selected)
+            phrase = _best_guess_phrase_from_candidates(selected, pct_move=mover.pct_move)
             if phrase:
                 render_mode = "simple_best_guess"
                 rejected.append("fallback_to_top_candidate")
@@ -4576,7 +4674,7 @@ def _hydrate_recap_row(*, row: EarningsRecapRow, since_utc: datetime, client: An
             candidates=candidates[: _synth_max_results()],
         )
         if not phrase and _synth_force_best_guess():
-            phrase = _best_guess_phrase_from_candidates(candidates[: _synth_max_results()])
+            phrase = _best_guess_phrase_from_candidates(candidates[: _synth_max_results()], pct_move=row.since_close_pct)
             if phrase:
                 llm_error = None
         line = _render_simple_reason_line(pct_move=row.since_close_pct, phrase=phrase)

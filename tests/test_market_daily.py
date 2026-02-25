@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -1511,7 +1511,7 @@ def test_simple_synthesis_force_best_guess_on_invalid_llm(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         "coatue_claw.market_daily._best_guess_phrase_from_candidates",
-        lambda candidates: "Morgan Stanley lifted Intel and flagged foundry constraints",
+        lambda candidates, pct_move=None: "Morgan Stanley lifted Intel and flagged foundry constraints",
     )
     monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: object())
     evidence, line = md._build_catalyst_for_mover(
@@ -1583,6 +1583,7 @@ def test_web_candidate_without_publish_time_is_rejected_when_strict_enabled(monk
     from coatue_claw import market_daily as md
 
     monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.setenv("COATUE_CLAW_MD_GOOGLE_SERP_API_KEY", "test-key")
     monkeypatch.setenv("COATUE_CLAW_MD_REQUIRE_IN_WINDOW_DATES", "1")
     monkeypatch.setenv("COATUE_CLAW_MD_ALLOW_UNDATED_FALLBACK", "0")
     monkeypatch.setenv("COATUE_CLAW_MD_PUBLISH_TIME_ENRICH_ENABLED", "0")
@@ -1693,6 +1694,7 @@ def test_intc_regression_prefers_in_window_why_stock_soaring_link(monkeypatch) -
     from coatue_claw import market_daily as md
 
     monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.setenv("COATUE_CLAW_MD_GOOGLE_SERP_API_KEY", "test-key")
     monkeypatch.setenv("COATUE_CLAW_MD_REQUIRE_IN_WINDOW_DATES", "1")
     monkeypatch.setenv("COATUE_CLAW_MD_ALLOW_UNDATED_FALLBACK", "0")
     monkeypatch.setenv("COATUE_CLAW_MD_REJECT_HISTORICAL_CALLBACK", "1")
@@ -1815,3 +1817,157 @@ def test_recap_uses_time_valid_evidence_only(monkeypatch) -> None:
     )
     assert hydrated.source_links == ("https://finance.yahoo.com/news/why-intel-intc-stock-soaring-210238819.html",)
     assert hydrated.bullets[0].startswith("Key catalyst: Shares rose after")
+
+
+def test_simple_synthesis_google_missing_uses_yahoo_only_not_ddg(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.delenv("COATUE_CLAW_MD_GOOGLE_SERP_API_KEY", raising=False)
+    monkeypatch.delenv("SERPAPI_API_KEY", raising=False)
+    now_utc = datetime.now(UTC)
+    since_utc = now_utc - timedelta(hours=6)
+    yahoo = [
+        md._EvidenceCandidate(
+            source_type="yahoo_news",
+            text="Intel shares rise after strong foundry update",
+            url="https://finance.yahoo.com/news/intel-shares-rise-foundry-update-210000000.html",
+            published_at_utc=now_utc - timedelta(minutes=30),
+            score=0.8,
+        )
+    ]
+    monkeypatch.setattr("coatue_claw.market_daily._fetch_yahoo_news_candidates", lambda ticker, aliases, since_utc: yahoo)
+    called = {"web": 0}
+
+    def _fake_web(ticker, aliases, since_utc, pct_move=None):
+        called["web"] += 1
+        return ([], "ddg_html", [])
+
+    monkeypatch.setattr("coatue_claw.market_daily._fetch_web_evidence", _fake_web)
+    _, selected, notes, backend = md._collect_synthesis_candidates(
+        ticker="INTC",
+        aliases=["Intel"],
+        since_utc=since_utc,
+        pct_move=0.05,
+    )
+    assert called["web"] == 0
+    assert backend is None
+    assert selected
+    assert selected[0].source_type == "yahoo_news"
+    assert "web:google_serp_required_missing" in notes
+
+
+def test_llm_unavailable_weak_candidate_falls_back(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.setenv("COATUE_CLAW_MD_SYNTH_FORCE_BEST_GUESS", "1")
+    mover = QuoteSnapshot("INTC", 100.0, 105.7, 100.0, 0.057, "2026-02-25T22:00:00+00:00")
+    weak = md._EvidenceCandidate(
+        source_type="web",
+        text="Intel (INTC) Price Forecast: Breakout Holds as Bulls Defend Support",
+        url="https://www.fxempire.com/forecasts/article/intel-intc-price-forecast-breakout-holds-as-bulls-defend-support-1581660",
+        published_at_utc=datetime(2026, 2, 25, 21, 0, 0, tzinfo=UTC),
+        score=0.95,
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._collect_synthesis_candidates",
+        lambda ticker, aliases, since_utc, pct_move=None: ([weak], [weak], [], "google_serp"),
+    )
+    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: None)
+    evidence, line = md._build_catalyst_for_mover(
+        mover=mover,
+        slot_name="close",
+        since_utc=datetime(2026, 2, 25, 14, 30, 0, tzinfo=UTC),
+    )
+    assert line == md.FALLBACK_CAUSE_LINE
+    assert evidence.cause_render_mode == "fallback"
+    assert "fallback_to_top_candidate_failed" in evidence.quality_rejections
+
+
+def test_llm_unavailable_strong_causal_candidate_still_specific(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.setenv("COATUE_CLAW_MD_SYNTH_FORCE_BEST_GUESS", "1")
+    mover = QuoteSnapshot("INTC", 100.0, 105.7, 100.0, 0.057, "2026-02-25T22:00:00+00:00")
+    strong = md._EvidenceCandidate(
+        source_type="web",
+        text="Why Is Intel (INTC) Stock Soaring Today - Yahoo Finance",
+        url="https://finance.yahoo.com/news/why-intel-intc-stock-soaring-210238819.html",
+        published_at_utc=datetime(2026, 2, 25, 21, 0, 0, tzinfo=UTC),
+        score=0.88,
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._collect_synthesis_candidates",
+        lambda ticker, aliases, since_utc, pct_move=None: ([strong], [strong], [], "google_serp"),
+    )
+    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: None)
+    evidence, line = md._build_catalyst_for_mover(
+        mover=mover,
+        slot_name="close",
+        since_utc=datetime(2026, 2, 25, 14, 30, 0, tzinfo=UTC),
+    )
+    assert line != md.FALLBACK_CAUSE_LINE
+    assert evidence.cause_render_mode == "simple_best_guess"
+
+
+def test_technical_analysis_soft_penalty_lowers_rank() -> None:
+    from coatue_claw import market_daily as md
+
+    now_utc = datetime.now(UTC)
+    since = now_utc - timedelta(hours=6)
+    published = now_utc - timedelta(minutes=30)
+    ta = md._compute_evidence_score(
+        source_type="web",
+        text="Price Forecast: Breakout Holds as Bulls Defend Support",
+        url="https://example.com/ta",
+        published_at_utc=published,
+        since_utc=since,
+        ticker="INTC",
+        aliases=["Intel"],
+    )
+    explainer = md._compute_evidence_score(
+        source_type="web",
+        text="Shares rose after management raised guidance today",
+        url="https://example.com/explainer",
+        published_at_utc=published,
+        since_utc=since,
+        ticker="INTC",
+        aliases=["Intel"],
+    )
+    assert explainer > ta
+
+
+def test_roundup_penalty_prevents_generic_analyst_calls_link_win() -> None:
+    from coatue_claw import market_daily as md
+
+    now_utc = datetime.now(UTC)
+    since = now_utc - timedelta(hours=6)
+    published = now_utc - timedelta(minutes=30)
+    roundup = md._compute_evidence_score(
+        source_type="web",
+        text="Qualcomm, Nvidia upgraded: Wall Street's top analyst calls",
+        url="https://example.com/roundup",
+        published_at_utc=published,
+        since_utc=since,
+        ticker="BKNG",
+        aliases=["Booking Holdings", "Booking.com"],
+    )
+    explainer = md._compute_evidence_score(
+        source_type="web",
+        text="Booking shares rose after stronger online travel demand guidance",
+        url="https://example.com/explainer",
+        published_at_utc=published,
+        since_utc=since,
+        ticker="BKNG",
+        aliases=["Booking Holdings", "Booking.com"],
+    )
+    assert explainer > roundup
+
+
+def test_sanitize_phrase_removes_aggregator_prefix() -> None:
+    from coatue_claw import market_daily as md
+
+    cleaned = md._sanitize_synth_phrase("FinancialContent - Why Is Intel (INTC) Stock Soaring Today")
+    assert cleaned == "Why Is Intel (INTC) Stock Soaring Today"
