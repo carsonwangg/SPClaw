@@ -1035,3 +1035,14 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
     - `tests/test_launchd_runtime.py` (`8 passed`)
     - `openclaw` Slack probe healthy after restart
   - immediate next patch: Intel headline-quality hardening to reject generic quote-wrapper titles as catalyst phrases.
+
+- Market Daily Intel headline-quality hardening shipped on `main` (post no-X deploy):
+  - deterministic wrapper-title rejection added for quote-directory strings (e.g., stock price/quote-history wrappers)
+  - applied in candidate normalization, direct-cause selection, cluster phrase generation, and reason-line rendering
+  - INTC-like wrapper phrase path now resolves to specific causal phrase or fallback (never wrapper text in rendered line)
+  - validation:
+    - `tests/test_market_daily.py` -> `43 passed`
+    - `tests/test_launchd_runtime.py` -> `8 passed`
+  - runtime check:
+    - forced MD close run now shows INTC fallback line instead of wrapper-title phrase
+    - MD footer remains no-X (`Yahoo fast_info + Yahoo news + web search`)

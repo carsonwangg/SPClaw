@@ -1103,3 +1103,65 @@ def test_run_earnings_recap_selects_top4_and_writes_artifact(tmp_path: Path, mon
     assert "## Recap Rows" in content
     assert "Yahoo/web evidence" in content
     assert "X/Yahoo/web evidence" not in content
+
+
+def test_quote_page_wrapper_title_rejected_as_generic_wrapper() -> None:
+    from coatue_claw import market_daily as md
+
+    rows = md._normalize_evidence_candidates(
+        candidates=[
+            md._EvidenceCandidate(
+                source_type="web",
+                text="Intel Corporation (INTC) Stock Price, News, Quote & History",
+                url="https://finance.yahoo.com/quote/INTC/",
+                published_at_utc=None,
+                score=0.99,
+            )
+        ],
+        ticker="INTC",
+        aliases=["Intel", "Intel Corporation"],
+    )
+    assert rows
+    assert rows[0].reject_reason == "generic_wrapper"
+
+
+def test_direct_evidence_path_skips_wrapper_when_specific_headline_exists() -> None:
+    from coatue_claw import market_daily as md
+
+    wrapper = md._EvidenceCandidate(
+        source_type="web",
+        text="Intel Corporation (INTC) Stock Price, News, Quote & History",
+        url="https://finance.yahoo.com/quote/INTC/",
+        published_at_utc=None,
+        score=0.99,
+        domain="finance.yahoo.com",
+    )
+    specific = md._EvidenceCandidate(
+        source_type="web",
+        text="Intel shares rose after SambaNova partnership and new funding round.",
+        url="https://www.reuters.com/markets/deals/intel-sambanova-partnership-2026-02-24/",
+        published_at_utc=None,
+        score=0.85,
+        domain="reuters.com",
+    )
+    picked = md._pick_direct_cause_candidate(candidates=[wrapper, specific], pct_move=0.05)
+    assert picked is not None
+    assert "sambanova partnership" in picked.text.lower()
+    assert "stock price" not in picked.text.lower()
+
+
+def test_reason_line_for_wrapper_phrase_falls_back_in_intc_case() -> None:
+    from coatue_claw import market_daily as md
+
+    line = md._build_reason_line_from_phrase(
+        pct_move=0.05,
+        phrase="Intel Corporation (INTC) Stock Price, News, Quote & History",
+    )
+    assert line == md.FALLBACK_CAUSE_LINE
+    assert "stock price" not in line.lower()
+
+    line2 = md._build_reason_line_from_phrase(
+        pct_move=0.05,
+        phrase="Why Is Intel (INTC) Stock Soaring Today. According to a Reuters report, Intel and a key rival",
+    )
+    assert line2 == md.FALLBACK_CAUSE_LINE

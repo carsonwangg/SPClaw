@@ -2264,3 +2264,22 @@ Then confirm bot returns:
   - mover lines include `[News]` / `[Web]` only (no `[X]`).
   - `debug-catalyst INTC --slot close` returns links map with only `news`/`web` fields (no `x`).
 - Follow-up required (Phase B): reject quote-directory wrapper titles from catalyst phrase selection (INTC currently still picks Yahoo quote-page style wrapper title).
+
+## Update (2026-02-24, Market Daily Intel headline-quality hardening)
+- Implemented deterministic wrapper-title rejection in `src/coatue_claw/market_daily.py` for quote-directory style evidence text.
+- Added wrapper-title guardrails at all required gates:
+  - `_normalize_evidence_candidates(...)` now tags wrapper titles with `reject_reason="generic_wrapper"`.
+  - `_pick_direct_cause_candidate(...)` now skips wrapper-title candidates.
+  - `_cluster_event_phrase(...)` returns `None` for wrapper-title candidate text.
+  - `_build_reason_line_from_phrase(...)` now falls back for wrapper-title phrases.
+- Added/updated tests in `tests/test_market_daily.py`:
+  - quote-page wrapper title rejected as generic wrapper.
+  - direct-evidence path skips wrapper title when a better causal headline exists.
+  - INTC-like wrapper phrase path falls back (never emits wrapper text in rendered reason line).
+- Validation:
+  - `PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_market_daily.py` -> `43 passed`
+  - `PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
+- Runtime verification:
+  - `make openclaw-restart` + `make openclaw-slack-status` probe healthy (`ok=true`).
+  - `make openclaw-market-daily-run-once FORCE=1` artifact: `/opt/coatue-claw-data/artifacts/market-daily/md-close-20260225-023157.md`.
+  - INTC line now: `Likely positioning/flow; no single confirmed catalyst.` (no quote-directory wrapper phrase).

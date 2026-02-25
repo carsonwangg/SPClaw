@@ -1276,6 +1276,14 @@ _GENERIC_WRAPPER_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bshares?\b.*\bfalling today\b", flags=re.IGNORECASE),
 )
 
+_WRAPPER_TITLE_BLOCKLIST_PHRASES: tuple[str, ...] = (
+    "stock price",
+    "quote and history",
+    "news quote",
+    "latest stock news and headlines",
+    "stock quote history news",
+)
+
 _BASKET_MEMBERS: dict[str, set[str]] = {
     "cybersecurity": {"NET", "CRWD", "PANW", "OKTA", "ZS", "FTNT", "S"},
 }
@@ -1467,6 +1475,23 @@ def _canonicalize_url(url: str | None) -> str | None:
     return urlunparse(cleaned)
 
 
+def _is_wrapper_title_evidence_text(text: str) -> bool:
+    cleaned = _normalize_whitespace(text)
+    if not cleaned:
+        return False
+    lower = cleaned.lower().replace("&", " and ")
+    normalized = _normalize_whitespace(re.sub(r"[^a-z0-9 ]+", " ", lower))
+    if not normalized:
+        return False
+    if any(phrase in normalized for phrase in _WRAPPER_TITLE_BLOCKLIST_PHRASES):
+        return True
+    if re.search(r"\bwhy\b.*\bstock\b.*\b(today|now)\b", normalized):
+        return True
+    if re.search(r"\bwhy\b.*\bshares?\b.*\b(today|now)\b", normalized):
+        return True
+    return "find the latest" in normalized and "stock quote" in normalized and "history" in normalized and "news" in normalized
+
+
 def _is_generic_headline_wrapper(*, text: str, ticker: str, aliases: list[str]) -> bool:
     if not _generic_headline_blocklist_enabled():
         return False
@@ -1528,7 +1553,11 @@ def _normalize_evidence_candidates(*, candidates: list[_EvidenceCandidate], tick
                 url=canonical_url or item.url,
                 canonical_url=canonical_url or item.url,
                 domain=domain,
-                reject_reason=("generic_wrapper" if _is_generic_headline_wrapper(text=item.text, ticker=ticker, aliases=aliases) else item.reject_reason),
+                reject_reason=(
+                    "generic_wrapper"
+                    if (_is_wrapper_title_evidence_text(item.text) or _is_generic_headline_wrapper(text=item.text, ticker=ticker, aliases=aliases))
+                    else item.reject_reason
+                ),
             )
         )
     return deduped
@@ -2283,6 +2312,8 @@ def _pick_direct_cause_candidate(*, candidates: list[_EvidenceCandidate], pct_mo
     for item in candidates:
         if item.source_type not in {"yahoo_news", "web"}:
             continue
+        if _is_wrapper_title_evidence_text(item.text):
+            continue
         if item.reject_reason == "generic_wrapper":
             continue
         if not _is_quality_domain(item.domain or item.url):
@@ -2386,6 +2417,8 @@ def _cluster_event_phrase(cluster: str, *, candidate: _EvidenceCandidate | None)
         return None
     if candidate.reject_reason == "generic_wrapper":
         return None
+    if _is_wrapper_title_evidence_text(candidate.text):
+        return None
     cleaned = _strip_non_md_artifacts(candidate.text)
     cleaned = re.sub(r"(?i)^why\b.+?\b(today|now)\b", "", cleaned).strip()
     if not cleaned:
@@ -2446,6 +2479,8 @@ def _build_reason_line_from_phrase(*, pct_move: float | None, phrase: str | None
         return FALLBACK_CAUSE_LINE
     cleaned_phrase = _shorten(_strip_non_md_artifacts(phrase).strip(), 90).rstrip(".")
     if not cleaned_phrase:
+        return FALLBACK_CAUSE_LINE
+    if _is_wrapper_title_evidence_text(cleaned_phrase):
         return FALLBACK_CAUSE_LINE
     if pct_move is not None and pct_move < 0:
         line = f"Shares fell after {cleaned_phrase}."
