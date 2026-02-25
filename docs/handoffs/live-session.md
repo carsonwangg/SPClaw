@@ -2484,3 +2484,31 @@ Then confirm bot returns:
     - `generation_format=free_sentence`, `generation_policy=post_as_is`
 - Recap footer remains no-X:
   - `Sources: Yahoo earnings calendar/history + Yahoo fast_info + Google web + Yahoo news evidence`
+
+## Update (2026-02-25, integrator cherry-pick: market-daily earnings recap anchor-first rewrite)
+- Integrator action used market-daily-only path (no full branch merge):
+  - `git cherry-pick 58c8258`
+  - resulting commit on `main`: `0f78583` (`market-daily: rewrite earnings recap to anchor-first end-to-end`)
+- Cherry-pick conflict resolution summary:
+  - kept `main` continuity in handoff docs during conflict resolution.
+  - resolved `src/coatue_claw/market_daily.py` conflict and retained current mover consensus/no-attribution behavior while accepting recap rewrite.
+  - follow-up fix applied post-cherry-pick so recap keeps anchor+support citation ordering (without applying mover-family filter to recap rows).
+- Validation status:
+  - checklist host `python3` commands failed on mini (`No module named pytest`; Python 3.9 `datetime.UTC` import mismatch).
+  - runtime-equivalent validation passed on venv:
+    - `tests/test_market_daily.py` -> `75 passed`
+    - `tests/test_launchd_runtime.py` -> `8 passed`
+- Runtime ops:
+  - `make openclaw-restart`
+  - `make openclaw-slack-status` healthy after restart (`ok=true`, status `200`)
+  - `make openclaw-market-daily-earnings-recap-run-once FORCE=1` posted:
+    - `/opt/coatue-claw-data/artifacts/market-daily/md-earnings-recap-20260225-180006.md`
+  - `make openclaw-slack-logs` captured current channel runtime logs.
+- Acceptance check snapshot (latest forced recap run):
+  - Recap posted only when reporters existed (`reporters=3`).
+  - Each ticker had 3 bullets (within required 2–4).
+  - No X links/sources appeared in footer or content.
+  - Deterministic backup remained coherent when LLM unavailable (`recap_generation_mode=deterministic_backup`).
+  - Limitation in this run: no source evidence rows were available (`evidence: none`), so `[S1]/[S2]` citation handles and `Sources:` URL-handle mapping were not present for ticker bullets.
+- Integrator note:
+  - dry-run recap invocation in this environment can stall intermittently; force-run path completed and was used for production verification.

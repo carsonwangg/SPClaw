@@ -1129,3 +1129,13 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - INTC close line now surfaces partnership catalyst (SambaNova) without Reuters attribution.
   - footer stays no-X (`Yahoo fast_info + Yahoo news + web search`).
   - market daily + launchd runtime test suites pass on mini venv (`72 passed`, `8 passed`).
+
+- Deployed on `main` via cherry-pick (market-daily-only) from role branch:
+  - commit `0f78583` (`market-daily: rewrite earnings recap to anchor-first end-to-end`)
+- Verification state:
+  - recap service force-run posts successfully when reporters are present.
+  - recap bullet count contract (2–4) validated on latest run.
+  - no-X policy remains intact in recap output/footer.
+  - deterministic backup path remains coherent when LLM is unavailable.
+- Remaining runtime nuance to monitor:
+  - when recap evidence hydration yields `none`, citation-handle bullets (`[S1]/[S2]/[S3]`) cannot be emitted for those rows in that run.

@@ -5210,7 +5210,7 @@ def _hydrate_recap_row(*, row: EarningsRecapRow, since_utc: datetime, client: An
             max_support=_recap_support_count(),
             pct_move=row.since_close_pct,
         )
-        supports = _filter_support_candidates_by_family(supports=supports, family=consensus_family)
+        # Recap keeps anchor + support evidence ordering for citation stability.
     else:
         collected = _collect_evidence_for_ticker(
             ticker=row.ticker,
