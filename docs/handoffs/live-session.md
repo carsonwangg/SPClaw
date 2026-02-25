@@ -2628,3 +2628,14 @@ Then confirm bot returns:
   - `writing_mode`
   - `writing_artifact_cleanups`
   - `writing_field_dedup_fixes`
+
+## Update (2026-02-25, board-seat target extractor hardening)
+- Hardened target validation to reject additional non-company tokens that leaked into `Idea` targets:
+  - added stopword rejects: `there`, `here`, `d2c`, `b2b`, `b2c`, `plg`, `director`.
+  - added non-company shape reject for conceptual adjective forms (e.g., `ai-focused`, `llm-native`, `model-driven`).
+- Regression tests added for invalid targets:
+  - `There`, `D2C`, `Director`, `AI-focused`.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `63 passed`.
+- Operational note:
+  - Posted a manual real-research board-seat message to `#openai` at Slack ts `1772060668.808919` while extractor hardening is being stabilized for fully automated target selection.

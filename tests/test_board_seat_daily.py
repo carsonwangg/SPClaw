@@ -980,6 +980,9 @@ def test_resolve_target_to_company_valid_company_remains_as_extracted() -> None:
 def test_is_valid_target_name_rejects_pronoun_placeholders() -> None:
     assert board_seat_daily._is_valid_target_name(company="OpenAI", target="This") is False
     assert board_seat_daily._is_valid_target_name(company="OpenAI", target="The") is False
+    assert board_seat_daily._is_valid_target_name(company="OpenAI", target="There") is False
+    assert board_seat_daily._is_valid_target_name(company="OpenAI", target="D2C") is False
+    assert board_seat_daily._is_valid_target_name(company="OpenAI", target="Director") is False
 
 
 def test_is_valid_target_name_rejects_ai_first_placeholder() -> None:
@@ -996,6 +999,10 @@ def test_is_valid_target_name_rejects_metric_token() -> None:
 
 def test_is_valid_target_name_rejects_conceptual_llms_token() -> None:
     assert board_seat_daily._is_valid_target_name(company="OpenAI", target="LLMs") is False
+
+
+def test_is_valid_target_name_rejects_ai_focused_label() -> None:
+    assert board_seat_daily._is_valid_target_name(company="OpenAI", target="AI-focused") is False
 
 
 def test_sanitize_draft_retargets_conceptual_llms_target_to_concrete_company() -> None:

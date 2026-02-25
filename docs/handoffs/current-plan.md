@@ -1226,3 +1226,14 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - run payload rows (`sent` and gate-based `skipped`) now include writing observability fields.
 - Governance unchanged:
   - company-only target enforcement, confidence/new-target gate, hard 14-day no-repeat, and repitch significance.
+
+## Board Seat - Target Extractor Hardening (2026-02-25)
+- Status: in progress on `codex/agent-board-seat` (shipped tests), pending integrator merge.
+- Completed in this update:
+  - expanded non-company target rejection for leaked placeholders and business-model acronyms (`there`, `d2c`, `director`, etc.).
+  - added conceptual adjective rejection for `ai/llm/model` + `focused/first/native/driven`.
+  - added regression tests covering these failure patterns.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `63 passed`.
+- Next:
+  - add a post-sanitize target-lock re-check so retargeted outputs cannot bypass cooldown/new-target governance when final target differs from initial extraction.

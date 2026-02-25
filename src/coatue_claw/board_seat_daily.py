@@ -281,6 +281,13 @@ TARGET_TOKEN_STOPWORDS = {
     "that",
     "these",
     "those",
+    "there",
+    "here",
+    "d2c",
+    "b2b",
+    "b2c",
+    "plg",
+    "director",
     "the",
     "a",
     "an",
@@ -2648,6 +2655,10 @@ def _is_non_company_target_shape(target: str) -> bool:
     if "/" in candidate:
         return True
     if "." in candidate and any(tok in {"js", "ts", "py", "go", "rb"} for tok in tokens):
+        return True
+    if any(tok in {"ai", "llm", "model", "models"} for tok in tokens) and any(
+        tok in {"focused", "first", "native", "driven"} for tok in tokens
+    ):
         return True
     if tokens and tokens[-1] in NON_COMPANY_TARGET_SUFFIX_TOKENS:
         return True
