@@ -40,6 +40,20 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Market Daily simplified catalyst mode shipped on role branch:
+  - default catalyst path is now `simple_synthesis` (`COATUE_CLAW_MD_CATALYST_MODE`).
+  - retrieval path is Google web + Yahoo ticker headlines with `top-5` cap (`COATUE_CLAW_MD_SYNTH_MAX_RESULTS=5`).
+  - soft domain gate prefers quality domains; falls back to broader domains when quality coverage is sparse.
+  - line output stays fixed-format: `Shares rose/fell after <cause>.`
+  - forced best-guess mode is enabled by default (`COATUE_CLAW_MD_SYNTH_FORCE_BEST_GUESS=1`) when candidates exist.
+  - legacy heuristic path remains available for rollback (`legacy_heuristic`).
+  - debug/artifacts now emit synthesis diagnostics:
+    - `synth_generation_mode`
+    - `synth_model_used`
+    - `synth_candidates_considered`
+    - `synth_candidates_used`
+    - `synth_chosen_urls`
+  - earnings recap hydration now reuses simple synthesis and prepends a key-catalyst bullet.
 - Market Daily grammar hardening shipped on role branch:
   - Added deterministic causal phrase extraction and phrase-quality gates for MD mover lines.
   - Added optional hybrid LLM polish pass with source-lock, lexical overlap, and entity/number drift guards.

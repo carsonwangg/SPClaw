@@ -3,6 +3,30 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-25, MD simple synthesis catalyst mode)
+- Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
+  - Added new default catalyst mode: `COATUE_CLAW_MD_CATALYST_MODE=simple_synthesis`.
+  - Added simple synthesis controls:
+    - `COATUE_CLAW_MD_SYNTH_MAX_RESULTS` (default `5`)
+    - `COATUE_CLAW_MD_SYNTH_SOURCE_MODE` (default `google_plus_yahoo`)
+    - `COATUE_CLAW_MD_SYNTH_DOMAIN_GATE` (default `soft`)
+    - `COATUE_CLAW_MD_SYNTH_FORCE_BEST_GUESS` (default `1`)
+  - Added `_build_catalyst_for_mover_simple(...)` and mode routing:
+    - `simple_synthesis` uses Google+Yahoo top evidence -> one-line catalyst synthesis.
+    - `legacy_heuristic` remains available as rollback.
+  - Preserved quote-directory/generic wrapper rejection and no-X policy.
+  - Added synthesis diagnostics to artifacts/debug:
+    - `synth_generation_mode`, `synth_model_used`
+    - `synth_candidates_considered`, `synth_candidates_used`, `synth_chosen_urls`
+  - Extended earnings recap hydration to reuse the same simple synthesis helper and prepend a `Key catalyst:` bullet when available.
+- Tests updated in `/Users/carsonwang/worktrees/coatue-claw/market-daily/tests/test_market_daily.py`:
+  - new simple-mode default/config tests
+  - simple synthesis happy-path line generation
+  - soft-domain gate prioritization
+  - force-best-guess fallback path
+  - no-candidate fallback path
+  - recap key-catalyst bullet injection
+
 ## Update (2026-02-25, MD grammar hardening with hybrid polish + aggressive fallback)
 - Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
   - Added reason-quality runtime controls:

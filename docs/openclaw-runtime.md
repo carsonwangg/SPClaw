@@ -237,6 +237,11 @@ MD (Market Daily) environment controls:
 - `COATUE_CLAW_MD_COATUE_CIK`: Coatue CIK for auto 13F refresh
 - `COATUE_CLAW_MD_OPENFIGI_API_KEY`: optional OpenFIGI key for stronger CUSIP->ticker resolution
 - `COATUE_CLAW_MD_MODEL`: optional catalyst summarizer model (default `gpt-5.2-chat-latest`)
+- `COATUE_CLAW_MD_CATALYST_MODE`: catalyst engine mode (`simple_synthesis` default, `legacy_heuristic` rollback)
+- `COATUE_CLAW_MD_SYNTH_MAX_RESULTS`: max evidence candidates passed to simple synthesis (default `5`)
+- `COATUE_CLAW_MD_SYNTH_SOURCE_MODE`: simple synthesis source mix (`google_plus_yahoo` default, `google_only`, `yahoo_only`)
+- `COATUE_CLAW_MD_SYNTH_DOMAIN_GATE`: synthesis domain filter (`soft` default, `quality_only`, `off`)
+- `COATUE_CLAW_MD_SYNTH_FORCE_BEST_GUESS`: when synthesis output is invalid, force deterministic best-guess phrase if any candidate exists (`1` default)
 - `COATUE_CLAW_MD_MAX_LOOKBACK_HOURS`: max evidence lookback cap for session windows (default `96`)
 - `COATUE_CLAW_MD_WEB_SEARCH_ENABLED`: enable web fallback retrieval (`1`/`0`, default `1`)
 - `COATUE_CLAW_MD_WEB_SEARCH_BACKEND`: web backend (`google_serp` primary with `ddg_html` fallback, default `google_serp`)
@@ -256,6 +261,11 @@ MD (Market Daily) environment controls:
 - `COATUE_CLAW_MD_REASON_POLISH_ENABLED`: enable optional LLM polish pass for awkward phrases (`1`/`0`, default `1`)
 - `COATUE_CLAW_MD_REASON_POLISH_MODEL`: optional model override for reason polish (default follows `COATUE_CLAW_MD_MODEL`)
 - `COATUE_CLAW_MD_REASON_POLISH_MAX_CHARS`: max chars for polished reason phrase (default `90`)
+- `simple_synthesis` mode behavior:
+  - collects top Google web + Yahoo ticker evidence
+  - rejects quote-directory/generic wrapper items before synthesis
+  - synthesizes one catalyst phrase and renders `Shares rose/fell after <cause>.`
+  - falls back only when no usable candidates remain
 - Basket coherence rule: if a confirmed `anthropic_claude_cyber` cause is present for one cybersecurity mover in a run, peer cybersecurity selloff movers reuse that same cause phrase.
 - MD fallback line (when corroboration gate fails): `Likely positioning/flow; no single confirmed catalyst.`
 

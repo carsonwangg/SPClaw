@@ -93,6 +93,11 @@ class CatalystEvidence:
     cause_raw_phrase: str | None = None
     cause_final_phrase: str | None = None
     quality_rejections: tuple[str, ...] = ()
+    synth_generation_mode: str | None = None
+    synth_model_used: str | None = None
+    synth_candidates_considered: tuple[str, ...] = ()
+    synth_candidates_used: tuple[str, ...] = ()
+    synth_chosen_urls: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -217,6 +222,45 @@ def _reason_polish_max_chars() -> int:
     except Exception:
         val = 90
     return max(70, min(130, val))
+
+
+def _catalyst_mode() -> str:
+    raw = (os.environ.get("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis") or "simple_synthesis").strip().lower()
+    if raw in {"legacy", "legacy_heuristic", "heuristic"}:
+        return "legacy_heuristic"
+    return "simple_synthesis"
+
+
+def _synth_max_results() -> int:
+    raw = (os.environ.get("COATUE_CLAW_MD_SYNTH_MAX_RESULTS", "5") or "5").strip()
+    try:
+        val = int(raw)
+    except Exception:
+        val = 5
+    return max(1, min(10, val))
+
+
+def _synth_source_mode() -> str:
+    raw = (os.environ.get("COATUE_CLAW_MD_SYNTH_SOURCE_MODE", "google_plus_yahoo") or "google_plus_yahoo").strip().lower()
+    if raw in {"google_only", "google"}:
+        return "google_only"
+    if raw in {"yahoo_only", "yahoo"}:
+        return "yahoo_only"
+    return "google_plus_yahoo"
+
+
+def _synth_domain_gate() -> str:
+    raw = (os.environ.get("COATUE_CLAW_MD_SYNTH_DOMAIN_GATE", "soft") or "soft").strip().lower()
+    if raw in {"quality_only", "strict"}:
+        return "quality_only"
+    if raw in {"off", "any", "none"}:
+        return "off"
+    return "soft"
+
+
+def _synth_force_best_guess() -> bool:
+    raw = (os.environ.get("COATUE_CLAW_MD_SYNTH_FORCE_BEST_GUESS", "1") or "1").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
 
 
 def _top_n() -> int:
@@ -2879,6 +2923,189 @@ def _collect_evidence_for_ticker(
     )
 
 
+def _candidate_debug_entry(*, item: _EvidenceCandidate, pct_move: float | None) -> str:
+    return _shorten(
+        f"{item.source_type}({_effective_candidate_score(candidate=item, pct_move=pct_move):.2f}): {item.text} [{item.url or 'no-url'}]",
+        180,
+    )
+
+
+def _apply_synth_domain_gate(*, candidates: list[_EvidenceCandidate], max_results: int) -> list[_EvidenceCandidate]:
+    gate = _synth_domain_gate()
+    if gate == "off":
+        return candidates[:max_results]
+    quality = [c for c in candidates if _is_quality_domain(c.domain or c.url)]
+    non_quality = [c for c in candidates if not _is_quality_domain(c.domain or c.url)]
+    if gate == "quality_only":
+        return quality[:max_results]
+    if len(quality) >= 2:
+        return quality[:max_results]
+    out = quality + non_quality
+    return out[:max_results]
+
+
+def _collect_synthesis_candidates(
+    *,
+    ticker: str,
+    aliases: list[str],
+    since_utc: datetime,
+    pct_move: float | None = None,
+) -> tuple[list[_EvidenceCandidate], list[_EvidenceCandidate], list[str], str | None]:
+    notes: list[str] = []
+    source_mode = _synth_source_mode()
+    merged: list[_EvidenceCandidate] = []
+    web_backend: str | None = None
+
+    if source_mode in {"google_plus_yahoo", "yahoo_only"}:
+        yahoo = _fetch_yahoo_news_candidates(ticker=ticker, aliases=aliases, since_utc=since_utc)
+        if not yahoo:
+            notes.append("yahoo:no_recent_relevant_headlines")
+        merged.extend(yahoo)
+
+    if source_mode in {"google_plus_yahoo", "google_only"}:
+        web_rows, backend, web_notes = _fetch_web_evidence(
+            ticker=ticker,
+            aliases=aliases,
+            since_utc=since_utc,
+            pct_move=pct_move,
+        )
+        web_backend = backend
+        notes.extend(web_notes)
+        if web_rows:
+            notes.append(f"web:backend={backend}")
+        else:
+            notes.append("web:no_relevant_results")
+        merged.extend(web_rows)
+
+    normalized = _normalize_evidence_candidates(candidates=merged, ticker=ticker, aliases=aliases)
+    allowed = _md_allowed_evidence_sources()
+    normalized = [c for c in normalized if c.source_type in allowed]
+    ranked = sorted(
+        normalized,
+        key=lambda c: (
+            -_effective_candidate_score(candidate=c, pct_move=pct_move),
+            _source_rank(c.source_type),
+        ),
+    )
+    usable = [
+        c
+        for c in ranked
+        if c.reject_reason != "generic_wrapper" and (not _is_quote_directory_wrapper(text=c.text, url=c.url))
+    ]
+    if ranked and (not usable):
+        notes.append("all_candidates:rejected_as_wrappers")
+    gated = _apply_synth_domain_gate(candidates=usable, max_results=_synth_max_results())
+    return ranked, gated, notes, web_backend
+
+
+def _sanitize_synth_phrase(raw: str) -> str:
+    phrase = _normalize_whitespace(str(raw or "")).strip().lstrip("-*• ").strip(" \"'`")
+    phrase = re.sub(r"https?://\S+", "", phrase, flags=re.IGNORECASE)
+    phrase = re.sub(r"\[[^\]]+\]\([^)]+\)", "", phrase)
+    phrase = phrase.strip(" .")
+    phrase = re.sub(
+        r"(?i)^shares\s+(?:rose|fell|moved)\s+(?:after|amid|as|following|due to|because|on)\s+",
+        "",
+        phrase,
+    ).strip(" .")
+    return _shorten(phrase, 90).strip(" .")
+
+
+def _synth_phrase_invalid_reason(*, phrase: str, evidence_text: str) -> str | None:
+    if not phrase:
+        return "empty_phrase"
+    lower = phrase.lower()
+    if "http://" in lower or "https://" in lower or "www." in lower:
+        return "contains_link"
+    if _is_quote_directory_title(phrase) or _contains_disallowed_reason_phrasing(phrase):
+        return "wrapper_phrase"
+    if _has_entity_drift(raw_phrase=evidence_text, candidate=phrase):
+        return "entity_drift"
+    if _lexical_overlap_ratio(raw_phrase=evidence_text, candidate=phrase) < 0.12:
+        return "low_overlap"
+    return None
+
+
+def _best_guess_phrase_from_candidates(candidates: list[_EvidenceCandidate]) -> str | None:
+    for item in candidates:
+        if item.reject_reason == "generic_wrapper":
+            continue
+        if _is_quote_directory_wrapper(text=item.text, url=item.url):
+            continue
+        phrase = _extract_causal_clause(item.text)
+        if phrase:
+            return _sanitize_synth_phrase(phrase)
+        fallback = _sanitize_synth_phrase(_strip_non_md_artifacts(item.text))
+        if fallback:
+            return fallback
+    return None
+
+
+def _synthesize_catalyst_phrase_simple(
+    *,
+    client: Any | None,
+    ticker: str,
+    pct_move: float | None,
+    candidates: list[_EvidenceCandidate],
+) -> tuple[str | None, str | None]:
+    if not candidates:
+        return None, "no_candidates"
+    if client is None:
+        return None, "llm_unavailable"
+
+    evidence_lines: list[str] = []
+    for idx, item in enumerate(candidates[: _synth_max_results()], start=1):
+        evidence_lines.append(
+            f"[S{idx}] src={item.source_type} score={_effective_candidate_score(candidate=item, pct_move=pct_move):.2f} title={item.text} url={item.url or 'n/a'}"
+        )
+    evidence_text = "\n".join(evidence_lines)
+    move = _format_pct(pct_move)
+    prompt = (
+        "Write exactly one causal phrase for the stock move using only the provided evidence.\n"
+        "Rules:\n"
+        "- One phrase only, plain text.\n"
+        "- Max 90 characters.\n"
+        "- No links, no markdown, no publisher names, no menu/quote-directory language.\n"
+        "- Do not add facts/entities/numbers not present in evidence.\n"
+        "- Phrase should fit after the word 'after'.\n\n"
+        f"Ticker: {ticker}\n"
+        f"Move: {move}\n"
+        "Evidence:\n"
+        f"{evidence_text}\n"
+    )
+    try:
+        response = client.chat.completions.create(
+            model=_reason_polish_model(),
+            messages=[
+                {"role": "system", "content": "You write concise, factual catalyst phrases grounded in source evidence."},
+                {"role": "user", "content": prompt},
+            ],
+        )
+        raw = str(response.choices[0].message.content or "").strip()  # type: ignore[index]
+    except Exception:
+        logger.exception("simple catalyst synthesis failed for %s", ticker)
+        return None, "llm_exception"
+
+    phrase = _sanitize_synth_phrase(raw)
+    invalid = _synth_phrase_invalid_reason(phrase=phrase, evidence_text=" ".join(c.text for c in candidates))
+    if invalid is not None:
+        return None, f"llm_invalid_output:{invalid}"
+    return phrase, None
+
+
+def _render_simple_reason_line(*, pct_move: float | None, phrase: str | None) -> str:
+    cleaned = _sanitize_synth_phrase(phrase or "")
+    if not cleaned:
+        return FALLBACK_CAUSE_LINE
+    if pct_move is not None and pct_move < 0:
+        line = f"Shares fell after {cleaned}."
+    elif pct_move is not None and pct_move > 0:
+        line = f"Shares rose after {cleaned}."
+    else:
+        line = f"Shares moved after {cleaned}."
+    return _shorten(line, 110).rstrip(" .") + "."
+
+
 def _preferred_evidence_text(evidence: CatalystEvidence) -> str:
     if evidence.chosen_source == "web" and evidence.web_title:
         return evidence.web_title
@@ -3124,6 +3351,22 @@ def _write_artifact(
             lines.append(f"  - cause_final_phrase: {ev.cause_final_phrase}")
         if ev.quality_rejections:
             lines.append(f"  - quality_rejections: {', '.join(ev.quality_rejections)}")
+        if ev.synth_generation_mode:
+            lines.append(f"  - synth_generation_mode: {ev.synth_generation_mode}")
+        if ev.synth_model_used:
+            lines.append(f"  - synth_model_used: {ev.synth_model_used}")
+        if ev.synth_candidates_considered:
+            lines.append("  - synth_candidates_considered:")
+            for entry in ev.synth_candidates_considered:
+                lines.append(f"    - {entry}")
+        if ev.synth_candidates_used:
+            lines.append("  - synth_candidates_used:")
+            for entry in ev.synth_candidates_used:
+                lines.append(f"    - {entry}")
+        if ev.synth_chosen_urls:
+            lines.append("  - synth_chosen_urls:")
+            for url in ev.synth_chosen_urls:
+                lines.append(f"    - {url}")
         if ev.cause_source_type:
             lines.append(f"  - cause_source_type: {ev.cause_source_type}")
         if ev.cause_source_url:
@@ -3193,7 +3436,107 @@ def _post_to_slack(*, channel_ref: str, text: str) -> tuple[str | None, str | No
     raise MarketDailyError(f"Slack post failed after token fallback: {last_error or 'unknown'}")
 
 
-def _build_catalyst_for_mover(*, mover: QuoteSnapshot, slot_name: str, since_utc: datetime) -> tuple[CatalystEvidence, str]:
+def _build_catalyst_for_mover_simple(*, mover: QuoteSnapshot, slot_name: str, since_utc: datetime) -> tuple[CatalystEvidence, str]:
+    aliases = _company_aliases(mover.ticker)
+    considered, selected, rejected, web_backend = _collect_synthesis_candidates(
+        ticker=mover.ticker,
+        aliases=aliases,
+        since_utc=since_utc,
+        pct_move=mover.pct_move,
+    )
+    if not selected:
+        rejected = list(rejected) + ["no_candidates"]
+        evidence = CatalystEvidence(
+            ticker=mover.ticker,
+            x_text=None,
+            x_url=None,
+            x_engagement=0,
+            news_title=None,
+            news_url=None,
+            web_title=None,
+            web_url=None,
+            confidence=0.0,
+            chosen_source=None,
+            top_evidence=tuple(_candidate_debug_entry(item=c, pct_move=mover.pct_move) for c in considered[:5]),
+            rejected_reasons=tuple(rejected),
+            since_utc=since_utc.replace(microsecond=0).isoformat(),
+            web_backend=web_backend,
+            cause_mode="simple_synthesis",
+            cause_render_mode="fallback",
+            quality_rejections=("no_candidates",),
+            synth_generation_mode="simple_synthesis",
+            synth_model_used=(_reason_polish_model() if _openai_client() is not None else None),
+            synth_candidates_considered=tuple(_candidate_debug_entry(item=c, pct_move=mover.pct_move) for c in considered[:5]),
+            synth_candidates_used=(),
+            synth_chosen_urls=(),
+        )
+        return evidence, FALLBACK_CAUSE_LINE
+
+    best = selected[0]
+    client = _openai_client()
+    phrase, llm_error = _synthesize_catalyst_phrase_simple(
+        client=client,
+        ticker=mover.ticker,
+        pct_move=mover.pct_move,
+        candidates=selected,
+    )
+    render_mode = "simple_llm"
+    quality_rejections: list[str] = []
+    if llm_error:
+        quality_rejections.append(llm_error)
+        rejected.append(llm_error)
+    if not phrase:
+        if _synth_force_best_guess():
+            phrase = _best_guess_phrase_from_candidates(selected)
+            if phrase:
+                render_mode = "simple_best_guess"
+                rejected.append("fallback_to_top_candidate")
+            else:
+                quality_rejections.append("fallback_to_top_candidate_failed")
+        else:
+            quality_rejections.append("llm_no_phrase")
+
+    line = _render_simple_reason_line(pct_move=mover.pct_move, phrase=phrase)
+    if line == FALLBACK_CAUSE_LINE:
+        quality_rejections.append("line_builder_rejected")
+        render_mode = "fallback"
+
+    best_news = _pick_best_by_source(selected, "yahoo_news", pct_move=mover.pct_move)
+    best_web = _pick_best_by_source(selected, "web", pct_move=mover.pct_move)
+    confidence = _effective_candidate_score(candidate=best, pct_move=mover.pct_move)
+    evidence = CatalystEvidence(
+        ticker=mover.ticker,
+        x_text=None,
+        x_url=None,
+        x_engagement=0,
+        news_title=best_news.text if best_news else None,
+        news_url=best_news.url if best_news else None,
+        web_title=best_web.text if best_web else None,
+        web_url=best_web.url if best_web else None,
+        confidence=confidence,
+        chosen_source=best.source_type,
+        top_evidence=tuple(_candidate_debug_entry(item=c, pct_move=mover.pct_move) for c in considered[:5]),
+        rejected_reasons=tuple(rejected),
+        since_utc=since_utc.replace(microsecond=0).isoformat(),
+        web_backend=web_backend,
+        cause_source_type=best.source_type,
+        cause_source_url=best.url,
+        cause_mode="simple_synthesis",
+        cause_render_mode=render_mode,
+        cause_raw_phrase=phrase,
+        cause_final_phrase=(phrase if line != FALLBACK_CAUSE_LINE else None),
+        confirmed_cause_phrase=(phrase if line != FALLBACK_CAUSE_LINE else None),
+        quality_rejections=tuple(quality_rejections),
+        synth_generation_mode="simple_synthesis",
+        synth_model_used=(_reason_polish_model() if client is not None else None),
+        synth_candidates_considered=tuple(_candidate_debug_entry(item=c, pct_move=mover.pct_move) for c in considered[:5]),
+        synth_candidates_used=tuple(_candidate_debug_entry(item=c, pct_move=mover.pct_move) for c in selected[: _synth_max_results()]),
+        synth_chosen_urls=tuple([c.url for c in selected[: _synth_max_results()] if c.url]),
+    )
+    return evidence, line
+
+
+def _build_catalyst_for_mover_legacy(*, mover: QuoteSnapshot, slot_name: str, since_utc: datetime) -> tuple[CatalystEvidence, str]:
     aliases = _company_aliases(mover.ticker)
     collected = _collect_evidence_for_ticker(
         ticker=mover.ticker,
@@ -3375,6 +3718,12 @@ def _build_catalyst_for_mover(*, mover: QuoteSnapshot, slot_name: str, since_utc
     return evidence, line
 
 
+def _build_catalyst_for_mover(*, mover: QuoteSnapshot, slot_name: str, since_utc: datetime) -> tuple[CatalystEvidence, str]:
+    if _catalyst_mode() == "legacy_heuristic":
+        return _build_catalyst_for_mover_legacy(mover=mover, slot_name=slot_name, since_utc=since_utc)
+    return _build_catalyst_for_mover_simple(mover=mover, slot_name=slot_name, since_utc=since_utc)
+
+
 def _build_catalyst_rows(*, movers: list[QuoteSnapshot], slot_name: str) -> tuple[list[CatalystEvidence], list[str]]:
     since_utc = _session_window_since_utc(slot_name=slot_name)
     rows: list[CatalystEvidence] = []
@@ -3470,6 +3819,11 @@ def debug_catalyst(*, ticker: str, slot_name: str = "open") -> dict[str, Any]:
         "cause_raw_phrase": evidence.cause_raw_phrase,
         "cause_final_phrase": evidence.cause_final_phrase,
         "quality_rejections": list(evidence.quality_rejections),
+        "synth_generation_mode": evidence.synth_generation_mode,
+        "synth_model_used": evidence.synth_model_used,
+        "synth_candidates_considered": list(evidence.synth_candidates_considered),
+        "synth_candidates_used": list(evidence.synth_candidates_used),
+        "synth_chosen_urls": list(evidence.synth_chosen_urls),
         "cause_source_type": evidence.cause_source_type,
         "cause_source_url": evidence.cause_source_url,
         "corroborated_sources": evidence.corroborated_sources,
@@ -3829,16 +4183,25 @@ def _synthesize_earnings_bullets(*, client: Any | None, row: EarningsRecapRow) -
 
 def _hydrate_recap_row(*, row: EarningsRecapRow, since_utc: datetime, client: Any | None) -> EarningsRecapRow:
     aliases = _company_aliases(row.ticker)
-    collected = _collect_evidence_for_ticker(
-        ticker=row.ticker,
-        aliases=aliases,
-        since_utc=since_utc,
-        pct_move=row.since_close_pct,
-    )
-    if len(collected) == 3:
-        candidates = collected[0]
+    if _catalyst_mode() == "simple_synthesis":
+        considered, selected, _, _ = _collect_synthesis_candidates(
+            ticker=row.ticker,
+            aliases=aliases,
+            since_utc=since_utc,
+            pct_move=row.since_close_pct,
+        )
+        candidates = selected or considered
     else:
-        candidates = collected[0]  # type: ignore[index]
+        collected = _collect_evidence_for_ticker(
+            ticker=row.ticker,
+            aliases=aliases,
+            since_utc=since_utc,
+            pct_move=row.since_close_pct,
+        )
+        if len(collected) == 3:
+            candidates = collected[0]
+        else:
+            candidates = collected[0]  # type: ignore[index]
     evidence_lines: list[str] = []
     links: list[str] = []
     for item in candidates[:4]:
@@ -3850,8 +4213,30 @@ def _hydrate_recap_row(*, row: EarningsRecapRow, since_utc: datetime, client: An
         evidence=tuple(evidence_lines),
         source_links=tuple(links),
     )
-    bullets = _synthesize_earnings_bullets(client=client, row=hydrated)
-    return replace(hydrated, bullets=bullets)
+    bullets = list(_synthesize_earnings_bullets(client=client, row=hydrated))
+    if _catalyst_mode() == "simple_synthesis":
+        phrase, llm_error = _synthesize_catalyst_phrase_simple(
+            client=client,
+            ticker=row.ticker,
+            pct_move=row.since_close_pct,
+            candidates=candidates[: _synth_max_results()],
+        )
+        if not phrase and _synth_force_best_guess():
+            phrase = _best_guess_phrase_from_candidates(candidates[: _synth_max_results()])
+            if phrase:
+                llm_error = None
+        line = _render_simple_reason_line(pct_move=row.since_close_pct, phrase=phrase)
+        if line != FALLBACK_CAUSE_LINE:
+            ref = " [S1]" if links else ""
+            catalyst_bullet = f"Key catalyst: {line.rstrip('.')}{ref}."
+            bullets = [catalyst_bullet] + [b for b in bullets if not b.lower().startswith("key catalyst:")]
+        elif llm_error:
+            bullets.insert(0, "Key catalyst remains mixed across early coverage; monitor updates.")
+    if len(bullets) > 4:
+        bullets = bullets[:4]
+    if len(bullets) < 2:
+        bullets = list(_fallback_earnings_bullets(row=hydrated))
+    return replace(hydrated, bullets=tuple(bullets))
 
 
 def _build_earnings_recap_message(*, rows: list[EarningsRecapRow], now_local: datetime) -> str:
@@ -3865,7 +4250,7 @@ def _build_earnings_recap_message(*, rows: list[EarningsRecapRow], now_local: da
         if row.source_links:
             refs = [f"<{url}|[S{idx}]>" for idx, url in enumerate(row.source_links, start=1)]
             lines.append(f"Sources: {' '.join(refs)}")
-    lines.append(f"Data UTC: {_utc_now_iso()} | Sources: Yahoo earnings calendar/history + Yahoo fast_info + Yahoo/web evidence")
+    lines.append(f"Data UTC: {_utc_now_iso()} | Sources: Yahoo earnings calendar/history + Yahoo fast_info + Google web + Yahoo news evidence")
     return "\n".join(lines)
 
 
@@ -4200,6 +4585,11 @@ def status() -> dict[str, Any]:
         "earnings_recap_time": f"{recap_hh:02d}:{recap_mm:02d}",
         "channel": _channel_default(),
         "model": _md_model(),
+        "catalyst_mode": _catalyst_mode(),
+        "synth_max_results": _synth_max_results(),
+        "synth_source_mode": _synth_source_mode(),
+        "synth_domain_gate": _synth_domain_gate(),
+        "synth_force_best_guess": _synth_force_best_guess(),
         "reason_quality_mode": _reason_quality_mode(),
         "reason_polish_enabled": _reason_polish_enabled(),
         "reason_polish_model": _reason_polish_model(),

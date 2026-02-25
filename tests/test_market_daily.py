@@ -4,6 +4,8 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from coatue_claw.market_daily import (
     CatalystEvidence,
     EarningsPreviewItem,
@@ -28,6 +30,11 @@ from coatue_claw.market_daily import (
     run_earnings_recap,
     run_once,
 )
+
+
+@pytest.fixture(autouse=True)
+def _legacy_catalyst_mode_default(monkeypatch):
+    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "legacy_heuristic")
 
 
 def test_parse_times_defaults_and_custom() -> None:
@@ -1403,5 +1410,170 @@ def test_run_earnings_recap_selects_top4_and_writes_artifact(tmp_path: Path, mon
     assert artifact.exists()
     content = artifact.read_text(encoding="utf-8")
     assert "## Recap Rows" in content
-    assert "Yahoo/web evidence" in content
+    assert "Google web + Yahoo news evidence" in content
     assert "X/Yahoo/web evidence" not in content
+
+
+def test_catalyst_mode_defaults_to_simple(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    monkeypatch.delenv("COATUE_CLAW_MD_CATALYST_MODE", raising=False)
+    assert md._catalyst_mode() == "simple_synthesis"
+
+
+def test_simple_synthesis_happy_path_generates_specific_line(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    mover = QuoteSnapshot("AMD", 100.0, 108.8, 100.0, 0.088, "2026-02-25T22:00:00+00:00")
+    candidates = [
+        md._EvidenceCandidate(
+            source_type="yahoo_news",
+            text="AMD shares rise after Meta signs AI accelerator supply deal",
+            url="https://finance.yahoo.com/news/amd-meta-deal",
+            published_at_utc=datetime(2026, 2, 25, 20, 0, 0, tzinfo=UTC),
+            score=0.8,
+            driver_keywords=("deal_contract",),
+            canonical_url="https://finance.yahoo.com/news/amd-meta-deal",
+            domain="finance.yahoo.com",
+        ),
+        md._EvidenceCandidate(
+            source_type="web",
+            text="Meta inks multi-year AI chip agreement with AMD",
+            url="https://www.reuters.com/world/us/meta-amd-ai-chips-2026-02-25/",
+            published_at_utc=datetime(2026, 2, 25, 21, 0, 0, tzinfo=UTC),
+            score=0.77,
+            driver_keywords=("deal_contract",),
+            canonical_url="https://www.reuters.com/world/us/meta-amd-ai-chips-2026-02-25/",
+            domain="reuters.com",
+        ),
+    ]
+
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._collect_synthesis_candidates",
+        lambda ticker, aliases, since_utc, pct_move=None: (candidates, candidates, [], "google_serp"),
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._synthesize_catalyst_phrase_simple",
+        lambda client, ticker, pct_move, candidates: ("Meta signed an AI chip supply deal with AMD", None),
+    )
+    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: object())
+    evidence, line = md._build_catalyst_for_mover(
+        mover=mover,
+        slot_name="close",
+        since_utc=datetime(2026, 2, 25, 13, 30, 0, tzinfo=UTC),
+    )
+    assert line.startswith("Shares rose after")
+    assert "Meta signed an AI chip supply deal with AMD" in line
+    assert evidence.cause_mode == "simple_synthesis"
+    assert evidence.synth_generation_mode == "simple_synthesis"
+    assert evidence.synth_candidates_used
+
+
+def test_simple_synthesis_soft_domain_gate_prefers_quality(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    monkeypatch.setenv("COATUE_CLAW_MD_SYNTH_DOMAIN_GATE", "soft")
+    monkeypatch.setenv("COATUE_CLAW_MD_SYNTH_MAX_RESULTS", "3")
+    rows = [
+        md._EvidenceCandidate("web", "a", "https://example-blog.com/a", None, 0.9, domain="example-blog.com"),
+        md._EvidenceCandidate("web", "b", "https://www.reuters.com/b", None, 0.8, domain="reuters.com"),
+        md._EvidenceCandidate("web", "c", "https://finance.yahoo.com/c", None, 0.7, domain="finance.yahoo.com"),
+    ]
+    out = md._apply_synth_domain_gate(candidates=rows, max_results=3)
+    assert [x.domain for x in out][:2] == ["reuters.com", "finance.yahoo.com"]
+
+
+def test_simple_synthesis_force_best_guess_on_invalid_llm(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.setenv("COATUE_CLAW_MD_SYNTH_FORCE_BEST_GUESS", "1")
+    mover = QuoteSnapshot("INTC", 100.0, 105.7, 100.0, 0.057, "2026-02-25T22:00:00+00:00")
+    candidates = [
+        md._EvidenceCandidate(
+            source_type="web",
+            text="Morgan Stanley lifts Intel to $41 and flags foundry constraints",
+            url="https://www.reuters.com/world/us/morgan-stanley-intel-2026-02-25/",
+            published_at_utc=datetime(2026, 2, 25, 21, 0, 0, tzinfo=UTC),
+            score=0.76,
+            canonical_url="https://www.reuters.com/world/us/morgan-stanley-intel-2026-02-25/",
+            domain="reuters.com",
+        ),
+    ]
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._collect_synthesis_candidates",
+        lambda ticker, aliases, since_utc, pct_move=None: (candidates, candidates, [], "google_serp"),
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._synthesize_catalyst_phrase_simple",
+        lambda client, ticker, pct_move, candidates: (None, "llm_invalid_output:low_overlap"),
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._best_guess_phrase_from_candidates",
+        lambda candidates: "Morgan Stanley lifted Intel and flagged foundry constraints",
+    )
+    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: object())
+    evidence, line = md._build_catalyst_for_mover(
+        mover=mover,
+        slot_name="close",
+        since_utc=datetime(2026, 2, 25, 13, 30, 0, tzinfo=UTC),
+    )
+    assert line != md.FALLBACK_CAUSE_LINE
+    assert evidence.cause_render_mode == "simple_best_guess"
+    assert "fallback_to_top_candidate" in evidence.rejected_reasons
+
+
+def test_simple_synthesis_no_candidates_uses_fallback(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._collect_synthesis_candidates",
+        lambda ticker, aliases, since_utc, pct_move=None: ([], [], [], None),
+    )
+    mover = QuoteSnapshot("BKNG", 100.0, 105.1, 100.0, 0.051, "2026-02-25T22:00:00+00:00")
+    evidence, line = md._build_catalyst_for_mover(
+        mover=mover,
+        slot_name="close",
+        since_utc=datetime(2026, 2, 25, 13, 30, 0, tzinfo=UTC),
+    )
+    assert line == md.FALLBACK_CAUSE_LINE
+    assert "no_candidates" in evidence.rejected_reasons
+
+
+def test_simple_hydrate_recap_prepends_key_catalyst(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    row = EarningsRecapRow("AMD", "AMD", "2026-02-25", "after_close", 100.0, 108.8, 100.0, 0.088)
+    candidates = [
+        md._EvidenceCandidate(
+            source_type="yahoo_news",
+            text="AMD shares rise after Meta signs AI accelerator supply deal",
+            url="https://finance.yahoo.com/news/amd-meta-deal",
+            published_at_utc=datetime(2026, 2, 25, 20, 0, 0, tzinfo=UTC),
+            score=0.8,
+            canonical_url="https://finance.yahoo.com/news/amd-meta-deal",
+            domain="finance.yahoo.com",
+        )
+    ]
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._collect_synthesis_candidates",
+        lambda ticker, aliases, since_utc, pct_move=None: (candidates, candidates, [], "google_serp"),
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._synthesize_catalyst_phrase_simple",
+        lambda client, ticker, pct_move, candidates: ("Meta signed an AI chip supply deal with AMD", None),
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._synthesize_earnings_bullets",
+        lambda client, row: ("Shares traded higher after hours.", "Guidance comments were constructive."),
+    )
+    hydrated = md._hydrate_recap_row(
+        row=row,
+        since_utc=datetime(2026, 2, 25, 21, 0, 0, tzinfo=UTC),
+        client=None,
+    )
+    assert hydrated.bullets
+    assert hydrated.bullets[0].startswith("Key catalyst: Shares rose after")
