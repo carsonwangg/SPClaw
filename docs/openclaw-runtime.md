@@ -268,8 +268,11 @@ MD (Market Daily) environment controls:
 - `COATUE_CLAW_MD_REASON_POLISH_MAX_CHARS`: max chars for polished reason phrase (default `90`)
 - `simple_synthesis` mode behavior:
   - collects top Google web + Yahoo ticker evidence
+  - if Google SERP key is missing, skips DDG fallback for catalyst selection and relies on Yahoo evidence + safe fallback behavior
   - rejects quote-directory/generic wrapper items before synthesis
   - enforces strict time-integrity filtering for candidate links and catalyst selection
+  - applies soft penalties to technical-analysis and multi-ticker roundup headlines
+  - with LLM unavailable, only deterministic causal candidates may produce specific lines; otherwise fallback line is used
   - synthesizes one catalyst phrase and renders `Shares rose/fell after <cause>.`
   - falls back only when no usable time-valid candidates remain
 - Basket coherence rule: if a confirmed `anthropic_claude_cyber` cause is present for one cybersecurity mover in a run, peer cybersecurity selloff movers reuse that same cause phrase.

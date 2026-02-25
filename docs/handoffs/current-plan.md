@@ -40,6 +40,12 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Market Daily catalyst quality recovery shipped on role branch:
+  - in simple-synthesis mode, DDG web fallback is skipped when Google SERP key is missing (`web:google_serp_required_missing`), reducing noisy fallback evidence.
+  - deterministic no-LLM gate now requires strong causal/explainer candidates before rendering a specific line; otherwise uses generic fallback.
+  - soft penalties now reduce rank for technical-analysis and multi-ticker roundup headlines.
+  - synth phrase sanitizer strips common aggregator prefixes (for example `FinancialContent -`).
+  - preserves existing no-X and strict time-integrity policies.
 - Market Daily time-integrity guardrails shipped on role branch:
   - strict in-window date enforcement now gates catalyst evidence and links.
   - undated candidates are rejected by default unless explicitly allowed.

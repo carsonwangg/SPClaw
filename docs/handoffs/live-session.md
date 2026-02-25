@@ -3,6 +3,21 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-25, MD catalyst quality recovery for no-Google/no-LLM degradation)
+- Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
+  - simple synthesis now skips DDG fallback when Google SERP key is missing:
+    - emits `web:google_serp_required_missing`
+    - uses Yahoo-only evidence + fallback behavior.
+  - added deterministic no-LLM quality gate for best-guess phrasing:
+    - requires causal/explainer framing + minimum evidence score
+    - rejects wrapper/disallowed and TA-style weak phrases.
+  - added soft score penalties:
+    - technical-analysis style headlines (`price forecast`, `breakout`, `support/resistance`, etc.)
+    - multi-ticker roundup headlines (`top analyst calls`, broad list-style titles).
+  - improved phrase sanitization to strip aggregator prefixes (`FinancialContent -`, `MarketBeat -`, etc.).
+- effect:
+  - when Google or LLM is unavailable, MD now prefers fallback over noisy/non-causal specific lines.
+
 ## Update (2026-02-25, MD time-integrity guardrails for stale-catalyst prevention)
 - Implemented strict candidate time-integrity in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
   - added env controls:
