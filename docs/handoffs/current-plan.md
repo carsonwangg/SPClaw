@@ -40,6 +40,17 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Board-seat API-key compatibility + health diagnosis update:
+  - `_brave_search_api_key()` now reads both `COATUE_CLAW_BRAVE_API_KEY` and `BRAVE_SEARCH_API_KEY`.
+  - `.env.example` now documents `COATUE_CLAW_BRAVE_API_KEY`.
+  - regression test added:
+    - `tests/test_board_seat_daily.py::test_brave_api_key_accepts_coatue_claw_alias`
+  - environment diagnosis during live checks:
+    - Brave path now active with provided key alias
+    - SerpAPI currently returns HTTP `429` (rate-limited), so Google rows are empty until quota resets/plan changes
+  - validation:
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `46 passed`
+    - `PYTHONPATH=src python3 -m pytest -q` -> `310 passed`
 - Board-seat posting now enforces strict new-target quality gate across all active portcos:
   - skip post unless target is both **new** (not already in target memory for that company) and **High confidence** from source scoring.
   - skip reason contract:

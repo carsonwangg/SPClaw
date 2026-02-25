@@ -1184,3 +1184,9 @@ def test_status_reports_funding_quality_metrics(tmp_path: Path, monkeypatch) -> 
     assert metrics["low_confidence_count"] == 0
     assert payload["require_high_conf_new_target"] is True
     assert payload["funding_verification_by_company"]["Anduril"]["verification_status"] == "verified"
+
+
+def test_brave_api_key_accepts_coatue_claw_alias(monkeypatch) -> None:
+    monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
+    monkeypatch.setenv("COATUE_CLAW_BRAVE_API_KEY", "alias-brave-key")
+    assert board_seat_daily._brave_search_api_key() == "alias-brave-key"

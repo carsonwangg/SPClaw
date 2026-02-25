@@ -3,6 +3,22 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-25, board-seat API health + Brave key alias support)
+- Diagnosed OpenAI board-seat quality degradation causes:
+  - `COATUE_CLAW_BRAVE_API_KEY` was set, but resolver only read `BRAVE_SEARCH_API_KEY`; Brave rows were effectively disabled.
+  - SerpAPI endpoint currently responds `HTTP 429 Too Many Requests` for board-seat queries in this environment, yielding zero Google rows.
+- Implemented key resolver compatibility in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
+  - `_brave_search_api_key()` now accepts both:
+    - `COATUE_CLAW_BRAVE_API_KEY`
+    - `BRAVE_SEARCH_API_KEY`
+- Added regression test:
+  - `/Users/carsonwang/CoatueClaw/tests/test_board_seat_daily.py::test_brave_api_key_accepts_coatue_claw_alias`
+- Updated env sample:
+  - `/Users/carsonwang/CoatueClaw/.env.example` now lists `COATUE_CLAW_BRAVE_API_KEY`.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `46 passed`
+  - `PYTHONPATH=src python3 -m pytest -q` -> `310 passed`
+
 ## Update (2026-02-25, strict new-target gate: skip when no high-confidence new target)
 - Implemented a strict board-seat post gate in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
   - posts now require both:
