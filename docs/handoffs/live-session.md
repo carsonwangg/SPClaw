@@ -2391,3 +2391,32 @@ Then confirm bot returns:
   - links payload only contains `news`/`web`.
 - Integrator follow-up applied post-merge:
   - removed over-broad quote-wrapper rule that rejected valid in-window `why ... stock soaring today` candidates.
+
+## Update (2026-02-25, market-daily catalyst quality recovery merge + deploy)
+- Integrated role branch `origin/codex/agent-market-daily` into `main` using:
+  - merge commit: `bee2d68` (`Merge market-daily catalyst quality recovery`)
+  - included role patch: `c8736fa`
+- Validation run:
+  - checklist commands with system `python3` failed (`No module named pytest` on mini)
+  - runtime-equivalent venv checks passed:
+    - `tests/test_market_daily.py` -> `69 passed`
+    - `tests/test_launchd_runtime.py` -> `8 passed`
+- Runtime/ops:
+  - `make openclaw-restart`
+  - `make openclaw-slack-status` probe healthy (`ok=true`)
+  - forced runs posted:
+    - close artifact: `/opt/coatue-claw-data/artifacts/market-daily/md-close-20260225-051636.md`
+    - recap artifact: `/opt/coatue-claw-data/artifacts/market-daily/md-earnings-recap-20260225-051342.md`
+- Slack verification results:
+  - no `[X]` links and no `X recent search` footer
+  - sources footer remains no-X (`Yahoo fast_info + Yahoo news + web search`)
+  - stale Morgan callback is rejected for INTC (`historical_callback_reject`)
+  - with SERP key missing simulation:
+    - `rejected_reasons` includes `web:google_serp_required_missing`
+    - no DDG fallback note in simple synthesis
+  - recap footer uses `Google web + Yahoo news evidence` (no X)
+- Post-merge hardening on `main`:
+  - simple synthesis now prefers linking the top selected in-window evidence URL for the chosen source, so low-quality roundup links do not outrank cleaner causal explainers in rendered links.
+  - this produced INTC web link to Yahoo in-window explainer (`.../why-intel-intc-stock-soaring-210238819.html`) in latest debug checks.
+- Quick fallback simulation (LLM unavailable + weak evidence):
+  - `OPENAI_API_KEY=""` + missing SERP key => line falls back to `Likely positioning/flow; no single confirmed catalyst.`

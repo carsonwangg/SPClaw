@@ -3941,6 +3941,11 @@ def _build_catalyst_for_mover_simple(*, mover: QuoteSnapshot, slot_name: str, si
 
     best_news = _pick_best_by_source(selected, "yahoo_news", pct_move=mover.pct_move)
     best_web = _pick_best_by_source(selected, "web", pct_move=mover.pct_move)
+    # Prefer linking the top selected in-window evidence candidate for the chosen source.
+    if best.source_type == "yahoo_news":
+        best_news = best
+    elif best.source_type == "web":
+        best_web = best
     confidence = _effective_candidate_score(candidate=best, pct_move=mover.pct_move)
     evidence = CatalystEvidence(
         ticker=mover.ticker,

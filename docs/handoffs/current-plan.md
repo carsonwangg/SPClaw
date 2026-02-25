@@ -1094,3 +1094,15 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - close artifact footer remains no-X: `Yahoo fast_info + Yahoo news + web search`
 - Integrator compatibility note:
   - mini system `python3` should not be used for this module/tests; use `/opt/coatue-claw/.venv/bin/python`.
+
+- Market Daily catalyst quality recovery deployed on `main`:
+  - merge `bee2d68` from `origin/codex/agent-market-daily` (includes `c8736fa`)
+  - quality behavior confirmed:
+    - no-X links/footer in close + recap outputs
+    - stale historical callback links rejected under time-integrity gates
+    - simple synthesis requires Google SERP key and does not DDG-fallback when missing
+    - weak-evidence path can cleanly return fallback line when LLM/source support is unavailable
+- Integrator follow-up improvement on `main`:
+  - prefer top selected in-window source URL for rendered link selection in simple synthesis to avoid weak TA/roundup link wins over stronger explainers.
+- Operational note:
+  - use `/opt/coatue-claw/.venv/bin/python` for tests/CLI on mini (system `python3` is not runtime-compatible for this module).
