@@ -2611,3 +2611,20 @@ Then confirm bot returns:
   - preserved existing word-cap behavior and all governance gates.
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `57 passed`
+
+## Update (2026-02-25, board-seat writing quality recovery)
+- Implemented LLM-passthrough writing recovery with evidence-grounded prompting:
+  - new env controls:
+    - `COATUE_CLAW_BOARD_SEAT_MAX_LINE_WORDS=0` (default: no hard cap)
+    - `COATUE_CLAW_BOARD_SEAT_WRITING_MODE=llm_passthrough`
+    - `COATUE_CLAW_BOARD_SEAT_STRIP_OBVIOUS_ARTIFACTS=1`
+  - `_build_draft` now builds and passes an explicit evidence pack (target rows + acquisition rows + funding summary) to `_llm_draft`.
+  - prompt now requires field-specific outputs (`target_does`, `why_now`, `whats_different`, `mos_risks`) and removes the old `<=18 words` constraint.
+- Added minimal passthrough cleanup and dedup guards:
+  - strips obvious non-human artifacts (`<strong>`, `Get the full list`, `Read more`, ellipsis/menu crumbs).
+  - prevents exact duplicate thesis-field bodies by replacing duplicated later fields with deterministic safe fallback lines.
+  - never skips posting solely due writing cleanup.
+- Added run payload observability fields:
+  - `writing_mode`
+  - `writing_artifact_cleanups`
+  - `writing_field_dedup_fixes`

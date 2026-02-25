@@ -1211,3 +1211,18 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - prevents clipped outputs like `... Vercel. Migrate` while keeping existing 18-word cap and format contract.
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `57 passed`.
+
+## Board Seat - Writing Quality Recovery (2026-02-25)
+- Status: implemented on `codex/agent-board-seat`, validated.
+- Completed scope:
+  - default no-cap line policy via `COATUE_CLAW_BOARD_SEAT_MAX_LINE_WORDS=0` (legacy capped behavior still available with positive values).
+  - writing mode/env controls added: passthrough mode + obvious artifact stripping.
+  - LLM draft path now receives a concrete evidence pack from target/acquisition/funding retrieval before generation.
+  - prompt updated to request field-specific, non-duplicative thesis writing and removed hard 18-word instruction.
+  - sanitize path now:
+    - strips obvious artifacts from LLM fields
+    - applies exact duplicate-field guard across thesis lines
+    - records `writing_artifact_cleanups` + `writing_field_dedup_fixes`.
+  - run payload rows (`sent` and gate-based `skipped`) now include writing observability fields.
+- Governance unchanged:
+  - company-only target enforcement, confidence/new-target gate, hard 14-day no-repeat, and repitch significance.

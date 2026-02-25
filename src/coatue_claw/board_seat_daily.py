@@ -5,6 +5,7 @@ import csv
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+import html
 import hashlib
 import json
 import os
@@ -99,6 +100,7 @@ SIGNIFICANT_CHANGE_TERMS = {
 BOARD_SEAT_HEADER_RE = re.compile(r"board seat as a service\s*[—-]\s*(.+)$", re.IGNORECASE)
 BOARD_SEAT_FORMAT_VERSION = "v6_richtext_target_does_monthly_theme"
 MAX_LINE_WORDS = 18
+MAX_LINE_WORDS_DEFAULT = 0
 TARGET_LOCK_DAYS_DEFAULT = 14
 HARD_NO_REPITCH_DAYS = 14
 THESIS_LABELS: tuple[str, ...] = ("Idea", "Target does", "Why now", "What's different", "MOS/risks", "Bottom line")
@@ -136,6 +138,7 @@ SOURCE_POLICY_DEFAULT = "target_first_3_1"
 LOW_SIGNAL_MODE_DEFAULT = "candidate_with_confidence"
 TARGET_CONFIDENCE_LEVELS = {"High", "Medium", "Low"}
 REQUIRED_NEW_TARGET_CONFIDENCE = "High"
+WRITING_MODE_DEFAULT = "llm_passthrough"
 CONFIDENCE_MODEL_DEFAULT = "broad_weighted_v1"
 CONFIDENCE_HIGH_MIN_DEFAULT = 2.40
 CONFIDENCE_MEDIUM_MIN_DEFAULT = 1.35
@@ -390,6 +393,8 @@ class BoardSeatDraft:
     rewrite_reasons: list[str] = field(default_factory=list)
     target_original: str = ""
     target_resolution_reason: str = "as_extracted"
+    writing_artifact_cleanups: list[str] = field(default_factory=list)
+    writing_field_dedup_fixes: list[str] = field(default_factory=list)
 
 
 def _utc_now_iso() -> str:
@@ -510,6 +515,20 @@ def _env_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
 
 def _source_policy() -> str:
     return (os.environ.get("COATUE_CLAW_BOARD_SEAT_SOURCE_POLICY", SOURCE_POLICY_DEFAULT) or SOURCE_POLICY_DEFAULT).strip()
+
+
+def _max_line_words() -> int:
+    return _env_int("COATUE_CLAW_BOARD_SEAT_MAX_LINE_WORDS", MAX_LINE_WORDS_DEFAULT, minimum=0, maximum=120)
+
+
+def _writing_mode() -> str:
+    return (
+        os.environ.get("COATUE_CLAW_BOARD_SEAT_WRITING_MODE", WRITING_MODE_DEFAULT) or WRITING_MODE_DEFAULT
+    ).strip().lower()
+
+
+def _strip_obvious_artifacts() -> bool:
+    return _env_flag("COATUE_CLAW_BOARD_SEAT_STRIP_OBVIOUS_ARTIFACTS", True)
 
 
 def _include_funding_links() -> bool:
@@ -804,6 +823,14 @@ _DANGLING_TAIL_TOKENS = {
 }
 
 
+_WRITING_ARTIFACT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("html_tag", re.compile(r"<[^>]+>")),
+    ("menu_boilerplate", re.compile(r"\b(get the full list|read more|learn more|click here)\b", re.IGNORECASE)),
+    ("ellipsis", re.compile(r"\.{3,}|…")),
+    ("trail_boilerplate", re.compile(r"\b(?:view more|show more)\b", re.IGNORECASE)),
+)
+
+
 def _trim_line_tail(text: str) -> str:
     cleaned = str(text or "").strip(" ,;:-")
     if not cleaned:
@@ -835,6 +862,8 @@ def _trim_incomplete_sentence_tail(text: str) -> str:
 
 
 def _limit_words(text: str, *, max_words: int = MAX_LINE_WORDS) -> str:
+    if max_words <= 0:
+        return _trim_line_tail(str(text or "").strip())
     words = str(text or "").split()
     if len(words) <= max_words:
         candidate = " ".join(words)
@@ -849,11 +878,31 @@ def _limit_words(text: str, *, max_words: int = MAX_LINE_WORDS) -> str:
     candidate = _trim_incomplete_sentence_tail(candidate)
     return _trim_line_tail(candidate)
 
-def _normalize_line(text: str, *, max_words: int = MAX_LINE_WORDS) -> str:
-    return _limit_words(_normalize_line_text(text), max_words=max_words)
+
+def _normalize_line(text: str, *, max_words: int | None = None) -> str:
+    resolved_max_words = _max_line_words() if max_words is None else max_words
+    return _limit_words(_normalize_line_text(text), max_words=resolved_max_words)
 
 
-def _normalize_line_list(items: list[str], *, max_items: int, max_words: int = MAX_LINE_WORDS) -> list[str]:
+def _strip_obvious_writing_artifacts(text: str) -> tuple[str, list[str]]:
+    value = str(text or "")
+    cleanups: list[str] = []
+    if not value.strip():
+        return "", cleanups
+    decoded = html.unescape(value)
+    if decoded != value:
+        cleanups.append("html_unescape")
+    value = decoded
+    for label, pattern in _WRITING_ARTIFACT_PATTERNS:
+        updated = pattern.sub(" ", value)
+        if updated != value:
+            cleanups.append(label)
+        value = updated
+    value = re.sub(r"\s+", " ", value).strip(" ,;:-")
+    return value, cleanups
+
+
+def _normalize_line_list(items: list[str], *, max_items: int, max_words: int | None = None) -> list[str]:
     out: list[str] = []
     for item in items:
         line = _normalize_line(item, max_words=max_words)
@@ -1355,6 +1404,9 @@ def _high_conf_new_target_gate(
     target_key = _target_key(target)
     target_original = _normalize_source_text(draft.target_original, max_chars=100) or target
     target_resolution_reason = _normalize_text(draft.target_resolution_reason, max_chars=64) or "as_extracted"
+    writing_mode = _writing_mode()
+    writing_artifact_cleanups = list(draft.writing_artifact_cleanups or [])
+    writing_field_dedup_fixes = list(draft.writing_field_dedup_fixes or [])
     confidence_payload = _target_confidence_from_draft_sources(company=company, draft=draft)
     confidence = str(confidence_payload.get("confidence") or "Low")
     confidence_score = round(float(confidence_payload.get("score") or 0.0), 4)
@@ -1369,6 +1421,9 @@ def _high_conf_new_target_gate(
             "target": target,
             "target_original": target_original,
             "target_resolution_reason": target_resolution_reason,
+            "writing_mode": writing_mode,
+            "writing_artifact_cleanups": writing_artifact_cleanups,
+            "writing_field_dedup_fixes": writing_field_dedup_fixes,
             "target_key": target_key,
             "target_confidence": confidence,
             "target_confidence_score": confidence_score,
@@ -1384,6 +1439,9 @@ def _high_conf_new_target_gate(
             "target": target,
             "target_original": target_original,
             "target_resolution_reason": target_resolution_reason,
+            "writing_mode": writing_mode,
+            "writing_artifact_cleanups": writing_artifact_cleanups,
+            "writing_field_dedup_fixes": writing_field_dedup_fixes,
             "target_key": target_key,
             "target_confidence": confidence,
             "target_confidence_score": confidence_score,
@@ -1405,6 +1463,9 @@ def _high_conf_new_target_gate(
         "target": target,
         "target_original": target_original,
         "target_resolution_reason": target_resolution_reason,
+        "writing_mode": writing_mode,
+        "writing_artifact_cleanups": writing_artifact_cleanups,
+        "writing_field_dedup_fixes": writing_field_dedup_fixes,
         "target_key": target_key,
         "target_confidence": confidence,
         "target_confidence_score": confidence_score,
@@ -1453,7 +1514,7 @@ def _target_description_from_rows(*, target: str, rows: list[dict[str, str]]) ->
             continue
         cleaned = re.split(r"[.;]\s*", snippet, maxsplit=1)[0].strip()
         if cleaned:
-            return _normalize_line(cleaned, max_words=MAX_LINE_WORDS)
+            return _normalize_line(cleaned)
     return _normalize_line(f"{target} builds enterprise software and infrastructure used in production workflows.")
 
 
@@ -2958,6 +3019,7 @@ def _build_source_refs(
 
 def _validate_draft(draft: BoardSeatDraft) -> list[str]:
     errors: list[str] = []
+    line_cap = _max_line_words()
     checks = {
         "idea_line": draft.idea_line,
         "target_does": draft.target_does,
@@ -2975,7 +3037,7 @@ def _validate_draft(draft: BoardSeatDraft) -> list[str]:
         if not text:
             errors.append(f"missing_{key}")
             continue
-        if len(text.split()) > MAX_LINE_WORDS:
+        if line_cap > 0 and len(text.split()) > line_cap:
             errors.append(f"{key}_too_long")
     if not _is_valid_acquisition_idea_line(draft.idea_line):
         errors.append("idea_line_invalid")
@@ -3080,21 +3142,69 @@ def _sanitize_draft(
     default_bottom = f"Execute one target-led move with 12-month milestones tied to adoption, margin, and retention."
     default_context_efforts = f"{company}'s current roadmap and customer footprint create a clear insertion point for {target}."
     default_context_fit = f"Best fit is where {target}'s capabilities close current roadmap gaps faster than internal build."
-    target_does = _normalize_line(draft.target_does) or source_selection.target_description or _normalize_line(
+    writing_artifact_cleanups: list[str] = list(draft.writing_artifact_cleanups or [])
+
+    def _clean(label: str, value: str) -> str:
+        normalized = _normalize_line(value)
+        if not _strip_obvious_artifacts():
+            return normalized
+        stripped, cleanups = _strip_obvious_writing_artifacts(normalized)
+        writing_artifact_cleanups.extend(f"{label}:{item}" for item in cleanups)
+        return _normalize_line(stripped)
+
+    target_does = _clean("target_does", draft.target_does) or _clean("target_description", source_selection.target_description) or _normalize_line(
         f"{target} builds enterprise software and automation infrastructure for production workflows."
     )
+    why_now = _clean("why_now", draft.why_now) or _normalize_line(default_why_now)
+    whats_different = _clean("whats_different", draft.whats_different) or _normalize_line(default_whats_different)
+    mos_risks = _clean("mos_risks", draft.mos_risks) or _normalize_line(default_mos)
+    bottom_line = _clean("bottom_line", draft.bottom_line) or _normalize_line(default_bottom)
+    context_current_efforts = _clean("context_current_efforts", draft.context_current_efforts) or _normalize_line(default_context_efforts)
+    context_domain_fit_gaps = _clean("context_domain_fit_gaps", draft.context_domain_fit_gaps) or _normalize_line(default_context_fit)
+
+    thesis_values = {
+        "target_does": target_does,
+        "why_now": why_now,
+        "whats_different": whats_different,
+        "mos_risks": mos_risks,
+    }
+    thesis_fallbacks = {
+        "target_does": _normalize_line(f"{target} delivers a concrete product wedge for enterprise buyers."),
+        "why_now": _normalize_line(default_why_now),
+        "whats_different": _normalize_line(default_whats_different),
+        "mos_risks": _normalize_line(default_mos),
+    }
+    writing_field_dedup_fixes: list[str] = list(draft.writing_field_dedup_fixes or [])
+    seen_thesis: dict[str, str] = {}
+    for field_name in ("target_does", "why_now", "whats_different", "mos_risks"):
+        value = str(thesis_values.get(field_name) or "").strip()
+        if not value:
+            continue
+        key = _normalize_line_text(value).lower()
+        if not key:
+            continue
+        if key in seen_thesis:
+            thesis_values[field_name] = thesis_fallbacks[field_name]
+            writing_field_dedup_fixes.append(field_name)
+            continue
+        seen_thesis[key] = field_name
+
+    target_does = thesis_values["target_does"]
+    why_now = thesis_values["why_now"]
+    whats_different = thesis_values["whats_different"]
+    mos_risks = thesis_values["mos_risks"]
     return BoardSeatDraft(
         idea_line=idea_line,
         target_does=target_does,
-        why_now=_normalize_line(draft.why_now) or _normalize_line(default_why_now),
-        whats_different=_normalize_line(draft.whats_different) or _normalize_line(default_whats_different),
-        mos_risks=_normalize_line(draft.mos_risks) or _normalize_line(default_mos),
-        bottom_line=_normalize_line(draft.bottom_line) or _normalize_line(default_bottom),
-        context_current_efforts=_normalize_line(draft.context_current_efforts) or _normalize_line(default_context_efforts),
-        context_domain_fit_gaps=_normalize_line(draft.context_domain_fit_gaps) or _normalize_line(default_context_fit),
+        why_now=why_now,
+        whats_different=whats_different,
+        mos_risks=mos_risks,
+        bottom_line=bottom_line,
+        context_current_efforts=context_current_efforts,
+        context_domain_fit_gaps=context_domain_fit_gaps,
         funding_history=_normalize_line(draft.funding_history) or funding_history,
         funding_latest_round_backers=_normalize_line(draft.funding_latest_round_backers) or funding_latest_round_backers,
-        funding_warning=_normalize_line(draft.funding_warning) or funding_warning,
+        funding_warning=_clean("funding_warning", draft.funding_warning) or funding_warning,
         repitch_note=_normalize_line(draft.repitch_note, max_words=32),
         repitch_new_evidence=_normalize_line(draft.repitch_new_evidence, max_words=32),
         source_refs=source_selection.refs,
@@ -3102,6 +3212,8 @@ def _sanitize_draft(
         rewrite_reasons=draft.rewrite_reasons,
         target_original=target_original,
         target_resolution_reason=target_resolution_reason,
+        writing_artifact_cleanups=sorted(set(writing_artifact_cleanups)),
+        writing_field_dedup_fixes=writing_field_dedup_fixes,
     )
 
 
@@ -3997,6 +4109,45 @@ def _fetch_thematic_context(*, company: str, target: str, snippets: list[str]) -
     return out
 
 
+def _llm_evidence_pack(
+    *,
+    company: str,
+    target: str,
+    target_rows: list[dict[str, str]],
+    acquisition_rows: list[dict[str, str]],
+    funding: FundingSnapshot,
+) -> dict[str, Any]:
+    def _rows(rows: list[dict[str, str]], *, limit: int) -> list[dict[str, str]]:
+        out: list[dict[str, str]] = []
+        for row in rows[:limit]:
+            url = _normalize_source_url(str(row.get("url") or ""))
+            if not url:
+                continue
+            out.append(
+                {
+                    "publisher": _normalize_source_text(str(row.get("publisher") or ""), max_chars=64) or _publisher_from_url(url),
+                    "title": _normalize_source_text(str(row.get("title") or ""), max_chars=180),
+                    "snippet": _normalize_text(str(row.get("snippet") or ""), max_chars=220),
+                    "url": url,
+                }
+            )
+        return out
+
+    return {
+        "company": company,
+        "target": target,
+        "target_evidence": _rows(target_rows, limit=6),
+        "acquisition_evidence": _rows(acquisition_rows, limit=6),
+        "funding_summary": {
+            "history": _normalize_text(funding.history, max_chars=220),
+            "latest_round": _normalize_text(funding.latest_round, max_chars=120),
+            "latest_date": _normalize_text(funding.latest_date, max_chars=80),
+            "backers": [_normalize_source_text(str(item), max_chars=60) for item in funding.backers[:6]],
+            "source_type": _normalize_source_text(funding.source_type, max_chars=32),
+        },
+    }
+
+
 def _extract_funding_with_llm(*, company: str, rows: list[dict[str, str]]) -> FundingSnapshot | None:
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if OpenAI is None or (not api_key) or (not rows):
@@ -4507,6 +4658,7 @@ def _llm_draft(
     company: str,
     snippets: list[str],
     funding: FundingSnapshot,
+    evidence_pack: dict[str, Any] | None = None,
     prior_investments: list[str] | None = None,
 ) -> BoardSeatDraft | None:
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
@@ -4515,14 +4667,10 @@ def _llm_draft(
     model = (os.environ.get("COATUE_CLAW_BOARD_SEAT_MODEL", "gpt-5.2-chat-latest") or "gpt-5.2-chat-latest").strip()
     client = OpenAI(api_key=api_key)
     joined = "\n".join(f"- {line}" for line in snippets[:10]) if snippets else "- no fresh channel snippets"
-    funding_json = json.dumps(
-        {
-            "history": funding.history,
-            "latest_round": funding.latest_round,
-            "latest_date": funding.latest_date,
-            "backers": funding.backers,
-            "source_type": funding.source_type,
-        },
+    evidence_json = json.dumps(
+        evidence_pack
+        if evidence_pack is not None
+        else _llm_evidence_pack(company=company, target="", target_rows=[], acquisition_rows=[], funding=funding),
         ensure_ascii=False,
     )
     prompt = (
@@ -4532,21 +4680,24 @@ def _llm_draft(
         "context_current_efforts, context_domain_fit_gaps, "
         "funding_history, funding_latest_round_backers, source_refs.\n"
         "Constraints:\n"
-        f"- each value must be a single line <= {MAX_LINE_WORDS} words\n"
+        "- each value must be a single concise line\n"
         "- idea_line must start with Acquire or Acquihire and name a concrete target.\n"
-        "- target_does must explain the target's product and customer in plain language.\n"
-        "- why_now must use a past-month thematic trend, not last-24-hour phrasing.\n"
+        "- target_does must explain exactly what the target sells and who buys it.\n"
+        "- why_now must state a past-month timing catalyst and must not be generic.\n"
+        "- whats_different must state a specific differentiator versus alternatives.\n"
+        "- mos_risks must state concrete integration/commercial/execution risks.\n"
         "- do not propose internal build as primary recommendation.\n"
         "- short, high skim value, decision-useful.\n"
         "- style must be concise labeled-line content, not bullets.\n"
         "- do not use legacy labels (Signal/Board lens/Watchlist/Team ask).\n"
         "- source_refs is an array of objects with name_or_publisher, title, url.\n"
-        "- source_refs must prioritize target-company evidence, not parent-company funding links.\n"
-        "- avoid Reuters/SoftBank-style parent funding links in source_refs by default.\n"
+        "- source_refs must prioritize target-company evidence over parent-company funding links.\n"
+        "- do not include HTML tags, menu text, or boilerplate snippets.\n"
+        "- fields must not repeat each other.\n"
+        f"Evidence pack (target/acquisition/funding):\n{evidence_json}\n"
         "- keep lines concrete; allow at most one generic fallback line across thesis/context lines.\n"
         "Recent channel context:\n"
         f"{joined}\n"
-        f"Funding snapshot input:\n{funding_json}\n"
     )
     if prior_investments:
         prior = "\n".join(f"- {item}" for item in prior_investments[:5] if item.strip())
@@ -4619,9 +4770,23 @@ def _build_draft(
             break
     funding_entity = seed_target if scope == "target" else company
     funding = _resolve_funding_snapshot(store=store, company=funding_entity)
+    target_rows = _target_search_rows(target=seed_target or company, company=company, snippets=merged_snippets[:4])
     acquisition_rows = _acquisition_search_rows(company=company, snippets=merged_snippets)
+    evidence_pack = _llm_evidence_pack(
+        company=company,
+        target=seed_target or company,
+        target_rows=target_rows,
+        acquisition_rows=acquisition_rows,
+        funding=funding,
+    )
     prior_investments = [str(item.get("investment_text") or "").strip() for item in (recent_pitches or [])]
-    llm = _llm_draft(company=company, snippets=merged_snippets, funding=funding, prior_investments=prior_investments)
+    llm = _llm_draft(
+        company=company,
+        snippets=merged_snippets,
+        funding=funding,
+        evidence_pack=evidence_pack,
+        prior_investments=prior_investments,
+    )
     draft = llm if llm is not None else _fallback_draft(company=company, snippets=merged_snippets, funding=funding, acquisition_rows=acquisition_rows)
     draft = _sanitize_draft(company=company, draft=draft, funding=funding, acquisition_rows=acquisition_rows)
     if scope == "target":
@@ -4913,6 +5078,9 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                         "target_validation_reason": target_gate.get("target_validation_reason"),
                         "target_original": target_gate.get("target_original"),
                         "target_resolution_reason": target_gate.get("target_resolution_reason"),
+                        "writing_mode": target_gate.get("writing_mode"),
+                        "writing_artifact_cleanups": target_gate.get("writing_artifact_cleanups"),
+                        "writing_field_dedup_fixes": target_gate.get("writing_field_dedup_fixes"),
                         "is_new_target": bool(target_gate.get("is_new_target")),
                         "gate_reason": target_gate.get("reason"),
                         "matched_posted_at_utc": target_gate.get("matched_posted_at_utc"),
@@ -4954,6 +5122,9 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                     "target_validation_reason": target_gate.get("target_validation_reason"),
                     "target_original": target_gate.get("target_original"),
                     "target_resolution_reason": target_gate.get("target_resolution_reason"),
+                    "writing_mode": target_gate.get("writing_mode"),
+                    "writing_artifact_cleanups": target_gate.get("writing_artifact_cleanups"),
+                    "writing_field_dedup_fixes": target_gate.get("writing_field_dedup_fixes"),
                 }
             )
             continue
@@ -5081,6 +5252,9 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                             "target_validation_reason": target_gate.get("target_validation_reason"),
                             "target_original": target_gate.get("target_original"),
                             "target_resolution_reason": target_gate.get("target_resolution_reason"),
+                            "writing_mode": target_gate.get("writing_mode"),
+                            "writing_artifact_cleanups": target_gate.get("writing_artifact_cleanups"),
+                            "writing_field_dedup_fixes": target_gate.get("writing_field_dedup_fixes"),
                             "is_new_target": bool(target_gate.get("is_new_target")),
                             "gate_reason": target_gate.get("reason"),
                             "matched_posted_at_utc": target_gate.get("matched_posted_at_utc"),
@@ -5284,6 +5458,9 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                             "target_validation_reason": target_gate.get("target_validation_reason"),
                             "target_original": target_gate.get("target_original"),
                             "target_resolution_reason": target_gate.get("target_resolution_reason"),
+                            "writing_mode": target_gate.get("writing_mode"),
+                            "writing_artifact_cleanups": target_gate.get("writing_artifact_cleanups"),
+                            "writing_field_dedup_fixes": target_gate.get("writing_field_dedup_fixes"),
                         }
                     )
                     posted = True
@@ -5368,6 +5545,9 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                         "target_validation_reason": target_gate.get("target_validation_reason"),
                         "target_original": target_gate.get("target_original"),
                         "target_resolution_reason": target_gate.get("target_resolution_reason"),
+                        "writing_mode": target_gate.get("writing_mode"),
+                        "writing_artifact_cleanups": target_gate.get("writing_artifact_cleanups"),
+                        "writing_field_dedup_fixes": target_gate.get("writing_field_dedup_fixes"),
                     }
                 )
                 posted = True
@@ -5460,6 +5640,9 @@ def status() -> dict[str, Any]:
         "target_confidence_model": _target_confidence_model(),
         "target_confidence_high_min": _target_confidence_high_min(),
         "target_confidence_medium_min": _target_confidence_medium_min(),
+        "max_line_words": _max_line_words(),
+        "writing_mode": _writing_mode(),
+        "strip_obvious_artifacts": _strip_obvious_artifacts(),
         "portcos": portcos,
         "recent_runs": store.recent_runs(limit=20),
         "pitch_counts": {
