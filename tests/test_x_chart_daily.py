@@ -38,6 +38,7 @@ from coatue_claw.x_chart_daily import (
     _post_winner_to_slack,
     _render_chart_of_day_style,
     _render_source_snip_card,
+    _score_candidate,
     _select_style_draft,
     _shorten_without_ellipsis,
     _slot_key,
