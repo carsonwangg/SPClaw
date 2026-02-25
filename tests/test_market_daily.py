@@ -536,6 +536,59 @@ def test_direct_evidence_fallback_uses_specific_news_without_cluster_match(monke
     assert rows[0].cause_mode == "direct_evidence"
 
 
+def test_direct_evidence_fallback_skips_quote_directory_wrapper_and_uses_causal_headline(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    def _fake_collect(ticker, aliases, since_utc, pct_move=None):
+        return (
+            [
+                md._EvidenceCandidate(
+                    source_type="yahoo_news",
+                    text="Intel Corporation (INTC) Stock Price, News, Quote & History - Yahoo Finance",
+                    url="https://finance.yahoo.com/quote/INTC/",
+                    published_at_utc=datetime(2026, 2, 24, 14, 0, 0, tzinfo=UTC),
+                    score=0.99,
+                    driver_keywords=(),
+                    canonical_url="https://finance.yahoo.com/quote/INTC/",
+                    domain="finance.yahoo.com",
+                ),
+                md._EvidenceCandidate(
+                    source_type="web",
+                    text="Intel shares rose after management raised foundry margin outlook in late commentary.",
+                    url="https://www.reuters.com/world/us/intel-shares-rise-after-margin-outlook-2026-02-24/",
+                    published_at_utc=datetime(2026, 2, 24, 14, 10, 0, tzinfo=UTC),
+                    score=0.78,
+                    driver_keywords=("earnings_guidance",),
+                    canonical_url="https://www.reuters.com/world/us/intel-shares-rise-after-margin-outlook-2026-02-24/",
+                    domain="reuters.com",
+                ),
+            ],
+            [],
+            "google_serp",
+        )
+
+    monkeypatch.setattr("coatue_claw.market_daily._collect_evidence_for_ticker", _fake_collect)
+    monkeypatch.setattr("coatue_claw.market_daily._company_aliases", lambda ticker: ["Intel", "Intel Corporation"])
+    monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 24, 0, 0, 0, tzinfo=UTC))
+    movers = [QuoteSnapshot("INTC", 100.0, 105.7, 100.0, 0.057, "2026-02-24T22:05:00+00:00")]
+    rows, lines = md._build_catalyst_rows(movers=movers, slot_name="close")
+    assert "quote & history" not in lines[0].lower()
+    assert "stock price, news, quote" not in lines[0].lower()
+    assert lines[0] != md.FALLBACK_CAUSE_LINE
+    assert "shares rose after" in lines[0].lower()
+    assert rows[0].cause_mode in {"decisive_primary", "direct_evidence"}
+
+
+def test_reason_line_falls_back_when_phrase_is_quote_directory_wrapper() -> None:
+    from coatue_claw import market_daily as md
+
+    line = md._build_reason_line_from_phrase(
+        pct_move=0.057,
+        phrase="Intel Corporation (INTC) Stock Price, News, Quote & History - Yahoo Finance",
+    )
+    assert line == md.FALLBACK_CAUSE_LINE
+
+
 def test_debug_catalyst_returns_expected_shape(monkeypatch) -> None:
     evidence = CatalystEvidence(
         ticker="NET",
@@ -656,6 +709,34 @@ def test_generic_wrapper_detection_blocks_tautologies() -> None:
         aliases=["Cloudflare"],
     )
     assert md._contains_disallowed_reason_phrasing("After NET stock is down today.")
+
+
+def test_generic_wrapper_detection_blocks_quote_directory_title() -> None:
+    from coatue_claw import market_daily as md
+
+    title = "Intel Corporation (INTC) Stock Price, News, Quote & History - Yahoo Finance"
+    assert md._is_quote_directory_title(title)
+    assert md._is_generic_headline_wrapper(text=title, ticker="INTC", aliases=["Intel Corporation"])
+    assert md._contains_disallowed_reason_phrasing(title)
+
+
+def test_quote_directory_url_is_rejected_even_without_obvious_title_phrase() -> None:
+    from coatue_claw import market_daily as md
+
+    candidate = md._EvidenceCandidate(
+        source_type="web",
+        text="Intel investor updates and overview",
+        url="https://finance.yahoo.com/quote/INTC/",
+        published_at_utc=None,
+        score=0.85,
+    )
+    rows = md._normalize_evidence_candidates(
+        candidates=[candidate],
+        ticker="INTC",
+        aliases=["Intel Corporation", "Intel"],
+    )
+    assert rows
+    assert rows[0].reject_reason == "generic_wrapper"
 
 
 def test_anthropic_cluster_extraction_maps_keywords() -> None:
