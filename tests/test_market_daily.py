@@ -213,8 +213,8 @@ def test_build_message_format() -> None:
     assert "3 biggest movers this morning:" in text
     assert "📈" in text
     assert "NVDA +10.0%" in text
-    assert "<https://x.com/i/web/status/1|[X]>" in text
     assert "<https://example.com/news|[News]>" in text
+    assert "[X]" not in text
 
 
 def test_build_message_includes_earnings_after_close_section() -> None:
@@ -269,7 +269,7 @@ def test_fallback_line_hides_x_link_but_keeps_quality_news_web() -> None:
     assert "[Web]" in text
 
 
-def test_specific_line_can_include_relevant_x_link() -> None:
+def test_specific_line_omits_x_link_even_when_present_in_fixture() -> None:
     now_local = datetime(2026, 2, 20, 14, 15, 0, tzinfo=UTC)
     movers = [QuoteSnapshot("BKNG", 1000.0, 105.0, 100.0, 0.05, "2026-02-20T14:15:00+00:00")]
     text = _build_message(
@@ -291,7 +291,7 @@ def test_specific_line_can_include_relevant_x_link() -> None:
         ],
         catalyst_lines=["Shares rose after upbeat guidance and stronger bookings outlook."],
     )
-    assert "[X]" in text
+    assert "[X]" not in text
 
 
 def test_catalyst_sanitization_removes_tags_urls_and_extra_emoji() -> None:
@@ -562,6 +562,7 @@ def test_debug_catalyst_returns_expected_shape(monkeypatch) -> None:
     assert payload["ok"] is True
     assert payload["ticker"] == "NET"
     assert payload["chosen_source"] == "yahoo_news"
+    assert "x" not in payload["links"]
     assert payload["links"]["web"] == "https://stocktwits.com/news/example"
 
 
@@ -604,14 +605,16 @@ def test_negative_mover_prefers_negative_driver_language(monkeypatch) -> None:
 def test_collect_evidence_triggers_web_when_directional_signal_missing(monkeypatch) -> None:
     from coatue_claw import market_daily as md
 
-    x_candidates = [
+    yahoo_candidates = [
         md._EvidenceCandidate(
-            source_type="x",
-            text="Cloudflare partnership update for enterprise security",
-            url="https://x.com/i/web/status/1",
+            source_type="yahoo_news",
+            text="Cloudflare partnership update for enterprise security spending trends",
+            url="https://finance.yahoo.com/news/cloudflare-partnership-update-120000000.html",
             published_at_utc=datetime(2026, 2, 20, 10, 0, 0, tzinfo=UTC),
             score=0.92,
             driver_keywords=("cybersecurity_competition",),
+            canonical_url="https://finance.yahoo.com/news/cloudflare-partnership-update-120000000.html",
+            domain="finance.yahoo.com",
         )
     ]
     web_candidates = [
@@ -626,8 +629,7 @@ def test_collect_evidence_triggers_web_when_directional_signal_missing(monkeypat
     ]
     calls = {"web": 0}
 
-    monkeypatch.setattr("coatue_claw.market_daily._fetch_x_evidence_candidates", lambda ticker, aliases, since_utc: x_candidates)
-    monkeypatch.setattr("coatue_claw.market_daily._fetch_yahoo_news_candidates", lambda ticker, aliases, since_utc: [])
+    monkeypatch.setattr("coatue_claw.market_daily._fetch_yahoo_news_candidates", lambda ticker, aliases, since_utc: yahoo_candidates)
 
     def _fake_web(ticker, aliases, since_utc, pct_move=None):
         calls["web"] += 1
@@ -1099,3 +1101,5 @@ def test_run_earnings_recap_selects_top4_and_writes_artifact(tmp_path: Path, mon
     assert artifact.exists()
     content = artifact.read_text(encoding="utf-8")
     assert "## Recap Rows" in content
+    assert "Yahoo/web evidence" in content
+    assert "X/Yahoo/web evidence" not in content
