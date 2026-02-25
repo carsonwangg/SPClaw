@@ -51,7 +51,7 @@ from coatue_claw.x_chart_daily import (
 
 def test_parse_windows_defaults_and_custom() -> None:
     assert _parse_windows("09:00,12:00,18:00") == [(9, 0), (12, 0), (18, 0)]
-    assert _parse_windows("bad") == [(9, 0), (12, 0), (18, 0)]
+    assert _parse_windows("bad") == [(7, 0), (12, 0), (18, 0)]
     assert _parse_windows("8:30, 21:15") == [(8, 30), (21, 15)]
 
 

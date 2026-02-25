@@ -33,7 +33,7 @@ load_dotenv("/opt/coatue-claw/.env.prod")
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_WINDOWS = "09:00,12:00,18:00"
+DEFAULT_WINDOWS = "07:00,12:00,18:00"
 DEFAULT_TIMEZONE = "America/Los_Angeles"
 DEFAULT_CONVENTION_NAMES = ("Morning", "Afternoon", "Evening")
 
@@ -746,7 +746,7 @@ def _parse_windows(raw: str | None = None) -> list[tuple[int, int]]:
         if 0 <= h <= 23 and 0 <= minute <= 59:
             out.append((h, minute))
     if not out:
-        out = [(9, 0), (12, 0), (18, 0)]
+        out = [(7, 0), (12, 0), (18, 0)]
     out.sort()
     return out
 

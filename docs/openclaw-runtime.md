@@ -47,7 +47,7 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
 - Scheduled (wired):
   - Hourly memory prune via `launchd` (`com.coatueclaw.memory-prune`)
   - Memory reconcile queue export via `launchd` (`com.coatueclaw.memory-reconcile-export`) every 15 minutes by default (`COATUE_CLAW_MEMORY_RECONCILE_INTERVAL_SECONDS=900`)
-  - Chart scout via `launchd` (`com.coatueclaw.x-chart-daily`) every hour (`StartInterval=3600` default), with posting gated by `COATUE_CLAW_X_CHART_WINDOWS` (default `09:00,12:00,18:00`)
+  - Chart scout via `launchd` (`com.coatueclaw.x-chart-daily`) every hour (`StartInterval=3600` default), with posting gated by `COATUE_CLAW_X_CHART_WINDOWS` (default `07:00,12:00,18:00`)
   - Board Seat daily post via `launchd` (`com.coatueclaw.board-seat-daily`) at `COATUE_CLAW_BOARD_SEAT_TIME` (default `08:30`)
   - Daily Spencer change-request digest DM via `launchd` (`com.coatueclaw.spencer-change-digest`) at `COATUE_CLAW_SPENCER_CHANGE_DIGEST_TIME` (default `18:00`)
   - MD (Market Daily) via `launchd` (`com.coatueclaw.market-daily`) on US weekdays at `COATUE_CLAW_MD_TIMES` (default `07:00,14:15`, local PT runtime)
@@ -217,7 +217,7 @@ X digest environment controls:
 X chart scout environment controls:
 - `COATUE_CLAW_X_CHART_SLACK_CHANNEL`: required Slack destination (channel id like `C...` or channel name like `#charting`)
 - `COATUE_CLAW_X_CHART_TIMEZONE`: posting timezone (default `America/Los_Angeles`)
-- `COATUE_CLAW_X_CHART_WINDOWS`: comma-separated daily times (default `09:00,12:00,18:00`)
+- `COATUE_CLAW_X_CHART_WINDOWS`: comma-separated daily times (default `07:00,12:00,18:00`)
 - `COATUE_CLAW_X_CHART_SOURCE_LIMIT`: number of tracked source handles to scan each run (default `25`)
 - `COATUE_CLAW_X_CHART_DISCOVERY_MIN_ENGAGEMENT`: minimum engagement for auto-discovered source promotion (default `120`)
 - `COATUE_CLAW_X_CHART_DB_PATH`: optional SQLite store path (default `/opt/coatue-claw-data/db/x_chart_daily.sqlite`)
