@@ -89,6 +89,10 @@ class CatalystEvidence:
     cause_source_type: str | None = None
     cause_source_url: str | None = None
     cause_mode: str | None = None
+    cause_render_mode: str | None = None
+    cause_raw_phrase: str | None = None
+    cause_final_phrase: str | None = None
+    quality_rejections: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -187,6 +191,32 @@ def _earnings_recap_time() -> tuple[int, int]:
 
 def _md_model() -> str:
     return (os.environ.get("COATUE_CLAW_MD_MODEL", DEFAULT_MODEL) or DEFAULT_MODEL).strip() or DEFAULT_MODEL
+
+
+def _reason_quality_mode() -> str:
+    raw = (os.environ.get("COATUE_CLAW_MD_REASON_QUALITY_MODE", "hybrid") or "hybrid").strip().lower()
+    if raw == "deterministic":
+        return "deterministic"
+    return "hybrid"
+
+
+def _reason_polish_enabled() -> bool:
+    raw = (os.environ.get("COATUE_CLAW_MD_REASON_POLISH_ENABLED", "1") or "1").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _reason_polish_model() -> str:
+    fallback = _md_model()
+    return (os.environ.get("COATUE_CLAW_MD_REASON_POLISH_MODEL", fallback) or fallback).strip() or fallback
+
+
+def _reason_polish_max_chars() -> int:
+    raw = (os.environ.get("COATUE_CLAW_MD_REASON_POLISH_MAX_CHARS", "90") or "90").strip()
+    try:
+        val = int(raw)
+    except Exception:
+        val = 90
+    return max(70, min(130, val))
 
 
 def _top_n() -> int:
@@ -2527,6 +2557,288 @@ def _contains_disallowed_reason_phrasing(text: str) -> bool:
     return any(pattern.search(lower) for pattern in _GENERIC_WRAPPER_PATTERNS)
 
 
+def _has_action_verb(text: str) -> bool:
+    lower = _normalize_whitespace(text).lower()
+    action_terms = (
+        "rose",
+        "rises",
+        "gained",
+        "jumped",
+        "surged",
+        "rallied",
+        "fell",
+        "falls",
+        "dropped",
+        "slides",
+        "slid",
+        "sank",
+        "tumbled",
+        "pressured",
+        "beat",
+        "missed",
+        "raised",
+        "cut",
+        "launched",
+        "announced",
+        "inked",
+        "signed",
+        "upgraded",
+        "downgraded",
+        "report",
+        "reports",
+        "weighs",
+    )
+    return any(re.search(rf"\b{re.escape(term)}\b", lower) for term in action_terms)
+
+
+def _has_event_vocab(text: str) -> bool:
+    lower = _normalize_whitespace(text).lower()
+    event_terms = (
+        "guidance",
+        "earnings",
+        "forecast",
+        "outlook",
+        "downgrade",
+        "upgrade",
+        "probe",
+        "investigation",
+        "contract",
+        "deal",
+        "partnership",
+        "launch",
+        "regulatory",
+        "sec",
+        "threat",
+        "disruption",
+        "overhang",
+        "sentiment",
+    )
+    return any(term in lower for term in event_terms)
+
+
+def _strip_publisher_suffix(text: str) -> str:
+    cleaned = _normalize_whitespace(text)
+    if not cleaned:
+        return ""
+    cleaned = re.sub(
+        r"\s*(?:[-|]\s*)?(?:yahoo finance|reuters|bloomberg|cnbc|marketwatch|barrons?)\s*$",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    return _normalize_whitespace(cleaned)
+
+
+def _extract_causal_clause(text: str) -> str | None:
+    cleaned = _strip_publisher_suffix(_strip_non_md_artifacts(text))
+    if not cleaned:
+        return None
+    chunks = [_normalize_whitespace(x) for x in re.split(r"[.;:]", cleaned) if _normalize_whitespace(x)]
+    clauses = chunks or [cleaned]
+    for clause in clauses:
+        lower = f" {clause.lower()} "
+        if any(marker in lower for marker in (" after ", " amid ", " as ", " following ", " due to ", " because ", " on ")):
+            if _has_action_verb(clause) or ("shares" in lower) or ("stock" in lower):
+                return _shorten(clause.strip(), _reason_polish_max_chars()).rstrip(" .")
+    for clause in clauses:
+        if _has_event_vocab(clause) and _has_action_verb(clause):
+            return _shorten(clause.strip(), _reason_polish_max_chars()).rstrip(" .")
+    for clause in clauses:
+        if _has_event_vocab(clause):
+            return _shorten(clause.strip(), _reason_polish_max_chars()).rstrip(" .")
+    if _has_event_vocab(cleaned) and _has_action_verb(cleaned):
+        return _shorten(cleaned, _reason_polish_max_chars()).rstrip(" .")
+    if _has_event_vocab(cleaned):
+        return _shorten(cleaned, _reason_polish_max_chars()).rstrip(" .")
+    return None
+
+
+def _reason_phrase_quality_rejections(phrase: str) -> list[str]:
+    cleaned = _normalize_whitespace(phrase)
+    if not cleaned:
+        return ["empty"]
+
+    out: list[str] = []
+    lower = cleaned.lower()
+    words = re.findall(r"[A-Za-z0-9']+", cleaned)
+    max_chars = _reason_polish_max_chars()
+
+    if _is_quote_directory_title(cleaned):
+        out.append("quote_directory_title")
+    if re.search(r"\b(?:menu|watchlist|overview|historical data)\b", lower):
+        out.append("metadata_phrase")
+    if re.search(r"\b(?:nasdaq|nyse)\s*[:)]", lower):
+        out.append("ticker_metadata")
+    if len(words) < 4:
+        out.append("too_short")
+    if len(cleaned) > max_chars:
+        out.append("too_long")
+    if re.search(r"\b(?:and|or|but|with|to|for|on|as|after|amid|because|following|due)\s*$", lower):
+        out.append("dangling_ending")
+    if (not _has_action_verb(cleaned)) and (not _has_event_vocab(cleaned)):
+        out.append("no_action_verb")
+    if not (_has_causal_marker(cleaned) or _has_event_vocab(cleaned)):
+        out.append("no_causal_signal")
+
+    uniq: list[str] = []
+    seen: set[str] = set()
+    for reason in out:
+        if reason in seen:
+            continue
+        seen.add(reason)
+        uniq.append(reason)
+    return uniq
+
+
+def _is_reason_phrase_acceptable(phrase: str) -> bool:
+    return len(_reason_phrase_quality_rejections(phrase)) == 0
+
+
+def _lexical_overlap_ratio(*, raw_phrase: str, candidate: str) -> float:
+    stop = {"the", "and", "for", "with", "after", "amid", "because", "following", "shares", "stock"}
+    raw_tokens = {t for t in re.findall(r"[a-z0-9]{3,}", raw_phrase.lower()) if t not in stop}
+    cand_tokens = {t for t in re.findall(r"[a-z0-9]{3,}", candidate.lower()) if t not in stop}
+    if not raw_tokens or not cand_tokens:
+        return 0.0
+    return len(raw_tokens & cand_tokens) / float(len(raw_tokens))
+
+
+def _has_entity_drift(*, raw_phrase: str, candidate: str) -> bool:
+    raw_tickers = {x.upper() for x in re.findall(r"\b[A-Z]{2,8}\b", raw_phrase)}
+    cand_tickers = {x.upper() for x in re.findall(r"\b[A-Z]{2,8}\b", candidate)}
+    if cand_tickers - raw_tickers:
+        return True
+    raw_numbers = set(re.findall(r"\d+(?:\.\d+)?%?", raw_phrase))
+    cand_numbers = set(re.findall(r"\d+(?:\.\d+)?%?", candidate))
+    if cand_numbers - raw_numbers:
+        return True
+    raw_entities = {x.lower() for x in re.findall(r"\b[A-Z][a-z]{2,}\b", raw_phrase)}
+    cand_entities = {x.lower() for x in re.findall(r"\b[A-Z][a-z]{2,}\b", candidate)}
+    ignore = {"shares", "stock"}
+    if (cand_entities - ignore) - (raw_entities - ignore):
+        return True
+    return False
+
+
+def _polish_reason_phrase_llm(*, raw_phrase: str, evidence_text: str, ticker: str) -> str | None:
+    if _reason_quality_mode() != "hybrid":
+        return None
+    if not _reason_polish_enabled():
+        return None
+    client = _openai_client()
+    if client is None:
+        return None
+
+    max_chars = _reason_polish_max_chars()
+    prompt = (
+        "Rewrite the source phrase into one concise, grammatical causal phrase for a stock move.\n"
+        "Rules:\n"
+        f"- Max {max_chars} characters.\n"
+        "- Preserve meaning exactly; do not add new facts, entities, or numbers.\n"
+        "- Do not include publisher names, menus, quote-page language, or links.\n"
+        "- Return exactly one plain phrase (no bullets, no markdown).\n\n"
+        f"Ticker: {ticker}\n"
+        f"Source phrase: {raw_phrase}\n"
+        f"Evidence context: {evidence_text}\n"
+    )
+    try:
+        response = client.chat.completions.create(
+            model=_reason_polish_model(),
+            messages=[
+                {"role": "system", "content": "You rewrite market catalyst phrases with strict factual faithfulness."},
+                {"role": "user", "content": prompt},
+            ],
+        )
+        text = str(response.choices[0].message.content or "").strip()  # type: ignore[index]
+    except Exception:
+        logger.exception("reason-phrase polish failed for %s", ticker)
+        return None
+
+    polished = _normalize_whitespace(text.lstrip("-*• ").strip()).strip(" .")
+    if polished.lower().startswith("shares "):
+        polished = re.sub(
+            r"(?i)^shares\s+(?:rose|fell|moved)\s+(?:after|amid|as|due to|because|following|on)\s+",
+            "",
+            polished,
+        ).strip(" .")
+    polished = _shorten(polished, max_chars).rstrip(" .")
+    if not polished:
+        return None
+    if not _is_reason_phrase_acceptable(polished):
+        return None
+    if _lexical_overlap_ratio(raw_phrase=raw_phrase, candidate=polished) < 0.35:
+        return None
+    if _has_entity_drift(raw_phrase=raw_phrase, candidate=polished):
+        return None
+    if not (_has_causal_marker(polished) or _has_event_vocab(polished)):
+        return None
+    return polished
+
+
+def _render_reason_line_with_quality(
+    *,
+    ticker: str,
+    pct_move: float | None,
+    candidate_phrase: str | None,
+    evidence_text: str | None,
+) -> tuple[str, str | None, str | None, str, tuple[str, ...]]:
+    phrase_seed = _normalize_whitespace(candidate_phrase or "")
+    raw_phrase = _extract_causal_clause(phrase_seed) if phrase_seed else None
+    if raw_phrase is None and evidence_text:
+        raw_phrase = _extract_causal_clause(evidence_text)
+    if not raw_phrase:
+        return (
+            FALLBACK_CAUSE_LINE,
+            None,
+            None,
+            "fallback",
+            ("no_causal_clause",),
+        )
+
+    rejections = _reason_phrase_quality_rejections(raw_phrase)
+    final_phrase = raw_phrase
+    render_mode = "deterministic"
+    if rejections:
+        if _reason_quality_mode() == "hybrid":
+            polished = _polish_reason_phrase_llm(
+                raw_phrase=raw_phrase,
+                evidence_text=_normalize_whitespace(evidence_text or phrase_seed or raw_phrase),
+                ticker=ticker,
+            )
+            if polished:
+                final_phrase = polished
+                render_mode = "llm_polish"
+            else:
+                return (
+                    FALLBACK_CAUSE_LINE,
+                    raw_phrase,
+                    None,
+                    "fallback",
+                    tuple(list(rejections) + ["llm_polish_unusable"]),
+                )
+        else:
+            return (
+                FALLBACK_CAUSE_LINE,
+                raw_phrase,
+                None,
+                "fallback",
+                tuple(rejections),
+            )
+
+    line = _build_reason_line_from_phrase(pct_move=pct_move, phrase=final_phrase)
+    if line == FALLBACK_CAUSE_LINE:
+        rejection_list = list(rejections)
+        rejection_list.append("line_builder_rejected")
+        return (
+            FALLBACK_CAUSE_LINE,
+            raw_phrase,
+            final_phrase,
+            "fallback",
+            tuple(rejection_list),
+        )
+    return line, raw_phrase, final_phrase, render_mode, tuple(rejections)
+
+
 def _collect_evidence_for_ticker(
     *,
     ticker: str,
@@ -2808,6 +3120,14 @@ def _write_artifact(
             lines.append(f"  - selected_cluster: {ev.selected_cluster}")
         if ev.cause_mode:
             lines.append(f"  - cause_mode: {ev.cause_mode}")
+        if ev.cause_render_mode:
+            lines.append(f"  - cause_render_mode: {ev.cause_render_mode}")
+        if ev.cause_raw_phrase:
+            lines.append(f"  - cause_raw_phrase: {ev.cause_raw_phrase}")
+        if ev.cause_final_phrase:
+            lines.append(f"  - cause_final_phrase: {ev.cause_final_phrase}")
+        if ev.quality_rejections:
+            lines.append(f"  - quality_rejections: {', '.join(ev.quality_rejections)}")
         if ev.cause_source_type:
             lines.append(f"  - cause_source_type: {ev.cause_source_type}")
         if ev.cause_source_url:
@@ -2950,6 +3270,10 @@ def _build_catalyst_for_mover(*, mover: QuoteSnapshot, slot_name: str, since_utc
     cause_source_url: str | None = None
     cause_phrase: str | None = None
     direct_candidate: _EvidenceCandidate | None = None
+    cause_render_mode = "fallback"
+    cause_raw_phrase: str | None = None
+    cause_final_phrase: str | None = None
+    quality_rejections: tuple[str, ...] = ()
 
     if top_cluster_confirmed:
         confidence = max(_min_evidence_confidence(), min(1.0, confidence + 0.12))
@@ -2982,6 +3306,32 @@ def _build_catalyst_for_mover(*, mover: QuoteSnapshot, slot_name: str, since_utc
                 confidence = max(confidence, _effective_candidate_score(candidate=direct_candidate, pct_move=mover.pct_move))
                 rejected.append("cluster:using_direct_evidence_fallback")
 
+    line = FALLBACK_CAUSE_LINE
+    if cause_mode in {"cluster_confirmed", "decisive_primary", "direct_evidence"} and cause_phrase:
+        evidence_seed = (
+            direct_candidate.text
+            if direct_candidate is not None
+            else (
+                cluster_candidate.text
+                if cluster_candidate is not None
+                else (chosen.text if chosen is not None else cause_phrase)
+            )
+        )
+        (
+            line,
+            cause_raw_phrase,
+            cause_final_phrase,
+            cause_render_mode,
+            quality_rejections,
+        ) = _render_reason_line_with_quality(
+            ticker=mover.ticker,
+            pct_move=mover.pct_move,
+            candidate_phrase=cause_phrase,
+            evidence_text=evidence_seed,
+        )
+    else:
+        quality_rejections = ("no_specific_cause_mode",)
+
     best_news = _pick_best_by_source(ranked, "yahoo_news", pct_move=mover.pct_move)
     best_web = _pick_best_by_source(ranked, "web", pct_move=mover.pct_move)
     top_evidence = tuple(
@@ -3008,7 +3358,11 @@ def _build_catalyst_for_mover(*, mover: QuoteSnapshot, slot_name: str, since_utc
         rejected_reasons=tuple(rejected),
         since_utc=since_utc.replace(microsecond=0).isoformat(),
         confirmed_cluster=(top_cluster if (top_cluster_confirmed or decisive_primary) else None),
-        confirmed_cause_phrase=(cause_phrase if cause_mode in {"cluster_confirmed", "decisive_primary", "direct_evidence"} else None),
+        confirmed_cause_phrase=(
+            cause_final_phrase
+            if (line != FALLBACK_CAUSE_LINE and cause_mode in {"cluster_confirmed", "decisive_primary", "direct_evidence"})
+            else None
+        ),
         corroborated_sources=corroborated_sources,
         corroborated_domains=corroborated_domains,
         web_backend=web_backend,
@@ -3017,11 +3371,11 @@ def _build_catalyst_for_mover(*, mover: QuoteSnapshot, slot_name: str, since_utc
         cause_source_type=cause_source_type,
         cause_source_url=cause_source_url,
         cause_mode=cause_mode,
+        cause_render_mode=cause_render_mode,
+        cause_raw_phrase=cause_raw_phrase,
+        cause_final_phrase=cause_final_phrase,
+        quality_rejections=quality_rejections,
     )
-    if cause_mode in {"cluster_confirmed", "decisive_primary", "direct_evidence"} and cause_phrase:
-        line = _build_reason_line_from_phrase(pct_move=mover.pct_move, phrase=cause_phrase)
-    else:
-        line = FALLBACK_CAUSE_LINE
     return evidence, line
 
 
@@ -3116,6 +3470,10 @@ def debug_catalyst(*, ticker: str, slot_name: str = "open") -> dict[str, Any]:
         "confirmed_cluster": evidence.confirmed_cluster,
         "confirmed_cause_phrase": evidence.confirmed_cause_phrase,
         "cause_mode": evidence.cause_mode,
+        "cause_render_mode": evidence.cause_render_mode,
+        "cause_raw_phrase": evidence.cause_raw_phrase,
+        "cause_final_phrase": evidence.cause_final_phrase,
+        "quality_rejections": list(evidence.quality_rejections),
         "cause_source_type": evidence.cause_source_type,
         "cause_source_url": evidence.cause_source_url,
         "corroborated_sources": evidence.corroborated_sources,
@@ -3846,6 +4204,10 @@ def status() -> dict[str, Any]:
         "earnings_recap_time": f"{recap_hh:02d}:{recap_mm:02d}",
         "channel": _channel_default(),
         "model": _md_model(),
+        "reason_quality_mode": _reason_quality_mode(),
+        "reason_polish_enabled": _reason_polish_enabled(),
+        "reason_polish_model": _reason_polish_model(),
+        "reason_polish_max_chars": _reason_polish_max_chars(),
         "top_n": _top_n(),
         "top_k": _top_k(),
         "max_lookback_hours": _max_lookback_hours(),
