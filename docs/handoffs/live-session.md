@@ -2358,3 +2358,36 @@ Then confirm bot returns:
     - `cause_render_mode='simple_best_guess'`
 - Rollback flag was not needed. Legacy rollback remains available via:
   - `COATUE_CLAW_MD_CATALYST_MODE=legacy_heuristic`
+
+## Update (2026-02-24, Market Daily time-integrity guardrails merged/deployed)
+- Integrated `origin/codex/agent-market-daily` into `main` via merge commit `d59ca97` (includes `43c84ed`).
+- Scope now active:
+  - strict in-window evidence requirement
+  - historical callback rejection
+  - publish-time enrichment + timeout guardrails
+  - link emission constrained to time-valid evidence
+- Status verification (runtime interpreter):
+  - `require_in_window_dates=True`
+  - `allow_undated_fallback=False`
+  - `reject_historical_callback=True`
+  - `publish_time_enrich_enabled=True`
+  - `publish_time_enrich_timeout_ms=1200`
+- Validation:
+  - checklist `python3 -m pytest` fails on mini (missing pytest + Python 3.9 runtime mismatch for `datetime.UTC` imports).
+  - venv tests pass:
+    - `tests/test_market_daily.py` -> `63 passed`
+    - `tests/test_launchd_runtime.py` -> `8 passed`
+- Runtime verification:
+  - `make openclaw-restart` + `make openclaw-slack-status` healthy
+  - forced close run posted (`md-close-20260225-044033.md`)
+  - forced earnings recap run returned `no_reporters`
+- INTC debug checks passed:
+  - stale Morgan callback rejected (`historical_callback_reject` present)
+  - chosen synthesis URLs include in-window Intel Yahoo `.../why-intel-intc-stock-soaring-210238819.html` plus another in-window source
+  - debug arrays are non-empty:
+    - `publish_time_rejections`
+    - `historical_callback_rejections`
+    - `candidate_publish_times`
+  - links payload only contains `news`/`web`.
+- Integrator follow-up applied post-merge:
+  - removed over-broad quote-wrapper rule that rejected valid in-window `why ... stock soaring today` candidates.

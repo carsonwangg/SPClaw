@@ -1082,3 +1082,15 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - INTC no longer emits quote-directory catalyst text
 - Ops note:
   - mini system `python3` is not the runtime interpreter for this module/tests; use `/opt/coatue-claw/.venv/bin/python` for validation/CLI.
+
+- Market Daily time-integrity guardrails are deployed on `main` (`d59ca97`, includes `43c84ed`):
+  - strict in-window publish-time filtering enabled by default
+  - stale historical callback narratives rejected from synthesis candidates
+  - publish-time enrichment enabled with bounded timeout (1200ms)
+  - MD links now constrained to time-valid evidence
+- Operational verification:
+  - INTC debug confirms stale Morgan callback rejection and non-empty time-integrity diagnostics
+  - selected synthesis URLs include in-window Yahoo Intel "why stock soaring" candidate (or equivalent in-window replacement)
+  - close artifact footer remains no-X: `Yahoo fast_info + Yahoo news + web search`
+- Integrator compatibility note:
+  - mini system `python3` should not be used for this module/tests; use `/opt/coatue-claw/.venv/bin/python`.

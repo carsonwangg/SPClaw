@@ -1828,10 +1828,6 @@ def _is_quote_directory_title(text: str) -> bool:
         return True
     if re.search(r"\bstock quote,\s*history,\s*news\b", lower):
         return True
-    if re.search(r"\bwhy\b.*\bstock\b.*\b(today|now)\b", lower):
-        return True
-    if re.search(r"\bwhy\b.*\bshares?\b.*\b(today|now)\b", lower):
-        return True
     if ("stock price" in lower) and ("quote" in lower) and ("history" in lower):
         return True
     return False
