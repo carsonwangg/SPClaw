@@ -95,6 +95,15 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py tests/test_launchd_runtime.py` -> `34 passed`
 
+## Update (2026-02-26, board-seat continue-search behavior)
+- Updated candidate selection loop so a skipped target does not terminate the run for that company:
+  - if a candidate fails validation/gates (`entity_unverified`, `target_already_acquired`, confidence gate), Board Seat excludes it and tries the next candidate.
+  - run only skips after exhausting viable candidate pool.
+- Added regression test:
+  - `test_run_once_retries_next_target_when_first_skipped`
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py tests/test_launchd_runtime.py` -> `35 passed`
+
 ## Update (2026-02-26, board-seat hard reset scaffold)
 - Board Seat was intentionally scrapped to start fresh after repeated output quality failures.
 - Replaced `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py` with a reset scaffold:

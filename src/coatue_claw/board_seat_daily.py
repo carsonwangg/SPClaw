@@ -390,6 +390,10 @@ def _openai_model() -> str:
     return (os.environ.get("COATUE_CLAW_BOARD_SEAT_MODEL", "gpt-5.2-chat-latest") or "gpt-5.2-chat-latest").strip()
 
 
+def _llm_candidate_generation_enabled() -> bool:
+    return _env_flag("COATUE_CLAW_BOARD_SEAT_LLM_CANDIDATE_GEN_ENABLED", True)
+
+
 def _openai_api_key() -> str | None:
     for key in (
         "COATUE_CLAW_OPENAI_API_KEY",
@@ -758,6 +762,8 @@ def _filter_rows_for_target(*, target: str, rows: list[EvidenceRow]) -> list[Evi
 
 
 def _llm_candidate_ideas(*, company: str, used_target_keys: set[str]) -> list[str]:
+    if not _llm_candidate_generation_enabled():
+        return []
     prompt = json.dumps(
         {
             "company": company,
@@ -2232,6 +2238,7 @@ def _pick_target(
     store: BoardSeatStore,
     now_utc: datetime,
     run_date_local: str,
+    excluded_target_keys: set[str] | None = None,
 ) -> tuple[CandidateScore | None, str | None, float, list[CandidateScore], list[dict[str, Any]]]:
     candidates = _extract_candidates(company, rows)
     existing_keys = {_target_key(str(r.get("target") or "")) for r in store.target_ledger_rows(company=company, limit=1000)}
@@ -2251,6 +2258,8 @@ def _pick_target(
             row_indexes=(),
         )
     candidates = sorted(by_key.values(), key=lambda x: (-x.score, -x.distinct_domains, -x.evidence_count, x.target.lower()))
+    if excluded_target_keys:
+        candidates = [c for c in candidates if c.target_key not in excluded_target_keys]
     store.record_candidates(company=company, candidates=candidates, run_date_local=run_date_local)
 
     for candidate in candidates[:6]:
@@ -2341,63 +2350,89 @@ def _process_company(
         store.record_run(payload)
         return "skipped", payload
 
-    chosen, gate_reason, repitch_score, candidates, repitch_events = _pick_target(
-        company=company,
-        rows=rows,
-        store=store,
-        now_utc=now_utc,
-        run_date_local=run_date_local,
-    )
-    if chosen is None:
-        payload = {
-            **result_base,
-            "status": "skipped",
-            "reason": "no_high_confidence_new_target",
-            "gate_reason": gate_reason or "target_confidence_not_high",
-            "search_notes": search_notes,
-            "candidates_considered": len(candidates),
-            "delivery_mode_applied": "skip",
-        }
-        store.record_run(payload)
-        return "skipped", payload
+    excluded_target_keys: set[str] = set()
+    attempt_count = 0
+    gate_reason = ""
+    repitch_score = 0.0
+    repitch_events: list[dict[str, Any]] = []
+    candidates: list[CandidateScore] = []
+    chosen: CandidateScore | None = None
+    chosen_rows: list[EvidenceRow] = []
+    effective_confidence = "low"
+    verify_score = 0.0
 
-    verified_ok, verified_rows, verify_reason, verify_score = _verify_target_candidate(company=company, target=chosen.target)
-    if not verified_ok:
-        payload = {
-            **result_base,
-            "status": "skipped",
-            "reason": "no_high_confidence_new_target",
-            "gate_reason": verify_reason or "entity_unverified",
-            "search_notes": search_notes,
-            "candidates_considered": len(candidates),
-            "target": chosen.target,
-            "target_key": chosen.target_key,
-            "target_confidence": chosen.confidence,
-            "target_confidence_score": chosen.score,
-            "entity_verification_score": verify_score,
-            "delivery_mode_applied": "skip",
-        }
-        store.record_run(payload)
-        return "skipped", payload
+    while True:
+        attempt_count += 1
+        chosen, gate_reason, repitch_score, candidates, repitch_events = _pick_target(
+            company=company,
+            rows=rows,
+            store=store,
+            now_utc=now_utc,
+            run_date_local=run_date_local,
+            excluded_target_keys=excluded_target_keys,
+        )
+        if chosen is None:
+            payload = {
+                **result_base,
+                "status": "skipped",
+                "reason": "no_high_confidence_new_target",
+                "gate_reason": gate_reason or "target_confidence_not_high",
+                "search_notes": search_notes,
+                "candidates_considered": len(candidates),
+                "selection_attempts": attempt_count,
+                "delivery_mode_applied": "skip",
+            }
+            store.record_run(payload)
+            return "skipped", payload
 
-    chosen_rows = verified_rows
-    effective_confidence = "high" if (verify_score >= 0.72 and len({r.domain for r in chosen_rows if r.domain}) >= 2) else "medium"
-    if _require_high_conf_new_target() and effective_confidence != "high":
-        payload = {
-            **result_base,
-            "status": "skipped",
-            "reason": "no_high_confidence_new_target",
-            "gate_reason": "target_confidence_not_high",
-            "search_notes": search_notes,
-            "candidates_considered": len(candidates),
-            "target": chosen.target,
-            "target_key": chosen.target_key,
-            "target_confidence": effective_confidence,
-            "target_confidence_score": verify_score,
-            "delivery_mode_applied": "skip",
-        }
-        store.record_run(payload)
-        return "skipped", payload
+        verified_ok, verified_rows, verify_reason, verify_score = _verify_target_candidate(company=company, target=chosen.target)
+        if not verified_ok:
+            excluded_target_keys.add(chosen.target_key)
+            gate_reason = verify_reason or "entity_unverified"
+            if len(excluded_target_keys) >= max(3, len(candidates)):
+                payload = {
+                    **result_base,
+                    "status": "skipped",
+                    "reason": "no_high_confidence_new_target",
+                    "gate_reason": gate_reason,
+                    "search_notes": search_notes,
+                    "candidates_considered": len(candidates),
+                    "target": chosen.target,
+                    "target_key": chosen.target_key,
+                    "target_confidence": chosen.confidence,
+                    "target_confidence_score": chosen.score,
+                    "entity_verification_score": verify_score,
+                    "selection_attempts": attempt_count,
+                    "delivery_mode_applied": "skip",
+                }
+                store.record_run(payload)
+                return "skipped", payload
+            continue
+
+        chosen_rows = verified_rows
+        effective_confidence = "high" if (verify_score >= 0.72 and len({r.domain for r in chosen_rows if r.domain}) >= 2) else "medium"
+        if _require_high_conf_new_target() and effective_confidence != "high":
+            excluded_target_keys.add(chosen.target_key)
+            gate_reason = "target_confidence_not_high"
+            if len(excluded_target_keys) >= max(3, len(candidates)):
+                payload = {
+                    **result_base,
+                    "status": "skipped",
+                    "reason": "no_high_confidence_new_target",
+                    "gate_reason": gate_reason,
+                    "search_notes": search_notes,
+                    "candidates_considered": len(candidates),
+                    "target": chosen.target,
+                    "target_key": chosen.target_key,
+                    "target_confidence": effective_confidence,
+                    "target_confidence_score": verify_score,
+                    "selection_attempts": attempt_count,
+                    "delivery_mode_applied": "skip",
+                }
+                store.record_run(payload)
+                return "skipped", payload
+            continue
+        break
 
     funding = _funding_snapshot_for_target(store=store, target=chosen.target)
     last_post = store.latest_target_post(company=company, target_key=chosen.target_key)
@@ -2486,6 +2521,7 @@ def _process_company(
         "generation_mode": draft.generation_mode,
         "quality_fail_codes": list(draft.quality_fail_codes),
         "memory_rewrite_used": draft.memory_rewrite_used,
+        "selection_attempts": attempt_count,
         "warning_thread_posted": bool(warning_ts),
         "reason": "",
         "gate_reason": "",

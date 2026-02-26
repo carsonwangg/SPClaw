@@ -65,6 +65,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - targeting flow upgraded to two-stage:
     - LLM idea generation for candidate targets.
     - deterministic entity verification (high-signal domains + target-name consistency) before posting.
+    - if a candidate is rejected, system iterates to next candidate instead of stopping at first failure.
 - Historical context (superseded by v1 rebuild above):
   - Board Seat was reset to scaffold baseline before the current rebuild.
   - `src/coatue_claw/board_seat_daily.py` no longer runs legacy drafting/quality logic.
