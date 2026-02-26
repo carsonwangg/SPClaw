@@ -2869,3 +2869,17 @@ Then confirm bot returns:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `63 passed`.
 - Operational note:
   - Posted a manual real-research board-seat message to `#openai` at Slack ts `1772060668.808919` while extractor hardening is being stabilized for fully automated target selection.
+
+## Update (2026-02-26, market-daily recap dedupe fix deployed)
+- Cherry-picked  onto  as commit .
+- Purpose: manual daytime recap runs now write slot  so they do not block scheduled  runs.
+- Validation:
+  -  -> 
+  -  -> 
+- Runtime:
+  - /opt/homebrew/bin/openclaw gateway restart completed.
+  - /opt/homebrew/bin/openclaw channels status --probe --json probe OK (HTTP 200).
+- Behavior verification:
+  - manual dry-run: , , , 
+  - scheduled-path dry-run (forced with temporary recap-time override to current minute): , , , 
+  - DB rows confirm both slots exist independently for the same local date.
