@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -195,7 +196,7 @@ def test_extract_investment_text_parses_v5_idea_line() -> None:
     assert "series f" not in core.lower()
 
 
-def test_validate_draft_rejects_24h_why_now_phrasing() -> None:
+def test_validate_draft_allows_24h_why_now_phrasing_when_non_blocking() -> None:
     draft = _v6_draft()
     bad = board_seat_daily.BoardSeatDraft(
         idea_line=draft.idea_line,
@@ -211,10 +212,11 @@ def test_validate_draft_rejects_24h_why_now_phrasing() -> None:
         source_refs=draft.source_refs,
     )
     errors = board_seat_daily._validate_draft(bad)
-    assert "why_now_24h_disallowed" in errors
+    assert "why_now_24h_disallowed" not in errors
 
 
-def test_validate_draft_semantic_recency_requires_dated_evidence() -> None:
+def test_validate_draft_semantic_recency_requires_dated_evidence_when_strict(monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_WHY_NOW_MODE", "strict")
     base = _v6_draft()
     draft = board_seat_daily.BoardSeatDraft(
         idea_line=base.idea_line,
@@ -271,6 +273,23 @@ def test_validate_draft_semantic_recency_requires_dated_evidence() -> None:
     assert "why_now_recency_missing" in bad_errors
 
 
+def test_apply_why_now_mode_generates_thematic_fallback() -> None:
+    draft = _v6_draft()
+    weak = replace(
+        draft,
+        idea_line="Acquire Saronic to accelerate Anduril execution in a strategic wedge.",
+        why_now="",
+    )
+    shaped = board_seat_daily._apply_why_now_mode(
+        company="Anduril",
+        draft=weak,
+        evidence_pack={"why_now_evidence": []},
+    )
+    assert shaped.why_now_generated_fallback is True
+    assert "past few months" in shaped.why_now.lower()
+    assert shaped.why_now_soft_notes
+
+
 def test_llm_evidence_pack_builds_section_bundles_and_quality_flags() -> None:
     now = datetime.now(UTC)
     recent_a = now.date().isoformat()
@@ -316,6 +335,46 @@ def test_llm_evidence_pack_builds_section_bundles_and_quality_flags() -> None:
     assert "tier_1" in pack["evidence_tier_mix"]
     assert isinstance(pack["fact_cards"], dict)
     assert isinstance(pack["fact_cards_count_by_field"], dict)
+
+
+def test_target_search_rows_merges_brave_and_google(monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_BRAVE_API_KEY", "test-key")
+
+    def _fake_http_json(**kwargs):
+        return {
+            "web": {
+                "results": [
+                    {
+                        "url": "https://example.com/brave-item",
+                        "title": "Brave result",
+                        "description": "Brave description",
+                    }
+                ]
+            }
+        }
+
+    monkeypatch.setattr(board_seat_daily, "_http_json", _fake_http_json)
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_google_serp_rows",
+        lambda query, max_results=8: [
+            {
+                "publisher": "Reuters",
+                "title": "Google result",
+                "snippet": "Google description",
+                "url": "https://example.com/google-item",
+                "published_hint": "2026-02-20",
+            }
+        ],
+    )
+    rows = board_seat_daily._target_search_rows(
+        target="Sourcegraph",
+        company="Cursor",
+        snippets=["enterprise trend"],
+    )
+    urls = {str(item.get("url") or "") for item in rows}
+    assert "https://example.com/brave-item" in urls
+    assert "https://example.com/google-item" in urls
 
 
 def test_build_source_refs_tiered_policy_excludes_tier3_rows(monkeypatch) -> None:
@@ -1789,6 +1848,9 @@ def test_status_reports_funding_quality_metrics(tmp_path: Path, monkeypatch) -> 
     assert "fact_card_mode" in payload
     assert "quote_overlap_max" in payload
     assert "diagnostic_fallback_count_7d" in payload
+    assert payload["why_now_mode"] == "thematic_non_blocking"
+    assert payload["why_now_theme_window_days"] == 120
+    assert "why_now_soft_notes_count_7d" in payload
 
 
 def test_brave_api_key_accepts_coatue_claw_alias(monkeypatch) -> None:
@@ -1823,7 +1885,8 @@ def test_target_description_soft_block_skips_low_signal_rows(monkeypatch) -> Non
     assert "codebases" in normalized
 
 
-def test_assess_draft_quality_flags_near_duplicate_thesis_lines() -> None:
+def test_assess_draft_quality_flags_near_duplicate_thesis_lines(monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_WHY_NOW_MODE", "strict")
     draft = board_seat_daily.BoardSeatDraft(
         idea_line="Acquire Sourcegraph to accelerate Cursor execution in a strategic wedge.",
         target_does="Sourcegraph gives engineering teams fast code search across very large codebases for daily development workflows.",
@@ -1975,6 +2038,67 @@ def test_assess_draft_quality_flags_quote_overlap() -> None:
     assert assessment["quote_overlap_by_field"]["target_does"] > board_seat_daily._quote_overlap_max()
 
 
+def test_assess_draft_quality_non_blocking_why_now_does_not_fail(monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_WHY_NOW_MODE", "thematic_non_blocking")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_QUOTE_OVERLAP_MAX", "0.99")
+    draft = board_seat_daily.BoardSeatDraft(
+        idea_line="Acquire Sourcegraph to accelerate Cursor execution in a strategic wedge.",
+        target_does="Sourcegraph sells enterprise code search and intelligence products to large engineering teams.",
+        why_now="",
+        whats_different="Sourcegraph combines repository-scale code intelligence with enterprise governance controls.",
+        mos_risks="Risks include migration complexity, workflow disruption, and support scaling.",
+        bottom_line="Execute one target-led move with clear integration milestones.",
+        context_current_efforts="Cursor is expanding enterprise design-partner deployments.",
+        context_domain_fit_gaps="Large-repository retrieval quality and governance are the primary gaps.",
+        funding_history="Raised multiple rounds.",
+        funding_latest_round_backers="Series C with institutional backers.",
+        source_refs=[
+            board_seat_daily.SourceRef(
+                name_or_publisher="Reuters",
+                title="Sourcegraph enterprise momentum",
+                url="https://www.reuters.com/technology/sourcegraph-example",
+            )
+        ],
+    )
+    evidence_pack = {
+        "quality_required_evidence": {
+            "target_does": True,
+            "why_now": False,
+            "whats_different": True,
+            "mos_risks": True,
+        },
+        "evidence_tier_mix": {"tier_1": 2, "tier_2": 1, "tier_3": 0},
+        "fact_cards_count_by_field": {"target_does": 1, "why_now": 0, "whats_different": 1, "mos_risks": 1},
+        "why_now_recency_passed": False,
+        "target_does_evidence": [
+            {
+                "title": "Sourcegraph expands enterprise footprint",
+                "snippet": "Large enterprises adopt code intelligence for production workflows.",
+                "url": "https://www.reuters.com/technology/sourcegraph-example",
+            }
+        ],
+        "whats_different_evidence": [
+            {
+                "title": "Sourcegraph introduces enterprise controls",
+                "snippet": "Enterprise controls and governance features expand differentiation.",
+                "url": "https://techcrunch.com/example/sourcegraph-controls",
+            }
+        ],
+        "mos_risks_evidence": [
+            {
+                "title": "Integration execution risk remains",
+                "snippet": "Migration and change-management risks remain a key challenge.",
+                "url": "https://www.bloomberg.com/example/sourcegraph-risk",
+            }
+        ],
+        "why_now_evidence": [],
+    }
+    assessment = board_seat_daily._assess_draft_quality(company="Cursor", draft=draft, evidence_pack=evidence_pack)
+    assert "why_now" not in assessment["failed_fields"]
+    assert assessment["passed"] is True
+    assert assessment["why_now_soft_notes"]
+
+
 def test_run_once_quality_failure_posts_diagnostic_when_enabled(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
@@ -2019,6 +2143,9 @@ def test_quality_fields_payload_includes_fact_and_overlap_defaults() -> None:
     payload = board_seat_daily._quality_fields_payload(_v6_draft())
     assert set(payload["fact_cards_count_by_field"].keys()) == {"target_does", "why_now", "whats_different", "mos_risks"}
     assert set(payload["quote_overlap_by_field"].keys()) == {"target_does", "why_now", "whats_different", "mos_risks"}
+    assert payload["why_now_mode"] == "thematic_non_blocking"
+    assert payload["why_now_theme_window_days"] == 120
+    assert isinstance(payload["why_now_soft_notes"], list)
 
 
 def test_high_conf_gate_includes_fact_and_overlap_defaults(tmp_path: Path, monkeypatch) -> None:
@@ -2032,6 +2159,8 @@ def test_high_conf_gate_includes_fact_and_overlap_defaults(tmp_path: Path, monke
     )
     assert set(gate["fact_cards_count_by_field"].keys()) == {"target_does", "why_now", "whats_different", "mos_risks"}
     assert set(gate["quote_overlap_by_field"].keys()) == {"target_does", "why_now", "whats_different", "mos_risks"}
+    assert gate["why_now_mode"] == "thematic_non_blocking"
+    assert gate["why_now_theme_window_days"] == 120
 
 
 def test_run_once_sent_payload_includes_quality_fields(tmp_path: Path, monkeypatch) -> None:
@@ -2058,3 +2187,7 @@ def test_run_once_sent_payload_includes_quality_fields(tmp_path: Path, monkeypat
     assert "quality_required_evidence" in row
     assert "evidence_tier_mix" in row
     assert "why_now_recency_passed" in row
+    assert "why_now_mode" in row
+    assert "why_now_theme_window_days" in row
+    assert "why_now_generated_fallback" in row
+    assert "why_now_soft_notes" in row

@@ -3,6 +3,26 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-26, board-seat why-now thematic non-blocking relaxation)
+- Updated `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py` so `why_now` no longer blocks Board Seat posting when evidence is sparse:
+  - new defaults:
+    - `COATUE_CLAW_BOARD_SEAT_WHY_NOW_MODE=thematic_non_blocking`
+    - `COATUE_CLAW_BOARD_SEAT_WHY_NOW_THEME_WINDOW_DAYS=120`
+  - added thematic fallback synthesis path for weak/empty `why_now`:
+    - auto-generates a concise “past few months” trend line from available evidence context.
+  - quality gate behavior changed:
+    - `why_now` evidence/recency weakness now records soft notes and can trigger rewrite, but does not hard-fail delivery by itself.
+    - hard failures remain for artifacts/copying/structural issues.
+  - payload/status observability additions:
+    - `why_now_mode`
+    - `why_now_theme_window_days`
+    - `why_now_generated_fallback`
+    - `why_now_soft_notes`
+    - `why_now_soft_notes_count_7d`
+  - retrieval depth widened in target/acquisition research paths:
+    - merged Google SERP rows into core target/acquisition evidence collection.
+    - widened metadata enrichment beyond only tier-1 domain suffixes (still excluding wrapper/social/low-quality URLs).
+
 ## Update (2026-02-26, board-seat diagnostic observability propagation fix)
 - Patched `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py` to fix missing diagnostic payload maps after retarget/repitch copy flows:
   - preserved new quality fields through all `BoardSeatDraft(...)` copy constructors:

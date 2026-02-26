@@ -40,6 +40,18 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Board-seat why-now relaxation shipped in `src/coatue_claw/board_seat_daily.py`:
+  - `why_now` is now thematic and non-blocking by default:
+    - `COATUE_CLAW_BOARD_SEAT_WHY_NOW_MODE=thematic_non_blocking`
+    - `COATUE_CLAW_BOARD_SEAT_WHY_NOW_THEME_WINDOW_DAYS=120`
+  - sparse dated evidence for `why_now` now produces soft notes + optional fallback synthesis instead of blocking the post path.
+  - payload additions now emitted on sent/skipped rows:
+    - `why_now_mode`
+    - `why_now_theme_window_days`
+    - `why_now_generated_fallback`
+    - `why_now_soft_notes`
+  - quality metrics/status now include `why_now_soft_notes_count_7d`.
+  - target/acquisition retrieval now merges Brave + Google rows for broader context before drafting.
 - Board-seat diagnostic fallback observability patch shipped in `src/coatue_claw/board_seat_daily.py`:
   - fixed field propagation across retarget/repitch copy paths so quality observability survives draft rewrites.
   - ensured payload defaults always include full maps for:
