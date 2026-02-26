@@ -40,6 +40,23 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Board-seat fail-closed quality gate + auto-revision is now implemented in `src/coatue_claw/board_seat_daily.py`:
+  - new env controls (defaulted on):
+    - `COATUE_CLAW_BOARD_SEAT_QUALITY_GATE_ENABLED=1`
+    - `COATUE_CLAW_BOARD_SEAT_REWRITE_MAX_RETRIES=4`
+    - `COATUE_CLAW_BOARD_SEAT_SOURCE_GATE_MODE=soft_block`
+    - `COATUE_CLAW_BOARD_SEAT_QUALITY_FAIL_POLICY=skip`
+    - `COATUE_CLAW_BOARD_SEAT_REVIEW_MODEL` (defaults to generation model)
+  - source hygiene expanded with low-signal CTA/menu filtering and soft demotion in evidence selection.
+  - draft lifecycle now uses quality assess + reviewer rewrite loop before any post.
+  - fallback drafts are quality-gated as well; no fail-open path remains.
+  - on unrecoverable quality failure, run skips post with `reason=quality_gate_failed`.
+  - run/status observability now includes:
+    - `quality_gate_passed`, `quality_score`, `quality_reasons`, `rewrite_attempts`, `quality_fail_stage`
+    - `last_quality_run_metrics` in `status`.
+  - validation:
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `68 passed`
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
 - Board-seat candidate quality recovery shipped on `codex/agent-board-seat`:
   - confidence model now defaults to `broad_weighted_v1` (deterministic weighted scoring over top target evidence), replacing allowlist-heavy gating behavior.
   - new confidence env knobs:

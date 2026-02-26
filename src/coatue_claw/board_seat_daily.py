@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 import html
 import hashlib
@@ -13,7 +13,7 @@ from pathlib import Path
 import re
 import sqlite3
 from typing import Any, Iterator
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
@@ -139,6 +139,10 @@ LOW_SIGNAL_MODE_DEFAULT = "candidate_with_confidence"
 TARGET_CONFIDENCE_LEVELS = {"High", "Medium", "Low"}
 REQUIRED_NEW_TARGET_CONFIDENCE = "High"
 WRITING_MODE_DEFAULT = "llm_passthrough"
+QUALITY_GATE_ENABLED_DEFAULT = True
+REWRITE_MAX_RETRIES_DEFAULT = 4
+SOURCE_GATE_MODE_DEFAULT = "soft_block"
+QUALITY_FAIL_POLICY_DEFAULT = "skip"
 CONFIDENCE_MODEL_DEFAULT = "broad_weighted_v1"
 CONFIDENCE_HIGH_MIN_DEFAULT = 2.40
 CONFIDENCE_MEDIUM_MIN_DEFAULT = 1.35
@@ -402,6 +406,11 @@ class BoardSeatDraft:
     target_resolution_reason: str = "as_extracted"
     writing_artifact_cleanups: list[str] = field(default_factory=list)
     writing_field_dedup_fixes: list[str] = field(default_factory=list)
+    quality_gate_passed: bool = True
+    quality_score: float = 1.0
+    quality_reasons: list[str] = field(default_factory=list)
+    rewrite_attempts: int = 0
+    quality_fail_stage: str = ""
 
 
 def _utc_now_iso() -> str:
@@ -532,6 +541,29 @@ def _writing_mode() -> str:
     return (
         os.environ.get("COATUE_CLAW_BOARD_SEAT_WRITING_MODE", WRITING_MODE_DEFAULT) or WRITING_MODE_DEFAULT
     ).strip().lower()
+
+
+def _quality_gate_enabled() -> bool:
+    return _env_flag("COATUE_CLAW_BOARD_SEAT_QUALITY_GATE_ENABLED", QUALITY_GATE_ENABLED_DEFAULT)
+
+
+def _rewrite_max_retries() -> int:
+    return _env_int("COATUE_CLAW_BOARD_SEAT_REWRITE_MAX_RETRIES", REWRITE_MAX_RETRIES_DEFAULT, minimum=0, maximum=8)
+
+
+def _source_gate_mode() -> str:
+    return (os.environ.get("COATUE_CLAW_BOARD_SEAT_SOURCE_GATE_MODE", SOURCE_GATE_MODE_DEFAULT) or SOURCE_GATE_MODE_DEFAULT).strip().lower()
+
+
+def _quality_fail_policy() -> str:
+    return (os.environ.get("COATUE_CLAW_BOARD_SEAT_QUALITY_FAIL_POLICY", QUALITY_FAIL_POLICY_DEFAULT) or QUALITY_FAIL_POLICY_DEFAULT).strip().lower()
+
+
+def _review_model() -> str:
+    return (
+        os.environ.get("COATUE_CLAW_BOARD_SEAT_REVIEW_MODEL", (os.environ.get("COATUE_CLAW_BOARD_SEAT_MODEL", "gpt-5.2-chat-latest") or "gpt-5.2-chat-latest"))
+        or "gpt-5.2-chat-latest"
+    ).strip()
 
 
 def _strip_obvious_artifacts() -> bool:
@@ -833,8 +865,15 @@ _DANGLING_TAIL_TOKENS = {
 _WRITING_ARTIFACT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("html_tag", re.compile(r"<[^>]+>")),
     ("menu_boilerplate", re.compile(r"\b(get the full list|read more|learn more|click here)\b", re.IGNORECASE)),
+    ("cta_boilerplate", re.compile(r"\b(book a demo|see pricing|sign in|sign up|request demo|start for free|try for free)\b", re.IGNORECASE)),
     ("ellipsis", re.compile(r"\.{3,}|…")),
     ("trail_boilerplate", re.compile(r"\b(?:view more|show more)\b", re.IGNORECASE)),
+)
+
+LOW_SIGNAL_COPY_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\b(book a demo|see pricing|sign in|sign up|request demo|start for free|try for free)\b", re.IGNORECASE),
+    re.compile(r"\b(menu|pricing page|product tour|docs navigation)\b", re.IGNORECASE),
+    re.compile(r"(?:\b(book a demo|see pricing)\b[\s•|·]*){2,}", re.IGNORECASE),
 )
 
 
@@ -908,6 +947,89 @@ def _strip_obvious_writing_artifacts(text: str) -> tuple[str, list[str]]:
     value = re.sub(r"\s+", " ", value).strip(" ,;:-")
     return value, cleanups
 
+
+def _is_low_signal_copy(text: str) -> bool:
+    normalized = _normalize_line_text(text)
+    if not normalized:
+        return True
+    return any(pattern.search(normalized) for pattern in LOW_SIGNAL_COPY_PATTERNS)
+
+
+def _token_jaccard_similarity(text_a: str, text_b: str) -> float:
+    tokens_a = set(_tokenize(_normalize_text(text_a, max_chars=2000)))
+    tokens_b = set(_tokenize(_normalize_text(text_b, max_chars=2000)))
+    if not tokens_a or not tokens_b:
+        return 0.0
+    union = tokens_a | tokens_b
+    if not union:
+        return 0.0
+    return len(tokens_a & tokens_b) / float(len(union))
+
+
+def _line_information_density_score(text: str) -> float:
+    tokens = _tokenize(_normalize_text(text, max_chars=1000))
+    if not tokens:
+        return 0.0
+    unique = len(set(tokens))
+    return unique / float(len(tokens))
+
+
+def _quality_fields_payload(draft: BoardSeatDraft) -> dict[str, Any]:
+    return {
+        "quality_gate_passed": bool(draft.quality_gate_passed),
+        "quality_score": round(float(draft.quality_score), 4),
+        "quality_reasons": [str(item) for item in list(draft.quality_reasons or [])],
+        "rewrite_attempts": int(draft.rewrite_attempts),
+        "quality_fail_stage": str(draft.quality_fail_stage or ""),
+    }
+
+
+def _quality_fields_default(*, passed: bool = False, stage: str = "not_run") -> dict[str, Any]:
+    return {
+        "quality_gate_passed": bool(passed),
+        "quality_score": 0.0,
+        "quality_reasons": [],
+        "rewrite_attempts": 0,
+        "quality_fail_stage": stage,
+    }
+
+
+def _quality_metrics_path() -> Path:
+    return (_ledger_dir() / "quality-last-run.json").resolve()
+
+
+def _persist_quality_run_metrics(result: dict[str, Any]) -> None:
+    sent = list(result.get("sent") or [])
+    skipped = list(result.get("skipped") or [])
+    rows = [*sent, *skipped]
+    rewrite_values = [
+        int(row.get("rewrite_attempts") or 0)
+        for row in rows
+        if isinstance(row, dict)
+    ]
+    fails = [
+        row
+        for row in skipped
+        if isinstance(row, dict) and str(row.get("reason") or "") == "quality_gate_failed"
+    ]
+    reason_counts: dict[str, int] = {}
+    for row in fails:
+        for reason in list(row.get("quality_reasons") or []):
+            key = str(reason).strip()
+            if not key:
+                continue
+            reason_counts[key] = reason_counts.get(key, 0) + 1
+    top_reasons = sorted(reason_counts.items(), key=lambda item: item[1], reverse=True)[:5]
+    payload = {
+        "run_date_local": str(result.get("run_date_local") or ""),
+        "recorded_at_utc": _utc_now_iso(),
+        "quality_fail_count": len(fails),
+        "avg_rewrite_attempts": round(sum(rewrite_values) / float(len(rewrite_values)), 3) if rewrite_values else 0.0,
+        "top_failure_reasons": [{"reason": key, "count": value} for key, value in top_reasons],
+    }
+    path = _quality_metrics_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 def _normalize_line_list(items: list[str], *, max_items: int, max_words: int | None = None) -> list[str]:
     out: list[str] = []
@@ -1033,6 +1155,16 @@ def _source_domain(url: str) -> str:
     if host.startswith("www."):
         host = host[4:]
     return host
+
+
+def _is_search_results_url(url: str) -> bool:
+    parsed = urlparse(str(url or ""))
+    host = _source_domain(url)
+    path = str(parsed.path or "").strip().lower()
+    query = parse_qs(str(parsed.query or ""))
+    if host in {"google.com", "bing.com", "duckduckgo.com", "search.yahoo.com"}:
+        return ("q" in query) and (path in {"", "/", "/search"})
+    return False
 
 
 def _domain_from_url(url: str) -> str:
@@ -1234,7 +1366,9 @@ def _target_search_rows(*, target: str, company: str, snippets: list[str]) -> li
         queries.append(f"{target} {hints}")
 
     rows: list[dict[str, str]] = []
+    demoted_rows: list[dict[str, str]] = []
     seen: set[str] = set()
+    gate_mode = _source_gate_mode()
     for query in queries:
         try:
             payload = _http_json(
@@ -1260,16 +1394,24 @@ def _target_search_rows(*, target: str, company: str, snippets: list[str]) -> li
             seen.add(key)
             title = _normalize_source_text(str(item.get("title") or ""), max_chars=180)
             snippet = _normalize_text(str(item.get("description") or ""), max_chars=420)
-            rows.append(
-                {
-                    "publisher": _publisher_from_url(url),
-                    "title": title or _normalize_source_text(snippet, max_chars=180) or "Reference",
-                    "snippet": snippet,
-                    "url": url,
-                }
-            )
+            row = {
+                "publisher": _publisher_from_url(url),
+                "title": title or _normalize_source_text(snippet, max_chars=180) or "Reference",
+                "snippet": snippet,
+                "url": url,
+            }
+            blob = f"{row['title']} {row['snippet']}"
+            if gate_mode == "soft_block" and _is_low_signal_copy(blob):
+                demoted_rows.append(row)
+            else:
+                rows.append(row)
             if len(rows) >= TARGET_SEARCH_RESULTS:
                 return rows
+    if gate_mode == "soft_block":
+        for row in demoted_rows:
+            if len(rows) >= TARGET_SEARCH_RESULTS:
+                break
+            rows.append(row)
     return rows
 
 
@@ -1414,6 +1556,11 @@ def _high_conf_new_target_gate(
     writing_mode = _writing_mode()
     writing_artifact_cleanups = list(draft.writing_artifact_cleanups or [])
     writing_field_dedup_fixes = list(draft.writing_field_dedup_fixes or [])
+    quality_gate_passed = bool(draft.quality_gate_passed)
+    quality_score = round(float(draft.quality_score), 4)
+    quality_reasons = [str(item) for item in list(draft.quality_reasons or [])]
+    rewrite_attempts = int(draft.rewrite_attempts)
+    quality_fail_stage = str(draft.quality_fail_stage or "")
     confidence_payload = _target_confidence_from_draft_sources(company=company, draft=draft)
     confidence = str(confidence_payload.get("confidence") or "Low")
     confidence_score = round(float(confidence_payload.get("score") or 0.0), 4)
@@ -1431,6 +1578,11 @@ def _high_conf_new_target_gate(
             "writing_mode": writing_mode,
             "writing_artifact_cleanups": writing_artifact_cleanups,
             "writing_field_dedup_fixes": writing_field_dedup_fixes,
+            "quality_gate_passed": quality_gate_passed,
+            "quality_score": quality_score,
+            "quality_reasons": quality_reasons,
+            "rewrite_attempts": rewrite_attempts,
+            "quality_fail_stage": quality_fail_stage,
             "target_key": target_key,
             "target_confidence": confidence,
             "target_confidence_score": confidence_score,
@@ -1449,6 +1601,11 @@ def _high_conf_new_target_gate(
             "writing_mode": writing_mode,
             "writing_artifact_cleanups": writing_artifact_cleanups,
             "writing_field_dedup_fixes": writing_field_dedup_fixes,
+            "quality_gate_passed": quality_gate_passed,
+            "quality_score": quality_score,
+            "quality_reasons": quality_reasons,
+            "rewrite_attempts": rewrite_attempts,
+            "quality_fail_stage": quality_fail_stage,
             "target_key": target_key,
             "target_confidence": confidence,
             "target_confidence_score": confidence_score,
@@ -1473,6 +1630,11 @@ def _high_conf_new_target_gate(
         "writing_mode": writing_mode,
         "writing_artifact_cleanups": writing_artifact_cleanups,
         "writing_field_dedup_fixes": writing_field_dedup_fixes,
+        "quality_gate_passed": quality_gate_passed,
+        "quality_score": quality_score,
+        "quality_reasons": quality_reasons,
+        "rewrite_attempts": rewrite_attempts,
+        "quality_fail_stage": quality_fail_stage,
         "target_key": target_key,
         "target_confidence": confidence,
         "target_confidence_score": confidence_score,
@@ -1516,6 +1678,8 @@ def _target_description_from_rows(*, target: str, rows: list[dict[str, str]]) ->
     for row in rows:
         snippet = _normalize_line_text(str(row.get("snippet") or ""))
         if not snippet:
+            continue
+        if _source_gate_mode() == "soft_block" and _is_low_signal_copy(f"{row.get('title', '')} {snippet}"):
             continue
         if len(snippet.split()) < 6:
             continue
@@ -2914,6 +3078,10 @@ def _build_source_refs(
         normalized = _normalize_source_ref(ref)
         if normalized is None:
             return
+        low_signal = _is_low_signal_copy(f"{normalized.title} {text_blob}")
+        gate_mode = _source_gate_mode()
+        if gate_mode == "hard_block" and low_signal:
+            return
         url_key = normalized.url.lower()
         title_key = _title_fingerprint(normalized.title)
         dedupe_key = f"{_source_domain(normalized.url)}::{title_key}"
@@ -2936,6 +3104,8 @@ def _build_source_refs(
         }.get(category, 1.0)
         score += {"target_search": 0.4, "acquisition_search": 0.25, "draft": 0.1, "funding": -0.25}.get(origin, 0.0)
         score += 0.4 if quality > 0 else (-0.2 if quality < 0 else 0.0)
+        if gate_mode == "soft_block" and low_signal:
+            score -= 1.2
         normalized_candidates.append(
             SourceCandidate(
                 ref=normalized,
@@ -3225,6 +3395,11 @@ def _sanitize_draft(
         target_resolution_reason=target_resolution_reason,
         writing_artifact_cleanups=sorted(set(writing_artifact_cleanups)),
         writing_field_dedup_fixes=writing_field_dedup_fixes,
+        quality_gate_passed=bool(draft.quality_gate_passed),
+        quality_score=float(draft.quality_score),
+        quality_reasons=list(draft.quality_reasons or []),
+        rewrite_attempts=int(draft.rewrite_attempts),
+        quality_fail_stage=str(draft.quality_fail_stage or ""),
     )
 
 
@@ -4664,6 +4839,242 @@ def _parse_llm_draft_payload(payload: Any) -> BoardSeatDraft | None:
     )
 
 
+def _assess_draft_quality(
+    *,
+    company: str,
+    draft: BoardSeatDraft,
+    evidence_pack: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    reasons: list[str] = []
+    score = 1.0
+    thesis_fields = {
+        "target_does": str(draft.target_does or ""),
+        "why_now": str(draft.why_now or ""),
+        "whats_different": str(draft.whats_different or ""),
+        "mos_risks": str(draft.mos_risks or ""),
+    }
+
+    for label, text in thesis_fields.items():
+        line = _normalize_line_text(text)
+        if not line:
+            reasons.append(f"missing_line:{label}")
+            score -= 0.25
+            continue
+        if _is_low_signal_copy(line):
+            reasons.append(f"artifact_contamination:{label}")
+            score -= 0.35
+        if re.search(r"<[^>]+>", line):
+            reasons.append(f"html_artifact:{label}")
+            score -= 0.25
+        density = _line_information_density_score(line)
+        if len(_tokenize(line)) >= 8 and density < 0.50:
+            reasons.append(f"low_information_density:{label}")
+            score -= 0.12
+
+    pairs = [("target_does", "why_now"), ("target_does", "whats_different"), ("why_now", "whats_different"), ("whats_different", "mos_risks")]
+    for left, right in pairs:
+        left_text = thesis_fields.get(left, "")
+        right_text = thesis_fields.get(right, "")
+        if not left_text or not right_text:
+            continue
+        sim = _token_jaccard_similarity(left_text, right_text)
+        if sim >= 0.82:
+            reasons.append(f"near_duplicate:{left}:{right}")
+            score -= 0.22
+
+    evidence_texts: list[str] = []
+    substantive_evidence_count = 0
+    if isinstance(evidence_pack, dict):
+        for bucket in ("target_evidence", "acquisition_evidence"):
+            items = evidence_pack.get(bucket)
+            if not isinstance(items, list):
+                continue
+            for item in items[:10]:
+                if not isinstance(item, dict):
+                    continue
+                title = _normalize_text(str(item.get("title") or ""), max_chars=300)
+                snippet = _normalize_text(str(item.get("snippet") or ""), max_chars=500)
+                url = _normalize_source_url(str(item.get("url") or ""))
+                blob = _normalize_line_text(f"{title} {snippet}")
+                if not blob:
+                    continue
+                evidence_texts.append(blob)
+                if (len(_tokenize(blob)) >= 8) and (not _is_low_signal_copy(blob)) and (not _is_search_results_url(url)):
+                    substantive_evidence_count += 1
+    for ref in list(draft.source_refs or [])[:8]:
+        blob = _normalize_line_text(f"{ref.title} {ref.name_or_publisher}")
+        if not blob:
+            continue
+        evidence_texts.append(blob)
+        if (len(_tokenize(blob)) >= 8) and (not _is_low_signal_copy(blob)) and (not _is_search_results_url(ref.url)):
+            substantive_evidence_count += 1
+    evidence_token_set = set(_tokenize(_normalize_text(" ".join(evidence_texts), max_chars=8000)))
+    company_tokens = set(_tokenize(company))
+    target_tokens = set(_tokenize(_extract_acquisition_target(draft.idea_line)))
+
+    if evidence_token_set and substantive_evidence_count >= 2:
+        weak_alignment_fields = 0
+        for label, text in thesis_fields.items():
+            line_tokens = set(_tokenize(text))
+            if len(line_tokens) < 4:
+                continue
+            overlap = line_tokens & evidence_token_set
+            if len(overlap) >= 2:
+                continue
+            if (line_tokens & company_tokens) or (line_tokens & target_tokens):
+                continue
+            reasons.append(f"weak_evidence_alignment:{label}")
+            weak_alignment_fields += 1
+            score -= 0.08
+        if weak_alignment_fields >= 3:
+            reasons.append("blatant_evidence_mismatch")
+            score -= 0.25
+    else:
+        reasons.append("no_evidence_context")
+        score -= 0.1
+
+    score = max(0.0, min(1.0, score))
+    hard_fail = any(reason.startswith("artifact_contamination") for reason in reasons)
+    if "blatant_evidence_mismatch" in reasons:
+        hard_fail = True
+    passed = (score >= 0.62) and (not hard_fail)
+    return {"passed": passed, "score": round(score, 4), "reasons": reasons}
+
+
+def _llm_revise_draft(
+    *,
+    company: str,
+    draft: BoardSeatDraft,
+    evidence_pack: dict[str, Any] | None,
+    quality_reasons: list[str],
+) -> BoardSeatDraft | None:
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if OpenAI is None or (not api_key):
+        return None
+    model = _review_model()
+    client = OpenAI(api_key=api_key)
+    evidence_json = json.dumps(evidence_pack or {}, ensure_ascii=False)
+    draft_json = json.dumps(
+        {
+            "idea_line": draft.idea_line,
+            "target_does": draft.target_does,
+            "why_now": draft.why_now,
+            "whats_different": draft.whats_different,
+            "mos_risks": draft.mos_risks,
+            "bottom_line": draft.bottom_line,
+            "context_current_efforts": draft.context_current_efforts,
+            "context_domain_fit_gaps": draft.context_domain_fit_gaps,
+            "funding_history": draft.funding_history,
+            "funding_latest_round_backers": draft.funding_latest_round_backers,
+            "source_refs": [
+                {"name_or_publisher": ref.name_or_publisher, "title": ref.title, "url": ref.url}
+                for ref in list(draft.source_refs or [])[:6]
+            ],
+        },
+        ensure_ascii=False,
+    )
+    prompt = (
+        f"Revise this board-seat draft for {company}.\n"
+        "Return strict JSON only with keys: "
+        "idea_line, target_does, why_now, whats_different, mos_risks, bottom_line, "
+        "context_current_efforts, context_domain_fit_gaps, funding_history, funding_latest_round_backers, source_refs.\n"
+        "Rules:\n"
+        "- Keep board-seat style and preserve strategic intent.\n"
+        "- Fix only the failing lines where needed.\n"
+        "- Remove low-signal CTA/menu artifacts (book a demo, see pricing, sign in, etc).\n"
+        "- Avoid near-duplicate lines across thesis fields.\n"
+        "- Keep content grounded in evidence but natural (inference allowed).\n"
+        "- No HTML tags, UI crumbs, or copied nav snippets.\n"
+        f"Current draft:\n{draft_json}\n"
+        f"Quality failures:\n{json.dumps(list(quality_reasons or []), ensure_ascii=False)}\n"
+        f"Evidence:\n{evidence_json}\n"
+    )
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            temperature=0.2,
+            messages=[
+                {"role": "system", "content": "You are a quality editor for board-ready strategic writing. Return JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+        )
+    except Exception:
+        return None
+    text = ""
+    if response and response.choices:
+        text = str(response.choices[0].message.content or "").strip()
+    if not text:
+        return None
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    try:
+        payload = json.loads(text[start : end + 1])
+    except Exception:
+        return None
+    parsed = _parse_llm_draft_payload(payload)
+    if parsed is None:
+        return None
+    return replace(
+        parsed,
+        rewrite_reasons=[*list(draft.rewrite_reasons or []), "quality_rewrite"],
+        raw_model_output=text,
+    )
+
+
+def _quality_gate_draft(
+    *,
+    company: str,
+    draft: BoardSeatDraft,
+    funding: FundingSnapshot,
+    acquisition_rows: list[dict[str, str]],
+    evidence_pack: dict[str, Any] | None,
+) -> BoardSeatDraft:
+    if not _quality_gate_enabled():
+        return replace(draft, quality_gate_passed=True, quality_score=1.0, quality_reasons=[], rewrite_attempts=0, quality_fail_stage="")
+
+    current = draft
+    attempts = 0
+    max_retries = _rewrite_max_retries()
+    while True:
+        current = _sanitize_draft(company=company, draft=current, funding=funding, acquisition_rows=acquisition_rows)
+        validation_errors = _validate_draft(current)
+        quality = _assess_draft_quality(company=company, draft=current, evidence_pack=evidence_pack)
+        reasons = [*[f"draft_validator:{item}" for item in validation_errors], *list(quality.get("reasons") or [])]
+        stage = "draft_validator" if validation_errors else "reviewer"
+        if any(str(item).startswith("artifact_contamination") for item in list(quality.get("reasons") or [])):
+            stage = "source_filter"
+        if (not validation_errors) and bool(quality.get("passed")):
+            return replace(
+                current,
+                quality_gate_passed=True,
+                quality_score=float(quality.get("score") or 0.0),
+                quality_reasons=list(quality.get("reasons") or []),
+                rewrite_attempts=attempts,
+                quality_fail_stage="",
+            )
+        if attempts >= max_retries:
+            return replace(
+                current,
+                quality_gate_passed=False,
+                quality_score=float(quality.get("score") or 0.0),
+                quality_reasons=reasons,
+                rewrite_attempts=attempts,
+                quality_fail_stage=stage,
+            )
+        revised = _llm_revise_draft(
+            company=company,
+            draft=current,
+            evidence_pack=evidence_pack,
+            quality_reasons=reasons,
+        )
+        attempts += 1
+        if revised is None:
+            revised = replace(current, rewrite_reasons=[*list(current.rewrite_reasons or []), "quality_rewrite_missing"])
+        current = revised
+
+
 def _llm_draft(
     *,
     company: str,
@@ -4805,9 +5216,28 @@ def _build_draft(
         if _target_key(final_target) and _target_key(final_target) != _target_key(seed_target):
             target_funding = _resolve_funding_snapshot(store=store, company=final_target)
             draft = _sanitize_draft(company=company, draft=draft, funding=target_funding, acquisition_rows=acquisition_rows)
-    if _validate_draft(draft):
-        return _fallback_draft(company=company, snippets=merged_snippets, funding=funding, acquisition_rows=acquisition_rows)
-    return draft
+    gated = _quality_gate_draft(
+        company=company,
+        draft=draft,
+        funding=funding,
+        acquisition_rows=acquisition_rows,
+        evidence_pack=evidence_pack,
+    )
+    if gated.quality_gate_passed:
+        return gated
+    fallback = _fallback_draft(company=company, snippets=merged_snippets, funding=funding, acquisition_rows=acquisition_rows)
+    fallback_gated = _quality_gate_draft(
+        company=company,
+        draft=fallback,
+        funding=funding,
+        acquisition_rows=acquisition_rows,
+        evidence_pack=evidence_pack,
+    )
+    if fallback_gated.quality_gate_passed:
+        return fallback_gated
+    if float(fallback_gated.quality_score) > float(gated.quality_score):
+        return fallback_gated
+    return gated
 
 
 def _funding_entity_for_draft(*, company: str, draft: BoardSeatDraft) -> str:
@@ -5064,6 +5494,15 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                     source_refs=draft.source_refs,
                     raw_model_output=draft.raw_model_output,
                     rewrite_reasons=[*draft.rewrite_reasons, "target_lock_retarget"],
+                    target_original=draft.target_original,
+                    target_resolution_reason=draft.target_resolution_reason,
+                    writing_artifact_cleanups=draft.writing_artifact_cleanups,
+                    writing_field_dedup_fixes=draft.writing_field_dedup_fixes,
+                    quality_gate_passed=draft.quality_gate_passed,
+                    quality_score=draft.quality_score,
+                    quality_reasons=draft.quality_reasons,
+                    rewrite_attempts=draft.rewrite_attempts,
+                    quality_fail_stage=draft.quality_fail_stage,
                 )
             result["event_tracking"].append(
                 _track_promising_target_events(
@@ -5074,6 +5513,16 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
             )
             funding = _resolve_funding_snapshot(store=store, company=_funding_entity_for_draft(company=company, draft=draft))
             draft = _sanitize_draft(company=company, draft=draft, funding=funding, acquisition_rows=[])
+            if (not bool(draft.quality_gate_passed)) and (_quality_fail_policy() == "skip"):
+                result["skipped"].append(
+                    {
+                        "company": company,
+                        "channel_ref": channel_ref,
+                        "reason": "quality_gate_failed",
+                        **_quality_fields_payload(draft),
+                    }
+                )
+                continue
             target_gate = _high_conf_new_target_gate(store=store, company=company, draft=draft)
             if not bool(target_gate.get("allow")):
                 result["skipped"].append(
@@ -5092,6 +5541,11 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                         "writing_mode": target_gate.get("writing_mode"),
                         "writing_artifact_cleanups": target_gate.get("writing_artifact_cleanups"),
                         "writing_field_dedup_fixes": target_gate.get("writing_field_dedup_fixes"),
+                        "quality_gate_passed": target_gate.get("quality_gate_passed"),
+                        "quality_score": target_gate.get("quality_score"),
+                        "quality_reasons": target_gate.get("quality_reasons"),
+                        "rewrite_attempts": target_gate.get("rewrite_attempts"),
+                        "quality_fail_stage": target_gate.get("quality_fail_stage"),
                         "is_new_target": bool(target_gate.get("is_new_target")),
                         "gate_reason": target_gate.get("reason"),
                         "matched_posted_at_utc": target_gate.get("matched_posted_at_utc"),
@@ -5136,6 +5590,11 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                     "writing_mode": target_gate.get("writing_mode"),
                     "writing_artifact_cleanups": target_gate.get("writing_artifact_cleanups"),
                     "writing_field_dedup_fixes": target_gate.get("writing_field_dedup_fixes"),
+                    "quality_gate_passed": target_gate.get("quality_gate_passed"),
+                    "quality_score": target_gate.get("quality_score"),
+                    "quality_reasons": target_gate.get("quality_reasons"),
+                    "rewrite_attempts": target_gate.get("rewrite_attempts"),
+                    "quality_fail_stage": target_gate.get("quality_fail_stage"),
                 }
             )
             continue
@@ -5227,6 +5686,15 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                         source_refs=draft.source_refs,
                         raw_model_output=draft.raw_model_output,
                         rewrite_reasons=[*draft.rewrite_reasons, "target_lock_retarget"],
+                        target_original=draft.target_original,
+                        target_resolution_reason=draft.target_resolution_reason,
+                        writing_artifact_cleanups=draft.writing_artifact_cleanups,
+                        writing_field_dedup_fixes=draft.writing_field_dedup_fixes,
+                        quality_gate_passed=draft.quality_gate_passed,
+                        quality_score=draft.quality_score,
+                        quality_reasons=draft.quality_reasons,
+                        rewrite_attempts=draft.rewrite_attempts,
+                        quality_fail_stage=draft.quality_fail_stage,
                     )
                     replacement_funding = _resolve_funding_snapshot(
                         store=store,
@@ -5247,6 +5715,18 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                 )
                 funding = _resolve_funding_snapshot(store=store, company=_funding_entity_for_draft(company=company, draft=draft))
                 draft = _sanitize_draft(company=company, draft=draft, funding=funding, acquisition_rows=[])
+                if (not bool(draft.quality_gate_passed)) and (_quality_fail_policy() == "skip"):
+                    result["skipped"].append(
+                        {
+                            "company": company,
+                            "channel_ref": channel_ref,
+                            "channel_id": channel_id,
+                            "reason": "quality_gate_failed",
+                            **_quality_fields_payload(draft),
+                        }
+                    )
+                    posted = True
+                    break
                 target_gate = _high_conf_new_target_gate(store=store, company=company, draft=draft)
                 if not bool(target_gate.get("allow")):
                     result["skipped"].append(
@@ -5266,6 +5746,11 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                             "writing_mode": target_gate.get("writing_mode"),
                             "writing_artifact_cleanups": target_gate.get("writing_artifact_cleanups"),
                             "writing_field_dedup_fixes": target_gate.get("writing_field_dedup_fixes"),
+                            "quality_gate_passed": target_gate.get("quality_gate_passed"),
+                            "quality_score": target_gate.get("quality_score"),
+                            "quality_reasons": target_gate.get("quality_reasons"),
+                            "rewrite_attempts": target_gate.get("rewrite_attempts"),
+                            "quality_fail_stage": target_gate.get("quality_fail_stage"),
                             "is_new_target": bool(target_gate.get("is_new_target")),
                             "gate_reason": target_gate.get("reason"),
                             "matched_posted_at_utc": target_gate.get("matched_posted_at_utc"),
@@ -5424,6 +5909,15 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                         source_refs=draft.source_refs,
                         raw_model_output=draft.raw_model_output,
                         rewrite_reasons=[*draft.rewrite_reasons, "repitch_disclosure"],
+                        target_original=draft.target_original,
+                        target_resolution_reason=draft.target_resolution_reason,
+                        writing_artifact_cleanups=draft.writing_artifact_cleanups,
+                        writing_field_dedup_fixes=draft.writing_field_dedup_fixes,
+                        quality_gate_passed=draft.quality_gate_passed,
+                        quality_score=draft.quality_score,
+                        quality_reasons=draft.quality_reasons,
+                        rewrite_attempts=draft.rewrite_attempts,
+                        quality_fail_stage=draft.quality_fail_stage,
                     )
                     message = _render_board_seat_message(company=company, draft=draft)
                     investment_text = _extract_investment_text(message)
@@ -5472,6 +5966,11 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                             "writing_mode": target_gate.get("writing_mode"),
                             "writing_artifact_cleanups": target_gate.get("writing_artifact_cleanups"),
                             "writing_field_dedup_fixes": target_gate.get("writing_field_dedup_fixes"),
+                            "quality_gate_passed": target_gate.get("quality_gate_passed"),
+                            "quality_score": target_gate.get("quality_score"),
+                            "quality_reasons": target_gate.get("quality_reasons"),
+                            "rewrite_attempts": target_gate.get("rewrite_attempts"),
+                            "quality_fail_stage": target_gate.get("quality_fail_stage"),
                         }
                     )
                     posted = True
@@ -5559,6 +6058,11 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                         "writing_mode": target_gate.get("writing_mode"),
                         "writing_artifact_cleanups": target_gate.get("writing_artifact_cleanups"),
                         "writing_field_dedup_fixes": target_gate.get("writing_field_dedup_fixes"),
+                        "quality_gate_passed": target_gate.get("quality_gate_passed"),
+                        "quality_score": target_gate.get("quality_score"),
+                        "quality_reasons": target_gate.get("quality_reasons"),
+                        "rewrite_attempts": target_gate.get("rewrite_attempts"),
+                        "quality_fail_stage": target_gate.get("quality_fail_stage"),
                     }
                 )
                 posted = True
@@ -5577,10 +6081,28 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
         if not posted:
             result["skipped"].append({"company": company, "channel_ref": channel_ref, "reason": last_error})
 
+    for row in list(result.get("sent") or []):
+        if not isinstance(row, dict):
+            continue
+        defaults = _quality_fields_default(passed=True, stage="")
+        for key, value in defaults.items():
+            row.setdefault(key, value)
+    for row in list(result.get("skipped") or []):
+        if not isinstance(row, dict):
+            continue
+        stage = "reviewer" if str(row.get("reason") or "") == "quality_gate_failed" else "not_run"
+        defaults = _quality_fields_default(passed=False, stage=stage)
+        for key, value in defaults.items():
+            row.setdefault(key, value)
+
     try:
         result["ledger"] = _write_target_ledger(store)
     except Exception as exc:
         result["ledger"] = {"error": str(exc)}
+    try:
+        _persist_quality_run_metrics(result)
+    except Exception:
+        pass
 
     return result
 
@@ -5596,6 +6118,27 @@ def status() -> dict[str, Any]:
     low_conf_count = 0
     oldest_cache_age_days = 0.0
     total_companies = len(portcos)
+    quality_metrics: dict[str, Any] = {
+        "run_date_local": "",
+        "recorded_at_utc": "",
+        "quality_fail_count": 0,
+        "avg_rewrite_attempts": 0.0,
+        "top_failure_reasons": [],
+    }
+    quality_path = _quality_metrics_path()
+    if quality_path.exists():
+        try:
+            payload = json.loads(quality_path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                quality_metrics = {
+                    "run_date_local": str(payload.get("run_date_local") or ""),
+                    "recorded_at_utc": str(payload.get("recorded_at_utc") or ""),
+                    "quality_fail_count": int(payload.get("quality_fail_count") or 0),
+                    "avg_rewrite_attempts": float(payload.get("avg_rewrite_attempts") or 0.0),
+                    "top_failure_reasons": list(payload.get("top_failure_reasons") or []),
+                }
+        except Exception:
+            pass
     for item in portcos:
         company = item["company"]
         manual_snapshot = manual_seed.get(_slug_company(company))
@@ -5654,6 +6197,11 @@ def status() -> dict[str, Any]:
         "max_line_words": _max_line_words(),
         "writing_mode": _writing_mode(),
         "strip_obvious_artifacts": _strip_obvious_artifacts(),
+        "quality_gate_enabled": _quality_gate_enabled(),
+        "rewrite_max_retries": _rewrite_max_retries(),
+        "source_gate_mode": _source_gate_mode(),
+        "quality_fail_policy": _quality_fail_policy(),
+        "review_model": _review_model(),
         "portcos": portcos,
         "recent_runs": store.recent_runs(limit=20),
         "pitch_counts": {
@@ -5681,6 +6229,7 @@ def status() -> dict[str, Any]:
             "low_confidence_pct": low_conf_pct,
             "oldest_cache_age_days": round(oldest_cache_age_days, 2),
         },
+        "last_quality_run_metrics": quality_metrics,
         "ledger_paths": {
             "artifact_dir": str(_ledger_dir()),
             "mirror_dir": str(_ledger_mirror_path()) if _ledger_mirror_enabled() else "",

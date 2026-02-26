@@ -3,6 +3,43 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-26, board-seat fail-closed quality gate + auto-revision)
+- Implemented Board Seat quality gate and rewrite loop in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
+  - source hygiene soft-block for low-signal web copy (`Book a Demo`, `See Pricing`, menu/CTA fragments).
+  - deterministic draft quality assessor (`_assess_draft_quality`) with artifact contamination, near-duplicate line detection, information density checks, and soft evidence-coherence scoring.
+  - reviewer rewrite loop (`_quality_gate_draft`) with configurable retries (`COATUE_CLAW_BOARD_SEAT_REWRITE_MAX_RETRIES`, default `4`).
+  - fail-closed skip behavior when quality cannot be recovered (`reason=quality_gate_failed`) controlled by `COATUE_CLAW_BOARD_SEAT_QUALITY_FAIL_POLICY=skip`.
+  - fallback drafts now also pass through the same quality gate before posting (no fail-open fallback leak).
+  - run payload observability added for `sent`/`skipped` rows:
+    - `quality_gate_passed`
+    - `quality_score`
+    - `quality_reasons`
+    - `rewrite_attempts`
+    - `quality_fail_stage`
+  - status payload now includes:
+    - `quality_gate_enabled`
+    - `rewrite_max_retries`
+    - `source_gate_mode`
+    - `quality_fail_policy`
+    - `review_model`
+    - `last_quality_run_metrics`
+- Added env examples in `/Users/carsonwang/CoatueClaw/.env.example`:
+  - `COATUE_CLAW_BOARD_SEAT_QUALITY_GATE_ENABLED=1`
+  - `COATUE_CLAW_BOARD_SEAT_REWRITE_MAX_RETRIES=4`
+  - `COATUE_CLAW_BOARD_SEAT_SOURCE_GATE_MODE=soft_block`
+  - `COATUE_CLAW_BOARD_SEAT_QUALITY_FAIL_POLICY=skip`
+  - `COATUE_CLAW_BOARD_SEAT_REVIEW_MODEL=gpt-5.2-chat-latest`
+- Added regression coverage in `/Users/carsonwang/CoatueClaw/tests/test_board_seat_daily.py`:
+  - CTA contamination cleanup (`Book a Demo` / `See Pricing`) in run output.
+  - soft source-gate target-description filtering.
+  - near-duplicate thesis quality detection.
+  - fail-closed skip after rewrite retries are exhausted.
+  - fallback-path safety under quality failure.
+  - quality observability fields present in sent payloads.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `68 passed`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
+
 ## Update (2026-02-25, board-seat candidate quality recovery: medium+new + broad weighted scoring)
 - Implemented candidate quality recovery in `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/board_seat_daily.py`:
   - target confidence model now defaults to `broad_weighted_v1` with deterministic score bands:

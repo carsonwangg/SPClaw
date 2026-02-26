@@ -1353,10 +1353,10 @@ def test_run_once_dry_run_cleans_noisy_llm_fields_and_emits_writing_observabilit
         "_llm_draft",
         lambda **kwargs: board_seat_daily.BoardSeatDraft(
             idea_line="Acquire Browserbase to accelerate OpenAI execution in a strategic wedge.",
-            target_does="Get the full list » Browserbase is &lt;strong&gt;enterprise browser infra&lt;/strong&gt; ... Read more",
-            why_now="Get the full list » Browserbase is &lt;strong&gt;enterprise browser infra&lt;/strong&gt; ... Read more",
-            whats_different="Get the full list » Browserbase is &lt;strong&gt;enterprise browser infra&lt;/strong&gt; ... Read more",
-            mos_risks="Get the full list » Browserbase is &lt;strong&gt;enterprise browser infra&lt;/strong&gt; ... Read more",
+            target_does="Get the full list » Book a Demo • See Pricing • Browserbase is &lt;strong&gt;enterprise browser infra&lt;/strong&gt; ... Read more",
+            why_now="Get the full list » Book a Demo • See Pricing • Browserbase is &lt;strong&gt;enterprise browser infra&lt;/strong&gt; ... Read more",
+            whats_different="Get the full list » Book a Demo • See Pricing • Browserbase is &lt;strong&gt;enterprise browser infra&lt;/strong&gt; ... Read more",
+            mos_risks="Get the full list » Book a Demo • See Pricing • Browserbase is &lt;strong&gt;enterprise browser infra&lt;/strong&gt; ... Read more",
             bottom_line="Execute one target-led move with 12-month milestones tied to revenue velocity and margin quality.",
             context_current_efforts="OpenAI has active customer programs and product pathways where this target can be integrated now.",
             context_domain_fit_gaps="Focus on the highest-friction capability gap where acquisition beats internal build speed.",
@@ -1373,6 +1373,8 @@ def test_run_once_dry_run_cleans_noisy_llm_fields_and_emits_writing_observabilit
     assert row["writing_artifact_cleanups"]
     assert set(row["writing_field_dedup_fixes"]) >= {"why_now", "whats_different", "mos_risks"}
     assert "Get the full list" not in row["preview"]
+    assert "Book a Demo" not in row["preview"]
+    assert "See Pricing" not in row["preview"]
     assert "<strong>" not in row["preview"]
 
 
@@ -1629,3 +1631,156 @@ def test_brave_api_key_accepts_coatue_claw_alias(monkeypatch) -> None:
     monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
     monkeypatch.setenv("COATUE_CLAW_BRAVE_API_KEY", "alias-brave-key")
     assert board_seat_daily._brave_search_api_key() == "alias-brave-key"
+
+
+def test_target_description_soft_block_skips_low_signal_rows(monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SOURCE_GATE_MODE", "soft_block")
+    description = board_seat_daily._target_description_from_rows(
+        target="Sourcegraph",
+        rows=[
+            {
+                "publisher": "Sourcegraph",
+                "title": "Book a Demo",
+                "snippet": "Book a Demo • See Pricing • Sign In • Product tour",
+                "url": "https://sourcegraph.com/pricing",
+            },
+            {
+                "publisher": "TechCrunch",
+                "title": "Sourcegraph expands enterprise AI code search",
+                "snippet": "Sourcegraph helps engineering teams search, understand, and refactor large codebases quickly.",
+                "url": "https://techcrunch.com/example/sourcegraph-expands",
+            },
+        ],
+    )
+    normalized = description.lower()
+    assert "book a demo" not in normalized
+    assert "see pricing" not in normalized
+    assert "sourcegraph" in normalized
+    assert "codebases" in normalized
+
+
+def test_assess_draft_quality_flags_near_duplicate_thesis_lines() -> None:
+    draft = board_seat_daily.BoardSeatDraft(
+        idea_line="Acquire Sourcegraph to accelerate Cursor execution in a strategic wedge.",
+        target_does="Sourcegraph gives engineering teams fast code search across very large codebases for daily development workflows.",
+        why_now="Sourcegraph gives engineering teams fast code search across very large codebases for daily development workflows.",
+        whats_different="Sourcegraph pairs enterprise controls with high-recall code intelligence for production teams.",
+        mos_risks="Risks include migration complexity, overlap with internal roadmap, and enterprise support burden.",
+        bottom_line="Execute one target-led move with measurable milestones over 12 months.",
+        context_current_efforts="Cursor has active enterprise rollout and agent workflow momentum.",
+        context_domain_fit_gaps="Codebase-scale retrieval and governance controls remain the primary gap.",
+        funding_history="Raised multiple rounds over time.",
+        funding_latest_round_backers="Series C led by strategic investors.",
+        source_refs=[
+            board_seat_daily.SourceRef(
+                name_or_publisher="Reuters",
+                title="Sourcegraph pushes enterprise code intelligence expansion",
+                url="https://www.reuters.com/technology/sourcegraph-expands-enterprise-code-intelligence-2026-01-20/",
+            ),
+            board_seat_daily.SourceRef(
+                name_or_publisher="TechCrunch",
+                title="Sourcegraph adds enterprise code search controls",
+                url="https://techcrunch.com/example/sourcegraph-controls",
+            ),
+        ],
+    )
+    assessment = board_seat_daily._assess_draft_quality(
+        company="Cursor",
+        draft=draft,
+        evidence_pack={
+            "target_evidence": [
+                {
+                    "publisher": "Reuters",
+                    "title": "Sourcegraph pushes enterprise code intelligence expansion",
+                    "snippet": "Sourcegraph helps developers navigate and refactor large repositories.",
+                    "url": "https://www.reuters.com/technology/sourcegraph-expands-enterprise-code-intelligence-2026-01-20/",
+                }
+            ],
+            "acquisition_evidence": [],
+        },
+    )
+    assert any(reason.startswith("near_duplicate:target_does:why_now") for reason in assessment["reasons"])
+
+
+def test_run_once_fail_closed_when_quality_gate_stays_failed(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_PORTCOS", "OpenAI:openai")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", "0")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_QUALITY_FAIL_POLICY", "skip")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REWRITE_MAX_RETRIES", "2")
+    monkeypatch.setattr(board_seat_daily, "WebClient", None)
+    monkeypatch.setattr(board_seat_daily, "_resolve_funding_snapshot", lambda **kwargs: _funding(source_type="cache"))
+    monkeypatch.setattr(board_seat_daily, "_acquisition_search_rows", lambda **kwargs: [])
+    monkeypatch.setattr(board_seat_daily, "_llm_draft", lambda **kwargs: _v6_draft())
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_assess_draft_quality",
+        lambda **kwargs: {"passed": False, "score": 0.25, "reasons": ["artifact_contamination:target_does"]},
+    )
+    monkeypatch.setattr(board_seat_daily, "_llm_revise_draft", lambda **kwargs: None)
+
+    payload = board_seat_daily.run_once(force=True, dry_run=True)
+    assert payload["ok"] is True
+    assert payload["sent"] == []
+    assert len(payload["skipped"]) == 1
+    row = payload["skipped"][0]
+    assert row["reason"] == "quality_gate_failed"
+    assert row["quality_gate_passed"] is False
+    assert row["rewrite_attempts"] == 2
+    assert row["quality_fail_stage"] in {"source_filter", "reviewer", "draft_validator"}
+    assert "quality_score" in row
+    assert "quality_reasons" in row
+
+
+def test_run_once_quality_fail_closed_applies_to_fallback_path(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_PORTCOS", "OpenAI:openai")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", "0")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_QUALITY_FAIL_POLICY", "skip")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REWRITE_MAX_RETRIES", "1")
+    monkeypatch.setattr(board_seat_daily, "WebClient", None)
+    monkeypatch.setattr(board_seat_daily, "_resolve_funding_snapshot", lambda **kwargs: _funding(source_type="cache"))
+    monkeypatch.setattr(board_seat_daily, "_acquisition_search_rows", lambda **kwargs: [])
+    monkeypatch.setattr(board_seat_daily, "_llm_draft", lambda **kwargs: None)
+    fallback_calls = {"count": 0}
+
+    def _fake_fallback(**kwargs):
+        fallback_calls["count"] += 1
+        return _v6_draft()
+
+    monkeypatch.setattr(board_seat_daily, "_fallback_draft", _fake_fallback)
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_assess_draft_quality",
+        lambda **kwargs: {"passed": False, "score": 0.2, "reasons": ["blatant_evidence_mismatch"]},
+    )
+    monkeypatch.setattr(board_seat_daily, "_llm_revise_draft", lambda **kwargs: None)
+
+    payload = board_seat_daily.run_once(force=True, dry_run=True)
+    assert payload["ok"] is True
+    assert fallback_calls["count"] >= 1
+    assert payload["sent"] == []
+    assert payload["skipped"][0]["reason"] == "quality_gate_failed"
+
+
+def test_run_once_sent_payload_includes_quality_fields(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_PORTCOS", "OpenAI:openai")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", "0")
+    monkeypatch.setattr(board_seat_daily, "WebClient", None)
+    monkeypatch.setattr(board_seat_daily, "_resolve_funding_snapshot", lambda **kwargs: _funding(source_type="cache"))
+    monkeypatch.setattr(board_seat_daily, "_acquisition_search_rows", lambda **kwargs: [])
+    monkeypatch.setattr(board_seat_daily, "_llm_draft", lambda **kwargs: _v6_draft())
+
+    payload = board_seat_daily.run_once(force=True, dry_run=True)
+    assert payload["ok"] is True
+    assert len(payload["sent"]) == 1
+    row = payload["sent"][0]
+    assert row["quality_gate_passed"] is True
+    assert "quality_score" in row
+    assert "quality_reasons" in row
+    assert "rewrite_attempts" in row
+    assert "quality_fail_stage" in row
