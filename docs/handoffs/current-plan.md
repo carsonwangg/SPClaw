@@ -49,6 +49,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - validation:
     - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `75 passed`
     - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
+  - deployed on Mac mini (`/opt/coatue-claw`) at commit `67934bf`; canary runs verified payload maps are populated in diagnostic outputs.
 - Board-seat output recovery shipped in `src/coatue_claw/board_seat_daily.py` with fact-cards + diagnostic fallback:
   - added delivery and anti-copy controls:
     - `COATUE_CLAW_BOARD_SEAT_DELIVERY_MODE=diagnostic_fallback`

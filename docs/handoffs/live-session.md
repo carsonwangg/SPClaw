@@ -16,6 +16,13 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `75 passed`
   - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
+- Deploy + runtime verification on Mac mini (`/opt/coatue-claw`):
+  - pulled `main` to `67934bf`, restarted OpenClaw, re-enabled 24x7, Slack probe healthy.
+  - canary dry-run and live run confirmed payload maps now populated (not empty):
+    - `fact_cards_count_by_field` includes all thesis fields with integer counts.
+    - `quote_overlap_by_field` includes all thesis fields with float scores.
+  - latest live canary diagnostic post:
+    - channel `#anduril`, `ts=1772075456.507279`.
 
 ## Update (2026-02-26, board-seat fact-cards + diagnostic fallback recovery)
 - Implemented Board Seat output recovery in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
