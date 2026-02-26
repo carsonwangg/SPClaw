@@ -114,6 +114,48 @@ def test_funding_snapshot_weak_adds_warning() -> None:
         assert any("low-confidence" in line.lower() for line in lines)
 
 
+def test_money_parser_rejects_unbounded_plain_numbers() -> None:
+    assert board_seat_daily._money_to_usd("2026") is None
+    assert board_seat_daily._money_to_usd("$2026") is None
+    assert board_seat_daily._money_to_usd("$40M") == 40_000_000
+
+
+def test_extract_backers_filters_clause_fragments() -> None:
+    text = (
+        "Vercept raised $40M led by Fifty Years, with investors including Eric Schmidt, "
+        "Jeff Dean, Google DeepMind, with participation from others."
+    )
+    backers = board_seat_daily._extract_backers(text)
+    assert "with participation from others" not in " ".join(backers).lower()
+    assert any("Fifty Years" == b for b in backers)
+
+
+def test_pick_target_blocks_already_acquired(board_seat_env: Path) -> None:
+    store = board_seat_daily.BoardSeatStore()
+    rows = [
+        _row(
+            title="Anthropic acquires Vercept in early exit deal",
+            url="https://news.example.com/a",
+            snippet="Anthropic acquired Vercept after competitive process.",
+        ),
+        _row(
+            title="Anthropic acquires Vercept to enhance Claude",
+            url="https://news.example.com/b",
+            snippet="Anthropic buys Vercept startup.",
+        ),
+    ]
+    chosen, gate_reason, _, candidates, _ = board_seat_daily._pick_target(
+        company="Anthropic",
+        rows=rows,
+        store=store,
+        now_utc=board_seat_daily._utc_now(),
+        run_date_local=board_seat_daily._today_key(),
+    )
+    assert chosen is None
+    assert len(candidates) >= 1
+    assert gate_reason == "target_already_acquired"
+
+
 def test_build_draft_memory_fallback_when_quality_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     def _bad_chat(*, prompt: str, system: str, temperature: float = 0.2, max_tokens: int = 700) -> str | None:
         if "model memory" in system.lower():

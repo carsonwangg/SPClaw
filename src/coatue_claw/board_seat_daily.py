@@ -807,13 +807,32 @@ def _significance_score_for_events(rows: list[dict[str, Any]]) -> float:
     return round(score, 4)
 
 
+def _already_acquired_signal(*, company: str, target: str, rows: list[EvidenceRow]) -> bool:
+    company_key = _target_key(company)
+    target_key = _target_key(target)
+    if not company_key or not target_key:
+        return False
+    for row in rows:
+        text = _normalize_whitespace(f"{row.title} {row.snippet}")
+        text_key = _target_key(text)
+        if company_key not in text_key or target_key not in text_key:
+            continue
+        lowered = text.lower()
+        if re.search(r"\b(acquires|acquired|buys|bought|purchased|purchase of|acquisition of)\b", lowered):
+            return True
+    return False
+
+
 def _money_to_usd(text: str) -> int | None:
     raw = _normalize_whitespace(text).lower().replace(",", "")
     m = re.search(r"\$?\s*(\d+(?:\.\d+)?)\s*(k|m|b|t|thousand|million|billion|trillion)?", raw)
     if not m:
         return None
+    has_dollar = "$" in raw
     val = float(m.group(1))
     suffix = (m.group(2) or "").lower()
+    if not has_dollar and not suffix:
+        return None
     mult = 1.0
     if suffix in {"k", "thousand"}:
         mult = 1e3
@@ -823,7 +842,12 @@ def _money_to_usd(text: str) -> int | None:
         mult = 1e9
     elif suffix in {"t", "trillion"}:
         mult = 1e12
-    return int(val * mult)
+    amount = int(val * mult)
+    if amount < 250_000:
+        return None
+    if amount > 250_000_000_000:
+        return None
+    return amount
 
 
 def _format_usd_short(amount: int | None) -> str:
@@ -841,12 +865,20 @@ def _format_usd_short(amount: int | None) -> str:
 def _extract_backers(text: str) -> list[str]:
     lowered = text.lower()
     backers: list[str] = []
-    m = re.search(r"(?:led by|investors include|backed by)\s+([A-Z][A-Za-z0-9&.,\- ]{3,120})", text)
+    m = re.search(r"(?:led by|investors include|backed by)\s+([A-Za-z0-9&.,'\- ]{3,220})", text)
     if m:
         body = m.group(1)
+        body = re.split(r"\bwith participation from\b|\bparticipation from\b|\baccording to\b", body, maxsplit=1, flags=re.IGNORECASE)[0]
+        body = re.split(r"[.;:]", body, maxsplit=1)[0]
         for token in re.split(r",| and ", body):
             cleaned = _normalize_whitespace(token).strip(" .")
-            if cleaned and 2 <= len(cleaned) <= 42:
+            if not cleaned:
+                continue
+            if cleaned.lower().startswith(("with ", "including ", "participation ")):
+                continue
+            if not re.search(r"[A-Za-z]", cleaned):
+                continue
+            if len(cleaned) <= 38 and not re.search(r"\b(including|participation|from|which|where|founded)\b", cleaned.lower()):
                 backers.append(cleaned)
     if "andreessen" in lowered:
         backers.append("Andreessen Horowitz")
@@ -879,9 +911,17 @@ def _funding_from_rows(target: str, rows: list[EvidenceRow]) -> FundingSnapshot:
 
     for row in rows:
         text = f"{row.title}. {row.snippet}".strip()
-        for amt in re.findall(r"\$\s*\d+(?:\.\d+)?\s*(?:[KMBT]|thousand|million|billion|trillion)?", text, flags=re.IGNORECASE):
+        for match in re.finditer(r"\$\s*\d+(?:\.\d+)?\s*(?:[KMBT]|thousand|million|billion|trillion)?", text, flags=re.IGNORECASE):
+            amt = match.group(0)
             parsed = _money_to_usd(amt)
             if parsed is not None:
+                span_start = max(0, match.start() - 48)
+                span_end = min(len(text), match.end() + 48)
+                context = text[span_start:span_end].lower()
+                has_funding_context = any(term in context for term in ("raised", "funding", "round", "investor", "led by", "backed"))
+                valuation_only = ("valuation" in context or "valued at" in context) and not has_funding_context
+                if valuation_only or not has_funding_context:
+                    continue
                 amount_values.append(parsed)
         round_val = _parse_round(text)
         if round_val != "unknown":
@@ -1009,7 +1049,12 @@ def _chat_completion(*, prompt: str, system: str, temperature: float = 0.2, max_
 
 
 def _render_funding_lines(snapshot: FundingSnapshot) -> list[str]:
-    backers = ", ".join(snapshot.backers) if snapshot.backers else "not clearly disclosed"
+    if snapshot.backers:
+        shown = list(snapshot.backers[:4])
+        suffix = f" (+{len(snapshot.backers) - 4} more)" if len(snapshot.backers) > 4 else ""
+        backers = ", ".join(shown) + suffix
+    else:
+        backers = "not clearly disclosed"
     lines = [
         f"- Total raised: {snapshot.total_raised}",
         f"- Most recent round: {snapshot.latest_round} ({snapshot.latest_round_date})",
@@ -2030,7 +2075,12 @@ def _pick_target(
     if not candidates:
         return None, "invalid_target", 0.0, candidates, []
 
+    blocked_acquired = False
     for c in candidates:
+        candidate_rows = [rows[i] for i in c.row_indexes if 0 <= i < len(rows)]
+        if _already_acquired_signal(company=company, target=c.target, rows=candidate_rows):
+            blocked_acquired = True
+            continue
         valid, reason = _is_valid_target_name(target=c.target, company=company)
         if not valid:
             continue
@@ -2047,6 +2097,8 @@ def _pick_target(
 
     # choose best reason for gate
     top = candidates[0]
+    if blocked_acquired:
+        return None, "target_already_acquired", 0.0, candidates, []
     valid, reason = _is_valid_target_name(target=top.target, company=company)
     if not valid:
         return None, reason, 0.0, candidates, []

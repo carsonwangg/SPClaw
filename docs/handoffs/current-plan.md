@@ -55,6 +55,10 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - legacy DB compatibility fix shipped:
     - additive/idempotent schema migrations now auto-upgrade older SQLite files at startup.
     - prevents runtime failures on missing legacy columns (for example `board_seat_target_events.source_url`).
+  - output hardening shipped for live quality:
+    - blocks already-acquired targets from being pitched again (`target_already_acquired` gate reason).
+    - funding amount parser now filters noisy/outlier amounts and enforces funding-context extraction.
+    - backer rendering now suppresses clause fragments and truncates cleanly with `(+N more)`.
 - Historical context (superseded by v1 rebuild above):
   - Board Seat was reset to scaffold baseline before the current rebuild.
   - `src/coatue_claw/board_seat_daily.py` no longer runs legacy drafting/quality logic.
