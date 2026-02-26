@@ -2883,3 +2883,18 @@ Then confirm bot returns:
   - manual dry-run: , , , 
   - scheduled-path dry-run (forced with temporary recap-time override to current minute): , , , 
   - DB rows confirm both slots exist independently for the same local date.
+
+
+## Update (2026-02-26, market-daily recap dedupe fix deployed)
+- Cherry-picked role branch commit 95ddd47 onto main as commit 67ad0f0.
+- Fix intent: manual daytime earnings recap writes slot earnings_recap_manual so it does not block scheduled earnings_recap.
+- Validation:
+  - PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_market_daily.py -> 76 passed
+  - PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_launchd_runtime.py -> 8 passed
+- Runtime health:
+  - make openclaw-restart completed
+  - make openclaw-slack-status probe OK (status 200)
+- Behavior verification:
+  - Manual dry run: run_id 13, slot earnings_recap_manual, triggered_manual 1, status dry_run
+  - Scheduled-path dry run (forced with temporary recap-time override to current minute): run_id 14, slot earnings_recap, triggered_manual 0, status dry_run
+  - DB rows show both slots on same local date, confirming manual runs no longer block scheduled recap.

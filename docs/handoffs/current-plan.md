@@ -1390,3 +1390,11 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Verified in runtime DB () with same-day rows for both:
   -  ()
   -  ()
+
+
+## Update (2026-02-26, Market Daily recap dedupe)
+- Deployed recap dedupe fix from role branch commit 95ddd47 via cherry-pick to main (commit 67ad0f0).
+- Verified behavior in md_runs table for current local date:
+  - earnings_recap_manual with triggered_manual=1
+  - earnings_recap with triggered_manual=0
+- Result: daytime manual recap tests no longer consume the scheduled nightly recap slot.
