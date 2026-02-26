@@ -102,6 +102,35 @@ def test_candidate_extraction_rejects_concepts() -> None:
     assert "AI" not in names
 
 
+def test_target_validation_rejects_company_product_names() -> None:
+    ok, reason = board_seat_daily._is_valid_target_name(target="Claude", company="Anthropic")
+    assert ok is False
+    assert reason == "product_not_company"
+
+    ok2, reason2 = board_seat_daily._is_valid_target_name(target="ChatGPT", company="OpenAI")
+    assert ok2 is False
+    assert reason2 == "product_not_company"
+
+
+def test_candidate_extraction_rejects_company_product_targets() -> None:
+    rows = [
+        _row(
+            title="Anthropic acquires Claude product team",
+            url="https://example.com/claude",
+            snippet="Anthropic acquisition discussion around Claude expansion",
+        ),
+        _row(
+            title="Anthropic acquires Vercept",
+            url="https://example.com/vercept",
+            snippet="Acquisition target Vercept",
+        ),
+    ]
+    candidates = board_seat_daily._extract_candidates("Anthropic", rows)
+    names = [c.target for c in candidates]
+    assert "Claude" not in names
+    assert "Vercept" in names
+
+
 def test_funding_snapshot_weak_adds_warning() -> None:
     rows = [
         _row(title="Sourcegraph raised $50M Series B led by Sequoia", url="https://a.com/x", snippet="funding details"),

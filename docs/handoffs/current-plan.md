@@ -57,6 +57,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
     - prevents runtime failures on missing legacy columns (for example `board_seat_target_events.source_url`).
   - output hardening shipped for live quality:
     - blocks already-acquired targets from being pitched again (`target_already_acquired` gate reason).
+    - blocks product/self targets (for example `Anthropic -> Claude`) via product-alias validation.
     - funding amount parser now filters noisy/outlier amounts and enforces funding-context extraction.
     - backer rendering now suppresses clause fragments and truncates cleanly with `(+N more)`.
     - Slack source citations now reliably post in-thread (fixed SlackResponse `ts` handling).

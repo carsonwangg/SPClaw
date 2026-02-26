@@ -77,6 +77,26 @@ CONCEPT_BLOCKLIST = {
     "hardware",
 }
 
+GENERIC_PRODUCT_NAME_BLOCKLIST = {
+    "claude",
+    "chatgpt",
+    "gemini",
+    "copilot",
+    "sora",
+    "gpt4",
+    "gpt5",
+    "llama",
+    "cursoride",
+}
+
+COMPANY_PRODUCT_ALIASES: dict[str, set[str]] = {
+    "anthropic": {"claude", "claudeai", "claudecode"},
+    "openai": {"chatgpt", "sora", "codex", "gpt4", "gpt5", "o1", "o3"},
+    "cursor": {"cursor", "cursoride"},
+    "anduril": {"lattice"},
+    "stripe": {"stripebilling", "stripesigma"},
+}
+
 ARTIFACT_TERMS = {
     "read more",
     "cookie",
@@ -726,7 +746,12 @@ def _is_valid_target_name(*, target: str, company: str) -> tuple[bool, str]:
         return False, "empty"
     if tk in CONCEPT_BLOCKLIST:
         return False, "conceptual"
-    if _target_key(company) == tk or tk in {_target_key(company) + "s", _target_key(company).rstrip("s")}:
+    if tk in GENERIC_PRODUCT_NAME_BLOCKLIST:
+        return False, "product_not_company"
+    company_key = _target_key(company)
+    if tk in COMPANY_PRODUCT_ALIASES.get(company_key, set()):
+        return False, "product_not_company"
+    if company_key == tk or tk in {company_key + "s", company_key.rstrip("s")}:
         return False, "self_company"
     if re.search(r"\b(inc|llc|ltd|corp|company|startup)\b", t.lower()) and len(t.split()) > 3:
         return False, "noisy_suffix"
