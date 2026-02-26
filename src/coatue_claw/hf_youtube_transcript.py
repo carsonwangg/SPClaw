@@ -167,6 +167,11 @@ def _download_audio(url: str, *, tmp_dir: Path) -> Path:
     raise YouTubeTranscriptError("audio_file_missing_after_download")
 
 
+def _is_response_format_incompatible_error(exc: Exception) -> bool:
+    text = str(exc or "").lower()
+    return "response_format" in text and "compatible" in text
+
+
 def _asr_transcript(url: str) -> list[TranscriptSegment]:
     if OpenAI is None:
         raise YouTubeTranscriptError("openai_client_unavailable_for_asr")
@@ -185,7 +190,17 @@ def _asr_transcript(url: str) -> list[TranscriptSegment]:
                     response_format="verbose_json",
                 )
         except Exception as exc:
-            raise YouTubeTranscriptError(f"asr_transcription_failed:{type(exc).__name__}") from exc
+            if _is_response_format_incompatible_error(exc):
+                try:
+                    with audio_path.open("rb") as handle:
+                        response = client.audio.transcriptions.create(
+                            model=model,
+                            file=handle,
+                        )
+                except Exception as retry_exc:
+                    raise YouTubeTranscriptError(f"asr_transcription_failed:{type(retry_exc).__name__}") from retry_exc
+            else:
+                raise YouTubeTranscriptError(f"asr_transcription_failed:{type(exc).__name__}") from exc
 
     segments_raw = getattr(response, "segments", None)
     if segments_raw is None and isinstance(response, dict):

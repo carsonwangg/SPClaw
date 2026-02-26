@@ -38,6 +38,17 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `85 passed`
 
+## Update (2026-02-26, HFA podcast ASR fallback compatibility patch)
+- Patched `src/coatue_claw/hf_youtube_transcript.py` to handle ASR model/API response format incompatibilities:
+  - first attempts transcription with `response_format="verbose_json"`.
+  - if provider rejects format compatibility, retries once without `response_format`.
+  - keeps text fallback path when segment payloads are unavailable.
+- Added regression test in `tests/test_hf_youtube_transcript.py`:
+  - `test_asr_transcript_retries_without_response_format_on_incompatible_model`
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_youtube_transcript.py tests/test_hf_podcast.py tests/test_hf_analyst.py` -> `16 passed`
+  - `PYTHONPATH=src python3 -m compileall -q src` -> pass
+
 ## Update (2026-02-26, board-seat hard reset scaffold)
 - Board Seat was intentionally scrapped to start fresh after repeated output quality failures.
 - Replaced `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py` with a reset scaffold:

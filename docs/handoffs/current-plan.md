@@ -64,6 +64,13 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- HFA podcast ASR compatibility patch shipped on `codex/agent-hf-analyst`:
+  - `src/coatue_claw/hf_youtube_transcript.py` now retries OpenAI audio transcription without `response_format` when model/API rejects `verbose_json`.
+  - this resolves failures like: `response_format 'verbose_json' is not compatible with model ...`.
+  - regression test added in `tests/test_hf_youtube_transcript.py`.
+  - validation:
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_youtube_transcript.py tests/test_hf_podcast.py tests/test_hf_analyst.py` -> `16 passed`
+    - `PYTHONPATH=src python3 -m compileall -q src` -> pass
 - HFA Podcast V1 implementation is complete on `codex/agent-hf-analyst`:
   - YouTube transcript flow: captions first, ASR fallback.
   - New HFA mode for podcast summarization with top verbatim quotes + timestamps.
