@@ -1993,6 +1993,11 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
     ):
         return
 
+    # Fast-path HFA commands before change-request heuristics/conversational fallbacks.
+    # This avoids ambiguous generic responses when users explicitly invoke `hfa ...`.
+    if _handle_hfa_command(text=text, channel=channel, thread_ts=thread_ts, user_id=user_id, say=say):
+        return
+
     git_memory_text = _parse_git_memory_request_text(text)
     if git_memory_text is not None:
         memory = _memory_runtime()
@@ -2130,10 +2135,6 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
 
     if _handle_market_daily_command(text=text, channel=channel, thread_ts=thread_ts, say=say):
         _mark_spencer_change(change_id, status="implemented", note="Handled by market daily workflow.")
-        return
-
-    if _handle_hfa_command(text=text, channel=channel, thread_ts=thread_ts, user_id=user_id, say=say):
-        _mark_spencer_change(change_id, status="implemented", note="Handled by HFA workflow.")
         return
 
     try:
