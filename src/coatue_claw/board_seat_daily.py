@@ -178,6 +178,39 @@ ROLE_PHRASE_TOKENS = {
     "intern",
 }
 
+REJECTION_REASONS = {
+    "target_already_acquired",
+    "target_not_new",
+    "repitch_not_significant",
+    "entity_unverified",
+    "target_confidence_not_high",
+    "invalid_target_name",
+    "role_phrase_not_company",
+    "product_not_company",
+    "ambiguous_common_term",
+}
+
+INVALID_NAME_REASONS = {
+    "empty",
+    "length",
+    "conceptual",
+    "self_company",
+    "noisy_suffix",
+    "not_name_like",
+}
+
+REASON_SEVERITY = {
+    "target_already_acquired": 100,
+    "target_not_new": 90,
+    "repitch_not_significant": 80,
+    "target_confidence_not_high": 70,
+    "entity_unverified": 60,
+    "role_phrase_not_company": 50,
+    "product_not_company": 40,
+    "ambiguous_common_term": 30,
+    "invalid_target_name": 20,
+}
+
 
 @dataclass(frozen=True)
 class SeedTargetResult:
@@ -240,6 +273,20 @@ class DraftResult:
     generation_mode: str
     quality_fail_codes: tuple[str, ...]
     memory_rewrite_used: bool
+
+
+@dataclass(frozen=True)
+class CandidateDecision:
+    run_date_local: str
+    company: str
+    target: str
+    target_key: str
+    decision: str
+    reason: str
+    score: float
+    confidence: str
+    batch_index: int
+    eval_index: int
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -424,6 +471,41 @@ def _openai_model() -> str:
 
 def _llm_candidate_generation_enabled() -> bool:
     return _env_flag("COATUE_CLAW_BOARD_SEAT_LLM_CANDIDATE_GEN_ENABLED", True)
+
+
+def _llm_first_mode_enabled() -> bool:
+    return _env_flag("COATUE_CLAW_BOARD_SEAT_LLM_FIRST_MODE", True)
+
+
+def _web_candidate_enrichment_enabled() -> bool:
+    return _env_flag("COATUE_CLAW_BOARD_SEAT_WEB_CANDIDATE_ENRICHMENT", True)
+
+
+def _llm_batch_size() -> int:
+    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_LLM_BATCH_SIZE", "8") or "8").strip()
+    try:
+        val = int(raw)
+    except Exception:
+        val = 8
+    return max(1, min(20, val))
+
+
+def _max_llm_batches() -> int:
+    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_MAX_LLM_BATCHES", "4") or "4").strip()
+    try:
+        val = int(raw)
+    except Exception:
+        val = 4
+    return max(1, min(20, val))
+
+
+def _max_candidate_evals() -> int:
+    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_MAX_CANDIDATE_EVALS", "40") or "40").strip()
+    try:
+        val = int(raw)
+    except Exception:
+        val = 40
+    return max(1, min(200, val))
 
 
 def _openai_api_key() -> str | None:
@@ -793,15 +875,16 @@ def _filter_rows_for_target(*, target: str, rows: list[EvidenceRow]) -> list[Evi
     return out
 
 
-def _llm_candidate_ideas(*, company: str, used_target_keys: set[str]) -> list[str]:
+def _llm_candidate_ideas(*, company: str, used_target_keys: set[str], batch_size: int | None = None) -> list[str]:
     if not _llm_candidate_generation_enabled():
         return []
+    size = max(1, min(20, int(batch_size or _llm_batch_size())))
     prompt = json.dumps(
         {
             "company": company,
             "goal": "Suggest potential acquisition targets that are independent companies (not products/features).",
             "constraints": [
-                "return 8 names max",
+                f"return {size} names max",
                 "prefer private companies and small public companies",
                 "exclude targets already pitched",
                 "exclude products or generic nouns",
@@ -842,7 +925,7 @@ def _llm_candidate_ideas(*, company: str, used_target_keys: set[str]) -> list[st
             continue
         seen.add(key)
         out.append(name)
-        if len(out) >= 8:
+        if len(out) >= size:
             break
     return out
 
@@ -1767,6 +1850,12 @@ class BoardSeatStore:
                     generation_mode TEXT,
                     quality_fail_codes TEXT,
                     memory_rewrite_used INTEGER NOT NULL DEFAULT 0,
+                    candidates_scanned_total INTEGER NOT NULL DEFAULT 0,
+                    candidates_evaluated_total INTEGER NOT NULL DEFAULT 0,
+                    llm_batches_used INTEGER NOT NULL DEFAULT 0,
+                    rejections_by_reason TEXT,
+                    top_rejected_targets TEXT,
+                    final_decision_path TEXT,
                     message_ts TEXT,
                     sources_thread_ts TEXT,
                     warning_message_ts TEXT,
@@ -1795,6 +1884,30 @@ class BoardSeatStore:
                     distinct_domains INTEGER,
                     created_at_utc TEXT NOT NULL
                 )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS board_seat_candidate_decisions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_date_local TEXT NOT NULL,
+                    company TEXT NOT NULL,
+                    target TEXT NOT NULL,
+                    target_key TEXT NOT NULL,
+                    decision TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    score REAL,
+                    confidence TEXT,
+                    batch_index INTEGER NOT NULL DEFAULT 0,
+                    eval_index INTEGER NOT NULL DEFAULT 0,
+                    created_at_utc TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_board_seat_candidate_decisions_recent
+                ON board_seat_candidate_decisions(company, run_date_local, id DESC)
                 """
             )
             conn.execute(
@@ -1891,6 +2004,12 @@ class BoardSeatStore:
                 ("generation_mode", "generation_mode TEXT"),
                 ("quality_fail_codes", "quality_fail_codes TEXT"),
                 ("memory_rewrite_used", "memory_rewrite_used INTEGER NOT NULL DEFAULT 0"),
+                ("candidates_scanned_total", "candidates_scanned_total INTEGER NOT NULL DEFAULT 0"),
+                ("candidates_evaluated_total", "candidates_evaluated_total INTEGER NOT NULL DEFAULT 0"),
+                ("llm_batches_used", "llm_batches_used INTEGER NOT NULL DEFAULT 0"),
+                ("rejections_by_reason", "rejections_by_reason TEXT"),
+                ("top_rejected_targets", "top_rejected_targets TEXT"),
+                ("final_decision_path", "final_decision_path TEXT"),
                 ("sources_thread_ts", "sources_thread_ts TEXT"),
                 ("warning_message_ts", "warning_message_ts TEXT"),
             ],
@@ -1926,9 +2045,11 @@ class BoardSeatStore:
                 INSERT INTO board_seat_runs (
                     run_date_local, company, channel_ref, channel_id, status, reason, gate_reason,
                     target, target_key, target_confidence, funding_confidence, generation_mode,
-                    quality_fail_codes, memory_rewrite_used, message_ts, sources_thread_ts,
+                    quality_fail_codes, memory_rewrite_used, candidates_scanned_total,
+                    candidates_evaluated_total, llm_batches_used, rejections_by_reason,
+                    top_rejected_targets, final_decision_path, message_ts, sources_thread_ts,
                     warning_message_ts, posted_at_utc, created_at_utc
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(payload.get("run_date_local") or _today_key()),
@@ -1945,6 +2066,12 @@ class BoardSeatStore:
                     str(payload.get("generation_mode") or ""),
                     json.dumps(payload.get("quality_fail_codes") or []),
                     1 if bool(payload.get("memory_rewrite_used")) else 0,
+                    int(payload.get("candidates_scanned_total") or 0),
+                    int(payload.get("candidates_evaluated_total") or 0),
+                    int(payload.get("llm_batches_used") or 0),
+                    json.dumps(payload.get("rejections_by_reason") or {}, sort_keys=True),
+                    json.dumps(payload.get("top_rejected_targets") or []),
+                    str(payload.get("final_decision_path") or ""),
                     str(payload.get("message_ts") or ""),
                     str(payload.get("sources_thread_ts") or ""),
                     str(payload.get("warning_message_ts") or ""),
@@ -1974,6 +2101,33 @@ class BoardSeatStore:
                         c.confidence,
                         int(c.evidence_count),
                         int(c.distinct_domains),
+                        _utc_now_iso(),
+                    ),
+                )
+
+    def record_candidate_decisions(self, rows: list[CandidateDecision]) -> None:
+        if not rows:
+            return
+        with self._connect() as conn:
+            for row in rows:
+                conn.execute(
+                    """
+                    INSERT INTO board_seat_candidate_decisions (
+                        run_date_local, company, target, target_key, decision, reason,
+                        score, confidence, batch_index, eval_index, created_at_utc
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        row.run_date_local,
+                        row.company,
+                        row.target,
+                        row.target_key,
+                        row.decision,
+                        row.reason,
+                        float(row.score),
+                        row.confidence,
+                        int(row.batch_index),
+                        int(row.eval_index),
                         _utc_now_iso(),
                     ),
                 )
@@ -2232,7 +2386,9 @@ class BoardSeatStore:
                 """
                 SELECT run_date_local, company, channel_ref, channel_id, status, reason, gate_reason,
                        target, target_key, target_confidence, funding_confidence, generation_mode,
-                       quality_fail_codes, memory_rewrite_used, message_ts, sources_thread_ts,
+                       quality_fail_codes, memory_rewrite_used, candidates_scanned_total,
+                       candidates_evaluated_total, llm_batches_used, rejections_by_reason,
+                       top_rejected_targets, final_decision_path, message_ts, sources_thread_ts,
                        warning_message_ts, posted_at_utc, created_at_utc
                 FROM board_seat_runs
                 ORDER BY id DESC
@@ -2281,6 +2437,89 @@ def _compute_repitch_eligibility(*, store: BoardSeatStore, company: str, target:
     return score >= _repitch_significance_min(), score, events
 
 
+def _normalize_rejection_reason(reason: str | None) -> str:
+    raw = str(reason or "").strip()
+    if raw in REJECTION_REASONS:
+        return raw
+    if raw in INVALID_NAME_REASONS:
+        return "invalid_target_name"
+    if raw == "role_phrase_not_company":
+        return "role_phrase_not_company"
+    if raw == "product_not_company":
+        return "product_not_company"
+    if raw == "ambiguous_common_term":
+        return "ambiguous_common_term"
+    return "invalid_target_name"
+
+
+def _dominant_rejection_reason(rejections_by_reason: dict[str, int]) -> str:
+    if not rejections_by_reason:
+        return "invalid_target_name"
+    ranked = sorted(
+        rejections_by_reason.items(),
+        key=lambda item: (-int(item[1]), -int(REASON_SEVERITY.get(item[0], 0)), item[0]),
+    )
+    return str(ranked[0][0])
+
+
+def _build_candidate_pool(
+    *,
+    company: str,
+    rows: list[EvidenceRow],
+    store: BoardSeatStore,
+    run_date_local: str,
+    excluded_target_keys: set[str],
+) -> list[CandidateScore]:
+    by_key: dict[str, CandidateScore] = {}
+    existing_keys = {_target_key(str(r.get("target") or "")) for r in store.target_ledger_rows(company=company, limit=1000)}
+    blocked_keys = set(existing_keys) | set(excluded_target_keys)
+
+    llm_candidates: list[str] = []
+    if _llm_first_mode_enabled():
+        llm_candidates = _llm_candidate_ideas(
+            company=company,
+            used_target_keys=blocked_keys,
+            batch_size=_llm_batch_size(),
+        )
+    for name in llm_candidates:
+        key = _target_key(name)
+        if not key or key in blocked_keys or key in by_key:
+            continue
+        by_key[key] = CandidateScore(
+            target=name,
+            target_key=key,
+            score=0.78,
+            confidence="high",
+            evidence_count=0,
+            distinct_domains=0,
+            row_indexes=(),
+        )
+
+    if _web_candidate_enrichment_enabled():
+        for c in _extract_candidates(company, rows):
+            if c.target_key in blocked_keys or c.target_key in by_key:
+                continue
+            by_key[c.target_key] = c
+
+    llm_keys = {_target_key(name) for name in llm_candidates}
+    candidates = sorted(
+        by_key.values(),
+        key=lambda x: (
+            0 if x.target_key in llm_keys else 1,
+            -x.score,
+            -x.distinct_domains,
+            -x.evidence_count,
+            x.target.lower(),
+        ),
+    )
+    store.record_candidates(company=company, candidates=candidates, run_date_local=run_date_local)
+    for candidate in candidates[:6]:
+        for idx in candidate.row_indexes[:3]:
+            if 0 <= idx < len(rows):
+                store.record_event(company=company, target=candidate.target, row=rows[idx], significance=candidate.score)
+    return candidates
+
+
 def _pick_target(
     *,
     company: str,
@@ -2290,70 +2529,39 @@ def _pick_target(
     run_date_local: str,
     excluded_target_keys: set[str] | None = None,
 ) -> tuple[CandidateScore | None, str | None, float, list[CandidateScore], list[dict[str, Any]]]:
-    candidates = _extract_candidates(company, rows)
-    existing_keys = {_target_key(str(r.get("target") or "")) for r in store.target_ledger_rows(company=company, limit=1000)}
-    llm_candidates = _llm_candidate_ideas(company=company, used_target_keys=existing_keys)
-    by_key: dict[str, CandidateScore] = {c.target_key: c for c in candidates}
-    for name in llm_candidates:
-        key = _target_key(name)
-        if key in by_key:
-            continue
-        by_key[key] = CandidateScore(
-            target=name,
-            target_key=key,
-            score=0.62,
-            confidence="medium",
-            evidence_count=0,
-            distinct_domains=0,
-            row_indexes=(),
-        )
-    candidates = sorted(by_key.values(), key=lambda x: (-x.score, -x.distinct_domains, -x.evidence_count, x.target.lower()))
-    if excluded_target_keys:
-        candidates = [c for c in candidates if c.target_key not in excluded_target_keys]
-    store.record_candidates(company=company, candidates=candidates, run_date_local=run_date_local)
-
-    for candidate in candidates[:6]:
-        # always keep events flowing for promising targets
-        for idx in candidate.row_indexes[:3]:
-            if 0 <= idx < len(rows):
-                store.record_event(company=company, target=candidate.target, row=rows[idx], significance=candidate.score)
-
+    excluded = excluded_target_keys or set()
+    candidates = _build_candidate_pool(
+        company=company,
+        rows=rows,
+        store=store,
+        run_date_local=run_date_local,
+        excluded_target_keys=excluded,
+    )
     if not candidates:
-        return None, "invalid_target", 0.0, candidates, []
+        return None, "invalid_target_name", 0.0, [], []
 
-    blocked_acquired = False
+    rejections_by_reason: dict[str, int] = {}
     for c in candidates:
         candidate_rows = [rows[i] for i in c.row_indexes if 0 <= i < len(rows)]
         if _already_acquired_signal(company=company, target=c.target, rows=candidate_rows):
-            blocked_acquired = True
+            rejections_by_reason["target_already_acquired"] = rejections_by_reason.get("target_already_acquired", 0) + 1
             continue
         valid, reason = _is_valid_target_name(target=c.target, company=company)
         if not valid:
-            continue
-        if _require_high_conf_new_target() and c.confidence != "high":
+            rr = _normalize_rejection_reason(reason)
+            rejections_by_reason[rr] = rejections_by_reason.get(rr, 0) + 1
             continue
         recent = store.latest_target_post(company=company, target_key=c.target_key)
         if recent is None:
             return c, None, 1.0, candidates, []
         if _should_block_recent(last_post=recent, now_utc=now_utc):
+            rejections_by_reason["target_not_new"] = rejections_by_reason.get("target_not_new", 0) + 1
             continue
         eligible, sig_score, events = _compute_repitch_eligibility(store=store, company=company, target=c, now_utc=now_utc)
         if eligible:
             return c, None, sig_score, candidates, events
-
-    # choose best reason for gate
-    top = candidates[0]
-    if blocked_acquired:
-        return None, "target_already_acquired", 0.0, candidates, []
-    valid, reason = _is_valid_target_name(target=top.target, company=company)
-    if not valid:
-        return None, reason, 0.0, candidates, []
-    if _require_high_conf_new_target() and top.confidence != "high":
-        return None, "target_confidence_not_high", 0.0, candidates, []
-    latest = store.latest_target_post(company=company, target_key=top.target_key)
-    if latest and _should_block_recent(last_post=latest, now_utc=now_utc):
-        return None, "target_not_new", 0.0, candidates, []
-    return None, "repitch_not_significant", 0.0, candidates, []
+        rejections_by_reason["repitch_not_significant"] = rejections_by_reason.get("repitch_not_significant", 0) + 1
+    return None, _dominant_rejection_reason(rejections_by_reason), 0.0, candidates, []
 
 
 def _funding_snapshot_for_target(*, store: BoardSeatStore, target: str, force_refresh: bool = False) -> FundingSnapshot:
@@ -2388,101 +2596,160 @@ def _process_company(
     }
 
     rows, search_notes = _collect_web_rows(_search_queries_for_company(company))
-    if not rows:
+    if not rows and not _llm_first_mode_enabled():
         payload = {
             **result_base,
             "status": "skipped",
             "reason": "no_high_confidence_new_target",
-            "gate_reason": "invalid_target",
+            "gate_reason": "invalid_target_name",
             "search_notes": search_notes,
+            "candidates_scanned_total": 0,
+            "candidates_evaluated_total": 0,
+            "llm_batches_used": 0,
+            "rejections_by_reason": {},
+            "top_rejected_targets": [],
+            "final_decision_path": "exhausted_no_valid_target",
             "delivery_mode_applied": "skip",
         }
         store.record_run(payload)
         return "skipped", payload
 
     excluded_target_keys: set[str] = set()
-    attempt_count = 0
-    gate_reason = ""
+    candidates_scanned_total = 0
+    candidates_evaluated_total = 0
+    llm_batches_used = 0
+    gate_reason = "invalid_target_name"
     repitch_score = 0.0
     repitch_events: list[dict[str, Any]] = []
-    candidates: list[CandidateScore] = []
     chosen: CandidateScore | None = None
     chosen_rows: list[EvidenceRow] = []
     effective_confidence = "low"
     verify_score = 0.0
+    rejections_by_reason: dict[str, int] = {}
+    top_rejected_targets: list[dict[str, str]] = []
+    candidate_decisions: list[CandidateDecision] = []
+    eval_index = 0
 
-    while True:
-        attempt_count += 1
-        chosen, gate_reason, repitch_score, candidates, repitch_events = _pick_target(
+    for batch_idx in range(1, _max_llm_batches() + 1):
+        if candidates_evaluated_total >= _max_candidate_evals():
+            break
+        batch_candidates = _build_candidate_pool(
             company=company,
             rows=rows,
             store=store,
-            now_utc=now_utc,
             run_date_local=run_date_local,
             excluded_target_keys=excluded_target_keys,
         )
-        if chosen is None:
-            payload = {
-                **result_base,
-                "status": "skipped",
-                "reason": "no_high_confidence_new_target",
-                "gate_reason": gate_reason or "target_confidence_not_high",
-                "search_notes": search_notes,
-                "candidates_considered": len(candidates),
-                "selection_attempts": attempt_count,
-                "delivery_mode_applied": "skip",
-            }
-            store.record_run(payload)
-            return "skipped", payload
-
-        verified_ok, verified_rows, verify_reason, verify_score = _verify_target_candidate(company=company, target=chosen.target)
-        if not verified_ok:
-            excluded_target_keys.add(chosen.target_key)
-            gate_reason = verify_reason or "entity_unverified"
-            if len(excluded_target_keys) >= max(3, len(candidates)):
-                payload = {
-                    **result_base,
-                    "status": "skipped",
-                    "reason": "no_high_confidence_new_target",
-                    "gate_reason": gate_reason,
-                    "search_notes": search_notes,
-                    "candidates_considered": len(candidates),
-                    "target": chosen.target,
-                    "target_key": chosen.target_key,
-                    "target_confidence": chosen.confidence,
-                    "target_confidence_score": chosen.score,
-                    "entity_verification_score": verify_score,
-                    "selection_attempts": attempt_count,
-                    "delivery_mode_applied": "skip",
-                }
-                store.record_run(payload)
-                return "skipped", payload
+        llm_batches_used += 1
+        if not batch_candidates:
             continue
+        candidates_scanned_total += len(batch_candidates)
 
-        chosen_rows = verified_rows
-        effective_confidence = "high" if (verify_score >= 0.72 and len({r.domain for r in chosen_rows if r.domain}) >= 2) else "medium"
-        if _require_high_conf_new_target() and effective_confidence != "high":
-            excluded_target_keys.add(chosen.target_key)
-            gate_reason = "target_confidence_not_high"
-            if len(excluded_target_keys) >= max(3, len(candidates)):
-                payload = {
-                    **result_base,
-                    "status": "skipped",
-                    "reason": "no_high_confidence_new_target",
-                    "gate_reason": gate_reason,
-                    "search_notes": search_notes,
-                    "candidates_considered": len(candidates),
-                    "target": chosen.target,
-                    "target_key": chosen.target_key,
-                    "target_confidence": effective_confidence,
-                    "target_confidence_score": verify_score,
-                    "selection_attempts": attempt_count,
-                    "delivery_mode_applied": "skip",
-                }
-                store.record_run(payload)
-                return "skipped", payload
-            continue
-        break
+        for c in batch_candidates:
+            if candidates_evaluated_total >= _max_candidate_evals():
+                break
+            if c.target_key in excluded_target_keys:
+                continue
+            candidates_evaluated_total += 1
+            eval_index += 1
+
+            def _reject(reason: str) -> None:
+                nonlocal gate_reason
+                rr = _normalize_rejection_reason(reason)
+                gate_reason = rr
+                excluded_target_keys.add(c.target_key)
+                rejections_by_reason[rr] = rejections_by_reason.get(rr, 0) + 1
+                if len(top_rejected_targets) < 10:
+                    top_rejected_targets.append({"target": c.target, "reason": rr})
+                candidate_decisions.append(
+                    CandidateDecision(
+                        run_date_local=run_date_local,
+                        company=company,
+                        target=c.target,
+                        target_key=c.target_key,
+                        decision="rejected",
+                        reason=rr,
+                        score=float(c.score),
+                        confidence=c.confidence,
+                        batch_index=batch_idx,
+                        eval_index=eval_index,
+                    )
+                )
+
+            valid, reason = _is_valid_target_name(target=c.target, company=company)
+            if not valid:
+                _reject(reason)
+                continue
+
+            candidate_rows = [rows[i] for i in c.row_indexes if 0 <= i < len(rows)]
+            if _already_acquired_signal(company=company, target=c.target, rows=candidate_rows):
+                _reject("target_already_acquired")
+                continue
+
+            recent = store.latest_target_post(company=company, target_key=c.target_key)
+            if recent is not None:
+                if _should_block_recent(last_post=recent, now_utc=now_utc):
+                    _reject("target_not_new")
+                    continue
+                eligible, sig_score, events = _compute_repitch_eligibility(store=store, company=company, target=c, now_utc=now_utc)
+                if not eligible:
+                    _reject("repitch_not_significant")
+                    continue
+                repitch_score = sig_score
+                repitch_events = events
+
+            verified_ok, verified_rows, verify_reason, verify_score = _verify_target_candidate(company=company, target=c.target)
+            if not verified_ok:
+                _reject(verify_reason or "entity_unverified")
+                continue
+
+            chosen_rows = verified_rows
+            domain_count = len({r.domain for r in chosen_rows if r.domain})
+            effective_confidence = "high" if (verify_score >= 0.72 and domain_count >= 2) else "medium"
+            if _require_high_conf_new_target() and effective_confidence != "high":
+                _reject("target_confidence_not_high")
+                continue
+
+            chosen = c
+            candidate_decisions.append(
+                CandidateDecision(
+                    run_date_local=run_date_local,
+                    company=company,
+                    target=c.target,
+                    target_key=c.target_key,
+                    decision="accepted",
+                    reason="",
+                    score=float(c.score),
+                    confidence=effective_confidence,
+                    batch_index=batch_idx,
+                    eval_index=eval_index,
+                )
+            )
+            break
+        if chosen is not None:
+            break
+
+    if chosen is None:
+        final_gate = _dominant_rejection_reason(rejections_by_reason) if rejections_by_reason else gate_reason
+        payload = {
+            **result_base,
+            "status": "skipped",
+            "reason": "no_high_confidence_new_target",
+            "gate_reason": final_gate or "invalid_target_name",
+            "search_notes": search_notes,
+            "candidates_considered": candidates_scanned_total,
+            "selection_attempts": llm_batches_used,
+            "candidates_scanned_total": candidates_scanned_total,
+            "candidates_evaluated_total": candidates_evaluated_total,
+            "llm_batches_used": llm_batches_used,
+            "rejections_by_reason": rejections_by_reason,
+            "top_rejected_targets": top_rejected_targets,
+            "final_decision_path": "exhausted_no_valid_target",
+            "delivery_mode_applied": "skip",
+        }
+        store.record_candidate_decisions(candidate_decisions)
+        store.record_run(payload)
+        return "skipped", payload
 
     funding = _funding_snapshot_for_target(store=store, target=chosen.target)
     last_post = store.latest_target_post(company=company, target_key=chosen.target_key)
@@ -2543,8 +2810,17 @@ def _process_company(
             "generation_mode": draft.generation_mode,
             "quality_fail_codes": list(draft.quality_fail_codes),
             "memory_rewrite_used": draft.memory_rewrite_used,
+            "candidates_considered": candidates_scanned_total,
+            "selection_attempts": llm_batches_used,
+            "candidates_scanned_total": candidates_scanned_total,
+            "candidates_evaluated_total": candidates_evaluated_total,
+            "llm_batches_used": llm_batches_used,
+            "rejections_by_reason": rejections_by_reason,
+            "top_rejected_targets": top_rejected_targets,
+            "final_decision_path": "exhausted_no_valid_target",
             "delivery_mode_applied": "skip",
         }
+        store.record_candidate_decisions(candidate_decisions)
         store.record_run(payload)
         return "skipped", payload
 
@@ -2571,7 +2847,14 @@ def _process_company(
         "generation_mode": draft.generation_mode,
         "quality_fail_codes": list(draft.quality_fail_codes),
         "memory_rewrite_used": draft.memory_rewrite_used,
-        "selection_attempts": attempt_count,
+        "selection_attempts": llm_batches_used,
+        "candidates_considered": candidates_scanned_total,
+        "candidates_scanned_total": candidates_scanned_total,
+        "candidates_evaluated_total": candidates_evaluated_total,
+        "llm_batches_used": llm_batches_used,
+        "rejections_by_reason": rejections_by_reason,
+        "top_rejected_targets": top_rejected_targets,
+        "final_decision_path": "sent",
         "warning_thread_posted": bool(warning_ts),
         "reason": "",
         "gate_reason": "",
@@ -2584,6 +2867,7 @@ def _process_company(
         "preview": text if dry_run else "",
         "delivery_mode_applied": "dry_run_preview" if dry_run else "post",
     }
+    store.record_candidate_decisions(candidate_decisions)
     store.record_run(payload)
     return "sent", payload
 
@@ -2602,6 +2886,11 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
         "sent": [],
         "skipped": [],
         "search_order": _search_order(),
+        "llm_first_mode": _llm_first_mode_enabled(),
+        "web_candidate_enrichment": _web_candidate_enrichment_enabled(),
+        "llm_batch_size": _llm_batch_size(),
+        "max_llm_batches": _max_llm_batches(),
+        "max_candidate_evals": _max_candidate_evals(),
         "require_high_conf_new_target": _require_high_conf_new_target(),
         "target_lock_days": _target_lock_days(),
         "repitch_significance_min": _repitch_significance_min(),
@@ -2701,9 +2990,23 @@ def status() -> dict[str, Any]:
     fallback_count = sum(1 for r in recent if int(r.get("memory_rewrite_used") or 0) == 1)
 
     skip_reason_counts: dict[str, int] = {}
+    rejection_reason_counts: dict[str, int] = {}
     for row in skipped:
         reason = str(row.get("reason") or "unknown")
         skip_reason_counts[reason] = skip_reason_counts.get(reason, 0) + 1
+        raw_rejections = str(row.get("rejections_by_reason") or "").strip()
+        if raw_rejections:
+            try:
+                parsed = json.loads(raw_rejections)
+                if isinstance(parsed, dict):
+                    for k, v in parsed.items():
+                        try:
+                            n = int(v)
+                        except Exception:
+                            continue
+                        rejection_reason_counts[str(k)] = rejection_reason_counts.get(str(k), 0) + max(0, n)
+            except Exception:
+                pass
 
     funding_rows = store.funding_cache_rows(limit=2000)
     funding_mix: dict[str, int] = {}
@@ -2732,6 +3035,11 @@ def status() -> dict[str, Any]:
         "channel_discovery_mode": _channel_discovery_mode(),
         "channel_types": _channel_types(),
         "search_order": _search_order(),
+        "llm_first_mode": _llm_first_mode_enabled(),
+        "web_candidate_enrichment": _web_candidate_enrichment_enabled(),
+        "llm_batch_size": _llm_batch_size(),
+        "max_llm_batches": _max_llm_batches(),
+        "max_candidate_evals": _max_candidate_evals(),
         "require_high_conf_new_target": _require_high_conf_new_target(),
         "target_lock_days": _target_lock_days(),
         "repitch_significance_min": _repitch_significance_min(),
@@ -2742,6 +3050,7 @@ def status() -> dict[str, Any]:
         "recent_skipped_count": len(skipped),
         "fallback_memory_rewrite_count": fallback_count,
         "skip_reason_counts": skip_reason_counts,
+        "rejection_reason_counts": rejection_reason_counts,
         "funding_confidence_distribution": funding_mix,
         "oldest_funding_cache_age_hours": round(oldest_cache_age_hours, 2) if oldest_cache_age_hours is not None else None,
         "portcos": [{"company": company, "channel_ref": channel_ref} for company, channel_ref in portcos],

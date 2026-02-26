@@ -2966,3 +2966,25 @@ Then confirm bot returns:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `63 passed`.
 - Operational note:
   - Posted a manual real-research board-seat message to `#openai` at Slack ts `1772060668.808919` while extractor hardening is being stabilized for fully automated target selection.
+
+## Update (2026-02-26, board-seat llm-first exhaustive search + rejection telemetry)
+- Implemented LLM-first targeting with replenishing candidate batches in `src/coatue_claw/board_seat_daily.py`.
+- New run behavior:
+  - candidates are seeded by LLM first (`COATUE_CLAW_BOARD_SEAT_LLM_FIRST_MODE=1`) with optional web enrichment.
+  - each candidate is evaluated one-by-one through all hard gates (validity, acquired, cooldown, repitch significance, verification, high-confidence).
+  - on rejection, the loop continues to the next candidate; when a batch is exhausted it requests another batch until configured caps are reached.
+- New defaults/env controls:
+  - `COATUE_CLAW_BOARD_SEAT_LLM_BATCH_SIZE=8`
+  - `COATUE_CLAW_BOARD_SEAT_MAX_LLM_BATCHES=4`
+  - `COATUE_CLAW_BOARD_SEAT_MAX_CANDIDATE_EVALS=40`
+  - `COATUE_CLAW_BOARD_SEAT_WEB_CANDIDATE_ENRICHMENT=1`
+- Added explicit run telemetry fields:
+  - `candidates_scanned_total`
+  - `candidates_evaluated_total`
+  - `llm_batches_used`
+  - `rejections_by_reason`
+  - `top_rejected_targets`
+  - `final_decision_path`
+- Added audit table:
+  - `board_seat_candidate_decisions` (accepted/rejected decision rows with reason and batch/eval indexes).
+- Added schema migrations for legacy DBs to include new `board_seat_runs` telemetry columns.

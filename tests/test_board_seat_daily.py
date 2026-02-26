@@ -297,12 +297,12 @@ def test_run_once_memory_fallback_posts_warning(board_seat_env: Path, monkeypatc
     monkeypatch.setattr(
         board_seat_daily,
         "_collect_web_rows",
-        lambda queries: ([_row(title="OpenAI acquires Databento", url="https://news.one/a", snippet="acquisition target Databento")], []),
+        lambda queries: ([_row(title="OpenAI evaluates Databento partnership", url="https://news.one/a", snippet="candidate target Databento")], []),
     )
     monkeypatch.setattr(
         board_seat_daily,
-        "_pick_target",
-        lambda **kwargs: (
+        "_build_candidate_pool",
+        lambda **kwargs: [
             board_seat_daily.CandidateScore(
                 target="Databento",
                 target_key="databento",
@@ -311,12 +311,8 @@ def test_run_once_memory_fallback_posts_warning(board_seat_env: Path, monkeypatc
                 evidence_count=2,
                 distinct_domains=2,
                 row_indexes=(0,),
-            ),
-            None,
-            1.0,
-            [],
-            [],
-        ),
+            )
+        ],
     )
     monkeypatch.setattr(
         board_seat_daily,
@@ -397,46 +393,19 @@ def test_run_once_retries_next_target_when_first_skipped(board_seat_env: Path, m
         ),
     )
 
-    calls = {"n": 0}
-
-    def _fake_pick_target(**kwargs):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            return (
-                board_seat_daily.CandidateScore(
-                    target="AlphaAI",
-                    target_key="alphaai",
-                    score=0.9,
-                    confidence="high",
-                    evidence_count=3,
-                    distinct_domains=2,
-                    row_indexes=(0,),
-                ),
-                None,
-                1.0,
-                [
-                    board_seat_daily.CandidateScore(
-                        target="AlphaAI",
-                        target_key="alphaai",
-                        score=0.9,
-                        confidence="high",
-                        evidence_count=3,
-                        distinct_domains=2,
-                        row_indexes=(0,),
-                    ),
-                    board_seat_daily.CandidateScore(
-                        target="BetaData",
-                        target_key="betadata",
-                        score=0.88,
-                        confidence="high",
-                        evidence_count=3,
-                        distinct_domains=2,
-                        row_indexes=(1,),
-                    ),
-                ],
-                [],
-            )
-        return (
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_build_candidate_pool",
+        lambda **kwargs: [
+            board_seat_daily.CandidateScore(
+                target="AlphaAI",
+                target_key="alphaai",
+                score=0.9,
+                confidence="high",
+                evidence_count=3,
+                distinct_domains=2,
+                row_indexes=(0,),
+            ),
             board_seat_daily.CandidateScore(
                 target="BetaData",
                 target_key="betadata",
@@ -446,23 +415,8 @@ def test_run_once_retries_next_target_when_first_skipped(board_seat_env: Path, m
                 distinct_domains=2,
                 row_indexes=(1,),
             ),
-            None,
-            1.0,
-            [
-                board_seat_daily.CandidateScore(
-                    target="BetaData",
-                    target_key="betadata",
-                    score=0.88,
-                    confidence="high",
-                    evidence_count=3,
-                    distinct_domains=2,
-                    row_indexes=(1,),
-                )
-            ],
-            [],
-        )
-
-    monkeypatch.setattr(board_seat_daily, "_pick_target", _fake_pick_target)
+        ],
+    )
 
     def _fake_verify(**kwargs):
         if kwargs.get("target") == "AlphaAI":
@@ -517,7 +471,164 @@ def test_run_once_retries_next_target_when_first_skipped(board_seat_env: Path, m
     payload = board_seat_daily.run_once(force=True, dry_run=False)
     assert len(payload["sent"]) == 1
     assert payload["sent"][0]["target"] == "BetaData"
-    assert payload["sent"][0]["selection_attempts"] >= 2
+    assert payload["sent"][0]["candidates_evaluated_total"] >= 2
+
+
+def test_run_once_replenishes_batches_until_winner(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_discover_channels_from_slack",
+        lambda: ([board_seat_daily.DiscoveryChannel(company="OpenAI", channel_ref="openai", channel_id="C123")], []),
+    )
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_collect_web_rows",
+        lambda queries: (
+            [
+                _row(title="OpenAI explores DealA", url="https://one.example/a", snippet="acquisition"),
+                _row(title="OpenAI explores DealB", url="https://two.example/b", snippet="acquisition"),
+            ],
+            [],
+        ),
+    )
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_MAX_LLM_BATCHES", "2")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_MAX_CANDIDATE_EVALS", "10")
+
+    calls = {"n": 0}
+
+    def _pool(**kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return [
+                board_seat_daily.CandidateScore(
+                    target="DealA",
+                    target_key="deala",
+                    score=0.8,
+                    confidence="high",
+                    evidence_count=1,
+                    distinct_domains=1,
+                    row_indexes=(0,),
+                )
+            ]
+        return [
+            board_seat_daily.CandidateScore(
+                target="DealB",
+                target_key="dealb",
+                score=0.79,
+                confidence="high",
+                evidence_count=1,
+                distinct_domains=1,
+                row_indexes=(1,),
+            )
+        ]
+
+    monkeypatch.setattr(board_seat_daily, "_build_candidate_pool", _pool)
+
+    def _verify(**kwargs):
+        if kwargs.get("target") == "DealA":
+            return False, [], "entity_unverified", 0.2
+        return (
+            True,
+            [
+                _row(title="DealB raises $30M", url="https://techcrunch.com/dealb", snippet="funding"),
+                _row(title="DealB company profile", url="https://crunchbase.com/organization/dealb", snippet="investors"),
+            ],
+            "",
+            0.91,
+        )
+
+    monkeypatch.setattr(board_seat_daily, "_verify_target_candidate", _verify)
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_funding_snapshot_for_target",
+        lambda **kwargs: board_seat_daily.FundingSnapshot(
+            target="DealB",
+            target_key="dealb",
+            total_raised="$30M",
+            latest_round="Series A",
+            latest_round_date="unknown",
+            backers=("Benchmark",),
+            evidence_count=2,
+            distinct_domains=2,
+            conflict_flags=(),
+            verification_status="partial",
+            source_rows=(),
+        ),
+    )
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_build_draft",
+        lambda **kwargs: board_seat_daily.DraftResult(
+            text=(
+                "*Board Seat as a Service — OpenAI*\n"
+                "*Thesis*\n- Acquire DealB.\n"
+                "*What the target does*\n- Workflow infra.\n"
+                "*Why it’s a fit for portfolio company*\n- Platform leverage.\n"
+                "*Risks*\n- Integration risk.\n"
+                "*Funding history and backers*\n- Total raised: $30M"
+            ),
+            generation_mode="web_synth",
+            quality_fail_codes=(),
+            memory_rewrite_used=False,
+        ),
+    )
+    monkeypatch.setattr(board_seat_daily, "_post_to_slack", lambda **kwargs: ("C123", "100.2", None))
+
+    payload = board_seat_daily.run_once(force=True, dry_run=False)
+    assert len(payload["sent"]) == 1
+    sent_row = payload["sent"][0]
+    assert sent_row["target"] == "DealB"
+    assert sent_row["llm_batches_used"] == 2
+    assert sent_row["rejections_by_reason"].get("entity_unverified", 0) >= 1
+
+
+def test_run_once_skip_reports_rejection_breakdown(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_discover_channels_from_slack",
+        lambda: ([board_seat_daily.DiscoveryChannel(company="Anthropic", channel_ref="anthropic", channel_id="C123")], []),
+    )
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_collect_web_rows",
+        lambda queries: ([_row(title="Anthropic update", url="https://example.com/1", snippet="general")], []),
+    )
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_MAX_LLM_BATCHES", "1")
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_build_candidate_pool",
+        lambda **kwargs: [
+            board_seat_daily.CandidateScore(
+                target="Lead",
+                target_key="lead",
+                score=0.7,
+                confidence="high",
+                evidence_count=0,
+                distinct_domains=0,
+                row_indexes=(),
+            ),
+            board_seat_daily.CandidateScore(
+                target="Vercept",
+                target_key="vercept",
+                score=0.69,
+                confidence="high",
+                evidence_count=0,
+                distinct_domains=0,
+                row_indexes=(),
+            ),
+        ],
+    )
+    monkeypatch.setattr(board_seat_daily, "_already_acquired_signal", lambda **kwargs: kwargs.get("target") == "Vercept")
+
+    payload = board_seat_daily.run_once(force=True, dry_run=True)
+    assert payload["sent"] == []
+    assert len(payload["skipped"]) == 1
+    skipped = payload["skipped"][0]
+    assert skipped["candidates_scanned_total"] == 2
+    assert skipped["candidates_evaluated_total"] == 2
+    assert skipped["final_decision_path"] == "exhausted_no_valid_target"
+    assert skipped["rejections_by_reason"].get("ambiguous_common_term", 0) == 1
+    assert skipped["rejections_by_reason"].get("target_already_acquired", 0) == 1
 
 
 def test_target_memory_lock_days_respected(board_seat_env: Path) -> None:
@@ -663,6 +774,8 @@ def test_schema_migration_adds_missing_board_seat_runs_columns(board_seat_env: P
     assert "warning_message_ts" in columns
     assert "sources_thread_ts" in columns
     assert "generation_mode" in columns
+    assert "rejections_by_reason" in columns
+    assert "final_decision_path" in columns
 
 
 def test_cli_status_json(board_seat_env: Path) -> None:

@@ -1405,3 +1405,14 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `63 passed`.
 - Next:
   - add a post-sanitize target-lock re-check so retargeted outputs cannot bypass cooldown/new-target governance when final target differs from initial extraction.
+
+## Board Seat - LLM-First Exhaustive Target Search (2026-02-26)
+- Status: implemented on `codex/agent-board-seat`, tests updated.
+- Completed scope:
+  - LLM-first candidate seeding with per-batch replenishment until winner or configured exhaustion.
+  - strict continue-on-reject behavior across hard gates (no early stop on first failed finalist).
+  - new per-run transparency fields for candidate scan/evaluation counts and rejection breakdown.
+  - persisted candidate-level decision audit rows in `board_seat_candidate_decisions`.
+  - legacy DB auto-migration for added `board_seat_runs` telemetry columns.
+- Next:
+  - integrator can run dry-run canary on Anthropic/Anduril and confirm rejection telemetry in payload/log output.
