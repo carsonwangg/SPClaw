@@ -2857,3 +2857,19 @@ Then confirm bot returns:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `63 passed`.
 - Operational note:
   - Posted a manual real-research board-seat message to `#openai` at Slack ts `1772060668.808919` while extractor hardening is being stabilized for fully automated target selection.
+
+## Update (2026-02-26, x-chart hard cooldown + cooldown-exhaustion notice + pull logs)
+- Implemented strict no-repeat source cooldown semantics for scheduled chart selection:
+  - `_pick_winner(...)` no longer falls back to recent-source reuse when all candidates are in cooldown.
+  - if all candidates are blocked by source cooldown, selection returns `None`.
+- Added explicit scheduled no-post notice:
+  - new `_post_no_candidate_message_to_slack(...)` posts: all candidate accounts are within cooldown window.
+  - `run_chart_scout_once(...)` now returns `reason=\"all_candidates_in_cooldown\"`.
+  - dry-run behavior: no notice posted.
+- Added deterministic pull logs for every skill invocation:
+  - new `_write_pull_log(...)` artifact output: `*-pull-log.json`.
+  - includes scanned candidates, source last-posted map, eligibility after item filter, eligibility after cooldown, selected candidate key, and result reason.
+  - scheduled run paths all emit pull logs (posted and skipped).
+  - manual URL flow (`run_chart_for_post_url`) emits pull logs with `mode=\"manual_url\"` and `manual_override_used=true` (manual override policy retained).
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `82 passed`

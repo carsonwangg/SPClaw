@@ -1377,3 +1377,23 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `63 passed`.
 - Next:
   - add a post-sanitize target-lock re-check so retargeted outputs cannot bypass cooldown/new-target governance when final target differs from initial extraction.
+
+## X Chart - Hard Cooldown + Pull Logging (2026-02-26)
+- Status: implemented on `codex/agent-chart-day`, validated.
+- Completed scope in `src/coatue_claw/x_chart_daily.py`:
+  - Hard source cooldown enforcement:
+    - `_pick_winner(...)` now returns `None` when all sources are within `COATUE_CLAW_X_CHART_SOURCE_REPEAT_DAYS` (default 3).
+    - removed starvation fallback that previously allowed recent-source reuse.
+  - Added scheduled cooldown-exhaustion notice:
+    - new helper `_post_no_candidate_message_to_slack(...)`.
+    - `run_chart_scout_once(...)` now returns reason `all_candidates_in_cooldown` and posts explicit channel notice (unless `dry_run`).
+  - Added deterministic per-run pull logs:
+    - new helper `_write_pull_log(...)` writes `*-pull-log.json` under artifacts directory.
+    - wired into all `run_chart_scout_once(...)` return paths (posted and skipped).
+    - wired into `run_chart_for_post_url(...)` with `mode=manual_url` and `manual_override_used=true` (manual URL override policy retained).
+- API/return payload additions:
+  - `pull_log_path` (all scout/manual-url outcomes)
+  - `notice_posted`, `notice_channel`, `notice` (cooldown-exhausted scheduled runs)
+  - new reason: `all_candidates_in_cooldown`
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `82 passed`
