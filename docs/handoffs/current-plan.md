@@ -40,6 +40,36 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Board-seat Research+Critic strict fail-closed pipeline shipped in `src/coatue_claw/board_seat_daily.py`:
+  - source policy default is now `tiered_trusted_first`.
+  - section-aware evidence bundles are generated and passed to writer/critic:
+    - `target_does_evidence`
+    - `why_now_evidence`
+    - `whats_different_evidence`
+    - `mos_risks_evidence`
+  - semantic Why-now recency gate added (`COATUE_CLAW_BOARD_SEAT_WHY_NOW_RECENCY_DAYS=45` default) with deterministic evidence alignment checks.
+  - critic thresholds and loop added:
+    - `COATUE_CLAW_BOARD_SEAT_CRITIC_MIN_FIELD_SCORE=0.70`
+    - `COATUE_CLAW_BOARD_SEAT_CRITIC_MIN_OVERALL_SCORE=0.78`
+    - reviewer uses `COATUE_CLAW_BOARD_SEAT_REVIEW_MODEL` (same top model default).
+  - evidence fetch knobs added:
+    - `COATUE_CLAW_BOARD_SEAT_EVIDENCE_FETCH_ENABLED=1`
+    - `COATUE_CLAW_BOARD_SEAT_EVIDENCE_FETCH_TIMEOUT_MS=2500`
+    - `COATUE_CLAW_BOARD_SEAT_EVIDENCE_MAX_URLS=12`
+  - fail-closed posting remains enforced with `COATUE_CLAW_BOARD_SEAT_QUALITY_FAIL_POLICY=skip`.
+  - run payload contract now includes:
+    - `quality_field_scores`
+    - `quality_failed_fields`
+    - `quality_required_evidence`
+    - `evidence_tier_mix`
+    - `why_now_recency_passed`
+  - status contract now includes:
+    - `quality_pass_rate_7d`
+    - `top_failed_fields_7d`
+    - `avg_rewrite_attempts_7d`
+  - validation:
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `71 passed`
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
 - Board-seat fail-closed quality gate + auto-revision is now implemented in `src/coatue_claw/board_seat_daily.py`:
   - new env controls (defaulted on):
     - `COATUE_CLAW_BOARD_SEAT_QUALITY_GATE_ENABLED=1`

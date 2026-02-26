@@ -3,6 +3,44 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-26, board-seat research+critic strict fail-closed pipeline)
+- Implemented strict Research+Critic quality recovery in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
+  - default source policy switched to `tiered_trusted_first`.
+  - added tier/page-type evidence modeling (`tier_1/2/3`, `news_report`, `press_release`, `product_docs`, `pricing_nav`, `company_profile`, `social`, `wrapper`).
+  - section-aware evidence bundles are now produced for:
+    - `target_does_evidence`
+    - `why_now_evidence`
+    - `whats_different_evidence`
+    - `mos_risks_evidence`
+  - added semantic Why-now recency assessment with new knobs:
+    - `COATUE_CLAW_BOARD_SEAT_WHY_NOW_RECENCY_DAYS` (default `45`)
+    - keeps `24h` phrasing rejection.
+  - added critic scoring thresholds and model loop:
+    - `COATUE_CLAW_BOARD_SEAT_CRITIC_MIN_FIELD_SCORE` (default `0.70`)
+    - `COATUE_CLAW_BOARD_SEAT_CRITIC_MIN_OVERALL_SCORE` (default `0.78`)
+    - `_llm_critic_assess` + `_merge_quality_assessments` in rewrite loop.
+  - fail-closed behavior remains enforced (`COATUE_CLAW_BOARD_SEAT_QUALITY_FAIL_POLICY=skip`): posts skip with `reason=quality_gate_failed` after retries.
+  - expanded sent/skipped payload observability:
+    - `quality_field_scores`
+    - `quality_failed_fields`
+    - `quality_required_evidence`
+    - `evidence_tier_mix`
+    - `why_now_recency_passed`
+  - expanded status observability:
+    - `quality_pass_rate_7d`
+    - `top_failed_fields_7d`
+    - `avg_rewrite_attempts_7d`
+    - plus current quality/critic/source policy settings.
+- Added env examples in `/Users/carsonwang/CoatueClaw/.env.example` for all new knobs, including source policy and evidence fetch controls.
+- Test coverage updated in `/Users/carsonwang/CoatueClaw/tests/test_board_seat_daily.py` for:
+  - semantic recency validation
+  - tiered source policy filtering
+  - section evidence bundle contract
+  - extended quality payload/status fields.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `71 passed`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
+
 ## Update (2026-02-26, board-seat fail-closed quality gate + auto-revision)
 - Implemented Board Seat quality gate and rewrite loop in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
   - source hygiene soft-block for low-signal web copy (`Book a Demo`, `See Pricing`, menu/CTA fragments).

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from coatue_claw import board_seat_daily
@@ -212,6 +212,158 @@ def test_validate_draft_rejects_24h_why_now_phrasing() -> None:
     )
     errors = board_seat_daily._validate_draft(bad)
     assert "why_now_24h_disallowed" in errors
+
+
+def test_validate_draft_semantic_recency_requires_dated_evidence() -> None:
+    base = _v6_draft()
+    draft = board_seat_daily.BoardSeatDraft(
+        idea_line=base.idea_line,
+        target_does=base.target_does,
+        why_now="Over the past month, enterprise launch and partnership momentum accelerated adoption.",
+        whats_different=base.whats_different,
+        mos_risks=base.mos_risks,
+        bottom_line=base.bottom_line,
+        context_current_efforts=base.context_current_efforts,
+        context_domain_fit_gaps=base.context_domain_fit_gaps,
+        funding_history=base.funding_history,
+        funding_latest_round_backers=base.funding_latest_round_backers,
+        source_refs=base.source_refs,
+    )
+    now = datetime.now(UTC)
+    recent_a = (now.replace(microsecond=0)).date().isoformat()
+    recent_b = (now.replace(microsecond=0) - timedelta(days=8)).date().isoformat()
+    stale = (now.replace(microsecond=0) - timedelta(days=200)).date().isoformat()
+    good_pack = {
+        "why_now_evidence": [
+            {
+                "title": "Sourcegraph launches new enterprise rollout",
+                "snippet": "Enterprise adoption accelerated after a new launch.",
+                "url": "https://www.reuters.com/example/sourcegraph-launch",
+                "published_hint": recent_a,
+                "tier": "tier_1",
+                "page_type": "news_report",
+            },
+            {
+                "title": "Company press release on partnership",
+                "snippet": "Partnership and launch expanded customer demand.",
+                "url": "https://techcrunch.com/example/sourcegraph-partnership",
+                "published_hint": recent_b,
+                "tier": "tier_1",
+                "page_type": "press_release",
+            },
+        ]
+    }
+    stale_pack = {
+        "why_now_evidence": [
+            {
+                "title": "Old article",
+                "snippet": "Old trend from prior cycle.",
+                "url": "https://www.reuters.com/example/sourcegraph-old",
+                "published_hint": stale,
+                "tier": "tier_1",
+                "page_type": "news_report",
+            }
+        ]
+    }
+    assert "why_now_not_monthly_theme" not in board_seat_daily._validate_draft(draft, company="Anduril", evidence_pack=good_pack)
+    bad_errors = board_seat_daily._validate_draft(draft, company="Anduril", evidence_pack=stale_pack)
+    assert "why_now_not_monthly_theme" in bad_errors
+    assert "why_now_recency_missing" in bad_errors
+
+
+def test_llm_evidence_pack_builds_section_bundles_and_quality_flags() -> None:
+    now = datetime.now(UTC)
+    recent_a = now.date().isoformat()
+    recent_b = (now - timedelta(days=7)).date().isoformat()
+    target_rows = [
+        {
+            "publisher": "Reuters",
+            "title": "Sourcegraph partners with enterprise software vendor",
+            "snippet": "Partnership expands enterprise code intelligence adoption and integration.",
+            "url": "https://www.reuters.com/example/sourcegraph-partners",
+            "published_hint": recent_a,
+        },
+        {
+            "publisher": "Sourcegraph",
+            "title": "Sourcegraph docs",
+            "snippet": "Product docs for enterprise deployment and governance.",
+            "url": "https://docs.sourcegraph.com/admin/deploy",
+            "published_hint": recent_b,
+        },
+    ]
+    acquisition_rows = [
+        {
+            "publisher": "TechCrunch",
+            "title": "Sourcegraph adds enterprise controls",
+            "snippet": "Launch adds differentiated controls for enterprise repositories.",
+            "url": "https://techcrunch.com/example/sourcegraph-controls",
+            "published_hint": recent_b,
+        }
+    ]
+    pack = board_seat_daily._llm_evidence_pack(
+        company="Cursor",
+        target="Sourcegraph",
+        target_rows=target_rows,
+        acquisition_rows=acquisition_rows,
+        funding=_funding(),
+    )
+    assert pack["source_policy"] == board_seat_daily._source_policy()
+    assert isinstance(pack["target_does_evidence"], list) and pack["target_does_evidence"]
+    assert isinstance(pack["why_now_evidence"], list) and pack["why_now_evidence"]
+    assert isinstance(pack["quality_required_evidence"], dict)
+    assert "why_now" in pack["quality_required_evidence"]
+    assert isinstance(pack["evidence_tier_mix"], dict)
+    assert "tier_1" in pack["evidence_tier_mix"]
+
+
+def test_build_source_refs_tiered_policy_excludes_tier3_rows(monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SOURCE_POLICY", "tiered_trusted_first")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SOURCE_GATE_MODE", "soft_block")
+
+    def _fake_target_rows(**kwargs):
+        return [
+            {
+                "publisher": "Reddit",
+                "title": "Book a Demo | Pricing",
+                "snippet": "Book a Demo • See Pricing • Sign In",
+                "url": "https://reddit.com/r/startups/example",
+            },
+            {
+                "publisher": "Reuters",
+                "title": "Sourcegraph expands enterprise code intelligence",
+                "snippet": "Enterprise adoption rose after product launch and partnership.",
+                "url": "https://www.reuters.com/example/sourcegraph-expands",
+            },
+        ]
+
+    monkeypatch.setattr(board_seat_daily, "_target_search_rows", _fake_target_rows)
+    selection = board_seat_daily._build_source_refs(
+        company="Cursor",
+        draft=board_seat_daily.BoardSeatDraft(
+            idea_line="Acquire Sourcegraph to accelerate Cursor execution in a strategic wedge.",
+            target_does="Sourcegraph sells enterprise code search and intelligence software.",
+            why_now="Over the past month, enterprise demand accelerated after launch and partnership updates.",
+            whats_different="Differentiated enterprise controls and repository-scale indexing.",
+            mos_risks="Risks include integration complexity and enterprise change management.",
+            bottom_line="Execute a measured integration plan.",
+            context_current_efforts="Cursor has active enterprise adoption momentum.",
+            context_domain_fit_gaps="Large-codebase retrieval and governance remain key gaps.",
+            funding_history="Raised across multiple rounds.",
+            funding_latest_round_backers="Series C with institutional backers.",
+            source_refs=[
+                board_seat_daily.SourceRef(
+                    name_or_publisher="Reuters",
+                    title="Sourcegraph expands enterprise code intelligence",
+                    url="https://www.reuters.com/example/sourcegraph-expands",
+                )
+            ],
+        ),
+        funding=_funding(),
+        acquisition_rows=[],
+    )
+    urls = [ref.url for ref in selection.refs]
+    assert any("reuters.com" in url for url in urls)
+    assert all("reddit.com" not in url for url in urls)
 
 
 def test_render_board_seat_blocks_headers_are_bold_and_underlined() -> None:
@@ -1315,6 +1467,7 @@ def test_run_once_dry_run_payload_includes_target_resolution_fields(tmp_path: Pa
 
 
 def test_run_once_dry_run_cleans_noisy_llm_fields_and_emits_writing_observability(tmp_path: Path, monkeypatch) -> None:
+    recent_hint = datetime.now(UTC).date().isoformat()
     monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_PORTCOS", "OpenAI:openai")
@@ -1328,26 +1481,28 @@ def test_run_once_dry_run_cleans_noisy_llm_fields_and_emits_writing_observabilit
         board_seat_daily,
         "_acquisition_search_rows",
         lambda **kwargs: [
-            {
-                "publisher": "TechCrunch",
-                "title": "OpenAI studies browser infrastructure M&A",
-                "snippet": "Deal could speed enterprise browser automation reliability.",
-                "url": "https://techcrunch.com/example/openai-mna",
-            }
-        ],
-    )
+                {
+                    "publisher": "TechCrunch",
+                    "title": "OpenAI studies browser infrastructure M&A",
+                    "snippet": "Deal could speed enterprise browser automation reliability.",
+                    "url": "https://techcrunch.com/example/openai-mna",
+                    "published_hint": recent_hint,
+                }
+            ],
+        )
     monkeypatch.setattr(
         board_seat_daily,
         "_target_search_rows",
         lambda **kwargs: [
-            {
-                "publisher": "VentureBeat",
-                "title": "Browserbase launches enterprise platform",
-                "snippet": "Browserbase provides browser automation infrastructure for enterprise AI teams.",
-                "url": "https://venturebeat.com/example/browserbase-platform",
-            }
-        ],
-    )
+                {
+                    "publisher": "Reuters",
+                    "title": "Browserbase launches enterprise platform",
+                    "snippet": "Browserbase provides browser automation infrastructure for enterprise AI teams.",
+                    "url": "https://www.reuters.com/example/browserbase-platform",
+                    "published_hint": recent_hint,
+                }
+            ],
+        )
     monkeypatch.setattr(
         board_seat_daily,
         "_llm_draft",
@@ -1625,6 +1780,9 @@ def test_status_reports_funding_quality_metrics(tmp_path: Path, monkeypatch) -> 
     assert metrics["low_confidence_count"] == 0
     assert payload["require_high_conf_new_target"] is True
     assert payload["funding_verification_by_company"]["Anduril"]["verification_status"] == "verified"
+    assert "quality_pass_rate_7d" in payload
+    assert "top_failed_fields_7d" in payload
+    assert "avg_rewrite_attempts_7d" in payload
 
 
 def test_brave_api_key_accepts_coatue_claw_alias(monkeypatch) -> None:
@@ -1731,6 +1889,11 @@ def test_run_once_fail_closed_when_quality_gate_stays_failed(tmp_path: Path, mon
     assert row["quality_fail_stage"] in {"source_filter", "reviewer", "draft_validator"}
     assert "quality_score" in row
     assert "quality_reasons" in row
+    assert "quality_field_scores" in row
+    assert "quality_failed_fields" in row
+    assert "quality_required_evidence" in row
+    assert "evidence_tier_mix" in row
+    assert "why_now_recency_passed" in row
 
 
 def test_run_once_quality_fail_closed_applies_to_fallback_path(tmp_path: Path, monkeypatch) -> None:
@@ -1784,3 +1947,8 @@ def test_run_once_sent_payload_includes_quality_fields(tmp_path: Path, monkeypat
     assert "quality_reasons" in row
     assert "rewrite_attempts" in row
     assert "quality_fail_stage" in row
+    assert "quality_field_scores" in row
+    assert "quality_failed_fields" in row
+    assert "quality_required_evidence" in row
+    assert "evidence_tier_mix" in row
+    assert "why_now_recency_passed" in row

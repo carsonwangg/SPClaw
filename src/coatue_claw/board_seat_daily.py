@@ -134,7 +134,7 @@ ACQ_PLACEHOLDER_TARGETS = {
     "aifirst",
 }
 ACQ_INVALID_TARGET_TERMS = {"startup team", "domain-adjacent", "internal", "in-house", "ai-first", "ai first"}
-SOURCE_POLICY_DEFAULT = "target_first_3_1"
+SOURCE_POLICY_DEFAULT = "tiered_trusted_first"
 LOW_SIGNAL_MODE_DEFAULT = "candidate_with_confidence"
 TARGET_CONFIDENCE_LEVELS = {"High", "Medium", "Low"}
 REQUIRED_NEW_TARGET_CONFIDENCE = "High"
@@ -143,6 +143,12 @@ QUALITY_GATE_ENABLED_DEFAULT = True
 REWRITE_MAX_RETRIES_DEFAULT = 4
 SOURCE_GATE_MODE_DEFAULT = "soft_block"
 QUALITY_FAIL_POLICY_DEFAULT = "skip"
+WHY_NOW_RECENCY_DAYS_DEFAULT = 45
+CRITIC_MIN_FIELD_SCORE_DEFAULT = 0.70
+CRITIC_MIN_OVERALL_SCORE_DEFAULT = 0.78
+EVIDENCE_FETCH_ENABLED_DEFAULT = True
+EVIDENCE_FETCH_TIMEOUT_MS_DEFAULT = 2500
+EVIDENCE_MAX_URLS_DEFAULT = 12
 CONFIDENCE_MODEL_DEFAULT = "broad_weighted_v1"
 CONFIDENCE_HIGH_MIN_DEFAULT = 2.40
 CONFIDENCE_MEDIUM_MIN_DEFAULT = 1.35
@@ -215,7 +221,6 @@ FUNDING_CONTEXT_TERMS = {
     "round",
     "investors",
     "softbank",
-    "reuters",
 }
 TARGET_PROXY_TERMS = {
     "browser",
@@ -252,6 +257,19 @@ SOURCE_QUALITY_DOMAIN_SUFFIXES = {
     "fool.com",
     "seekingalpha.com",
 }
+SOURCE_TIER1_TRUSTED_DOMAIN_SUFFIXES = {
+    "reuters.com",
+    "bloomberg.com",
+    "wsj.com",
+    "ft.com",
+    "axios.com",
+    "theinformation.com",
+    "techcrunch.com",
+    "finance.yahoo.com",
+    "openai.com",
+    "anthropic.com",
+    "sec.gov",
+}
 SOURCE_LOW_QUALITY_DOMAIN_SUFFIXES = {
     "reddit.com",
     "wikipedia.org",
@@ -259,6 +277,14 @@ SOURCE_LOW_QUALITY_DOMAIN_SUFFIXES = {
     "substack.com",
     "x.com",
     "twitter.com",
+    "youtube.com",
+    "tiktok.com",
+}
+SOURCE_TIER3_DOMAIN_SUFFIXES = {
+    "x.com",
+    "twitter.com",
+    "reddit.com",
+    "wikipedia.org",
     "youtube.com",
     "tiktok.com",
 }
@@ -343,6 +369,50 @@ FUNDING_AMOUNT_RE = re.compile(r"\$?\d+(?:\.\d+)?\s?(?:m|b|million|billion)\b", 
 FUNDING_YEAR_RE = re.compile(r"\b(20\d{2})\b")
 TARGET_EVENT_MAX_TARGETS_PER_COMPANY_DEFAULT = 4
 TARGET_EVENT_MAX_ROWS_PER_TARGET_DEFAULT = 8
+WHY_NOW_CATALYST_TERMS = {
+    "launch",
+    "launched",
+    "partnership",
+    "partnered",
+    "pricing",
+    "price",
+    "adoption",
+    "demand",
+    "hiring",
+    "revenue",
+    "guidance",
+    "policy",
+    "contract",
+    "expansion",
+    "rollout",
+    "integration",
+}
+DIFFERENTIATION_TERMS = {
+    "differentiated",
+    "differentiator",
+    "faster",
+    "faster than",
+    "lower cost",
+    "higher accuracy",
+    "enterprise",
+    "exclusive",
+    "moat",
+    "advantage",
+}
+RISK_SIGNAL_TERMS = {
+    "risk",
+    "integration",
+    "execution",
+    "regulatory",
+    "security",
+    "cost",
+    "margin",
+    "churn",
+    "retention",
+    "overlap",
+    "concentration",
+    "reliability",
+}
 
 
 @dataclass(frozen=True)
@@ -375,6 +445,9 @@ class SourceCandidate:
     quality: int
     score: float
     text_blob: str
+    tier: str = "tier_2"
+    page_type: str = "news_report"
+    published_hint: str = ""
 
 
 @dataclass(frozen=True)
@@ -382,6 +455,19 @@ class SourceSelection:
     refs: list[SourceRef]
     confidence: str
     target_description: str = ""
+
+
+@dataclass(frozen=True)
+class EvidenceItem:
+    id: str
+    url: str
+    publisher: str
+    title: str
+    snippet: str
+    published_hint: str
+    tier: str
+    page_type: str
+    quality_score: float
 
 
 @dataclass(frozen=True)
@@ -411,6 +497,11 @@ class BoardSeatDraft:
     quality_reasons: list[str] = field(default_factory=list)
     rewrite_attempts: int = 0
     quality_fail_stage: str = ""
+    quality_field_scores: dict[str, float] = field(default_factory=dict)
+    quality_failed_fields: list[str] = field(default_factory=list)
+    quality_required_evidence: dict[str, bool] = field(default_factory=dict)
+    evidence_tier_mix: dict[str, int] = field(default_factory=dict)
+    why_now_recency_passed: bool = False
 
 
 def _utc_now_iso() -> str:
@@ -557,6 +648,67 @@ def _source_gate_mode() -> str:
 
 def _quality_fail_policy() -> str:
     return (os.environ.get("COATUE_CLAW_BOARD_SEAT_QUALITY_FAIL_POLICY", QUALITY_FAIL_POLICY_DEFAULT) or QUALITY_FAIL_POLICY_DEFAULT).strip().lower()
+
+
+def _why_now_recency_days() -> int:
+    return _env_int(
+        "COATUE_CLAW_BOARD_SEAT_WHY_NOW_RECENCY_DAYS",
+        WHY_NOW_RECENCY_DAYS_DEFAULT,
+        minimum=7,
+        maximum=365,
+    )
+
+
+def _critic_min_field_score() -> float:
+    raw = (
+        os.environ.get(
+            "COATUE_CLAW_BOARD_SEAT_CRITIC_MIN_FIELD_SCORE",
+            str(CRITIC_MIN_FIELD_SCORE_DEFAULT),
+        )
+        or str(CRITIC_MIN_FIELD_SCORE_DEFAULT)
+    ).strip()
+    try:
+        value = float(raw)
+    except Exception:
+        value = CRITIC_MIN_FIELD_SCORE_DEFAULT
+    return max(0.0, min(1.0, value))
+
+
+def _critic_min_overall_score() -> float:
+    raw = (
+        os.environ.get(
+            "COATUE_CLAW_BOARD_SEAT_CRITIC_MIN_OVERALL_SCORE",
+            str(CRITIC_MIN_OVERALL_SCORE_DEFAULT),
+        )
+        or str(CRITIC_MIN_OVERALL_SCORE_DEFAULT)
+    ).strip()
+    try:
+        value = float(raw)
+    except Exception:
+        value = CRITIC_MIN_OVERALL_SCORE_DEFAULT
+    return max(0.0, min(1.0, value))
+
+
+def _evidence_fetch_enabled() -> bool:
+    return _env_flag("COATUE_CLAW_BOARD_SEAT_EVIDENCE_FETCH_ENABLED", EVIDENCE_FETCH_ENABLED_DEFAULT)
+
+
+def _evidence_fetch_timeout_ms() -> int:
+    return _env_int(
+        "COATUE_CLAW_BOARD_SEAT_EVIDENCE_FETCH_TIMEOUT_MS",
+        EVIDENCE_FETCH_TIMEOUT_MS_DEFAULT,
+        minimum=200,
+        maximum=10000,
+    )
+
+
+def _evidence_max_urls() -> int:
+    return _env_int(
+        "COATUE_CLAW_BOARD_SEAT_EVIDENCE_MAX_URLS",
+        EVIDENCE_MAX_URLS_DEFAULT,
+        minimum=4,
+        maximum=40,
+    )
 
 
 def _review_model() -> str:
@@ -981,6 +1133,11 @@ def _quality_fields_payload(draft: BoardSeatDraft) -> dict[str, Any]:
         "quality_reasons": [str(item) for item in list(draft.quality_reasons or [])],
         "rewrite_attempts": int(draft.rewrite_attempts),
         "quality_fail_stage": str(draft.quality_fail_stage or ""),
+        "quality_field_scores": {str(key): round(float(value), 4) for key, value in dict(draft.quality_field_scores or {}).items()},
+        "quality_failed_fields": [str(item) for item in list(draft.quality_failed_fields or [])],
+        "quality_required_evidence": {str(key): bool(value) for key, value in dict(draft.quality_required_evidence or {}).items()},
+        "evidence_tier_mix": {str(key): int(value) for key, value in dict(draft.evidence_tier_mix or {}).items()},
+        "why_now_recency_passed": bool(draft.why_now_recency_passed),
     }
 
 
@@ -991,11 +1148,20 @@ def _quality_fields_default(*, passed: bool = False, stage: str = "not_run") -> 
         "quality_reasons": [],
         "rewrite_attempts": 0,
         "quality_fail_stage": stage,
+        "quality_field_scores": {},
+        "quality_failed_fields": [],
+        "quality_required_evidence": {},
+        "evidence_tier_mix": {"tier_1": 0, "tier_2": 0, "tier_3": 0},
+        "why_now_recency_passed": False,
     }
 
 
 def _quality_metrics_path() -> Path:
     return (_ledger_dir() / "quality-last-run.json").resolve()
+
+
+def _quality_metrics_history_path() -> Path:
+    return (_ledger_dir() / "quality-history.json").resolve()
 
 
 def _persist_quality_run_metrics(result: dict[str, Any]) -> None:
@@ -1019,17 +1185,86 @@ def _persist_quality_run_metrics(result: dict[str, Any]) -> None:
             if not key:
                 continue
             reason_counts[key] = reason_counts.get(key, 0) + 1
+    failed_field_counts: dict[str, int] = {}
+    for row in fails:
+        for field_name in list(row.get("quality_failed_fields") or []):
+            key = str(field_name).strip()
+            if not key:
+                continue
+            failed_field_counts[key] = failed_field_counts.get(key, 0) + 1
     top_reasons = sorted(reason_counts.items(), key=lambda item: item[1], reverse=True)[:5]
+    recorded_at = _utc_now_iso()
+
+    history_path = _quality_metrics_history_path()
+    history: list[dict[str, Any]] = []
+    if history_path.exists():
+        try:
+            loaded = json.loads(history_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, list):
+                history = [item for item in loaded if isinstance(item, dict)]
+        except Exception:
+            history = []
+    history.append(
+        {
+            "recorded_at_utc": recorded_at,
+            "quality_pass_count": sum(1 for row in rows if isinstance(row, dict) and bool(row.get("quality_gate_passed"))),
+            "quality_fail_count": len(fails),
+            "rewrite_attempts": rewrite_values,
+            "failed_fields": dict(failed_field_counts),
+        }
+    )
+    cutoff = datetime.now(UTC) - timedelta(days=7)
+    trimmed_history: list[dict[str, Any]] = []
+    for item in history:
+        raw_dt = str(item.get("recorded_at_utc") or "")
+        try:
+            dt = datetime.fromisoformat(raw_dt.replace("Z", "+00:00")).astimezone(UTC)
+        except Exception:
+            continue
+        if dt >= cutoff:
+            trimmed_history.append(item)
+
+    total_pass = 0
+    total_fail = 0
+    rewrite_all: list[int] = []
+    failed_fields_7d: dict[str, int] = {}
+    for item in trimmed_history:
+        total_pass += int(item.get("quality_pass_count") or 0)
+        total_fail += int(item.get("quality_fail_count") or 0)
+        for value in list(item.get("rewrite_attempts") or []):
+            try:
+                rewrite_all.append(int(value))
+            except Exception:
+                continue
+        field_map = item.get("failed_fields")
+        if isinstance(field_map, dict):
+            for field_name, count in field_map.items():
+                key = str(field_name).strip()
+                if not key:
+                    continue
+                failed_fields_7d[key] = failed_fields_7d.get(key, 0) + int(count or 0)
+    total_checks = total_pass + total_fail
+    quality_pass_rate_7d = round(total_pass / float(total_checks), 4) if total_checks else 0.0
+    avg_rewrite_attempts_7d = round(sum(rewrite_all) / float(len(rewrite_all)), 3) if rewrite_all else 0.0
+    top_failed_fields_7d = [
+        {"field": key, "count": value}
+        for key, value in sorted(failed_fields_7d.items(), key=lambda item: item[1], reverse=True)[:5]
+    ]
+
     payload = {
         "run_date_local": str(result.get("run_date_local") or ""),
-        "recorded_at_utc": _utc_now_iso(),
+        "recorded_at_utc": recorded_at,
         "quality_fail_count": len(fails),
         "avg_rewrite_attempts": round(sum(rewrite_values) / float(len(rewrite_values)), 3) if rewrite_values else 0.0,
         "top_failure_reasons": [{"reason": key, "count": value} for key, value in top_reasons],
+        "quality_pass_rate_7d": quality_pass_rate_7d,
+        "top_failed_fields_7d": top_failed_fields_7d,
+        "avg_rewrite_attempts_7d": avg_rewrite_attempts_7d,
     }
     path = _quality_metrics_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    history_path.write_text(json.dumps(trimmed_history, indent=2), encoding="utf-8")
 
 def _normalize_line_list(items: list[str], *, max_items: int, max_words: int | None = None) -> list[str]:
     out: list[str] = []
@@ -1346,6 +1581,296 @@ def _classify_source_ref(
     return "target_proxy"
 
 
+def _extract_published_hint(text: str) -> str:
+    raw = _normalize_text(text, max_chars=300)
+    if not raw:
+        return ""
+    iso_match = re.search(r"\b(20\d{2}-\d{2}-\d{2})\b", raw)
+    if iso_match:
+        return iso_match.group(1)
+    us_match = re.search(
+        r"\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|"
+        r"Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},\s+20\d{2}\b",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if us_match:
+        return us_match.group(0)
+    year_match = re.search(r"\b(20\d{2})\b", raw)
+    if year_match:
+        return year_match.group(1)
+    return ""
+
+
+def _parse_published_hint(value: str) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt.astimezone(UTC)
+    except Exception:
+        pass
+    for fmt in ("%B %d, %Y", "%b %d, %Y", "%Y-%m-%d", "%Y"):
+        try:
+            dt = datetime.strptime(raw, fmt)
+            if fmt == "%Y":
+                dt = dt.replace(month=1, day=1)
+            return dt.replace(tzinfo=UTC)
+        except Exception:
+            continue
+    return None
+
+
+def _is_recent_published_hint(value: str, *, days: int) -> bool:
+    dt = _parse_published_hint(value)
+    if dt is None:
+        return False
+    return dt >= (datetime.now(UTC) - timedelta(days=max(1, days)))
+
+
+def _detect_page_type(*, title: str, snippet: str, url: str) -> str:
+    blob = _normalize_line_text(f"{title} {snippet} {url}").lower()
+    domain = _source_domain(url)
+    if _is_search_results_url(url) or _is_low_signal_copy(blob):
+        return "wrapper"
+    if any(domain.endswith(suffix) for suffix in SOURCE_TIER3_DOMAIN_SUFFIXES):
+        return "social"
+    if re.search(r"\b(newsroom|press release|announces?|announcement)\b", blob):
+        return "press_release"
+    if re.search(r"\b(docs?|documentation|developer|api reference|handbook)\b", blob):
+        return "product_docs"
+    if re.search(r"\b(pricing|book a demo|request demo|plans?|sign in|sign up)\b", blob):
+        return "pricing_nav"
+    if re.search(r"\b(news|reported|reports|coverage|interview)\b", blob):
+        return "news_report"
+    if re.search(r"\b(company profile|about us|founded|headquartered)\b", blob):
+        return "company_profile"
+    if domain in {"github.com", "docs.github.com", "linkedin.com"}:
+        return "product_docs"
+    return "news_report"
+
+
+def _source_tier_from_row(*, company: str, target: str, row: dict[str, str], page_type: str) -> str:
+    url = _normalize_source_url(str(row.get("url") or ""))
+    domain = _source_domain(url)
+    title = _normalize_line_text(str(row.get("title") or ""))
+    snippet = _normalize_line_text(str(row.get("snippet") or ""))
+    blob = f"{title} {snippet}".lower()
+    company_key = _target_key(company).replace(" ", "")
+    target_key = _target_key(target).replace(" ", "")
+    is_target_official = bool(target_key and target_key in domain.replace(".", ""))
+    is_company_official = bool(company_key and company_key in domain.replace(".", ""))
+    if page_type in {"wrapper", "social", "pricing_nav"}:
+        return "tier_3"
+    if domain and any(domain.endswith(suffix) for suffix in SOURCE_TIER3_DOMAIN_SUFFIXES):
+        return "tier_3"
+    if _is_low_quality_source(url):
+        return "tier_3"
+    if is_target_official and page_type in {"press_release", "news_report", "product_docs", "company_profile"}:
+        return "tier_1"
+    if is_company_official and page_type in {"press_release", "news_report", "product_docs"}:
+        return "tier_1"
+    if domain and any(domain.endswith(suffix) for suffix in SOURCE_TIER1_TRUSTED_DOMAIN_SUFFIXES):
+        return "tier_1"
+    if _is_quality_source(url) and page_type in {"news_report", "press_release"}:
+        return "tier_1"
+    if page_type in {"product_docs", "company_profile"}:
+        return "tier_2"
+    if "linkedin.com/company" in blob:
+        return "tier_2"
+    return "tier_2"
+
+
+def _evidence_quality_score(*, tier: str, page_type: str, row: dict[str, str]) -> float:
+    score = 0.45
+    score += {"tier_1": 0.35, "tier_2": 0.15, "tier_3": -0.25}.get(tier, 0.0)
+    score += {"news_report": 0.15, "press_release": 0.12, "product_docs": 0.05, "company_profile": 0.02, "wrapper": -0.2, "social": -0.15, "pricing_nav": -0.18}.get(page_type, 0.0)
+    snippet = _normalize_line_text(str(row.get("snippet") or ""))
+    title = _normalize_line_text(str(row.get("title") or ""))
+    if _is_generic_source_wrapper(f"{title} {snippet}"):
+        score -= 0.2
+    if _is_low_signal_copy(f"{title} {snippet}"):
+        score -= 0.3
+    if len(_tokenize(f"{title} {snippet}")) >= 8:
+        score += 0.05
+    return round(max(0.0, min(1.0, score)), 4)
+
+
+def _fallback_published_hint_from_url(url: str) -> str:
+    parsed = urlparse(url)
+    path = parsed.path or ""
+    match = re.search(r"/(20\d{2})/(\d{1,2})/(\d{1,2})/", path)
+    if not match:
+        return ""
+    year, month, day = match.groups()
+    return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+
+
+def _fetch_url_metadata(url: str) -> dict[str, str]:
+    if (not _evidence_fetch_enabled()) or (not url):
+        return {}
+    timeout = max(0.2, float(_evidence_fetch_timeout_ms()) / 1000.0)
+    req = Request(url, headers={"User-Agent": "CoatueClaw/1.0"})  # nosec B310
+    try:
+        with urlopen(req, timeout=timeout) as response:  # nosec B310
+            body = response.read(20000).decode("utf-8", errors="ignore")
+    except Exception:
+        return {}
+    title = ""
+    title_match = re.search(r"<title[^>]*>(.*?)</title>", body, flags=re.IGNORECASE | re.DOTALL)
+    if title_match:
+        title = _normalize_source_text(re.sub(r"\s+", " ", title_match.group(1)), max_chars=180)
+    published_hint = ""
+    for pattern in (
+        r'<meta[^>]+property=["\']article:published_time["\'][^>]+content=["\']([^"\']+)["\']',
+        r'<meta[^>]+name=["\']pubdate["\'][^>]+content=["\']([^"\']+)["\']',
+        r'<time[^>]+datetime=["\']([^"\']+)["\']',
+    ):
+        found = re.search(pattern, body, flags=re.IGNORECASE)
+        if found:
+            published_hint = _extract_published_hint(found.group(1))
+            if published_hint:
+                break
+    return {
+        "title": title,
+        "published_hint": published_hint,
+    }
+
+
+def _row_to_evidence_item(
+    *,
+    company: str,
+    target: str,
+    row: dict[str, str],
+    index: int,
+    allow_fetch: bool = False,
+) -> EvidenceItem | None:
+    url = _normalize_source_url(str(row.get("url") or ""))
+    if not url:
+        return None
+    title = _normalize_source_text(str(row.get("title") or ""), max_chars=180)
+    snippet = _normalize_text(str(row.get("snippet") or ""), max_chars=420)
+    publisher = _normalize_source_text(str(row.get("publisher") or ""), max_chars=64) or _publisher_from_url(url)
+    published_hint = _extract_published_hint(
+        " ".join(
+            [
+                str(row.get("published_hint") or ""),
+                str(row.get("published") or ""),
+                str(row.get("date") or ""),
+                title,
+                snippet,
+                _fallback_published_hint_from_url(url),
+            ]
+        )
+    )
+    if allow_fetch and (not title or not published_hint) and _evidence_fetch_enabled():
+        enriched = _fetch_url_metadata(url)
+        if not title:
+            title = _normalize_source_text(str(enriched.get("title") or ""), max_chars=180) or title
+        if not published_hint:
+            published_hint = _extract_published_hint(str(enriched.get("published_hint") or ""))
+    page_type = _detect_page_type(title=title, snippet=snippet, url=url)
+    tier = _source_tier_from_row(company=company, target=target, row=row, page_type=page_type)
+    quality_score = _evidence_quality_score(tier=tier, page_type=page_type, row={"title": title, "snippet": snippet, "url": url})
+    return EvidenceItem(
+        id=f"E{index}",
+        url=url,
+        publisher=publisher,
+        title=title or _normalize_source_text(snippet, max_chars=180) or "Reference",
+        snippet=snippet,
+        published_hint=published_hint,
+        tier=tier,
+        page_type=page_type,
+        quality_score=quality_score,
+    )
+
+
+def _evidence_item_to_dict(item: EvidenceItem) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "url": item.url,
+        "publisher": item.publisher,
+        "title": item.title,
+        "snippet": item.snippet,
+        "published_hint": item.published_hint,
+        "tier": item.tier,
+        "page_type": item.page_type,
+        "quality_score": item.quality_score,
+    }
+
+
+def _evidence_matches_terms(item: EvidenceItem, terms: set[str]) -> bool:
+    blob = _normalize_line_text(f"{item.title} {item.snippet}").lower()
+    return any(term in blob for term in terms)
+
+
+def _build_section_evidence(
+    *,
+    company: str,
+    target: str,
+    items: list[EvidenceItem],
+) -> dict[str, Any]:
+    policy = _source_policy().lower()
+    non_tier3 = [item for item in items if item.tier != "tier_3" and item.page_type not in {"wrapper", "social"}]
+    non_tier3 = non_tier3[: max(4, _evidence_max_urls())]
+    tier_mix = {"tier_1": 0, "tier_2": 0, "tier_3": 0}
+    for item in items:
+        tier_mix[item.tier] = tier_mix.get(item.tier, 0) + 1
+
+    target_does = [
+        item
+        for item in non_tier3
+        if item.page_type in {"product_docs", "company_profile", "press_release", "news_report"}
+    ]
+    target_does = sorted(target_does, key=lambda item: item.quality_score, reverse=True)[:4]
+    target_does_has_non_tier2 = any(item.tier != "tier_2" for item in target_does)
+    target_does_required = bool(target_does) and (
+        target_does_has_non_tier2 or not all(item.tier == "tier_2" for item in target_does)
+    )
+
+    why_now = [item for item in non_tier3 if item.tier == "tier_1" and item.page_type in {"news_report", "press_release", "company_profile"}]
+    why_now = sorted(why_now, key=lambda item: item.quality_score, reverse=True)[:6]
+    why_now_dated = [item for item in why_now if _parse_published_hint(item.published_hint) is not None]
+    why_now_domains = {_source_domain(item.url) for item in why_now_dated if _source_domain(item.url)}
+    why_now_recent = any(_is_recent_published_hint(item.published_hint, days=_why_now_recency_days()) for item in why_now_dated)
+    why_now_required = len(why_now_dated) >= 2 and len(why_now_domains) >= 2 and why_now_recent
+
+    whats_different = [item for item in non_tier3 if _evidence_matches_terms(item, DIFFERENTIATION_TERMS)]
+    if not whats_different:
+        whats_different = [item for item in non_tier3 if item.page_type in {"product_docs", "press_release"}]
+    whats_different = sorted(whats_different, key=lambda item: item.quality_score, reverse=True)[:4]
+    whats_different_required = bool(whats_different)
+
+    mos_risks = [item for item in non_tier3 if _evidence_matches_terms(item, RISK_SIGNAL_TERMS)]
+    if not mos_risks:
+        mos_risks = [item for item in non_tier3 if item.page_type == "news_report"]
+    mos_risks = sorted(mos_risks, key=lambda item: item.quality_score, reverse=True)[:4]
+    mos_risks_required = bool(mos_risks)
+
+    if policy == "tiered_trusted_first":
+        target_does = sorted(target_does, key=lambda item: (0 if item.tier == "tier_1" else 1, -item.quality_score))[:4]
+        whats_different = sorted(whats_different, key=lambda item: (0 if item.tier == "tier_1" else 1, -item.quality_score))[:4]
+        mos_risks = sorted(mos_risks, key=lambda item: (0 if item.tier == "tier_1" else 1, -item.quality_score))[:4]
+
+    return {
+        "target_does_evidence": [_evidence_item_to_dict(item) for item in target_does],
+        "why_now_evidence": [_evidence_item_to_dict(item) for item in why_now],
+        "whats_different_evidence": [_evidence_item_to_dict(item) for item in whats_different],
+        "mos_risks_evidence": [_evidence_item_to_dict(item) for item in mos_risks],
+        "quality_required_evidence": {
+            "target_does": target_does_required,
+            "why_now": why_now_required,
+            "whats_different": whats_different_required,
+            "mos_risks": mos_risks_required,
+        },
+        "evidence_tier_mix": tier_mix,
+        "why_now_recency_passed": bool(why_now_required),
+    }
+
+
 def _target_search_rows(*, target: str, company: str, snippets: list[str]) -> list[dict[str, str]]:
     api_key = _brave_search_api_key()
     if not api_key:
@@ -1394,11 +1919,24 @@ def _target_search_rows(*, target: str, company: str, snippets: list[str]) -> li
             seen.add(key)
             title = _normalize_source_text(str(item.get("title") or ""), max_chars=180)
             snippet = _normalize_text(str(item.get("description") or ""), max_chars=420)
+            published_hint = _extract_published_hint(
+                " ".join(
+                    [
+                        str(item.get("age") or ""),
+                        str(item.get("published") or ""),
+                        str(item.get("date") or ""),
+                        title,
+                        snippet,
+                        _fallback_published_hint_from_url(url),
+                    ]
+                )
+            )
             row = {
                 "publisher": _publisher_from_url(url),
                 "title": title or _normalize_source_text(snippet, max_chars=180) or "Reference",
                 "snippet": snippet,
                 "url": url,
+                "published_hint": published_hint,
             }
             blob = f"{row['title']} {row['snippet']}"
             if gate_mode == "soft_block" and _is_low_signal_copy(blob):
@@ -1561,6 +2099,11 @@ def _high_conf_new_target_gate(
     quality_reasons = [str(item) for item in list(draft.quality_reasons or [])]
     rewrite_attempts = int(draft.rewrite_attempts)
     quality_fail_stage = str(draft.quality_fail_stage or "")
+    quality_field_scores = {str(key): round(float(value), 4) for key, value in dict(draft.quality_field_scores or {}).items()}
+    quality_failed_fields = [str(item) for item in list(draft.quality_failed_fields or [])]
+    quality_required_evidence = {str(key): bool(value) for key, value in dict(draft.quality_required_evidence or {}).items()}
+    evidence_tier_mix = {str(key): int(value) for key, value in dict(draft.evidence_tier_mix or {}).items()}
+    why_now_recency_passed = bool(draft.why_now_recency_passed)
     confidence_payload = _target_confidence_from_draft_sources(company=company, draft=draft)
     confidence = str(confidence_payload.get("confidence") or "Low")
     confidence_score = round(float(confidence_payload.get("score") or 0.0), 4)
@@ -1583,6 +2126,11 @@ def _high_conf_new_target_gate(
             "quality_reasons": quality_reasons,
             "rewrite_attempts": rewrite_attempts,
             "quality_fail_stage": quality_fail_stage,
+            "quality_field_scores": quality_field_scores,
+            "quality_failed_fields": quality_failed_fields,
+            "quality_required_evidence": quality_required_evidence,
+            "evidence_tier_mix": evidence_tier_mix,
+            "why_now_recency_passed": why_now_recency_passed,
             "target_key": target_key,
             "target_confidence": confidence,
             "target_confidence_score": confidence_score,
@@ -1606,6 +2154,11 @@ def _high_conf_new_target_gate(
             "quality_reasons": quality_reasons,
             "rewrite_attempts": rewrite_attempts,
             "quality_fail_stage": quality_fail_stage,
+            "quality_field_scores": quality_field_scores,
+            "quality_failed_fields": quality_failed_fields,
+            "quality_required_evidence": quality_required_evidence,
+            "evidence_tier_mix": evidence_tier_mix,
+            "why_now_recency_passed": why_now_recency_passed,
             "target_key": target_key,
             "target_confidence": confidence,
             "target_confidence_score": confidence_score,
@@ -1635,6 +2188,11 @@ def _high_conf_new_target_gate(
         "quality_reasons": quality_reasons,
         "rewrite_attempts": rewrite_attempts,
         "quality_fail_stage": quality_fail_stage,
+        "quality_field_scores": quality_field_scores,
+        "quality_failed_fields": quality_failed_fields,
+        "quality_required_evidence": quality_required_evidence,
+        "evidence_tier_mix": evidence_tier_mix,
+        "why_now_recency_passed": why_now_recency_passed,
         "target_key": target_key,
         "target_confidence": confidence,
         "target_confidence_score": confidence_score,
@@ -1674,10 +2232,109 @@ def _is_monthly_theme_line(text: str) -> bool:
     return any(pattern.search(line) for pattern in MONTHLY_TREND_PATTERNS)
 
 
+def _evidence_items_from_bucket(payload: dict[str, Any] | None, key: str) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+    items = payload.get(key)
+    if not isinstance(items, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for raw in items:
+        if not isinstance(raw, dict):
+            continue
+        url = _normalize_source_url(str(raw.get("url") or ""))
+        if not url:
+            continue
+        out.append(
+            {
+                "url": url,
+                "title": _normalize_source_text(str(raw.get("title") or ""), max_chars=180),
+                "snippet": _normalize_text(str(raw.get("snippet") or ""), max_chars=420),
+                "published_hint": _extract_published_hint(str(raw.get("published_hint") or "")),
+                "tier": _normalize_source_text(str(raw.get("tier") or ""), max_chars=16).lower(),
+                "page_type": _normalize_source_text(str(raw.get("page_type") or ""), max_chars=32).lower(),
+            }
+        )
+    return out
+
+
+def _why_now_semantic_recency_assessment(*, company: str, draft: BoardSeatDraft, evidence_pack: dict[str, Any] | None) -> dict[str, Any]:
+    line = _normalize_line_text(draft.why_now)
+    if not line:
+        return {"passed": False, "recency_passed": False, "reasons": ["why_now_missing"]}
+    lower = line.lower()
+    if "24 hour" in lower or "last 24 hours" in lower:
+        return {"passed": False, "recency_passed": False, "reasons": ["why_now_24h_disallowed"]}
+
+    # Backward-compatible fallback for direct callers that do not pass evidence context.
+    if not isinstance(evidence_pack, dict):
+        heuristic = _is_monthly_theme_line(line)
+        return {
+            "passed": heuristic,
+            "recency_passed": heuristic,
+            "reasons": ([] if heuristic else ["why_now_not_monthly_theme"]),
+        }
+
+    items = _evidence_items_from_bucket(evidence_pack, "why_now_evidence")
+    if not items:
+        heuristic = _is_monthly_theme_line(line)
+        return {
+            "passed": heuristic,
+            "recency_passed": heuristic,
+            "reasons": ([] if heuristic else ["why_now_not_monthly_theme"]),
+        }
+    dated: list[dict[str, Any]] = []
+    in_window = False
+    domains: set[str] = set()
+    for item in items:
+        hint = str(item.get("published_hint") or "")
+        dt = _parse_published_hint(hint)
+        if dt is None:
+            continue
+        dated.append(item)
+        domain = _source_domain(str(item.get("url") or ""))
+        if domain:
+            domains.add(domain)
+        if _is_recent_published_hint(hint, days=_why_now_recency_days()):
+            in_window = True
+    reasons: list[str] = []
+    if len(dated) < 2:
+        reasons.append("why_now_insufficient_dated_sources")
+    if len(domains) < 2:
+        reasons.append("why_now_insufficient_source_diversity")
+    if not in_window:
+        reasons.append("why_now_no_in_window_source")
+    if not any(term in lower for term in WHY_NOW_CATALYST_TERMS):
+        reasons.append("why_now_missing_catalyst_semantics")
+
+    evidence_token_set: set[str] = set()
+    for item in items[:8]:
+        evidence_token_set.update(_tokenize(f"{item.get('title', '')} {item.get('snippet', '')}"))
+    line_tokens = set(_tokenize(line))
+    overlap = line_tokens & evidence_token_set
+    company_tokens = set(_tokenize(company))
+    if len(overlap) < 1 and not (line_tokens & company_tokens):
+        reasons.append("why_now_weak_evidence_alignment")
+
+    passed = not reasons
+    return {
+        "passed": passed,
+        "recency_passed": in_window and len(dated) >= 2 and len(domains) >= 2,
+        "reasons": reasons,
+    }
+
+
 def _target_description_from_rows(*, target: str, rows: list[dict[str, str]]) -> str:
     for row in rows:
         snippet = _normalize_line_text(str(row.get("snippet") or ""))
         if not snippet:
+            continue
+        page_type = _detect_page_type(
+            title=str(row.get("title") or ""),
+            snippet=snippet,
+            url=str(row.get("url") or ""),
+        )
+        if page_type in {"wrapper", "social", "pricing_nav"}:
             continue
         if _source_gate_mode() == "soft_block" and _is_low_signal_copy(f"{row.get('title', '')} {snippet}"):
             continue
@@ -3082,6 +3739,15 @@ def _build_source_refs(
         gate_mode = _source_gate_mode()
         if gate_mode == "hard_block" and low_signal:
             return
+        page_type = _detect_page_type(title=normalized.title, snippet=text_blob, url=normalized.url)
+        tier = _source_tier_from_row(
+            company=company,
+            target=target,
+            row={"url": normalized.url, "title": normalized.title, "snippet": text_blob},
+            page_type=page_type,
+        )
+        if _source_policy().lower() == "tiered_trusted_first" and tier == "tier_3":
+            return
         url_key = normalized.url.lower()
         title_key = _title_fingerprint(normalized.title)
         dedupe_key = f"{_source_domain(normalized.url)}::{title_key}"
@@ -3104,6 +3770,8 @@ def _build_source_refs(
         }.get(category, 1.0)
         score += {"target_search": 0.4, "acquisition_search": 0.25, "draft": 0.1, "funding": -0.25}.get(origin, 0.0)
         score += 0.4 if quality > 0 else (-0.2 if quality < 0 else 0.0)
+        score += {"tier_1": 0.8, "tier_2": 0.2, "tier_3": -1.0}.get(tier, 0.0)
+        score += {"news_report": 0.2, "press_release": 0.18, "product_docs": 0.08, "company_profile": 0.04, "pricing_nav": -0.4, "wrapper": -0.5, "social": -0.6}.get(page_type, 0.0)
         if gate_mode == "soft_block" and low_signal:
             score -= 1.2
         normalized_candidates.append(
@@ -3113,6 +3781,8 @@ def _build_source_refs(
                 quality=quality,
                 score=score,
                 text_blob=text_blob,
+                tier=tier,
+                page_type=page_type,
             )
         )
 
@@ -3150,7 +3820,27 @@ def _build_source_refs(
     selected_urls: set[str] = set()
     parent_count = 0
 
-    if policy == "target_first_3_1":
+    if policy == "tiered_trusted_first":
+        tier_rank = {"tier_1": 0, "tier_2": 1, "tier_3": 2}
+        page_rank = {"news_report": 0, "press_release": 1, "product_docs": 2, "company_profile": 3, "pricing_nav": 4, "wrapper": 5, "social": 6}
+        normalized_candidates.sort(
+            key=lambda item: (
+                tier_rank.get(item.tier, 9),
+                page_rank.get(item.page_type, 9),
+                -item.score,
+            )
+        )
+        for candidate in normalized_candidates:
+            if len(selected) >= 4:
+                break
+            key = candidate.ref.url.lower()
+            if key in selected_urls:
+                continue
+            if candidate.tier == "tier_3":
+                continue
+            selected.append(candidate)
+            selected_urls.add(key)
+    elif policy == "target_first_3_1":
         for candidate in normalized_candidates:
             if len(selected) >= 3:
                 break
@@ -3198,7 +3888,12 @@ def _build_source_refs(
     return SourceSelection(refs=refs, confidence=confidence, target_description=target_description)
 
 
-def _validate_draft(draft: BoardSeatDraft) -> list[str]:
+def _validate_draft(
+    draft: BoardSeatDraft,
+    *,
+    company: str = "",
+    evidence_pack: dict[str, Any] | None = None,
+) -> list[str]:
     errors: list[str] = []
     line_cap = _max_line_words()
     checks = {
@@ -3222,10 +3917,19 @@ def _validate_draft(draft: BoardSeatDraft) -> list[str]:
             errors.append(f"{key}_too_long")
     if not _is_valid_acquisition_idea_line(draft.idea_line):
         errors.append("idea_line_invalid")
-    if not _is_monthly_theme_line(draft.why_now):
-        errors.append("why_now_not_monthly_theme")
-    if "last 24 hours" in str(draft.why_now or "").lower():
-        errors.append("why_now_24h_disallowed")
+    why_now_gate = _why_now_semantic_recency_assessment(
+        company=company or "Company",
+        draft=draft,
+        evidence_pack=evidence_pack,
+    )
+    if not bool(why_now_gate.get("passed")):
+        reasons = [str(item) for item in list(why_now_gate.get("reasons") or [])]
+        if "why_now_24h_disallowed" in reasons:
+            errors.append("why_now_24h_disallowed")
+        if any(item in {"why_now_not_monthly_theme", "why_now_missing_recent_evidence", "why_now_no_in_window_source", "why_now_insufficient_dated_sources", "why_now_insufficient_source_diversity", "why_now_missing_catalyst_semantics", "why_now_weak_evidence_alignment"} for item in reasons):
+            errors.append("why_now_not_monthly_theme")
+    if (isinstance(evidence_pack, dict)) and (not bool(why_now_gate.get("recency_passed"))):
+        errors.append("why_now_recency_missing")
     if _specificity_mode() == "moderate":
         specificity_fields = [
             draft.why_now,
@@ -3400,6 +4104,11 @@ def _sanitize_draft(
         quality_reasons=list(draft.quality_reasons or []),
         rewrite_attempts=int(draft.rewrite_attempts),
         quality_fail_stage=str(draft.quality_fail_stage or ""),
+        quality_field_scores=dict(draft.quality_field_scores or {}),
+        quality_failed_fields=list(draft.quality_failed_fields or []),
+        quality_required_evidence=dict(draft.quality_required_evidence or {}),
+        evidence_tier_mix=dict(draft.evidence_tier_mix or {}),
+        why_now_recency_passed=bool(draft.why_now_recency_passed),
     )
 
 
@@ -3928,12 +4637,25 @@ def _acquisition_search_rows(*, company: str, snippets: list[str]) -> list[dict[
             seen.add(key)
             title = _normalize_source_text(str(item.get("title") or ""), max_chars=180)
             snippet = _normalize_text(str(item.get("description") or ""), max_chars=420)
+            published_hint = _extract_published_hint(
+                " ".join(
+                    [
+                        str(item.get("age") or ""),
+                        str(item.get("published") or ""),
+                        str(item.get("date") or ""),
+                        title,
+                        snippet,
+                        _fallback_published_hint_from_url(url),
+                    ]
+                )
+            )
             rows.append(
                 {
                     "publisher": _publisher_from_url(url),
                     "title": title or _normalize_source_text(snippet, max_chars=180) or "Reference",
                     "snippet": snippet,
                     "url": url,
+                    "published_hint": published_hint,
                 }
             )
             if len(rows) >= ACQ_SEARCH_RESULTS:
@@ -3968,12 +4690,24 @@ def _google_serp_rows(query: str, *, max_results: int = 8) -> list[dict[str, str
             seen.add(url.lower())
             title = _normalize_source_text(str(item.get("title") or ""), max_chars=180)
             snippet = _normalize_text(str(item.get("snippet") or ""), max_chars=420)
+            published_hint = _extract_published_hint(
+                " ".join(
+                    [
+                        str(item.get("date") or ""),
+                        str(item.get("snippet_highlighted_words") or ""),
+                        title,
+                        snippet,
+                        _fallback_published_hint_from_url(url),
+                    ]
+                )
+            )
             rows.append(
                 {
                     "publisher": _publisher_from_url(url),
                     "title": title or _normalize_source_text(snippet, max_chars=180) or "Reference",
                     "snippet": snippet,
                     "url": url,
+                    "published_hint": published_hint,
                 }
             )
     return rows
@@ -4303,27 +5037,70 @@ def _llm_evidence_pack(
     acquisition_rows: list[dict[str, str]],
     funding: FundingSnapshot,
 ) -> dict[str, Any]:
-    def _rows(rows: list[dict[str, str]], *, limit: int) -> list[dict[str, str]]:
-        out: list[dict[str, str]] = []
-        for row in rows[:limit]:
-            url = _normalize_source_url(str(row.get("url") or ""))
-            if not url:
-                continue
-            out.append(
-                {
-                    "publisher": _normalize_source_text(str(row.get("publisher") or ""), max_chars=64) or _publisher_from_url(url),
-                    "title": _normalize_source_text(str(row.get("title") or ""), max_chars=180),
-                    "snippet": _normalize_text(str(row.get("snippet") or ""), max_chars=220),
-                    "url": url,
-                }
-            )
-        return out
+    merged_rows: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
+    for row in [*list(target_rows or []), *list(acquisition_rows or [])]:
+        if not isinstance(row, dict):
+            continue
+        url = _normalize_source_url(str(row.get("url") or ""))
+        if not url:
+            continue
+        key = url.lower()
+        if key in seen_urls:
+            continue
+        seen_urls.add(key)
+        merged_rows.append(row)
+        if len(merged_rows) >= _evidence_max_urls():
+            break
+
+    evidence_items: list[EvidenceItem] = []
+    fetch_budget = _evidence_max_urls() if _evidence_fetch_enabled() else 0
+    fetched = 0
+    for index, row in enumerate(merged_rows, start=1):
+        row_url = _normalize_source_url(str(row.get("url") or ""))
+        row_domain = _source_domain(row_url)
+        allow_fetch = bool(
+            fetched < fetch_budget
+            and row_url
+            and row_domain
+            and (not _is_search_results_url(row_url))
+            and any(row_domain.endswith(suffix) for suffix in SOURCE_TIER1_TRUSTED_DOMAIN_SUFFIXES)
+        )
+        item = _row_to_evidence_item(
+            company=company,
+            target=target,
+            row=row,
+            index=index,
+            allow_fetch=allow_fetch,
+        )
+        if item is None:
+            continue
+        if allow_fetch:
+            fetched += 1
+        evidence_items.append(item)
+
+    section_evidence = _build_section_evidence(company=company, target=target, items=evidence_items)
+    target_bundle = list(section_evidence.get("target_does_evidence") or [])[:6]
+    acq_bundle = [
+        _evidence_item_to_dict(item)
+        for item in evidence_items
+        if item.page_type in {"news_report", "press_release", "company_profile"} and item.tier != "tier_3"
+    ][:6]
 
     return {
         "company": company,
         "target": target,
-        "target_evidence": _rows(target_rows, limit=6),
-        "acquisition_evidence": _rows(acquisition_rows, limit=6),
+        "source_policy": _source_policy(),
+        "target_evidence": target_bundle,
+        "acquisition_evidence": acq_bundle,
+        "all_evidence": [_evidence_item_to_dict(item) for item in evidence_items],
+        "target_does_evidence": list(section_evidence.get("target_does_evidence") or []),
+        "why_now_evidence": list(section_evidence.get("why_now_evidence") or []),
+        "whats_different_evidence": list(section_evidence.get("whats_different_evidence") or []),
+        "mos_risks_evidence": list(section_evidence.get("mos_risks_evidence") or []),
+        "quality_required_evidence": dict(section_evidence.get("quality_required_evidence") or {}),
+        "evidence_tier_mix": dict(section_evidence.get("evidence_tier_mix") or {}),
+        "why_now_recency_passed": bool(section_evidence.get("why_now_recency_passed")),
         "funding_summary": {
             "history": _normalize_text(funding.history, max_chars=220),
             "latest_round": _normalize_text(funding.latest_round, max_chars=120),
@@ -4846,30 +5623,40 @@ def _assess_draft_quality(
     evidence_pack: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     reasons: list[str] = []
-    score = 1.0
     thesis_fields = {
-        "target_does": str(draft.target_does or ""),
-        "why_now": str(draft.why_now or ""),
-        "whats_different": str(draft.whats_different or ""),
-        "mos_risks": str(draft.mos_risks or ""),
+        "target_does": _normalize_line_text(str(draft.target_does or "")),
+        "why_now": _normalize_line_text(str(draft.why_now or "")),
+        "whats_different": _normalize_line_text(str(draft.whats_different or "")),
+        "mos_risks": _normalize_line_text(str(draft.mos_risks or "")),
     }
+    field_scores: dict[str, float] = {field: 1.0 for field in thesis_fields}
+    failed_fields: set[str] = set()
+    quality_required_evidence: dict[str, bool] = {
+        "target_does": False,
+        "why_now": False,
+        "whats_different": False,
+        "mos_risks": False,
+    }
+    evidence_tier_mix: dict[str, int] = {"tier_1": 0, "tier_2": 0, "tier_3": 0}
+    why_now_recency_passed = False
 
-    for label, text in thesis_fields.items():
-        line = _normalize_line_text(text)
+    def _penalize(field: str, delta: float, reason: str) -> None:
+        field_scores[field] = max(0.0, field_scores.get(field, 1.0) - delta)
+        reasons.append(reason)
+        if field_scores[field] < _critic_min_field_score():
+            failed_fields.add(field)
+
+    for label, line in thesis_fields.items():
         if not line:
-            reasons.append(f"missing_line:{label}")
-            score -= 0.25
+            _penalize(label, 0.8, f"missing_line:{label}")
             continue
         if _is_low_signal_copy(line):
-            reasons.append(f"artifact_contamination:{label}")
-            score -= 0.35
+            _penalize(label, 0.55, f"artifact_contamination:{label}")
         if re.search(r"<[^>]+>", line):
-            reasons.append(f"html_artifact:{label}")
-            score -= 0.25
+            _penalize(label, 0.4, f"html_artifact:{label}")
         density = _line_information_density_score(line)
         if len(_tokenize(line)) >= 8 and density < 0.50:
-            reasons.append(f"low_information_density:{label}")
-            score -= 0.12
+            _penalize(label, 0.2, f"low_information_density:{label}")
 
     pairs = [("target_does", "why_now"), ("target_does", "whats_different"), ("why_now", "whats_different"), ("whats_different", "mos_risks")]
     for left, right in pairs:
@@ -4879,66 +5666,204 @@ def _assess_draft_quality(
             continue
         sim = _token_jaccard_similarity(left_text, right_text)
         if sim >= 0.82:
-            reasons.append(f"near_duplicate:{left}:{right}")
-            score -= 0.22
+            _penalize(left, 0.25, f"near_duplicate:{left}:{right}")
+            _penalize(right, 0.25, f"near_duplicate:{left}:{right}")
 
-    evidence_texts: list[str] = []
-    substantive_evidence_count = 0
+    def _evidence_blob(items: list[dict[str, Any]]) -> set[str]:
+        combined: list[str] = []
+        for item in items:
+            combined.append(str(item.get("title") or ""))
+            combined.append(str(item.get("snippet") or ""))
+        return set(_tokenize(_normalize_text(" ".join(combined), max_chars=8000)))
+
     if isinstance(evidence_pack, dict):
-        for bucket in ("target_evidence", "acquisition_evidence"):
-            items = evidence_pack.get(bucket)
-            if not isinstance(items, list):
-                continue
-            for item in items[:10]:
-                if not isinstance(item, dict):
-                    continue
-                title = _normalize_text(str(item.get("title") or ""), max_chars=300)
-                snippet = _normalize_text(str(item.get("snippet") or ""), max_chars=500)
-                url = _normalize_source_url(str(item.get("url") or ""))
-                blob = _normalize_line_text(f"{title} {snippet}")
-                if not blob:
-                    continue
-                evidence_texts.append(blob)
-                if (len(_tokenize(blob)) >= 8) and (not _is_low_signal_copy(blob)) and (not _is_search_results_url(url)):
-                    substantive_evidence_count += 1
-    for ref in list(draft.source_refs or [])[:8]:
-        blob = _normalize_line_text(f"{ref.title} {ref.name_or_publisher}")
-        if not blob:
-            continue
-        evidence_texts.append(blob)
-        if (len(_tokenize(blob)) >= 8) and (not _is_low_signal_copy(blob)) and (not _is_search_results_url(ref.url)):
-            substantive_evidence_count += 1
-    evidence_token_set = set(_tokenize(_normalize_text(" ".join(evidence_texts), max_chars=8000)))
-    company_tokens = set(_tokenize(company))
-    target_tokens = set(_tokenize(_extract_acquisition_target(draft.idea_line)))
+        required_payload = evidence_pack.get("quality_required_evidence")
+        if isinstance(required_payload, dict):
+            for key in quality_required_evidence:
+                quality_required_evidence[key] = bool(required_payload.get(key))
+        tier_mix_payload = evidence_pack.get("evidence_tier_mix")
+        if isinstance(tier_mix_payload, dict):
+            for key in evidence_tier_mix:
+                try:
+                    evidence_tier_mix[key] = int(tier_mix_payload.get(key) or 0)
+                except Exception:
+                    evidence_tier_mix[key] = 0
+        why_now_recency_passed = bool(evidence_pack.get("why_now_recency_passed"))
 
-    if evidence_token_set and substantive_evidence_count >= 2:
-        weak_alignment_fields = 0
-        for label, text in thesis_fields.items():
-            line_tokens = set(_tokenize(text))
-            if len(line_tokens) < 4:
+    strict_evidence_context = sum(int(value) for value in evidence_tier_mix.values()) >= 2
+    if strict_evidence_context:
+        for field_name, required in quality_required_evidence.items():
+            if required:
                 continue
-            overlap = line_tokens & evidence_token_set
-            if len(overlap) >= 2:
-                continue
-            if (line_tokens & company_tokens) or (line_tokens & target_tokens):
-                continue
-            reasons.append(f"weak_evidence_alignment:{label}")
-            weak_alignment_fields += 1
-            score -= 0.08
-        if weak_alignment_fields >= 3:
-            reasons.append("blatant_evidence_mismatch")
-            score -= 0.25
+            _penalize(field_name, 0.45, f"missing_required_evidence:{field_name}")
+        if not why_now_recency_passed:
+            _penalize("why_now", 0.35, "why_now_recency_missing")
     else:
         reasons.append("no_evidence_context")
-        score -= 0.1
 
-    score = max(0.0, min(1.0, score))
+    field_to_bucket = {
+        "target_does": "target_does_evidence",
+        "why_now": "why_now_evidence",
+        "whats_different": "whats_different_evidence",
+        "mos_risks": "mos_risks_evidence",
+    }
+    company_tokens = set(_tokenize(company))
+    target_tokens = set(_tokenize(_extract_acquisition_target(draft.idea_line)))
+    for field_name, bucket in field_to_bucket.items():
+        items = _evidence_items_from_bucket(evidence_pack if isinstance(evidence_pack, dict) else {}, bucket)
+        if not items:
+            continue
+        evidence_tokens = _evidence_blob(items)
+        line_tokens = set(_tokenize(thesis_fields.get(field_name, "")))
+        if len(line_tokens) < 3:
+            continue
+        overlap = line_tokens & evidence_tokens
+        if len(overlap) >= 2:
+            continue
+        if (line_tokens & company_tokens) or (line_tokens & target_tokens):
+            continue
+        _penalize(field_name, 0.2, f"weak_evidence_alignment:{field_name}")
+
+    overall = round(sum(field_scores.values()) / float(len(field_scores)), 4) if field_scores else 0.0
+    if overall < _critic_min_overall_score():
+        reasons.append("critic_overall_below_threshold")
+    for field_name, score in field_scores.items():
+        if score < _critic_min_field_score():
+            failed_fields.add(field_name)
+            reasons.append(f"critic_field_below_threshold:{field_name}")
+
     hard_fail = any(reason.startswith("artifact_contamination") for reason in reasons)
-    if "blatant_evidence_mismatch" in reasons:
-        hard_fail = True
-    passed = (score >= 0.62) and (not hard_fail)
-    return {"passed": passed, "score": round(score, 4), "reasons": reasons}
+    passed = (overall >= _critic_min_overall_score()) and (not hard_fail) and (not failed_fields)
+    return {
+        "passed": passed,
+        "score": overall,
+        "reasons": reasons,
+        "field_scores": {key: round(float(value), 4) for key, value in field_scores.items()},
+        "failed_fields": sorted(failed_fields),
+        "quality_required_evidence": quality_required_evidence,
+        "evidence_tier_mix": evidence_tier_mix,
+        "why_now_recency_passed": why_now_recency_passed,
+    }
+
+
+def _llm_critic_assess(
+    *,
+    company: str,
+    draft: BoardSeatDraft,
+    evidence_pack: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if OpenAI is None or (not api_key):
+        return None
+    model = _review_model()
+    client = OpenAI(api_key=api_key)
+    draft_payload = {
+        "idea_line": draft.idea_line,
+        "target_does": draft.target_does,
+        "why_now": draft.why_now,
+        "whats_different": draft.whats_different,
+        "mos_risks": draft.mos_risks,
+        "bottom_line": draft.bottom_line,
+        "context_current_efforts": draft.context_current_efforts,
+        "context_domain_fit_gaps": draft.context_domain_fit_gaps,
+    }
+    prompt = (
+        f"Assess this board-seat draft for {company}.\n"
+        "Return strict JSON only with keys: overall_score, field_scores, failed_fields, reasons.\n"
+        "field_scores keys must be: target_does, why_now, whats_different, mos_risks.\n"
+        "Scoring rubric (0-1): relevance, non-duplication, factual alignment, specificity, writing clarity.\n"
+        "Hard-fail if there is menu/CTA contamination, semantic duplication, or obvious evidence mismatch.\n"
+        f"Draft:\n{json.dumps(draft_payload, ensure_ascii=False)}\n"
+        f"Evidence:\n{json.dumps(evidence_pack or {}, ensure_ascii=False)}\n"
+    )
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            temperature=0.0,
+            messages=[
+                {"role": "system", "content": "You are a strict board-writing critic. Return JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+        )
+    except Exception:
+        return None
+    text = ""
+    if response and response.choices:
+        text = str(response.choices[0].message.content or "").strip()
+    if not text:
+        return None
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    try:
+        payload = json.loads(text[start : end + 1])
+    except Exception:
+        return None
+    try:
+        overall_score = max(0.0, min(1.0, float(payload.get("overall_score") or 0.0)))
+    except Exception:
+        overall_score = 0.0
+    field_scores_raw = payload.get("field_scores")
+    field_scores: dict[str, float] = {}
+    if isinstance(field_scores_raw, dict):
+        for field_name in ("target_does", "why_now", "whats_different", "mos_risks"):
+            try:
+                field_scores[field_name] = max(0.0, min(1.0, float(field_scores_raw.get(field_name) or 0.0)))
+            except Exception:
+                field_scores[field_name] = 0.0
+    failed_fields_raw = payload.get("failed_fields")
+    failed_fields = [str(item) for item in failed_fields_raw if str(item)] if isinstance(failed_fields_raw, list) else []
+    reasons_raw = payload.get("reasons")
+    reasons = [str(item) for item in reasons_raw if str(item)] if isinstance(reasons_raw, list) else []
+    passed = (
+        overall_score >= _critic_min_overall_score()
+        and all(field_scores.get(field, 0.0) >= _critic_min_field_score() for field in ("target_does", "why_now", "whats_different", "mos_risks"))
+        and not failed_fields
+    )
+    return {
+        "passed": passed,
+        "score": round(overall_score, 4),
+        "field_scores": field_scores,
+        "failed_fields": failed_fields,
+        "reasons": reasons,
+    }
+
+
+def _merge_quality_assessments(
+    *,
+    deterministic: dict[str, Any],
+    critic: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(critic, dict):
+        return deterministic
+    field_scores = dict(deterministic.get("field_scores") or {})
+    critic_field_scores = critic.get("field_scores")
+    if isinstance(critic_field_scores, dict):
+        for key in ("target_does", "why_now", "whats_different", "mos_risks"):
+            if key in field_scores:
+                field_scores[key] = round(min(float(field_scores.get(key) or 0.0), float(critic_field_scores.get(key) or 0.0)), 4)
+            else:
+                field_scores[key] = round(float(critic_field_scores.get(key) or 0.0), 4)
+    failed_fields = set(str(item) for item in list(deterministic.get("failed_fields") or []))
+    failed_fields.update(str(item) for item in list(critic.get("failed_fields") or []))
+    for key, value in field_scores.items():
+        if float(value) < _critic_min_field_score():
+            failed_fields.add(key)
+    reasons = [str(item) for item in list(deterministic.get("reasons") or [])]
+    reasons.extend(f"critic:{item}" for item in list(critic.get("reasons") or []))
+    overall = round(min(float(deterministic.get("score") or 0.0), float(critic.get("score") or 0.0)), 4)
+    passed = bool(deterministic.get("passed")) and bool(critic.get("passed")) and not failed_fields and overall >= _critic_min_overall_score()
+    return {
+        "passed": passed,
+        "score": overall,
+        "reasons": reasons,
+        "field_scores": field_scores,
+        "failed_fields": sorted(failed_fields),
+        "quality_required_evidence": dict(deterministic.get("quality_required_evidence") or {}),
+        "evidence_tier_mix": dict(deterministic.get("evidence_tier_mix") or {}),
+        "why_now_recency_passed": bool(deterministic.get("why_now_recency_passed")),
+    }
 
 
 def _llm_revise_draft(
@@ -4947,6 +5872,7 @@ def _llm_revise_draft(
     draft: BoardSeatDraft,
     evidence_pack: dict[str, Any] | None,
     quality_reasons: list[str],
+    failed_fields: list[str] | None = None,
 ) -> BoardSeatDraft | None:
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if OpenAI is None or (not api_key):
@@ -4980,11 +5906,12 @@ def _llm_revise_draft(
         "context_current_efforts, context_domain_fit_gaps, funding_history, funding_latest_round_backers, source_refs.\n"
         "Rules:\n"
         "- Keep board-seat style and preserve strategic intent.\n"
-        "- Fix only the failing lines where needed.\n"
+        "- Fix only the failing fields where needed.\n"
         "- Remove low-signal CTA/menu artifacts (book a demo, see pricing, sign in, etc).\n"
         "- Avoid near-duplicate lines across thesis fields.\n"
         "- Keep content grounded in evidence but natural (inference allowed).\n"
         "- No HTML tags, UI crumbs, or copied nav snippets.\n"
+        f"Failed fields (revise these first): {json.dumps(list(failed_fields or []), ensure_ascii=False)}\n"
         f"Current draft:\n{draft_json}\n"
         f"Quality failures:\n{json.dumps(list(quality_reasons or []), ensure_ascii=False)}\n"
         f"Evidence:\n{evidence_json}\n"
@@ -5032,15 +5959,29 @@ def _quality_gate_draft(
     evidence_pack: dict[str, Any] | None,
 ) -> BoardSeatDraft:
     if not _quality_gate_enabled():
-        return replace(draft, quality_gate_passed=True, quality_score=1.0, quality_reasons=[], rewrite_attempts=0, quality_fail_stage="")
+        return replace(
+            draft,
+            quality_gate_passed=True,
+            quality_score=1.0,
+            quality_reasons=[],
+            rewrite_attempts=0,
+            quality_fail_stage="",
+            quality_field_scores={},
+            quality_failed_fields=[],
+            quality_required_evidence={},
+            evidence_tier_mix={},
+            why_now_recency_passed=False,
+        )
 
     current = draft
     attempts = 0
     max_retries = _rewrite_max_retries()
     while True:
         current = _sanitize_draft(company=company, draft=current, funding=funding, acquisition_rows=acquisition_rows)
-        validation_errors = _validate_draft(current)
-        quality = _assess_draft_quality(company=company, draft=current, evidence_pack=evidence_pack)
+        validation_errors = _validate_draft(current, company=company, evidence_pack=evidence_pack)
+        deterministic = _assess_draft_quality(company=company, draft=current, evidence_pack=evidence_pack)
+        critic = _llm_critic_assess(company=company, draft=current, evidence_pack=evidence_pack)
+        quality = _merge_quality_assessments(deterministic=deterministic, critic=critic)
         reasons = [*[f"draft_validator:{item}" for item in validation_errors], *list(quality.get("reasons") or [])]
         stage = "draft_validator" if validation_errors else "reviewer"
         if any(str(item).startswith("artifact_contamination") for item in list(quality.get("reasons") or [])):
@@ -5053,6 +5994,11 @@ def _quality_gate_draft(
                 quality_reasons=list(quality.get("reasons") or []),
                 rewrite_attempts=attempts,
                 quality_fail_stage="",
+                quality_field_scores=dict(quality.get("field_scores") or {}),
+                quality_failed_fields=list(quality.get("failed_fields") or []),
+                quality_required_evidence=dict(quality.get("quality_required_evidence") or {}),
+                evidence_tier_mix=dict(quality.get("evidence_tier_mix") or {}),
+                why_now_recency_passed=bool(quality.get("why_now_recency_passed")),
             )
         if attempts >= max_retries:
             return replace(
@@ -5062,12 +6008,18 @@ def _quality_gate_draft(
                 quality_reasons=reasons,
                 rewrite_attempts=attempts,
                 quality_fail_stage=stage,
+                quality_field_scores=dict(quality.get("field_scores") or {}),
+                quality_failed_fields=list(quality.get("failed_fields") or []),
+                quality_required_evidence=dict(quality.get("quality_required_evidence") or {}),
+                evidence_tier_mix=dict(quality.get("evidence_tier_mix") or {}),
+                why_now_recency_passed=bool(quality.get("why_now_recency_passed")),
             )
         revised = _llm_revise_draft(
             company=company,
             draft=current,
             evidence_pack=evidence_pack,
             quality_reasons=reasons,
+            failed_fields=list(quality.get("failed_fields") or []),
         )
         attempts += 1
         if revised is None:
@@ -5102,22 +6054,23 @@ def _llm_draft(
         "context_current_efforts, context_domain_fit_gaps, "
         "funding_history, funding_latest_round_backers, source_refs.\n"
         "Constraints:\n"
-        "- each value must be a single concise line\n"
+        "- each value should be one to two concise sentences.\n"
         "- idea_line must start with Acquire or Acquihire and name a concrete target.\n"
-        "- target_does must explain exactly what the target sells and who buys it.\n"
-        "- why_now must state a past-month timing catalyst and must not be generic.\n"
-        "- whats_different must state a specific differentiator versus alternatives.\n"
-        "- mos_risks must state concrete integration/commercial/execution risks.\n"
+        "- target_does must explain exactly what the target sells and who buys it, using target_does_evidence.\n"
+        "- why_now must state a recent catalyst/trend backed by why_now_evidence.\n"
+        "- whats_different must state a specific differentiator versus alternatives using whats_different_evidence.\n"
+        "- mos_risks must state concrete integration/commercial/execution risks using mos_risks_evidence.\n"
         "- do not propose internal build as primary recommendation.\n"
         "- short, high skim value, decision-useful.\n"
         "- style must be concise labeled-line content, not bullets.\n"
         "- do not use legacy labels (Signal/Board lens/Watchlist/Team ask).\n"
         "- source_refs is an array of objects with name_or_publisher, title, url.\n"
-        "- source_refs must prioritize target-company evidence over parent-company funding links.\n"
+        "- source_refs must prioritize tier_1 evidence and exclude social/wrapper sources.\n"
         "- do not include HTML tags, menu text, or boilerplate snippets.\n"
         "- fields must not repeat each other.\n"
+        "- if a field lacks evidence, prefer a cautious but specific fallback instead of copying another field.\n"
         f"Evidence pack (target/acquisition/funding):\n{evidence_json}\n"
-        "- keep lines concrete; allow at most one generic fallback line across thesis/context lines.\n"
+        "- keep lines concrete; at most one generic fallback line across thesis/context lines.\n"
         "Recent channel context:\n"
         f"{joined}\n"
     )
@@ -5503,6 +6456,11 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                     quality_reasons=draft.quality_reasons,
                     rewrite_attempts=draft.rewrite_attempts,
                     quality_fail_stage=draft.quality_fail_stage,
+                    quality_field_scores=draft.quality_field_scores,
+                    quality_failed_fields=draft.quality_failed_fields,
+                    quality_required_evidence=draft.quality_required_evidence,
+                    evidence_tier_mix=draft.evidence_tier_mix,
+                    why_now_recency_passed=draft.why_now_recency_passed,
                 )
             result["event_tracking"].append(
                 _track_promising_target_events(
@@ -5546,6 +6504,11 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                         "quality_reasons": target_gate.get("quality_reasons"),
                         "rewrite_attempts": target_gate.get("rewrite_attempts"),
                         "quality_fail_stage": target_gate.get("quality_fail_stage"),
+                        "quality_field_scores": target_gate.get("quality_field_scores"),
+                        "quality_failed_fields": target_gate.get("quality_failed_fields"),
+                        "quality_required_evidence": target_gate.get("quality_required_evidence"),
+                        "evidence_tier_mix": target_gate.get("evidence_tier_mix"),
+                        "why_now_recency_passed": target_gate.get("why_now_recency_passed"),
                         "is_new_target": bool(target_gate.get("is_new_target")),
                         "gate_reason": target_gate.get("reason"),
                         "matched_posted_at_utc": target_gate.get("matched_posted_at_utc"),
@@ -5595,6 +6558,11 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                     "quality_reasons": target_gate.get("quality_reasons"),
                     "rewrite_attempts": target_gate.get("rewrite_attempts"),
                     "quality_fail_stage": target_gate.get("quality_fail_stage"),
+                    "quality_field_scores": target_gate.get("quality_field_scores"),
+                    "quality_failed_fields": target_gate.get("quality_failed_fields"),
+                    "quality_required_evidence": target_gate.get("quality_required_evidence"),
+                    "evidence_tier_mix": target_gate.get("evidence_tier_mix"),
+                    "why_now_recency_passed": target_gate.get("why_now_recency_passed"),
                 }
             )
             continue
@@ -5695,6 +6663,11 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                         quality_reasons=draft.quality_reasons,
                         rewrite_attempts=draft.rewrite_attempts,
                         quality_fail_stage=draft.quality_fail_stage,
+                        quality_field_scores=draft.quality_field_scores,
+                        quality_failed_fields=draft.quality_failed_fields,
+                        quality_required_evidence=draft.quality_required_evidence,
+                        evidence_tier_mix=draft.evidence_tier_mix,
+                        why_now_recency_passed=draft.why_now_recency_passed,
                     )
                     replacement_funding = _resolve_funding_snapshot(
                         store=store,
@@ -5751,6 +6724,11 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                             "quality_reasons": target_gate.get("quality_reasons"),
                             "rewrite_attempts": target_gate.get("rewrite_attempts"),
                             "quality_fail_stage": target_gate.get("quality_fail_stage"),
+                            "quality_field_scores": target_gate.get("quality_field_scores"),
+                            "quality_failed_fields": target_gate.get("quality_failed_fields"),
+                            "quality_required_evidence": target_gate.get("quality_required_evidence"),
+                            "evidence_tier_mix": target_gate.get("evidence_tier_mix"),
+                            "why_now_recency_passed": target_gate.get("why_now_recency_passed"),
                             "is_new_target": bool(target_gate.get("is_new_target")),
                             "gate_reason": target_gate.get("reason"),
                             "matched_posted_at_utc": target_gate.get("matched_posted_at_utc"),
@@ -5918,6 +6896,11 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                         quality_reasons=draft.quality_reasons,
                         rewrite_attempts=draft.rewrite_attempts,
                         quality_fail_stage=draft.quality_fail_stage,
+                        quality_field_scores=draft.quality_field_scores,
+                        quality_failed_fields=draft.quality_failed_fields,
+                        quality_required_evidence=draft.quality_required_evidence,
+                        evidence_tier_mix=draft.evidence_tier_mix,
+                        why_now_recency_passed=draft.why_now_recency_passed,
                     )
                     message = _render_board_seat_message(company=company, draft=draft)
                     investment_text = _extract_investment_text(message)
@@ -5971,6 +6954,11 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                             "quality_reasons": target_gate.get("quality_reasons"),
                             "rewrite_attempts": target_gate.get("rewrite_attempts"),
                             "quality_fail_stage": target_gate.get("quality_fail_stage"),
+                            "quality_field_scores": target_gate.get("quality_field_scores"),
+                            "quality_failed_fields": target_gate.get("quality_failed_fields"),
+                            "quality_required_evidence": target_gate.get("quality_required_evidence"),
+                            "evidence_tier_mix": target_gate.get("evidence_tier_mix"),
+                            "why_now_recency_passed": target_gate.get("why_now_recency_passed"),
                         }
                     )
                     posted = True
@@ -6063,6 +7051,11 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                         "quality_reasons": target_gate.get("quality_reasons"),
                         "rewrite_attempts": target_gate.get("rewrite_attempts"),
                         "quality_fail_stage": target_gate.get("quality_fail_stage"),
+                        "quality_field_scores": target_gate.get("quality_field_scores"),
+                        "quality_failed_fields": target_gate.get("quality_failed_fields"),
+                        "quality_required_evidence": target_gate.get("quality_required_evidence"),
+                        "evidence_tier_mix": target_gate.get("evidence_tier_mix"),
+                        "why_now_recency_passed": target_gate.get("why_now_recency_passed"),
                     }
                 )
                 posted = True
@@ -6124,6 +7117,9 @@ def status() -> dict[str, Any]:
         "quality_fail_count": 0,
         "avg_rewrite_attempts": 0.0,
         "top_failure_reasons": [],
+        "quality_pass_rate_7d": 0.0,
+        "top_failed_fields_7d": [],
+        "avg_rewrite_attempts_7d": 0.0,
     }
     quality_path = _quality_metrics_path()
     if quality_path.exists():
@@ -6136,6 +7132,9 @@ def status() -> dict[str, Any]:
                     "quality_fail_count": int(payload.get("quality_fail_count") or 0),
                     "avg_rewrite_attempts": float(payload.get("avg_rewrite_attempts") or 0.0),
                     "top_failure_reasons": list(payload.get("top_failure_reasons") or []),
+                    "quality_pass_rate_7d": float(payload.get("quality_pass_rate_7d") or 0.0),
+                    "top_failed_fields_7d": list(payload.get("top_failed_fields_7d") or []),
+                    "avg_rewrite_attempts_7d": float(payload.get("avg_rewrite_attempts_7d") or 0.0),
                 }
         except Exception:
             pass
@@ -6201,6 +7200,13 @@ def status() -> dict[str, Any]:
         "rewrite_max_retries": _rewrite_max_retries(),
         "source_gate_mode": _source_gate_mode(),
         "quality_fail_policy": _quality_fail_policy(),
+        "source_policy": _source_policy(),
+        "why_now_recency_days": _why_now_recency_days(),
+        "critic_min_field_score": _critic_min_field_score(),
+        "critic_min_overall_score": _critic_min_overall_score(),
+        "evidence_fetch_enabled": _evidence_fetch_enabled(),
+        "evidence_fetch_timeout_ms": _evidence_fetch_timeout_ms(),
+        "evidence_max_urls": _evidence_max_urls(),
         "review_model": _review_model(),
         "portcos": portcos,
         "recent_runs": store.recent_runs(limit=20),
@@ -6230,6 +7236,9 @@ def status() -> dict[str, Any]:
             "oldest_cache_age_days": round(oldest_cache_age_days, 2),
         },
         "last_quality_run_metrics": quality_metrics,
+        "quality_pass_rate_7d": quality_metrics.get("quality_pass_rate_7d", 0.0),
+        "top_failed_fields_7d": quality_metrics.get("top_failed_fields_7d", []),
+        "avg_rewrite_attempts_7d": quality_metrics.get("avg_rewrite_attempts_7d", 0.0),
         "ledger_paths": {
             "artifact_dir": str(_ledger_dir()),
             "mirror_dir": str(_ledger_mirror_path()) if _ledger_mirror_enabled() else "",
