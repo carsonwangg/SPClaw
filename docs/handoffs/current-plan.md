@@ -1386,3 +1386,13 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `63 passed`.
 - Next:
   - add a post-sanitize target-lock re-check so retargeted outputs cannot bypass cooldown/new-target governance when final target differs from initial extraction.
+
+
+## Update (2026-02-26T20:15:28.162192+00:00, HFA Podcast V1)
+- `main` now includes HFA Podcast V1 merge commit `96caf25`.
+- Test verification passed for HFA podcast/transcript/routing suites (`26 passed`).
+- Runtime restarted and Slack channel status recovered.
+- Remaining blocker before clean acceptance: ASR transcription fallback uses `verbose_json` against model `gpt-4o-mini-transcribe-api-ev3`, which rejects that response format; podcast runs with missing captions currently fail with `transcript_unavailable`.
+- Operational checks complete:
+  - DB writable: `/opt/coatue-claw-data/db/hf_analyst.sqlite`
+  - Artifact dir writable: `/opt/coatue-claw-data/artifacts/hf-analyst/`

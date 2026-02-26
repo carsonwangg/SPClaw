@@ -2876,3 +2876,27 @@ Then confirm bot returns:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `63 passed`.
 - Operational note:
   - Posted a manual real-research board-seat message to `#openai` at Slack ts `1772060668.808919` while extractor hardening is being stabilized for fully automated target selection.
+
+
+## Update (2026-02-26T20:15:28.162192+00:00, HFA Podcast V1 deploy on main)
+- Merged `origin/codex/agent-hf-analyst` into `main` with merge commit `96caf25`.
+- Dependency/runtime updates:
+  - installed editable package in runtime venv: `/opt/coatue-claw/.venv/bin/python -m pip install -e .`
+  - ensured `yt-dlp` and `youtube-transcript-api` are installed in runtime venv.
+- Verification:
+  - `PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_hf_analyst.py tests/test_hf_podcast.py tests/test_hf_youtube_transcript.py tests/test_hf_document_extract.py tests/test_slack_routing.py` -> `26 passed`
+  - `PYTHONPATH=src python3 -m compileall -q src` -> pass
+- Runtime restart:
+  - `make openclaw-restart` completed
+  - `make openclaw-slack-status` probe healthy after restart
+- CLI acceptance:
+  - `python -m coatue_claw.cli hfa podcast --url <youtube-url> --question "focus on variant view"` executed and persisted run record (`run_kind=podcast_youtube`), but run failed due transcript fallback API incompatibility:
+    - `HFAError: transcript_unavailable:captions_empty | asr_transcription_failed:BadRequestError`
+    - OpenAI error: `response_format verbose_json is not compatible with model gpt-4o-mini-transcribe-api-ev3`
+  - `python -m coatue_claw.cli hfa status --limit 5` confirms latest run exists with `run_kind=podcast_youtube` and `status=failed`.
+- Env/path checks:
+  - `OPENAI_API_KEY` resolved true when loading `.env.prod`.
+  - `/opt/coatue-claw-data/db/hf_analyst.sqlite` writable.
+  - `/opt/coatue-claw-data/artifacts/hf-analyst/` writable.
+- Note:
+  - `.env.prod` contains an unquoted value with spaces in `COATUE_CLAW_BOARD_SEAT_PORTCOS`; sourcing file in shell raises parse warning. Runtime itself remains functional via process env, but shell sourcing should be corrected.
