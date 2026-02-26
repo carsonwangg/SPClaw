@@ -40,46 +40,34 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
-- HFA bare command aliases shipped on `codex/agent-hf-analyst`:
-  - users can invoke HFA flows without prefix:
-    - `analyze ...`, `podcast <url> ...`, `quotes <url>`, `status`
-  - YouTube link in `analyze <url>` routes to podcast mode.
-  - validation:
-    - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_slack_routing.py tests/test_hf_youtube_transcript.py` -> `17 passed`
-- HFA conversational command support shipped on `codex/agent-hf-analyst`:
-  - `src/coatue_claw/hf_analyst.py` now maps conversational variants into HFA intents (especially podcast/quotes/transcript phrasings).
-  - `src/coatue_claw/slack_bot.py` now resolves YouTube URL from prior thread messages when podcast intent is present but URL is omitted.
-  - validation:
-    - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_slack_routing.py tests/test_hf_youtube_transcript.py` -> `17 passed`
-- HFA command-shape hardening shipped on `codex/agent-hf-analyst`:
-  - `src/coatue_claw/slack_bot.py` now treats `hfa analyze ...<youtube-url>...` as podcast mode (alias route) so explicit HFA commands do not fall into non-HFA fallback behavior.
-  - `src/coatue_claw/hf_youtube_transcript.py` dependency errors now point to venv-only install command:
-    - `/opt/coatue-claw/.venv/bin/python -m pip install -U youtube-transcript-api yt-dlp`
-  - validation:
-    - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_hf_youtube_transcript.py tests/test_slack_routing.py` -> `17 passed`
-    - `PYTHONPATH=src python3 -m compileall -q src` -> pass
-- HFA Slack command routing hardening shipped on `codex/agent-hf-analyst`:
-  - `src/coatue_claw/slack_bot.py` now fast-path handles `hfa ...` commands before change-request heuristics/fallback.
-  - this reduces/avoids off-contract conversational replies and unrelated `Exec:` warning noise for explicit HFA command messages.
-  - validation:
-    - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_slack_routing.py` -> `12 passed`
-- HFA podcast ASR compatibility patch shipped on `codex/agent-hf-analyst`:
-  - `src/coatue_claw/hf_youtube_transcript.py` now retries OpenAI audio transcription without `response_format` when model/API rejects `verbose_json`.
-  - this resolves failures like: `response_format 'verbose_json' is not compatible with model ...`.
-  - regression test added in `tests/test_hf_youtube_transcript.py`.
-  - validation:
-    - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_youtube_transcript.py tests/test_hf_podcast.py tests/test_hf_analyst.py` -> `16 passed`
-    - `PYTHONPATH=src python3 -m compileall -q src` -> pass
-- HFA Podcast V1 implementation is complete on `codex/agent-hf-analyst`:
-  - YouTube transcript flow: captions first, ASR fallback.
-  - New HFA mode for podcast summarization with top verbatim quotes + timestamps.
-  - Slack command and DM auto-run routing are wired.
-  - CLI command `claw hfa podcast` is wired.
-  - HFA store schema extended for podcast runs + DM dedupe.
-  - targeted validation:
-    - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_hf_podcast.py tests/test_hf_youtube_transcript.py tests/test_hf_document_extract.py tests/test_slack_routing.py` -> `26 passed`
-    - `PYTHONPATH=src python3 -m compileall -q src` -> pass
-- Board Seat has been reset to a scaffold baseline to restart from scratch:
+- Board Seat v1 rebuild is now implemented in `src/coatue_claw/board_seat_daily.py`:
+  - weekday noon PT scheduling posture (`COATUE_CLAW_BOARD_SEAT_TIME=12:00`, `COATUE_CLAW_BOARD_SEAT_WEEKDAYS_ONLY=1`).
+  - auto channel discovery (`company_match`) across public/private Slack channels with static fallback.
+  - web-first target discovery (Brave first, Serp fallback), candidate scoring, high-confidence new-target gate, and 20-day hard no-repeat (default).
+  - repitch requires significance score threshold and emits explicit prior-pitch/new-evidence note when resurfaced.
+  - concise 5-section output contract with source citations moved to thread reply.
+  - funding cache + confidence model (`verified|partial|weak`) with low-confidence warning line.
+  - quality gate + rewrite loop; on persistent failure, memory-only rewrite posts with mandatory warning thread.
+  - persisted audit tables: `board_seat_runs`, `board_seat_candidates`, `board_seat_target_events`, `board_seat_funding_cache`, `board_seat_channel_discovery`.
+  - funding maintenance commands now live:
+    - `board_seat_daily refresh-funding`
+    - `board_seat_daily funding-quality-report`
+  - legacy DB compatibility fix shipped:
+    - additive/idempotent schema migrations now auto-upgrade older SQLite files at startup.
+    - prevents runtime failures on missing legacy columns (for example `board_seat_target_events.source_url`).
+  - output hardening shipped for live quality:
+    - blocks already-acquired targets from being pitched again (`target_already_acquired` gate reason).
+    - blocks product/self targets (for example `Anthropic -> Claude`) via product-alias validation.
+    - blocks ambiguous common-word targets (for example `Lead`) via target validation.
+    - funding amount parser now filters noisy/outlier amounts and enforces funding-context extraction.
+    - backer rendering now suppresses clause fragments and truncates cleanly with `(+N more)`.
+    - Slack source citations now reliably post in-thread (fixed SlackResponse `ts` handling).
+  - targeting flow upgraded to two-stage:
+    - LLM idea generation for candidate targets.
+    - deterministic entity verification (high-signal domains + target-name consistency) before posting.
+    - if a candidate is rejected, system iterates to next candidate instead of stopping at first failure.
+- Historical context (superseded by v1 rebuild above):
+  - Board Seat was reset to scaffold baseline before the current rebuild.
   - `src/coatue_claw/board_seat_daily.py` no longer runs legacy drafting/quality logic.
   - default behavior is hard skip with `feature_reset_in_progress`.
   - CLI/ops commands are still present so launchd and make targets remain stable.

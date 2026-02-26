@@ -38,6 +38,8 @@ def board_seat_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_TIME", "12:00")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SEARCH_ORDER", "brave,serp")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", "1")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_LLM_CANDIDATE_GEN_ENABLED", "0")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_CHANNEL_DISCOVERY", "static")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_MEMORY_REWRITE_ON_FAIL", "1")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SOURCES_IN_THREAD", "1")
     monkeypatch.delenv("COATUE_CLAW_BOARD_SEAT_PORTCOS", raising=False)
@@ -353,6 +355,147 @@ def test_run_once_memory_fallback_posts_warning(board_seat_env: Path, monkeypatc
     assert row["generation_mode"] == "memory_rewrite"
     assert row["warning_thread_posted"] is True
     assert len(calls) >= 3
+
+
+def test_run_once_retries_next_target_when_first_skipped(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_discover_channels_from_slack",
+        lambda: ([board_seat_daily.DiscoveryChannel(company="Anthropic", channel_ref="anthropic", channel_id="C123")], []),
+    )
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_collect_web_rows",
+        lambda queries: (
+            [
+                _row(title="Anthropic acquisition candidate AlphaAI", url="https://news.one/a", snippet="acquisition"),
+                _row(title="Anthropic acquisition candidate BetaData", url="https://news.two/b", snippet="acquisition"),
+            ],
+            [],
+        ),
+    )
+
+    calls = {"n": 0}
+
+    def _fake_pick_target(**kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return (
+                board_seat_daily.CandidateScore(
+                    target="AlphaAI",
+                    target_key="alphaai",
+                    score=0.9,
+                    confidence="high",
+                    evidence_count=3,
+                    distinct_domains=2,
+                    row_indexes=(0,),
+                ),
+                None,
+                1.0,
+                [
+                    board_seat_daily.CandidateScore(
+                        target="AlphaAI",
+                        target_key="alphaai",
+                        score=0.9,
+                        confidence="high",
+                        evidence_count=3,
+                        distinct_domains=2,
+                        row_indexes=(0,),
+                    ),
+                    board_seat_daily.CandidateScore(
+                        target="BetaData",
+                        target_key="betadata",
+                        score=0.88,
+                        confidence="high",
+                        evidence_count=3,
+                        distinct_domains=2,
+                        row_indexes=(1,),
+                    ),
+                ],
+                [],
+            )
+        return (
+            board_seat_daily.CandidateScore(
+                target="BetaData",
+                target_key="betadata",
+                score=0.88,
+                confidence="high",
+                evidence_count=3,
+                distinct_domains=2,
+                row_indexes=(1,),
+            ),
+            None,
+            1.0,
+            [
+                board_seat_daily.CandidateScore(
+                    target="BetaData",
+                    target_key="betadata",
+                    score=0.88,
+                    confidence="high",
+                    evidence_count=3,
+                    distinct_domains=2,
+                    row_indexes=(1,),
+                )
+            ],
+            [],
+        )
+
+    monkeypatch.setattr(board_seat_daily, "_pick_target", _fake_pick_target)
+
+    def _fake_verify(**kwargs):
+        if kwargs.get("target") == "AlphaAI":
+            return False, [], "entity_unverified", 0.2
+        return (
+            True,
+            [
+                _row(title="BetaData funding", url="https://techcrunch.com/betadata", snippet="raised $60M"),
+                _row(title="BetaData profile", url="https://crunchbase.com/organization/betadata", snippet="investors"),
+            ],
+            "",
+            0.92,
+        )
+
+    monkeypatch.setattr(board_seat_daily, "_verify_target_candidate", _fake_verify)
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_funding_snapshot_for_target",
+        lambda **kwargs: board_seat_daily.FundingSnapshot(
+            target="BetaData",
+            target_key="betadata",
+            total_raised="$60M",
+            latest_round="Series B",
+            latest_round_date="unknown",
+            backers=("Sequoia",),
+            evidence_count=2,
+            distinct_domains=2,
+            conflict_flags=(),
+            verification_status="partial",
+            source_rows=(),
+        ),
+    )
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_build_draft",
+        lambda **kwargs: board_seat_daily.DraftResult(
+            text=(
+                "*Board Seat as a Service — Anthropic*\n"
+                "*Thesis*\n- Acquire BetaData.\n"
+                "*What the target does*\n- Data tooling.\n"
+                "*Why it’s a fit for portfolio company*\n- Improves stack.\n"
+                "*Risks*\n- Integration risk.\n"
+                "*Funding history and backers*\n- Total raised: $60M"
+            ),
+            generation_mode="web_synth",
+            quality_fail_codes=(),
+            memory_rewrite_used=False,
+        ),
+    )
+    monkeypatch.setattr(board_seat_daily, "_post_to_slack", lambda **kwargs: ("C123", "100.1", None))
+
+    payload = board_seat_daily.run_once(force=True, dry_run=False)
+    assert len(payload["sent"]) == 1
+    assert payload["sent"][0]["target"] == "BetaData"
+    assert payload["sent"][0]["selection_attempts"] >= 2
 
 
 def test_target_memory_lock_days_respected(board_seat_env: Path) -> None:
