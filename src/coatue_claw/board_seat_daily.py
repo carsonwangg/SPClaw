@@ -146,6 +146,38 @@ LOW_SIGNAL_DOMAINS = {
     "angel.co",
 }
 
+JOB_INTENT_TERMS = {
+    "job",
+    "jobs",
+    "career",
+    "careers",
+    "hiring",
+    "role",
+    "position",
+    "apply",
+    "application",
+    "recruiter",
+}
+
+ROLE_PHRASE_TOKENS = {
+    "corporate",
+    "development",
+    "integration",
+    "manager",
+    "director",
+    "advisory",
+    "associate",
+    "principal",
+    "operations",
+    "strategy",
+    "business",
+    "partnerships",
+    "lead",
+    "head",
+    "vp",
+    "intern",
+}
+
 
 @dataclass(frozen=True)
 class SeedTargetResult:
@@ -908,13 +940,31 @@ def _is_valid_target_name(*, target: str, company: str) -> tuple[bool, str]:
         return False, "noisy_suffix"
     if len(re.findall(r"[A-Za-z]", t)) < 2:
         return False, "not_name_like"
+    if _looks_like_role_or_job_phrase(t):
+        return False, "role_phrase_not_company"
     return True, "ok"
+
+
+def _looks_like_role_or_job_phrase(name: str) -> bool:
+    tokens = [tok for tok in re.findall(r"[a-z0-9]+", _normalize_whitespace(name).lower()) if tok]
+    if not tokens:
+        return False
+    if any(tok in JOB_INTENT_TERMS for tok in tokens):
+        return True
+    if len(tokens) >= 2 and all(tok in ROLE_PHRASE_TOKENS for tok in tokens):
+        return True
+    phrase = " ".join(tokens)
+    if any(pattern in phrase for pattern in ("corporate development", "development integration", "integration advisory")):
+        return True
+    return False
 
 
 def _extract_candidates(company: str, rows: list[EvidenceRow]) -> list[CandidateScore]:
     by_key: dict[str, dict[str, Any]] = {}
     for idx, row in enumerate(rows):
         text = f"{row.title} {row.snippet}".lower()
+        if any(term in text for term in JOB_INTENT_TERMS):
+            continue
         if not any(term in text for term in ("acquire", "acquisition", "acqui", "buy", "takeover", "merger", "funding", "startup")):
             continue
         candidates = _extract_title_candidates(row.title)

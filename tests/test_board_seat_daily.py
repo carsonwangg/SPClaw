@@ -115,6 +115,9 @@ def test_target_validation_rejects_company_product_names() -> None:
     ok3, reason3 = board_seat_daily._is_valid_target_name(target="Lead", company="Anthropic")
     assert ok3 is False
     assert reason3 == "ambiguous_common_term"
+    ok4, reason4 = board_seat_daily._is_valid_target_name(target="Corporate Development Integration", company="Anthropic")
+    assert ok4 is False
+    assert reason4 == "role_phrase_not_company"
 
 
 def test_candidate_extraction_rejects_company_product_targets() -> None:
@@ -144,6 +147,25 @@ def test_filter_rows_for_target_drops_low_signal_sources() -> None:
     filtered = board_seat_daily._filter_rows_for_target(target="Lead", rows=rows)
     assert len(filtered) == 1
     assert "techcrunch.com" in filtered[0].domain
+
+
+def test_candidate_extraction_skips_job_intent_rows() -> None:
+    rows = [
+        _row(
+            title="Job Application for Corporate Development Integration Lead at Anthropic",
+            url="https://job-boards.greenhouse.io/anthropic/jobs/123",
+            snippet="Apply to the role",
+        ),
+        _row(
+            title="Anthropic acquires Vercept",
+            url="https://techcrunch.com/2026/02/25/anthropic-acquires-vercept",
+            snippet="acquisition details",
+        ),
+    ]
+    candidates = board_seat_daily._extract_candidates("Anthropic", rows)
+    names = [c.target for c in candidates]
+    assert "Corporate Development Integration" not in names
+    assert "Vercept" in names
 
 
 def test_funding_snapshot_weak_adds_warning() -> None:
