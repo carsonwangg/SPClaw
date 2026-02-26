@@ -2015,6 +2015,25 @@ def test_run_once_quality_failure_posts_diagnostic_when_enabled(tmp_path: Path, 
     assert "Quality block (no reliable thesis draft)" in row["preview"]
 
 
+def test_quality_fields_payload_includes_fact_and_overlap_defaults() -> None:
+    payload = board_seat_daily._quality_fields_payload(_v6_draft())
+    assert set(payload["fact_cards_count_by_field"].keys()) == {"target_does", "why_now", "whats_different", "mos_risks"}
+    assert set(payload["quote_overlap_by_field"].keys()) == {"target_does", "why_now", "whats_different", "mos_risks"}
+
+
+def test_high_conf_gate_includes_fact_and_overlap_defaults(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", "0")
+    gate = board_seat_daily._high_conf_new_target_gate(
+        store=board_seat_daily.BoardSeatStore(),
+        company="OpenAI",
+        draft=_v6_draft(),
+    )
+    assert set(gate["fact_cards_count_by_field"].keys()) == {"target_does", "why_now", "whats_different", "mos_risks"}
+    assert set(gate["quote_overlap_by_field"].keys()) == {"target_does", "why_now", "whats_different", "mos_risks"}
+
+
 def test_run_once_sent_payload_includes_quality_fields(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))

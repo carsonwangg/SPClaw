@@ -1283,6 +1283,11 @@ def _quality_fields_payload(draft: BoardSeatDraft) -> dict[str, Any]:
     failure_codes = [str(item) for item in list(draft.quality_failure_codes or []) if str(item).strip()]
     if not failure_codes:
         failure_codes = _quality_failure_codes_from_reasons([str(item) for item in list(draft.quality_reasons or [])])
+    fact_cards_count_by_field = {str(key): int(value) for key, value in dict(draft.fact_cards_count_by_field or {}).items()}
+    quote_overlap_by_field = {str(key): round(float(value), 4) for key, value in dict(draft.quote_overlap_by_field or {}).items()}
+    for field_name in _fact_card_fields():
+        fact_cards_count_by_field.setdefault(field_name, 0)
+        quote_overlap_by_field.setdefault(field_name, 0.0)
     return {
         "quality_gate_passed": bool(draft.quality_gate_passed),
         "quality_score": round(float(draft.quality_score), 4),
@@ -1294,8 +1299,8 @@ def _quality_fields_payload(draft: BoardSeatDraft) -> dict[str, Any]:
         "quality_failure_codes": failure_codes,
         "quality_required_evidence": {str(key): bool(value) for key, value in dict(draft.quality_required_evidence or {}).items()},
         "evidence_tier_mix": {str(key): int(value) for key, value in dict(draft.evidence_tier_mix or {}).items()},
-        "fact_cards_count_by_field": {str(key): int(value) for key, value in dict(draft.fact_cards_count_by_field or {}).items()},
-        "quote_overlap_by_field": {str(key): round(float(value), 4) for key, value in dict(draft.quote_overlap_by_field or {}).items()},
+        "fact_cards_count_by_field": fact_cards_count_by_field,
+        "quote_overlap_by_field": quote_overlap_by_field,
         "why_now_recency_passed": bool(draft.why_now_recency_passed),
     }
 
@@ -2425,6 +2430,9 @@ def _high_conf_new_target_gate(
     evidence_tier_mix = {str(key): int(value) for key, value in dict(draft.evidence_tier_mix or {}).items()}
     fact_cards_count_by_field = {str(key): int(value) for key, value in dict(draft.fact_cards_count_by_field or {}).items()}
     quote_overlap_by_field = {str(key): round(float(value), 4) for key, value in dict(draft.quote_overlap_by_field or {}).items()}
+    for field_name in _fact_card_fields():
+        fact_cards_count_by_field.setdefault(field_name, 0)
+        quote_overlap_by_field.setdefault(field_name, 0.0)
     why_now_recency_passed = bool(draft.why_now_recency_passed)
     confidence_payload = _target_confidence_from_draft_sources(company=company, draft=draft)
     confidence = str(confidence_payload.get("confidence") or "Low")
@@ -6994,8 +7002,11 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                     quality_fail_stage=draft.quality_fail_stage,
                     quality_field_scores=draft.quality_field_scores,
                     quality_failed_fields=draft.quality_failed_fields,
+                    quality_failure_codes=draft.quality_failure_codes,
                     quality_required_evidence=draft.quality_required_evidence,
                     evidence_tier_mix=draft.evidence_tier_mix,
+                    fact_cards_count_by_field=draft.fact_cards_count_by_field,
+                    quote_overlap_by_field=draft.quote_overlap_by_field,
                     why_now_recency_passed=draft.why_now_recency_passed,
                 )
             result["event_tracking"].append(
@@ -7244,8 +7255,11 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                         quality_fail_stage=draft.quality_fail_stage,
                         quality_field_scores=draft.quality_field_scores,
                         quality_failed_fields=draft.quality_failed_fields,
+                        quality_failure_codes=draft.quality_failure_codes,
                         quality_required_evidence=draft.quality_required_evidence,
                         evidence_tier_mix=draft.evidence_tier_mix,
+                        fact_cards_count_by_field=draft.fact_cards_count_by_field,
+                        quote_overlap_by_field=draft.quote_overlap_by_field,
                         why_now_recency_passed=draft.why_now_recency_passed,
                     )
                     replacement_funding = _resolve_funding_snapshot(
@@ -7590,8 +7604,11 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                         quality_fail_stage=draft.quality_fail_stage,
                         quality_field_scores=draft.quality_field_scores,
                         quality_failed_fields=draft.quality_failed_fields,
+                        quality_failure_codes=draft.quality_failure_codes,
                         quality_required_evidence=draft.quality_required_evidence,
                         evidence_tier_mix=draft.evidence_tier_mix,
+                        fact_cards_count_by_field=draft.fact_cards_count_by_field,
+                        quote_overlap_by_field=draft.quote_overlap_by_field,
                         why_now_recency_passed=draft.why_now_recency_passed,
                     )
                     message = _render_board_seat_message(company=company, draft=draft)

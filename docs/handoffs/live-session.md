@@ -3,6 +3,20 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-26, board-seat diagnostic observability propagation fix)
+- Patched `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py` to fix missing diagnostic payload maps after retarget/repitch copy flows:
+  - preserved new quality fields through all `BoardSeatDraft(...)` copy constructors:
+    - `quality_failure_codes`
+    - `fact_cards_count_by_field`
+    - `quote_overlap_by_field`
+  - hardened `_quality_fields_payload(...)` and `_high_conf_new_target_gate(...)` to always emit keyed defaults for all thesis fields.
+- Added tests in `/Users/carsonwang/CoatueClaw/tests/test_board_seat_daily.py`:
+  - payload map defaults present
+  - target gate map defaults present
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `75 passed`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
+
 ## Update (2026-02-26, board-seat fact-cards + diagnostic fallback recovery)
 - Implemented Board Seat output recovery in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
   - added fact-card pipeline (`FactCard`, `_build_fact_cards`) so writer input is sectioned claim cards instead of raw prose snippets.

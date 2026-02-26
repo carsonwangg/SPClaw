@@ -40,6 +40,15 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Board-seat diagnostic fallback observability patch shipped in `src/coatue_claw/board_seat_daily.py`:
+  - fixed field propagation across retarget/repitch copy paths so quality observability survives draft rewrites.
+  - ensured payload defaults always include full maps for:
+    - `fact_cards_count_by_field`
+    - `quote_overlap_by_field`
+  - quality gate payload and target gate payload now consistently return non-empty keyed maps (`target_does`, `why_now`, `whats_different`, `mos_risks`).
+  - validation:
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `75 passed`
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
 - Board-seat output recovery shipped in `src/coatue_claw/board_seat_daily.py` with fact-cards + diagnostic fallback:
   - added delivery and anti-copy controls:
     - `COATUE_CLAW_BOARD_SEAT_DELIVERY_MODE=diagnostic_fallback`
