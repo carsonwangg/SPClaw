@@ -3,6 +3,12 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-26, board-seat cooldown default change)
+- Board Seat default cooldown updated from 14 days to 20 days:
+  - `COATUE_CLAW_BOARD_SEAT_TARGET_LOCK_DAYS` default in code now `20`.
+  - `.env.example` updated to `COATUE_CLAW_BOARD_SEAT_TARGET_LOCK_DAYS=20`.
+- Note: explicit env values in `/opt/coatue-claw/.env.prod` still take precedence.
+
 ## Update (2026-02-26, board-seat v1 rebuild: noon PT + natural synthesis + memory fallback)
 - Rebuilt `src/coatue_claw/board_seat_daily.py` from reset scaffold to production v1 pipeline:
   - weekday noon schedule posture with `COATUE_CLAW_BOARD_SEAT_TIME=12:00` and `COATUE_CLAW_BOARD_SEAT_WEEKDAYS_ONLY=1`.

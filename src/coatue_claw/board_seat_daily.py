@@ -284,11 +284,11 @@ def _board_seat_time() -> str:
 
 
 def _target_lock_days() -> int:
-    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_TARGET_LOCK_DAYS", "14") or "14").strip()
+    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_TARGET_LOCK_DAYS", "20") or "20").strip()
     try:
         val = int(raw)
     except Exception:
-        val = 14
+        val = 20
     return max(1, min(90, val))
 
 

@@ -19,7 +19,7 @@
   - weekday-noon schedule gating
   - channel auto-discovery (`company_match`)
   - web-first target search (`brave,serp`)
-  - high-confidence new-target gate + 14-day cooldown
+  - high-confidence new-target gate + 20-day cooldown (default)
   - repitch significance checks
   - concise 5-section output
   - funding confidence model + cache
