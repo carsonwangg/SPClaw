@@ -40,6 +40,15 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Board Seat has been reset to a scaffold baseline to restart from scratch:
+  - `src/coatue_claw/board_seat_daily.py` no longer runs legacy drafting/quality logic.
+  - default behavior is hard skip with `feature_reset_in_progress`.
+  - CLI/ops commands are still present so launchd and make targets remain stable.
+  - funding subcommands are temporary `not_implemented` placeholders during rebuild.
+  - target memory/ledger primitives remain available for continuity.
+- Rebuild target for next phase:
+  - implement a clean v1 candidate-first architecture with minimal mandatory gates.
+  - keep reset mode on until new writer pipeline passes canary quality checks.
 - Board-seat writing fix v3 shipped in `src/coatue_claw/board_seat_daily.py`:
   - passthrough-biased drafting replaced by strict synthesis defaults.
   - defaults now prioritize quality-safe output:

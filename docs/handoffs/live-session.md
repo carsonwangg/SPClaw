@@ -3,6 +3,18 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-26, board-seat hard reset scaffold)
+- Board Seat was intentionally scrapped to start fresh after repeated output quality failures.
+- Replaced `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py` with a reset scaffold:
+  - `run-once` now skips all portcos with `reason=feature_reset_in_progress` while reset mode is on.
+  - `status` now reports `status=reset_scaffold`, `reset_mode`, `board_seat_enabled`, and memory counts.
+  - CLI contract is preserved (`run-once`, `status`, `seed-target`, `target-memory`, `export-ledger`, `refresh-funding`, `funding-quality-report`), but funding commands return `not_implemented` during reset.
+  - target memory storage remains available for manual seeding and later rebuild continuity.
+- New reset env defaults documented in `/Users/carsonwang/CoatueClaw/.env.example`:
+  - `COATUE_CLAW_BOARD_SEAT_RESET_MODE=1`
+  - `COATUE_CLAW_BOARD_SEAT_ENABLED=0`
+- Replaced test suite in `/Users/carsonwang/CoatueClaw/tests/test_board_seat_daily.py` with reset-scaffold coverage.
+
 ## Update (2026-02-26, board-seat writing fix v3: strict synthesis + fail-closed diagnostic)
 - Implemented strict no-passthrough writing mode in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
   - defaults now enforce:
