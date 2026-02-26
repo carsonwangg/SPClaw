@@ -40,6 +40,15 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- HFA Podcast V1 implementation is complete on `codex/agent-hf-analyst`:
+  - YouTube transcript flow: captions first, ASR fallback.
+  - New HFA mode for podcast summarization with top verbatim quotes + timestamps.
+  - Slack command and DM auto-run routing are wired.
+  - CLI command `claw hfa podcast` is wired.
+  - HFA store schema extended for podcast runs + DM dedupe.
+  - targeted validation:
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_hf_podcast.py tests/test_hf_youtube_transcript.py tests/test_hf_document_extract.py tests/test_slack_routing.py` -> `26 passed`
+    - `PYTHONPATH=src python3 -m compileall -q src` -> pass
 - Board Seat has been reset to a scaffold baseline to restart from scratch:
   - `src/coatue_claw/board_seat_daily.py` no longer runs legacy drafting/quality logic.
   - default behavior is hard skip with `feature_reset_in_progress`.

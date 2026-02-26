@@ -3,6 +3,25 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-26, HFA Podcast V1 shipped on agent branch)
+- Implemented YouTube podcast support inside HFA on `codex/agent-hf-analyst`:
+  - Slack command: `hfa podcast <youtube-url> [optional question]`
+  - DM auto-run for YouTube links with dedupe by `channel + user + thread + url_hash`
+  - CLI command: `claw hfa podcast --url <youtube-url> [--question \"...\"] [--dry-run]`
+- Added transcript ingestion modules:
+  - `src/coatue_claw/hf_youtube_transcript.py` for URL parsing, metadata, captions-first fetch, ASR fallback.
+  - `src/coatue_claw/hf_podcast.py` for summary generation, top verbatim quote validation, and artifact markdown rendering.
+- Extended HFA persistence:
+  - `hf_runs.run_kind` includes `podcast_youtube`.
+  - new tables: `hf_podcast_inputs`, `hf_dm_podcast_autoruns`.
+- Added/updated tests:
+  - `tests/test_hf_podcast.py`
+  - `tests/test_hf_youtube_transcript.py`
+  - `tests/test_hf_analyst.py` (podcast intent + DM dedupe + podcast analyze path)
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_hf_podcast.py tests/test_hf_youtube_transcript.py tests/test_hf_document_extract.py tests/test_slack_routing.py` -> `26 passed`
+  - `PYTHONPATH=src python3 -m compileall -q src` -> pass
+
 ## Update (2026-02-26, board-seat hard reset scaffold)
 - Board Seat was intentionally scrapped to start fresh after repeated output quality failures.
 - Replaced `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py` with a reset scaffold:
