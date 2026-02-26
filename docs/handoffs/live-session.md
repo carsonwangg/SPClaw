@@ -73,17 +73,21 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py tests/test_launchd_runtime.py` -> `33 passed`
 
-## Update (2026-02-26, HFA analyze->podcast alias routing + venv install hints)
-- Patched `src/coatue_claw/slack_bot.py`:
-  - when users type `hfa analyze ...` and include a YouTube URL, route directly to HFA podcast analysis instead of thread-doc analysis/fallback conversation.
-  - this prevents command-shape ambiguity like `hfa analyze this podcast <url>` from escaping the strict HFA flow.
-- Patched `src/coatue_claw/hf_youtube_transcript.py` dependency errors:
-  - missing transcript deps now return explicit venv-only install hints:
-    - `/opt/coatue-claw/.venv/bin/python -m pip install -U youtube-transcript-api yt-dlp`
-  - avoids suggesting system/user pip install patterns that fail on externally managed Python.
+## Update (2026-02-26, board-seat two-stage targeting hardening)
+- Reworked targeting behavior in `src/coatue_claw/board_seat_daily.py` to reduce fake/ambiguous leads:
+  - Stage A: LLM proposes candidate acquisition targets (excluding previously used targets when possible).
+  - Stage B: deterministic entity verification gate must pass before drafting/posting.
+- New verifier behavior:
+  - rejects low-signal/source-noise domains for target identity (`greenhouse`, `zoominfo`, etc.).
+  - requires target-entity mention consistency across multiple domains.
+  - blocks target if entity remains unverified (`gate_reason=entity_unverified`).
+  - maintains already-acquired hard block (`target_already_acquired`).
+- Additional target hygiene:
+  - blocks ambiguous common target terms (example: `Lead`) via validation.
+  - keeps product-name blocks (`Claude`, `ChatGPT`, etc.) to prevent self/product pitches.
+- Funding extraction now also uses target-specific high-signal filtering before computing totals/backers.
 - Validation:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_hf_youtube_transcript.py tests/test_slack_routing.py` -> `17 passed`
-  - `PYTHONPATH=src python3 -m compileall -q src` -> pass
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py tests/test_launchd_runtime.py` -> `34 passed`
 
 ## Update (2026-02-26, board-seat hard reset scaffold)
 - Board Seat was intentionally scrapped to start fresh after repeated output quality failures.

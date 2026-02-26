@@ -89,6 +89,18 @@ GENERIC_PRODUCT_NAME_BLOCKLIST = {
     "cursoride",
 }
 
+COMMON_AMBIGUOUS_TARGETS = {
+    "lead",
+    "growth",
+    "focus",
+    "scale",
+    "insight",
+    "momentum",
+    "core",
+    "vector",
+    "signal",
+}
+
 COMPANY_PRODUCT_ALIASES: dict[str, set[str]] = {
     "anthropic": {"claude", "claudeai", "claudecode"},
     "openai": {"chatgpt", "sora", "codex", "gpt4", "gpt5", "o1", "o3"},
@@ -122,6 +134,16 @@ MAJOR_EVENT_TERMS = {
     "launch",
     "deal",
     "revenue",
+}
+
+LOW_SIGNAL_DOMAINS = {
+    "job-boards.greenhouse.io",
+    "greenhouse.io",
+    "zoominfo.com",
+    "verifiedmetrics.com",
+    "builtin.com",
+    "wellfound.com",
+    "angel.co",
 }
 
 
@@ -673,12 +695,133 @@ def _search_queries_for_company(company: str) -> list[str]:
     ]
 
 
+def _target_verification_queries(*, company: str, target: str) -> list[str]:
+    return [
+        f"\"{target}\" company funding",
+        f"\"{target}\" startup investors",
+        f"{company} acquire {target}",
+        f"{target} announced funding round",
+    ]
+
+
 def _search_queries_for_funding(target: str) -> list[str]:
     return [
         f"{target} total funding raised",
         f"{target} latest funding round investors",
         f"{target} series round backers",
     ]
+
+
+def _domain_is_low_signal(domain: str) -> bool:
+    d = str(domain or "").lower().strip()
+    if not d:
+        return True
+    return d in LOW_SIGNAL_DOMAINS or any(
+        d.endswith("." + suffix) for suffix in LOW_SIGNAL_DOMAINS
+    )
+
+
+def _target_in_text(*, target: str, text: str) -> bool:
+    t = _normalize_whitespace(target)
+    s = _normalize_whitespace(text)
+    if not t or not s:
+        return False
+    pattern = r"\b" + re.escape(t) + r"\b"
+    if re.search(pattern, s, flags=re.IGNORECASE):
+        return True
+    # token fallback for multi-word variants
+    target_tokens = [tok for tok in re.findall(r"[a-z0-9]+", t.lower()) if len(tok) >= 3]
+    source_tokens = set(re.findall(r"[a-z0-9]+", s.lower()))
+    if target_tokens and all(tok in source_tokens for tok in target_tokens):
+        return True
+    return False
+
+
+def _filter_rows_for_target(*, target: str, rows: list[EvidenceRow]) -> list[EvidenceRow]:
+    out: list[EvidenceRow] = []
+    seen: set[str] = set()
+    for row in rows:
+        key = row.canonical_url or row.url
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        if _domain_is_low_signal(row.domain):
+            continue
+        text = _normalize_whitespace(f"{row.title} {row.snippet}")
+        if not _target_in_text(target=target, text=text):
+            continue
+        lowered = text.lower()
+        if any(term in lowered for term in ("job application", "hiring", "careers", "open role")):
+            continue
+        out.append(row)
+    return out
+
+
+def _llm_candidate_ideas(*, company: str, used_target_keys: set[str]) -> list[str]:
+    prompt = json.dumps(
+        {
+            "company": company,
+            "goal": "Suggest potential acquisition targets that are independent companies (not products/features).",
+            "constraints": [
+                "return 8 names max",
+                "prefer private companies and small public companies",
+                "exclude targets already pitched",
+                "exclude products or generic nouns",
+            ],
+            "exclude_target_keys": sorted(list(used_target_keys))[:120],
+            "output_schema": {"targets": ["CompanyA", "CompanyB"]},
+        },
+        indent=2,
+    )
+    raw = _chat_completion(
+        prompt=prompt,
+        system="Return compact JSON only with key `targets` as an array of company names.",
+        temperature=0.2,
+        max_tokens=300,
+    )
+    if not raw:
+        return []
+    try:
+        payload = json.loads(raw)
+        candidates = payload.get("targets") if isinstance(payload, dict) else None
+    except Exception:
+        m = re.search(r"\[[^\]]{1,1200}\]", raw, flags=re.DOTALL)
+        if not m:
+            return []
+        try:
+            candidates = json.loads(m.group(0))
+        except Exception:
+            return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in candidates if isinstance(candidates, list) else []:
+        name = _normalize_whitespace(str(item or ""))
+        key = _target_key(name)
+        if not name or not key or key in seen or key in used_target_keys:
+            continue
+        valid, _ = _is_valid_target_name(target=name, company=company)
+        if not valid:
+            continue
+        seen.add(key)
+        out.append(name)
+        if len(out) >= 8:
+            break
+    return out
+
+
+def _verify_target_candidate(*, company: str, target: str) -> tuple[bool, list[EvidenceRow], str, float]:
+    rows, _ = _collect_web_rows(_target_verification_queries(company=company, target=target))
+    filtered = _filter_rows_for_target(target=target, rows=rows)
+    if not filtered:
+        return False, [], "entity_unverified", 0.0
+    if _already_acquired_signal(company=company, target=target, rows=filtered):
+        return False, filtered, "target_already_acquired", 0.0
+    domains = {r.domain for r in filtered if r.domain}
+    authoritative_hits = sum(1 for r in filtered if r.domain in {"crunchbase.com", "dealroom.co", "tracxn.com", "pitchbook.com"})
+    score = min(1.0, len(filtered) * 0.12 + len(domains) * 0.22 + authoritative_hits * 0.15)
+    if len(filtered) < 2 or len(domains) < 2 or score < 0.6:
+        return False, filtered, "entity_unverified", round(score, 4)
+    return True, filtered, "", round(score, 4)
 
 
 def _collect_web_rows(queries: list[str]) -> tuple[list[EvidenceRow], list[str]]:
@@ -748,6 +891,8 @@ def _is_valid_target_name(*, target: str, company: str) -> tuple[bool, str]:
         return False, "conceptual"
     if tk in GENERIC_PRODUCT_NAME_BLOCKLIST:
         return False, "product_not_company"
+    if tk in COMMON_AMBIGUOUS_TARGETS:
+        return False, "ambiguous_common_term"
     company_key = _target_key(company)
     if tk in COMPANY_PRODUCT_ALIASES.get(company_key, set()):
         return False, "product_not_company"
@@ -2089,6 +2234,23 @@ def _pick_target(
     run_date_local: str,
 ) -> tuple[CandidateScore | None, str | None, float, list[CandidateScore], list[dict[str, Any]]]:
     candidates = _extract_candidates(company, rows)
+    existing_keys = {_target_key(str(r.get("target") or "")) for r in store.target_ledger_rows(company=company, limit=1000)}
+    llm_candidates = _llm_candidate_ideas(company=company, used_target_keys=existing_keys)
+    by_key: dict[str, CandidateScore] = {c.target_key: c for c in candidates}
+    for name in llm_candidates:
+        key = _target_key(name)
+        if key in by_key:
+            continue
+        by_key[key] = CandidateScore(
+            target=name,
+            target_key=key,
+            score=0.62,
+            confidence="medium",
+            evidence_count=0,
+            distinct_domains=0,
+            row_indexes=(),
+        )
+    candidates = sorted(by_key.values(), key=lambda x: (-x.score, -x.distinct_domains, -x.evidence_count, x.target.lower()))
     store.record_candidates(company=company, candidates=candidates, run_date_local=run_date_local)
 
     for candidate in candidates[:6]:
@@ -2143,6 +2305,7 @@ def _funding_snapshot_for_target(*, store: BoardSeatStore, target: str, force_re
             return cached
 
     rows, _ = _collect_web_rows(_search_queries_for_funding(target))
+    rows = _filter_rows_for_target(target=target, rows=rows)
     snapshot = _funding_from_rows(target, rows)
     store.upsert_funding_cache(snapshot)
     return snapshot
@@ -2198,7 +2361,44 @@ def _process_company(
         store.record_run(payload)
         return "skipped", payload
 
-    chosen_rows = [rows[i] for i in chosen.row_indexes if 0 <= i < len(rows)]
+    verified_ok, verified_rows, verify_reason, verify_score = _verify_target_candidate(company=company, target=chosen.target)
+    if not verified_ok:
+        payload = {
+            **result_base,
+            "status": "skipped",
+            "reason": "no_high_confidence_new_target",
+            "gate_reason": verify_reason or "entity_unverified",
+            "search_notes": search_notes,
+            "candidates_considered": len(candidates),
+            "target": chosen.target,
+            "target_key": chosen.target_key,
+            "target_confidence": chosen.confidence,
+            "target_confidence_score": chosen.score,
+            "entity_verification_score": verify_score,
+            "delivery_mode_applied": "skip",
+        }
+        store.record_run(payload)
+        return "skipped", payload
+
+    chosen_rows = verified_rows
+    effective_confidence = "high" if (verify_score >= 0.72 and len({r.domain for r in chosen_rows if r.domain}) >= 2) else "medium"
+    if _require_high_conf_new_target() and effective_confidence != "high":
+        payload = {
+            **result_base,
+            "status": "skipped",
+            "reason": "no_high_confidence_new_target",
+            "gate_reason": "target_confidence_not_high",
+            "search_notes": search_notes,
+            "candidates_considered": len(candidates),
+            "target": chosen.target,
+            "target_key": chosen.target_key,
+            "target_confidence": effective_confidence,
+            "target_confidence_score": verify_score,
+            "delivery_mode_applied": "skip",
+        }
+        store.record_run(payload)
+        return "skipped", payload
+
     funding = _funding_snapshot_for_target(store=store, target=chosen.target)
     last_post = store.latest_target_post(company=company, target_key=chosen.target_key)
     repitch_note = _repitch_note(last_post=last_post, events=repitch_events) if last_post else None
@@ -2280,8 +2480,8 @@ def _process_company(
         "channel_id": posted_channel_id,
         "target": chosen.target,
         "target_key": chosen.target_key,
-        "target_confidence": chosen.confidence,
-        "target_confidence_score": chosen.score,
+        "target_confidence": effective_confidence,
+        "target_confidence_score": verify_score,
         "funding_confidence": funding.verification_status,
         "generation_mode": draft.generation_mode,
         "quality_fail_codes": list(draft.quality_fail_codes),
