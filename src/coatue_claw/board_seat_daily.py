@@ -1369,7 +1369,7 @@ def _post_to_slack(*, channel_ref: str, text: str, thread_ts: str | None = None)
             if thread_ts:
                 kwargs["thread_ts"] = thread_ts
             resp = client.chat_postMessage(**kwargs)
-            ts = str(resp.get("ts") or "") if isinstance(resp, dict) else ""
+            ts = _normalize_whitespace(str(getattr(resp, "get", lambda *_: "")("ts") or ""))
             return channel_id, ts or None, None
         except SlackApiError as exc:  # pragma: no cover - runtime integration
             err = str(getattr(exc, "response", {}).get("error") or "") if hasattr(exc, "response") else str(exc)

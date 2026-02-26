@@ -472,3 +472,35 @@ def test_cli_run_once_json(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch
     payload = json.loads(out)
     assert payload["ok"] is True
     assert payload["format_version"] == board_seat_daily.BOARD_SEAT_FORMAT_VERSION
+
+
+def test_post_to_slack_reads_ts_from_slackresponse_like_object(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _Resp:
+        def __init__(self, payload: dict[str, str]) -> None:
+            self.payload = payload
+
+        def get(self, key: str, default: str = "") -> str:
+            return self.payload.get(key, default)
+
+    class _Client:
+        calls: list[dict[str, str]] = []
+
+        def __init__(self, token: str) -> None:
+            self.token = token
+
+        def chat_postMessage(self, **kwargs):
+            _Client.calls.append({k: str(v) for k, v in kwargs.items()})
+            return _Resp({"ts": "123.456"})
+
+    monkeypatch.setattr(board_seat_daily, "WebClient", _Client)
+    monkeypatch.setattr(board_seat_daily, "_slack_tokens", lambda: ["xoxb-test"])
+    monkeypatch.setattr(board_seat_daily, "_resolve_channel_id", lambda _client, _ref: "C123")
+
+    channel_id, ts, err = board_seat_daily._post_to_slack(channel_ref="openai", text="main message")
+    assert err is None
+    assert channel_id == "C123"
+    assert ts == "123.456"
+
+    _, thread_ts, _ = board_seat_daily._post_to_slack(channel_ref="openai", text="sources", thread_ts=ts)
+    assert thread_ts == "123.456"
+    assert any(call.get("thread_ts") == "123.456" for call in _Client.calls)

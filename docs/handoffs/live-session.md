@@ -53,6 +53,15 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py tests/test_launchd_runtime.py` -> `30 passed`
 
+## Update (2026-02-26, board-seat source-thread posting fix)
+- Fixed Slack thread behavior in `src/coatue_claw/board_seat_daily.py`:
+  - `_post_to_slack(...)` now reads `ts` from SlackResponse-like objects (not only raw dict), so follow-up source posts use a real `thread_ts`.
+  - resolves issue where `Sources` appeared as a separate channel message instead of a threaded reply.
+- Added regression in `tests/test_board_seat_daily.py`:
+  - `test_post_to_slack_reads_ts_from_slackresponse_like_object`
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py tests/test_launchd_runtime.py` -> `31 passed`
+
 ## Update (2026-02-26, board-seat hard reset scaffold)
 - Board Seat was intentionally scrapped to start fresh after repeated output quality failures.
 - Replaced `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py` with a reset scaffold:

@@ -59,6 +59,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
     - blocks already-acquired targets from being pitched again (`target_already_acquired` gate reason).
     - funding amount parser now filters noisy/outlier amounts and enforces funding-context extraction.
     - backer rendering now suppresses clause fragments and truncates cleanly with `(+N more)`.
+    - Slack source citations now reliably post in-thread (fixed SlackResponse `ts` handling).
 - Historical context (superseded by v1 rebuild above):
   - Board Seat was reset to scaffold baseline before the current rebuild.
   - `src/coatue_claw/board_seat_daily.py` no longer runs legacy drafting/quality logic.
