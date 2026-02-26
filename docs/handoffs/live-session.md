@@ -3,6 +3,27 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-26, board-seat v1 rebuild: noon PT + natural synthesis + memory fallback)
+- Rebuilt `src/coatue_claw/board_seat_daily.py` from reset scaffold to production v1 pipeline:
+  - weekday noon schedule posture with `COATUE_CLAW_BOARD_SEAT_TIME=12:00` and `COATUE_CLAW_BOARD_SEAT_WEEKDAYS_ONLY=1`.
+  - auto channel discovery for portco channels via Slack (`company_match`, public+private), with static fallback.
+  - web-first candidate discovery (`brave -> serp`), anti-noise target extraction, deterministic scoring, and high-confidence new-target gate.
+  - hard 14-day no-repeat lock and strict repitch significance gating after cooldown.
+  - concise 5-section Board Seat message contract.
+  - funding extraction (web-only), confidence tiering (`verified|partial|weak`), and low-confidence warning line.
+  - thread citation delivery (`Publisher — title: url`) and memory-only rewrite fallback warning thread.
+  - persisted audit tables for runs/candidates/events/funding cache/channel discovery.
+- Scheduler update in `src/coatue_claw/launchd_runtime.py`:
+  - board-seat default `StartCalendarInterval` now weekdays at 12:00.
+- Docs/env updates:
+  - `.env.example` now documents Board Seat v1 env contract.
+  - `AGENTS.md` Board Seat rule updated to v1 5-section structure and thread-source policy.
+  - `docs/handoffs/current-plan.md` updated with v1 status.
+- Validation run:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `15 passed`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `10 passed`
+  - `PYTHONPATH=src python3 -m pytest -q` currently blocked in this environment by missing optional deps (`yfinance`, `matplotlib`) during collection.
+
 ## Update (2026-02-26, board-seat hard reset scaffold)
 - Board Seat was intentionally scrapped to start fresh after repeated output quality failures.
 - Replaced `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py` with a reset scaffold:
