@@ -11,14 +11,35 @@ import pytest
 from coatue_claw import board_seat_daily
 
 
+def _row(*, title: str, url: str, snippet: str = "") -> board_seat_daily.EvidenceRow:
+    canonical = board_seat_daily._canonicalize_url(url)
+    return board_seat_daily.EvidenceRow(
+        title=title,
+        snippet=snippet,
+        url=url,
+        canonical_url=canonical,
+        publisher=board_seat_daily._domain_from_url(canonical),
+        domain=board_seat_daily._domain_from_url(canonical),
+        published_at_utc=None,
+        backend="brave",
+        quality=0.9,
+    )
+
+
 @pytest.fixture
 def board_seat_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     data_root = tmp_path / "data"
     monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(data_root))
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(data_root / "db" / "board_seat_daily.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_RESET_MODE", "0")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_ENABLED", "1")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_WEEKDAYS_ONLY", "0")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_TIME", "12:00")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SEARCH_ORDER", "brave,serp")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", "1")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_MEMORY_REWRITE_ON_FAIL", "1")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SOURCES_IN_THREAD", "1")
     monkeypatch.delenv("COATUE_CLAW_BOARD_SEAT_PORTCOS", raising=False)
-    monkeypatch.delenv("COATUE_CLAW_BOARD_SEAT_ENABLED", raising=False)
-    monkeypatch.delenv("COATUE_CLAW_BOARD_SEAT_RESET_MODE", raising=False)
     return data_root
 
 
@@ -33,58 +54,257 @@ def test_parse_portcos_custom() -> None:
     assert parsed == [("Anduril", "anduril"), ("OpenAI", "openai")]
 
 
-def test_run_once_reset_mode_skips_all(board_seat_env: Path) -> None:
+def test_run_once_reset_mode_skips_all(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_RESET_MODE", "1")
     payload = board_seat_daily.run_once(force=True, dry_run=False)
     assert payload["ok"] is True
     assert payload["reset_mode"] is True
     assert payload["sent"] == []
-    assert len(payload["skipped"]) == len(payload["portcos"])
+    assert len(payload["skipped"]) == len(board_seat_daily._parse_portcos())
     assert {row["reason"] for row in payload["skipped"]} == {"feature_reset_in_progress"}
 
 
-def test_run_once_disabled_when_reset_off(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_RESET_MODE", "0")
+def test_run_once_disabled(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_ENABLED", "0")
     payload = board_seat_daily.run_once(force=True, dry_run=False)
     assert payload["ok"] is True
-    assert payload["reset_mode"] is False
     assert payload["sent"] == []
     assert {row["reason"] for row in payload["skipped"]} == {"board_seat_disabled"}
 
 
-def test_run_once_dry_run_preview_when_enabled(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_RESET_MODE", "0")
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_ENABLED", "1")
+def test_quality_gate_detects_artifacts() -> None:
+    draft = (
+        "*Thesis*\n"
+        "- Read more to learn.\n"
+        "*What the target does*\n"
+        "- builds tools.\n"
+        "*Why it’s a fit for portfolio company*\n"
+        "- fit.\n"
+        "*Risks*\n"
+        "- risk.\n"
+        "*Funding history and backers*\n"
+        "- unknown."
+    )
+    ok, reasons = board_seat_daily._quality_gate(draft, source_rows=[])
+    assert ok is False
+    assert "artifact_term" in reasons
+
+
+def test_candidate_extraction_rejects_concepts() -> None:
+    rows = [
+        _row(title="OpenAI acquisition target: AI platform", url="https://example.com/a", snippet="OpenAI may acquire an AI platform"),
+        _row(title="OpenAI acquires Databento", url="https://news.example.com/b", snippet="Acquisition rumors"),
+    ]
+    candidates = board_seat_daily._extract_candidates("OpenAI", rows)
+    names = [c.target for c in candidates]
+    assert "Databento" in names
+    assert "AI" not in names
+
+
+def test_funding_snapshot_weak_adds_warning() -> None:
+    rows = [
+        _row(title="Sourcegraph raised $50M Series B led by Sequoia", url="https://a.com/x", snippet="funding details"),
+        _row(title="Sourcegraph raised $250M Series D led by a16z", url="https://b.com/y", snippet="valuation update"),
+    ]
+    snap = board_seat_daily._funding_from_rows("Sourcegraph", rows)
+    lines = board_seat_daily._render_funding_lines(snap)
+    assert snap.verification_status in {"partial", "weak", "verified"}
+    if snap.verification_status == "weak":
+        assert any("low-confidence" in line.lower() for line in lines)
+
+
+def test_build_draft_memory_fallback_when_quality_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _bad_chat(*, prompt: str, system: str, temperature: float = 0.2, max_tokens: int = 700) -> str | None:
+        if "model memory" in system.lower():
+            return (
+                "*Board Seat as a Service — OpenAI*\n"
+                "*Thesis*\n- Acquire Databento to improve market data speed.\n"
+                "*What the target does*\n- Databento provides low-latency market data APIs.\n"
+                "*Why it’s a fit for portfolio company*\n- Strengthens product reliability and developer adoption.\n"
+                "*Risks*\n- Integration and valuation risk.\n"
+                "*Funding history and backers*\n- Total raised: unknown"
+            )
+        return (
+            "*Thesis*\n- Read more\n*What the target does*\n- x\n"
+            "*Why it’s a fit for portfolio company*\n- x\n*Risks*\n- x\n"
+            "*Funding history and backers*\n- x"
+        )
+
+    monkeypatch.setattr(board_seat_daily, "_chat_completion", _bad_chat)
+    monkeypatch.setattr(board_seat_daily, "_max_web_rewrites", lambda: 1)
+
+    funding = board_seat_daily.FundingSnapshot(
+        target="Databento",
+        target_key="databento",
+        total_raised="unknown",
+        latest_round="unknown",
+        latest_round_date="unknown",
+        backers=(),
+        evidence_count=0,
+        distinct_domains=0,
+        conflict_flags=(),
+        verification_status="weak",
+        source_rows=(),
+    )
+    rows = [_row(title="OpenAI acquires Databento", url="https://a.com/1", snippet="analysis")]
+    draft = board_seat_daily._build_draft(
+        company="OpenAI",
+        target="Databento",
+        evidence_rows=rows,
+        funding=funding,
+        repitch_note=None,
+    )
+    assert draft.generation_mode == "memory_rewrite"
+    assert draft.memory_rewrite_used is True
+
+
+def test_run_once_skips_when_no_high_conf_target(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_discover_channels_from_slack",
+        lambda: ([board_seat_daily.DiscoveryChannel(company="OpenAI", channel_ref="openai", channel_id="C123")], []),
+    )
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_collect_web_rows",
+        lambda queries: ([_row(title="OpenAI platform update", url="https://example.com/1", snippet="general update")], []),
+    )
+
     payload = board_seat_daily.run_once(force=True, dry_run=True)
     assert payload["ok"] is True
-    assert len(payload["sent"]) == len(payload["portcos"])
-    assert payload["skipped"] == []
-    assert payload["sent"][0]["delivery_mode_applied"] == "dry_run_preview"
+    assert payload["sent"] == []
+    assert len(payload["skipped"]) == 1
+    assert payload["skipped"][0]["reason"] == "no_high_confidence_new_target"
 
 
-def test_seed_target_and_target_memory(board_seat_env: Path) -> None:
-    seeded = board_seat_daily._seed_target(company="Anduril", target="Saronic", channel_ref="anduril")
-    assert seeded.inserted is True
-    assert seeded.target_key == "saronic"
+def test_run_once_memory_fallback_posts_warning(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, str | None]] = []
 
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_discover_channels_from_slack",
+        lambda: ([board_seat_daily.DiscoveryChannel(company="OpenAI", channel_ref="openai", channel_id="C123")], []),
+    )
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_collect_web_rows",
+        lambda queries: ([_row(title="OpenAI acquires Databento", url="https://news.one/a", snippet="acquisition target Databento")], []),
+    )
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_pick_target",
+        lambda **kwargs: (
+            board_seat_daily.CandidateScore(
+                target="Databento",
+                target_key="databento",
+                score=0.91,
+                confidence="high",
+                evidence_count=2,
+                distinct_domains=2,
+                row_indexes=(0,),
+            ),
+            None,
+            1.0,
+            [],
+            [],
+        ),
+    )
+
+    funding = board_seat_daily.FundingSnapshot(
+        target="Databento",
+        target_key="databento",
+        total_raised="$40M",
+        latest_round="Series B",
+        latest_round_date="unknown",
+        backers=("Sequoia",),
+        evidence_count=2,
+        distinct_domains=2,
+        conflict_flags=(),
+        verification_status="partial",
+        source_rows=(),
+    )
+    monkeypatch.setattr(board_seat_daily, "_funding_snapshot_for_target", lambda **kwargs: funding)
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_build_draft",
+        lambda **kwargs: board_seat_daily.DraftResult(
+            text=(
+                "*Board Seat as a Service — OpenAI*\n"
+                "*Thesis*\n- Acquire Databento.\n"
+                "*What the target does*\n- Market data APIs.\n"
+                "*Why it’s a fit for portfolio company*\n- Product leverage.\n"
+                "*Risks*\n- Integration risk.\n"
+                "*Funding history and backers*\n- Total raised: $40M"
+            ),
+            generation_mode="memory_rewrite",
+            quality_fail_codes=("artifact_term",),
+            memory_rewrite_used=True,
+        ),
+    )
+
+    def _fake_post(*, channel_ref: str, text: str, thread_ts: str | None = None):
+        calls.append({"channel_ref": channel_ref, "text": text, "thread_ts": thread_ts})
+        idx = len(calls)
+        return "C123", f"1700.00{idx}", None
+
+    monkeypatch.setattr(board_seat_daily, "_post_to_slack", _fake_post)
+
+    payload = board_seat_daily.run_once(force=True, dry_run=False)
+    assert len(payload["sent"]) == 1
+    row = payload["sent"][0]
+    assert row["generation_mode"] == "memory_rewrite"
+    assert row["warning_thread_posted"] is True
+    assert len(calls) >= 3
+
+
+def test_target_memory_lock_days_respected(board_seat_env: Path) -> None:
     store = board_seat_daily.BoardSeatStore()
-    rows = store.target_ledger_rows(company="Anduril", limit=10)
-    assert len(rows) == 1
-    assert rows[0]["target"] == "Saronic"
+    now_iso = board_seat_daily._utc_now_iso()
+    store.record_target(
+        company="OpenAI",
+        target="Databento",
+        channel_ref="openai",
+        channel_id="C123",
+        source="manual",
+        posted_at_utc=now_iso,
+        run_date_local=board_seat_daily._today_key(),
+        message_ts="1.1",
+    )
+    last = store.latest_target_post(company="OpenAI", target_key="databento")
+    assert last is not None
+    assert board_seat_daily._should_block_recent(last_post=last, now_utc=board_seat_daily._utc_now()) is True
 
 
-def test_status_reports_reset_scaffold(board_seat_env: Path) -> None:
+def test_refresh_funding_works(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = board_seat_daily.BoardSeatStore()
+    store.record_target(
+        company="OpenAI",
+        target="Databento",
+        channel_ref="openai",
+        channel_id="C123",
+        source="manual",
+        posted_at_utc=board_seat_daily._utc_now_iso(),
+        run_date_local=board_seat_daily._today_key(),
+        message_ts="1.2",
+    )
+
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_collect_web_rows",
+        lambda queries: ([_row(title="Databento raised $40M led by Sequoia", url="https://funding.com/1", snippet="Series B")], []),
+    )
+
+    payload = board_seat_daily._refresh_funding_payload(entities=["OpenAI"], include_recent_targets=True, report=True)
+    assert payload["ok"] is True
+    assert payload["count"] >= 1
+    assert payload["report_path"]
+
+
+def test_status_reports_metrics(board_seat_env: Path) -> None:
     payload = board_seat_daily.status()
     assert payload["ok"] is True
-    assert payload["status"] == "reset_scaffold"
-    assert payload["reset_mode"] is True
-    assert payload["hard_gates"] == ["company_only_target", "cooldown_repeat_block"]
-
-
-def test_refresh_funding_returns_not_implemented(board_seat_env: Path) -> None:
-    payload = board_seat_daily._refresh_funding_payload(entities=["Anduril"], report=False)
-    assert payload["ok"] is True
-    assert payload["status"] == "not_implemented"
+    assert "schedule_time" in payload
+    assert "funding_confidence_distribution" in payload
 
 
 def test_cli_status_json(board_seat_env: Path) -> None:
@@ -93,12 +313,23 @@ def test_cli_status_json(board_seat_env: Path) -> None:
     out = subprocess.check_output(cmd, text=True, env=env)
     payload = json.loads(out)
     assert payload["ok"] is True
-    assert payload["status"] == "reset_scaffold"
+    assert payload["format_version"] == board_seat_daily.BOARD_SEAT_FORMAT_VERSION
 
 
-def test_cli_run_once_json(board_seat_env: Path) -> None:
+def test_cli_run_once_json(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_discover_channels_from_slack",
+        lambda: ([board_seat_daily.DiscoveryChannel(company="OpenAI", channel_ref="openai", channel_id="C123")], []),
+    )
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_collect_web_rows",
+        lambda queries: ([_row(title="OpenAI and Databento", url="https://example.com/1", snippet="market data startup")], []),
+    )
+
     env = os.environ.copy()
-    cmd = [sys.executable, "-m", "coatue_claw.board_seat_daily", "run-once", "--dry-run"]
+    cmd = [sys.executable, "-m", "coatue_claw.board_seat_daily", "run-once", "--force", "--dry-run"]
     out = subprocess.check_output(cmd, text=True, env=env)
     payload = json.loads(out)
     assert payload["ok"] is True

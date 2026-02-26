@@ -3,30 +3,6 @@
 ## Objective
 Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as the primary runtime and control plane.
 
-## Chart-of-Day Title Policy (2026-02-26)
-- Applied relaxed title policy in `x_chart_daily` for chart-of-the-day styling:
-  - title/headline generation is now primarily LLM-directed from tweet text.
-  - strict deterministic headline completion guardrails are no longer used as publish blockers.
-  - post-url title overrides accept freeform non-empty text (no strict sentence-finalization requirement).
-- Regression coverage aligned in `tests/test_x_chart_daily.py`.
-- Current validation status:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` passes (`82 passed`).
-
-## Chart-of-Day Discovery Expansion (2026-02-26)
-- Shipped hybrid candidate discovery for chart-of-day:
-  - source-list pull is now only one input leg.
-  - open X search is executed each scheduled scout run (configurable, default enabled).
-  - merged pool is deduped and ranked with added “interesting takeaway” bias before final source-variety selection.
-- Source DB is no longer treated as static truth:
-  - unseen winning X accounts are auto-added to `sources` (bounded by daily cap).
-- Pull-log artifact contract now includes discovery and source-building telemetry:
-  - candidate counts by channel (`seed`, `open_search`, `merged`)
-  - scanned accounts list
-  - winner discovery origin
-  - auto-add action metadata
-- Validation status:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` passes (`85 passed`).
-
 ## V1 Scope
 - SEC + transcript + macro ingestion
 - Diligence packets (bull/bear + peer comp + charts)
@@ -64,23 +40,20 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
-- HFA podcast ASR compatibility patch shipped on `codex/agent-hf-analyst`:
-  - `src/coatue_claw/hf_youtube_transcript.py` now retries OpenAI audio transcription without `response_format` when model/API rejects `verbose_json`.
-  - this resolves failures like: `response_format 'verbose_json' is not compatible with model ...`.
-  - regression test added in `tests/test_hf_youtube_transcript.py`.
-  - validation:
-    - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_youtube_transcript.py tests/test_hf_podcast.py tests/test_hf_analyst.py` -> `16 passed`
-    - `PYTHONPATH=src python3 -m compileall -q src` -> pass
-- HFA Podcast V1 implementation is complete on `codex/agent-hf-analyst`:
-  - YouTube transcript flow: captions first, ASR fallback.
-  - New HFA mode for podcast summarization with top verbatim quotes + timestamps.
-  - Slack command and DM auto-run routing are wired.
-  - CLI command `claw hfa podcast` is wired.
-  - HFA store schema extended for podcast runs + DM dedupe.
-  - targeted validation:
-    - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_hf_podcast.py tests/test_hf_youtube_transcript.py tests/test_hf_document_extract.py tests/test_slack_routing.py` -> `26 passed`
-    - `PYTHONPATH=src python3 -m compileall -q src` -> pass
-- Board Seat has been reset to a scaffold baseline to restart from scratch:
+- Board Seat v1 rebuild is now implemented in `src/coatue_claw/board_seat_daily.py`:
+  - weekday noon PT scheduling posture (`COATUE_CLAW_BOARD_SEAT_TIME=12:00`, `COATUE_CLAW_BOARD_SEAT_WEEKDAYS_ONLY=1`).
+  - auto channel discovery (`company_match`) across public/private Slack channels with static fallback.
+  - web-first target discovery (Brave first, Serp fallback), candidate scoring, high-confidence new-target gate, and 14-day hard no-repeat.
+  - repitch requires significance score threshold and emits explicit prior-pitch/new-evidence note when resurfaced.
+  - concise 5-section output contract with source citations moved to thread reply.
+  - funding cache + confidence model (`verified|partial|weak`) with low-confidence warning line.
+  - quality gate + rewrite loop; on persistent failure, memory-only rewrite posts with mandatory warning thread.
+  - persisted audit tables: `board_seat_runs`, `board_seat_candidates`, `board_seat_target_events`, `board_seat_funding_cache`, `board_seat_channel_discovery`.
+  - funding maintenance commands now live:
+    - `board_seat_daily refresh-funding`
+    - `board_seat_daily funding-quality-report`
+- Historical context (superseded by v1 rebuild above):
+  - Board Seat was reset to scaffold baseline before the current rebuild.
   - `src/coatue_claw/board_seat_daily.py` no longer runs legacy drafting/quality logic.
   - default behavior is hard skip with `feature_reset_in_progress`.
   - CLI/ops commands are still present so launchd and make targets remain stable.
@@ -1417,13 +1390,3 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `63 passed`.
 - Next:
   - add a post-sanitize target-lock re-check so retargeted outputs cannot bypass cooldown/new-target governance when final target differs from initial extraction.
-
-
-## Update (2026-02-26T20:15:28.162192+00:00, HFA Podcast V1)
-- `main` now includes HFA Podcast V1 merge commit `96caf25`.
-- Test verification passed for HFA podcast/transcript/routing suites (`26 passed`).
-- Runtime restarted and Slack channel status recovered.
-- Remaining blocker before clean acceptance: ASR transcription fallback uses `verbose_json` against model `gpt-4o-mini-transcribe-api-ev3`, which rejects that response format; podcast runs with missing captions currently fail with `transcript_unavailable`.
-- Operational checks complete:
-  - DB writable: `/opt/coatue-claw-data/db/hf_analyst.sqlite`
-  - Artifact dir writable: `/opt/coatue-claw-data/artifacts/hf-analyst/`

@@ -3,51 +3,26 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
-## Update (2026-02-26, chart title prompt relaxation for Chart of the Day)
-- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/src/coatue_claw/x_chart_daily.py` to remove strict deterministic title guardrails in style synthesis:
-  - LLM title prompt now uses tweet text as the direct source context.
-  - removed strict headline sentence/tail enforcement from publish issue gating.
-  - removed headline auto-rewrite fallback path in source-card render and post-url flow.
-  - title override validation now only requires non-empty normalized text (no strict completion checks).
-- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/tests/test_x_chart_daily.py` expectations to match relaxed title policy (LLM-controlled headline allowed, no forced fallback for fragmentary title text).
-- Validation:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `82 passed`
-
-## Update (2026-02-26, chart-day hybrid discovery + auto-source buildout)
-- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/src/coatue_claw/x_chart_daily.py` to treat source DB as a seed, not a hard boundary:
-  - added hybrid discovery mode (`seed_only|open_only|hybrid`, default `hybrid`).
-  - added per-run open X search fetch path (`_fetch_x_candidates_open_search`) and merged it into candidate selection.
-  - winner selection now applies an “interesting takeaway” bonus (novelty/specificity/theme/move signal) before source-variety tie-breaking.
-- Added account auto-enrollment behavior for winning new X sources:
-  - if winner account was not in pre-run source DB snapshot, it is auto-added (`manual=0`) with daily cap control.
-  - new env knobs:
-    - `COATUE_CLAW_X_CHART_OPEN_SEARCH_ENABLED`
-    - `COATUE_CLAW_X_CHART_DISCOVERY_MODE`
-    - `COATUE_CLAW_X_CHART_OPEN_SEARCH_QUERIES`
-    - `COATUE_CLAW_X_CHART_AUTO_ADD_SOURCES`
-    - `COATUE_CLAW_X_CHART_AUTO_ADD_DAILY_CAP`
-- Pull-log schema expanded for auditability:
-  - `seed_candidates_count`, `open_search_candidates_count`, `merged_candidates_count`
-  - `scanned_accounts`
-  - `winner_discovered_via`
-  - `new_source_auto_added`, `new_source_handle`
-- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/tests/test_x_chart_daily.py` with new coverage:
-  - hybrid flow can pick open-search candidate
-  - winner source auto-add for unseen account
-  - pull-log includes discovery metadata
-- Validation:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `85 passed`
-
-## Update (2026-02-26, HFA podcast ASR fallback compatibility patch)
-- Patched `src/coatue_claw/hf_youtube_transcript.py` to handle ASR model/API response format incompatibilities:
-  - first attempts transcription with `response_format="verbose_json"`.
-  - if provider rejects format compatibility, retries once without `response_format`.
-  - keeps text fallback path when segment payloads are unavailable.
-- Added regression test in `tests/test_hf_youtube_transcript.py`:
-  - `test_asr_transcript_retries_without_response_format_on_incompatible_model`
-- Validation:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_youtube_transcript.py tests/test_hf_podcast.py tests/test_hf_analyst.py` -> `16 passed`
-  - `PYTHONPATH=src python3 -m compileall -q src` -> pass
+## Update (2026-02-26, board-seat v1 rebuild: noon PT + natural synthesis + memory fallback)
+- Rebuilt `src/coatue_claw/board_seat_daily.py` from reset scaffold to production v1 pipeline:
+  - weekday noon schedule posture with `COATUE_CLAW_BOARD_SEAT_TIME=12:00` and `COATUE_CLAW_BOARD_SEAT_WEEKDAYS_ONLY=1`.
+  - auto channel discovery for portco channels via Slack (`company_match`, public+private), with static fallback.
+  - web-first candidate discovery (`brave -> serp`), anti-noise target extraction, deterministic scoring, and high-confidence new-target gate.
+  - hard 14-day no-repeat lock and strict repitch significance gating after cooldown.
+  - concise 5-section Board Seat message contract.
+  - funding extraction (web-only), confidence tiering (`verified|partial|weak`), and low-confidence warning line.
+  - thread citation delivery (`Publisher — title: url`) and memory-only rewrite fallback warning thread.
+  - persisted audit tables for runs/candidates/events/funding cache/channel discovery.
+- Scheduler update in `src/coatue_claw/launchd_runtime.py`:
+  - board-seat default `StartCalendarInterval` now weekdays at 12:00.
+- Docs/env updates:
+  - `.env.example` now documents Board Seat v1 env contract.
+  - `AGENTS.md` Board Seat rule updated to v1 5-section structure and thread-source policy.
+  - `docs/handoffs/current-plan.md` updated with v1 status.
+- Validation run:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `15 passed`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `10 passed`
+  - `PYTHONPATH=src python3 -m pytest -q` currently blocked in this environment by missing optional deps (`yfinance`, `matplotlib`) during collection.
 
 ## Update (2026-02-26, board-seat hard reset scaffold)
 - Board Seat was intentionally scrapped to start fresh after repeated output quality failures.
@@ -2903,19 +2878,3 @@ Then confirm bot returns:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `63 passed`.
 - Operational note:
   - Posted a manual real-research board-seat message to `#openai` at Slack ts `1772060668.808919` while extractor hardening is being stabilized for fully automated target selection.
-
-## Update (2026-02-26, x-chart hard cooldown + cooldown-exhaustion notice + pull logs)
-- Implemented strict no-repeat source cooldown semantics for scheduled chart selection:
-  - `_pick_winner(...)` no longer falls back to recent-source reuse when all candidates are in cooldown.
-  - if all candidates are blocked by source cooldown, selection returns `None`.
-- Added explicit scheduled no-post notice:
-  - new `_post_no_candidate_message_to_slack(...)` posts: all candidate accounts are within cooldown window.
-  - `run_chart_scout_once(...)` now returns `reason=\"all_candidates_in_cooldown\"`.
-  - dry-run behavior: no notice posted.
-- Added deterministic pull logs for every skill invocation:
-  - new `_write_pull_log(...)` artifact output: `*-pull-log.json`.
-  - includes scanned candidates, source last-posted map, eligibility after item filter, eligibility after cooldown, selected candidate key, and result reason.
-  - scheduled run paths all emit pull logs (posted and skipped).
-  - manual URL flow (`run_chart_for_post_url`) emits pull logs with `mode=\"manual_url\"` and `manual_override_used=true` (manual override policy retained).
-- Validation:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `82 passed`
