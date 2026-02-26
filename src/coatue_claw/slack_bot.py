@@ -387,6 +387,26 @@ def _handle_hfa_command(
         return True
 
     if kind == "analyze":
+        analyze_urls = extract_youtube_urls(tail or "")
+        if analyze_urls:
+            url = analyze_urls[0]
+            question = (tail or "").replace(url, "").strip() or None
+            try:
+                result = run_hfa_podcast(
+                    url=url,
+                    question=question,
+                    requested_by=user_id,
+                    channel=channel,
+                    thread_ts=thread_ts,
+                    trigger_mode="slack_podcast_alias_from_analyze",
+                    dry_run=False,
+                    memory_runtime=_memory_runtime(),
+                )
+            except HFAError as exc:
+                say(text=f"HFA podcast failed: `{exc}`", thread_ts=thread_ts)
+                return True
+            say(text=format_hfa_slack_summary(result), thread_ts=thread_ts)
+            return True
         try:
             result = run_hfa_thread(
                 channel=channel,
