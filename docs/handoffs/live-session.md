@@ -73,6 +73,18 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py tests/test_launchd_runtime.py` -> `33 passed`
 
+## Update (2026-02-26, HFA analyze->podcast alias routing + venv install hints)
+- Patched `src/coatue_claw/slack_bot.py`:
+  - when users type `hfa analyze ...` and include a YouTube URL, route directly to HFA podcast analysis instead of thread-doc analysis/fallback conversation.
+  - this prevents command-shape ambiguity like `hfa analyze this podcast <url>` from escaping the strict HFA flow.
+- Patched `src/coatue_claw/hf_youtube_transcript.py` dependency errors:
+  - missing transcript deps now return explicit venv-only install hints:
+    - `/opt/coatue-claw/.venv/bin/python -m pip install -U youtube-transcript-api yt-dlp`
+  - avoids suggesting system/user pip install patterns that fail on externally managed Python.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_hf_youtube_transcript.py tests/test_slack_routing.py` -> `17 passed`
+  - `PYTHONPATH=src python3 -m compileall -q src` -> pass
+
 ## Update (2026-02-26, board-seat hard reset scaffold)
 - Board Seat was intentionally scrapped to start fresh after repeated output quality failures.
 - Replaced `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py` with a reset scaffold:

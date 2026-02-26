@@ -28,6 +28,10 @@ class YouTubeTranscriptError(RuntimeError):
     pass
 
 
+def _venv_install_hint() -> str:
+    return "/opt/coatue-claw/.venv/bin/python -m pip install -U youtube-transcript-api yt-dlp"
+
+
 @dataclass(frozen=True)
 class TranscriptSegment:
     start_sec: float
@@ -105,7 +109,7 @@ def _fetch_video_metadata(url: str, video_id: str) -> tuple[str, str, int | None
 
 def _captions_transcript(video_id: str) -> list[TranscriptSegment]:
     if YouTubeTranscriptApi is None:
-        raise YouTubeTranscriptError("youtube-transcript-api not installed")
+        raise YouTubeTranscriptError(f"youtube-transcript-api not installed; install with `{_venv_install_hint()}`")
     try:
         # Support both v1 instance-style API and older class/static method API.
         if hasattr(YouTubeTranscriptApi, "fetch"):
@@ -145,7 +149,7 @@ def _captions_transcript(video_id: str) -> list[TranscriptSegment]:
 
 def _download_audio(url: str, *, tmp_dir: Path) -> Path:
     if yt_dlp is None:
-        raise YouTubeTranscriptError("yt_dlp_not_installed")
+        raise YouTubeTranscriptError(f"yt_dlp_not_installed; install with `{_venv_install_hint()}`")
     outtmpl = str(tmp_dir / "audio.%(ext)s")
     opts = {
         "format": "bestaudio/best",
