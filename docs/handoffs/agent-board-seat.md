@@ -18,12 +18,13 @@
 - `board_seat_daily.py` now includes:
   - weekday-noon schedule gating
   - channel auto-discovery (`company_match`)
-  - web-first target search (`brave,serp`)
+  - LLM-first target seeding + web verification/enrichment (`brave,serp`)
   - high-confidence new-target gate + 20-day cooldown (default)
   - repitch significance checks
   - concise 5-section output
   - funding confidence model + cache
   - memory-only rewrite fallback with warning thread
+  - exhaustive candidate loop with rejection telemetry + candidate decision audit table
 - Funding commands are live:
   - `refresh-funding`
   - `funding-quality-report`
