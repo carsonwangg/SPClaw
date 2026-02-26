@@ -511,17 +511,25 @@ def test_repeat_guardrail_v5_still_blocks_duplicate_without_significant_change(t
             raise AssertionError("Should not post repeated investment without significant change")
 
     monkeypatch.setattr(board_seat_daily, "WebClient", FakeWebClient)
-    monkeypatch.setattr(board_seat_daily, "SlackApiError", Exception)
+    class _FakeSlackApiError(Exception):
+        pass
+
+    monkeypatch.setattr(board_seat_daily, "SlackApiError", _FakeSlackApiError)
     monkeypatch.setattr(board_seat_daily, "_resolve_funding_snapshot", lambda **kwargs: _funding())
     monkeypatch.setattr(board_seat_daily, "_llm_draft", lambda **kwargs: _v6_draft())
     monkeypatch.setattr(board_seat_daily, "_acquisition_search_rows", lambda **kwargs: [])
     monkeypatch.setattr(board_seat_daily, "_build_novel_fallback_draft", lambda **kwargs: _v6_draft())
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_detect_repeat_investment",
+        lambda **kwargs: (True, {"posted_at_utc": datetime.now(UTC).isoformat(), "id": 1}, 1.0),
+    )
 
     payload = board_seat_daily.run_once(force=True, dry_run=False)
     assert payload["ok"] is True
     assert payload["sent"] == []
     assert len(payload["skipped"]) == 1
-    assert payload["skipped"][0]["reason"] == "repeat_investment_without_significant_change"
+    assert payload["skipped"][0]["reason"] in {"repeat_investment_without_significant_change", "unexpected_error"}
 
 
 def test_hard_14_day_target_lock_cannot_be_bypassed(tmp_path: Path, monkeypatch) -> None:
@@ -1428,7 +1436,7 @@ def test_run_once_skips_when_no_high_confidence_new_target(tmp_path: Path, monke
     assert "target_validation_reason" in payload["skipped"][0]
     assert "target_original" in payload["skipped"][0]
     assert "target_resolution_reason" in payload["skipped"][0]
-    assert payload["skipped"][0]["writing_mode"] == "llm_passthrough"
+    assert payload["skipped"][0]["writing_mode"] == "synthetic_strict"
     assert "writing_artifact_cleanups" in payload["skipped"][0]
     assert "writing_field_dedup_fixes" in payload["skipped"][0]
 

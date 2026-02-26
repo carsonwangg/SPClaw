@@ -3,6 +3,36 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-26, board-seat writing fix v3: strict synthesis + fail-closed diagnostic)
+- Implemented strict no-passthrough writing mode in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
+  - defaults now enforce:
+    - `COATUE_CLAW_BOARD_SEAT_WRITING_MODE=synthetic_strict`
+    - `COATUE_CLAW_BOARD_SEAT_QUALITY_MODE=strict`
+    - `COATUE_CLAW_BOARD_SEAT_DELIVERY_MODE=diagnostic_fallback`
+    - `COATUE_CLAW_BOARD_SEAT_QUOTE_OVERLAP_MAX=0.28`
+  - new synthesis controls:
+    - `COATUE_CLAW_BOARD_SEAT_SYNTH_MIN_FIELD_SCORE=0.72`
+    - `COATUE_CLAW_BOARD_SEAT_SYNTH_REWRITE_MAX=3`
+- Copy/passthrough controls strengthened:
+  - stricter fact-card claim normalization (short factual claims only, CTA/nav/quote-like text dropped).
+  - strict-mode hard fail on `quote_overlap_high`, semantic near-duplicate fields, and target-selection mismatch.
+  - writer/reviser prompts now explicitly require transformed strategic synthesis (no source-like phrasing).
+- Candidate extraction noise hardened:
+  - `_target_candidates_from_seed` now rejects all-caps fragments and slogan-like candidate strings.
+  - noise rejection reasons are captured for observability.
+- Target selection consistency guard added:
+  - candidate-selected target is aligned with final idea-line target before gating.
+  - inconsistency is tracked and can trigger fail-closed diagnostic.
+- New run payload observability fields:
+  - `synthesis_enforced`
+  - `copy_guard_triggered_fields`
+  - `candidate_noise_rejections`
+  - `target_selection_consistent`
+- `.env.example` updated with new strict defaults and synthesis knobs.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `79 passed`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
+
 ## Update (2026-02-26, board-seat recovery v2: candidate-first + light guardrails)
 - Implemented in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
   - candidate-first target selection pipeline:

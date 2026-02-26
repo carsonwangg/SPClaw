@@ -138,14 +138,14 @@ SOURCE_POLICY_DEFAULT = "tiered_trusted_first"
 LOW_SIGNAL_MODE_DEFAULT = "candidate_with_confidence"
 TARGET_CONFIDENCE_LEVELS = {"High", "Medium", "Low"}
 REQUIRED_NEW_TARGET_CONFIDENCE = "High"
-WRITING_MODE_DEFAULT = "llm_passthrough"
+WRITING_MODE_DEFAULT = "synthetic_strict"
 QUALITY_GATE_ENABLED_DEFAULT = True
 REWRITE_MAX_RETRIES_DEFAULT = 4
 SOURCE_GATE_MODE_DEFAULT = "soft_block"
 QUALITY_FAIL_POLICY_DEFAULT = "skip"
-DELIVERY_MODE_DEFAULT = "post"
+DELIVERY_MODE_DEFAULT = "diagnostic_fallback"
 FACT_CARD_MODE_DEFAULT = "always"
-QUOTE_OVERLAP_MAX_DEFAULT = 0.55
+QUOTE_OVERLAP_MAX_DEFAULT = 0.28
 DIAGNOSTIC_MAX_REASONS_DEFAULT = 4
 DIAGNOSTIC_INCLUDE_URLS_DEFAULT = True
 WHY_NOW_MODE_DEFAULT = "thematic_non_blocking"
@@ -159,8 +159,10 @@ EVIDENCE_MAX_URLS_DEFAULT = 12
 SELECTION_MODE_DEFAULT = "candidate_first"
 CANDIDATE_POOL_SIZE_DEFAULT = 8
 CANDIDATE_EVIDENCE_PER_TARGET_DEFAULT = 6
-QUALITY_MODE_DEFAULT = "light"
+QUALITY_MODE_DEFAULT = "strict"
 CRITIC_ENABLED_DEFAULT = True
+SYNTH_MIN_FIELD_SCORE_DEFAULT = 0.72
+SYNTH_REWRITE_MAX_DEFAULT = 3
 CONFIDENCE_MODEL_DEFAULT = "broad_weighted_v1"
 CONFIDENCE_HIGH_MIN_DEFAULT = 2.40
 CONFIDENCE_MEDIUM_MIN_DEFAULT = 1.35
@@ -549,6 +551,10 @@ class BoardSeatDraft:
     candidate_selection_urls: list[str] = field(default_factory=list)
     quality_warnings: list[str] = field(default_factory=list)
     hard_gate_applied: list[str] = field(default_factory=list)
+    synthesis_enforced: bool = False
+    copy_guard_triggered_fields: list[str] = field(default_factory=list)
+    candidate_noise_rejections: list[str] = field(default_factory=list)
+    target_selection_consistent: bool = True
 
 
 def _utc_now_iso() -> str:
@@ -676,9 +682,12 @@ def _max_line_words() -> int:
 
 
 def _writing_mode() -> str:
-    return (
+    mode = (
         os.environ.get("COATUE_CLAW_BOARD_SEAT_WRITING_MODE", WRITING_MODE_DEFAULT) or WRITING_MODE_DEFAULT
     ).strip().lower()
+    if mode not in {"synthetic_strict", "llm_passthrough"}:
+        return WRITING_MODE_DEFAULT
+    return mode
 
 
 def _quality_gate_enabled() -> bool:
@@ -744,6 +753,30 @@ def _quality_mode() -> str:
 
 def _critic_enabled() -> bool:
     return _env_flag("COATUE_CLAW_BOARD_SEAT_CRITIC_ENABLED", CRITIC_ENABLED_DEFAULT)
+
+
+def _synth_min_field_score() -> float:
+    raw = (
+        os.environ.get(
+            "COATUE_CLAW_BOARD_SEAT_SYNTH_MIN_FIELD_SCORE",
+            str(SYNTH_MIN_FIELD_SCORE_DEFAULT),
+        )
+        or str(SYNTH_MIN_FIELD_SCORE_DEFAULT)
+    ).strip()
+    try:
+        value = float(raw)
+    except Exception:
+        value = SYNTH_MIN_FIELD_SCORE_DEFAULT
+    return max(0.0, min(1.0, value))
+
+
+def _synth_rewrite_max() -> int:
+    return _env_int(
+        "COATUE_CLAW_BOARD_SEAT_SYNTH_REWRITE_MAX",
+        SYNTH_REWRITE_MAX_DEFAULT,
+        minimum=1,
+        maximum=8,
+    )
 
 
 def _fact_card_mode() -> str:
@@ -840,6 +873,13 @@ def _critic_min_overall_score() -> float:
     except Exception:
         value = CRITIC_MIN_OVERALL_SCORE_DEFAULT
     return max(0.0, min(1.0, value))
+
+
+def _effective_min_field_score() -> float:
+    base = _critic_min_field_score()
+    if _writing_mode() == "synthetic_strict":
+        return max(base, _synth_min_field_score())
+    return base
 
 
 def _evidence_fetch_enabled() -> bool:
@@ -1405,6 +1445,10 @@ def _quality_fields_payload(draft: BoardSeatDraft) -> dict[str, Any]:
         ][:4],
         "quality_warnings": [str(item) for item in list(draft.quality_warnings or []) if str(item).strip()],
         "hard_gate_applied": [str(item) for item in list(draft.hard_gate_applied or []) if str(item).strip()],
+        "synthesis_enforced": bool(draft.synthesis_enforced),
+        "copy_guard_triggered_fields": [str(item) for item in list(draft.copy_guard_triggered_fields or []) if str(item).strip()],
+        "candidate_noise_rejections": [str(item) for item in list(draft.candidate_noise_rejections or []) if str(item).strip()],
+        "target_selection_consistent": bool(draft.target_selection_consistent),
     }
 
 
@@ -1436,6 +1480,10 @@ def _quality_fields_default(*, passed: bool = False, stage: str = "not_run") -> 
         "candidate_selection_urls": [],
         "quality_warnings": [],
         "hard_gate_applied": [],
+        "synthesis_enforced": False,
+        "copy_guard_triggered_fields": [],
+        "candidate_noise_rejections": [],
+        "target_selection_consistent": True,
     }
 
 
@@ -2230,19 +2278,29 @@ def _fact_card_fields() -> tuple[str, ...]:
 
 
 def _fact_card_claim_from_item(*, item: dict[str, Any]) -> str:
-    raw = _normalize_text(
-        str(item.get("snippet") or "") or str(item.get("title") or ""),
-        max_chars=360,
-    )
+    title = _normalize_text(str(item.get("title") or ""), max_chars=220)
+    snippet = _normalize_text(str(item.get("snippet") or ""), max_chars=360)
+    raw = title or snippet
+    if not raw:
+        return ""
+    if title and snippet and (not _is_generic_source_wrapper(title)):
+        raw = f"{title}. {snippet}"
     if not raw:
         return ""
     stripped, _cleanups = _strip_obvious_writing_artifacts(raw)
-    line = _normalize_line(_trim_incomplete_sentence_tail(stripped), max_words=40)
+    # Convert noisy web prose into compact factual claims before it reaches the writer.
+    line = _normalize_line(_trim_incomplete_sentence_tail(stripped), max_words=24)
     if not line:
         return ""
     if _is_low_signal_copy(line) or _is_generic_source_wrapper(line):
         return ""
-    if len(_tokenize(line)) < 6:
+    if len(_tokenize(line)) < 5:
+        return ""
+    if len(_tokenize(line)) > 24:
+        return ""
+    if re.search(r"\".+\"", line):
+        return ""
+    if re.search(r"\b(book a demo|see pricing|sign in|request demo|learn more|get started)\b", line, flags=re.IGNORECASE):
         return ""
     return line
 
@@ -2585,6 +2643,10 @@ def _high_conf_new_target_gate(
     why_now_generated_fallback = bool(draft.why_now_generated_fallback)
     why_now_soft_notes = [str(item) for item in list(draft.why_now_soft_notes or []) if str(item).strip()]
     quality_warnings = [str(item) for item in list(draft.quality_warnings or []) if str(item).strip()]
+    synthesis_enforced = bool(draft.synthesis_enforced)
+    copy_guard_triggered_fields = [str(item) for item in list(draft.copy_guard_triggered_fields or []) if str(item).strip()]
+    candidate_noise_rejections = [str(item) for item in list(draft.candidate_noise_rejections or []) if str(item).strip()]
+    target_selection_consistent = bool(draft.target_selection_consistent)
     candidate_pool_size = int(draft.candidate_pool_size or 0)
     candidate_shortlist = [str(item) for item in list(draft.candidate_shortlist or []) if str(item).strip()]
     candidate_selected = _normalize_source_text(str(draft.candidate_selected or ""), max_chars=100)
@@ -2636,6 +2698,10 @@ def _high_conf_new_target_gate(
         "why_now_generated_fallback": why_now_generated_fallback,
         "why_now_soft_notes": why_now_soft_notes,
         "quality_warnings": quality_warnings,
+        "synthesis_enforced": synthesis_enforced,
+        "copy_guard_triggered_fields": copy_guard_triggered_fields,
+        "candidate_noise_rejections": candidate_noise_rejections,
+        "target_selection_consistent": target_selection_consistent,
         "candidate_pool_size": candidate_pool_size,
         "candidate_shortlist": candidate_shortlist,
         "candidate_selected": candidate_selected,
@@ -4000,7 +4066,7 @@ def _render_quality_diagnostic_message(
 ) -> str:
     failed_fields = [str(item) for item in list(draft.quality_failed_fields or []) if str(item).strip()]
     if not failed_fields:
-        failed_fields = [field for field, score in dict(draft.quality_field_scores or {}).items() if float(score or 0.0) < _critic_min_field_score()]
+        failed_fields = [field for field, score in dict(draft.quality_field_scores or {}).items() if float(score or 0.0) < _effective_min_field_score()]
     failure_codes = [str(item) for item in list(draft.quality_failure_codes or []) if str(item).strip()]
     if not failure_codes:
         failure_codes = _quality_failure_codes_from_reasons([str(item) for item in list(draft.quality_reasons or [])])
@@ -4019,6 +4085,14 @@ def _render_quality_diagnostic_message(
         f"*Why blocked:* {'; '.join(reason_humans) if reason_humans else 'quality checks failed'}",
         f"*Missing evidence:* {', '.join(missing_evidence) if missing_evidence else 'none'}",
     ]
+    selected = _normalize_source_text(str(draft.candidate_selected or ""), max_chars=100)
+    shortlist = [str(item).strip() for item in list(draft.candidate_shortlist or []) if str(item).strip()]
+    if selected or shortlist:
+        lines.append(f"*Candidate selected:* {selected or 'unknown'}")
+        if shortlist:
+            lines.append(f"*Candidate shortlist:* {', '.join(shortlist[:4])}")
+    if not bool(draft.target_selection_consistent):
+        lines.append("*Selection consistency:* failed (winner and rendered target diverged)")
     if _diagnostic_include_urls():
         urls = _diagnostic_debug_urls(draft=draft, evidence_pack=evidence_pack, max_urls=2)
         if urls:
@@ -4223,7 +4297,12 @@ def _is_valid_acquisition_idea_line(text: str, *, company: str = "") -> bool:
     return _target_validation_reason(company=company, target=target) == "ok"
 
 
-def _target_candidates_from_seed(*, company: str, seed_text: str) -> list[str]:
+def _target_candidates_from_seed(
+    *,
+    company: str,
+    seed_text: str,
+    rejections: list[str] | None = None,
+) -> list[str]:
     cleaned = re.sub(r"[“”\"'`]", "", str(seed_text or ""))
     matches = re.findall(r"\b[A-Z][A-Za-z0-9&.\-]{1,30}(?:\s+[A-Z][A-Za-z0-9&.\-]{1,30}){0,2}\b", cleaned)
     company_key = _canonical_target_key(company)
@@ -4250,6 +4329,28 @@ def _target_candidates_from_seed(*, company: str, seed_text: str) -> list[str]:
     }
     out: list[str] = []
     seen: set[str] = set()
+    noise_terms = {
+        "technical",
+        "analysis",
+        "defense",
+        "aerospace",
+        "industries",
+        "brands",
+        "reliability",
+        "excellence",
+        "global",
+        "depth",
+        "most",
+        "in",
+        "and",
+        "the",
+        "on",
+    }
+
+    def _reject(candidate: str, reason: str) -> None:
+        if rejections is None:
+            return
+        rejections.append(f"{candidate}:{reason}")
     for item in matches:
         candidate = re.sub(r"\s+", " ", item).strip(" .,:;-")
         if not candidate:
@@ -4257,7 +4358,11 @@ def _target_candidates_from_seed(*, company: str, seed_text: str) -> list[str]:
         candidate = re.sub(r"^(?:Acquire|Acquihire)\s+", "", candidate, flags=re.IGNORECASE).strip()
         if not candidate:
             continue
+        if candidate == candidate.upper() and len(candidate.split()) >= 2:
+            _reject(candidate, "all_caps_fragment")
+            continue
         if len(candidate) < 3:
+            _reject(candidate, "too_short")
             continue
         key = _slug(candidate)
         if not key or key in seen:
@@ -4265,20 +4370,32 @@ def _target_candidates_from_seed(*, company: str, seed_text: str) -> list[str]:
         seen.add(key)
         single_token = re.sub(r"[^a-z0-9]+", "", candidate.lower())
         if single_token in TARGET_TOKEN_STOPWORDS:
+            _reject(candidate, "stopword")
             continue
         if key in ACQ_PLACEHOLDER_TARGETS:
+            _reject(candidate, "placeholder")
             continue
         if key in blocked:
+            _reject(candidate, "blocked_term")
             continue
         if company_key and _canonical_target_key(candidate) == company_key:
+            _reject(candidate, "same_as_company")
             continue
         if "stealth" in candidate.lower():
+            _reject(candidate, "stealth")
             continue
         if any(term in candidate.lower() for term in ACQ_INVALID_TARGET_TERMS):
+            _reject(candidate, "invalid_term")
             continue
         if _is_conceptual_target_name(candidate):
+            _reject(candidate, "conceptual")
             continue
         if _require_company_target() and _is_non_company_target_shape(candidate):
+            _reject(candidate, "non_company_shape")
+            continue
+        tokens = [tok for tok in re.findall(r"[a-z0-9]+", candidate.lower()) if tok]
+        if len(tokens) >= 3 and sum(1 for tok in tokens if tok in noise_terms) >= max(2, len(tokens) - 1):
+            _reject(candidate, "slogan_fragment")
             continue
         out.append(candidate)
     return out
@@ -4365,10 +4482,13 @@ def _candidate_company_pool(
     snippets: list[str],
     acquisition_rows: list[dict[str, str]],
     target_rows: list[dict[str, str]],
-) -> list[str]:
+) -> tuple[list[str], list[str]]:
     seed_text = " ".join(snippets[:10])
     raw_candidates: list[str] = []
-    raw_candidates.extend(_target_candidates_from_seed(company=company, seed_text=seed_text))
+    candidate_noise_rejections: list[str] = []
+    raw_candidates.extend(
+        _target_candidates_from_seed(company=company, seed_text=seed_text, rejections=candidate_noise_rejections)
+    )
     for row in [*list(acquisition_rows or []), *list(target_rows or [])]:
         row_text = " ".join(
             [
@@ -4378,7 +4498,9 @@ def _candidate_company_pool(
         ).strip()
         if not row_text:
             continue
-        raw_candidates.extend(_target_candidates_from_seed(company=company, seed_text=row_text))
+        raw_candidates.extend(
+            _target_candidates_from_seed(company=company, seed_text=row_text, rejections=candidate_noise_rejections)
+        )
     company_key = _slug_company(company)
     raw_candidates.extend(list(TARGET_ROTATION_BY_COMPANY.get(company_key, ())))
     raw_candidates.append(_default_target_for_company(company))
@@ -4409,7 +4531,7 @@ def _candidate_company_pool(
         out.append(resolved)
         if len(out) >= cap:
             break
-    return out
+    return out, candidate_noise_rejections
 
 
 def _candidate_evidence_rows(*, company: str, candidate: str, snippets: list[str]) -> list[dict[str, str]]:
@@ -4987,6 +5109,10 @@ def _sanitize_draft(
         candidate_selection_urls=list(draft.candidate_selection_urls or []),
         quality_warnings=list(draft.quality_warnings or []),
         hard_gate_applied=list(draft.hard_gate_applied or []),
+        synthesis_enforced=bool(draft.synthesis_enforced),
+        copy_guard_triggered_fields=list(draft.copy_guard_triggered_fields or []),
+        candidate_noise_rejections=list(draft.candidate_noise_rejections or []),
+        target_selection_consistent=bool(draft.target_selection_consistent),
     )
     source_selection = _build_source_refs(company=company, draft=source_draft, funding=funding, acquisition_rows=acq_rows)
     target = _extract_acquisition_target(idea_line) or _default_target_for_company(company, blocked_keys=set())
@@ -5094,6 +5220,10 @@ def _sanitize_draft(
         ][:4],
         quality_warnings=[str(item) for item in list(draft.quality_warnings or []) if str(item).strip()],
         hard_gate_applied=[str(item) for item in list(draft.hard_gate_applied or []) if str(item).strip()],
+        synthesis_enforced=bool(draft.synthesis_enforced),
+        copy_guard_triggered_fields=[str(item) for item in list(draft.copy_guard_triggered_fields or []) if str(item).strip()],
+        candidate_noise_rejections=[str(item) for item in list(draft.candidate_noise_rejections or []) if str(item).strip()],
+        target_selection_consistent=bool(draft.target_selection_consistent),
     )
 
 
@@ -6650,6 +6780,7 @@ def _assess_draft_quality(
 ) -> dict[str, Any]:
     reasons: list[str] = []
     why_now_non_blocking = _why_now_mode() == "thematic_non_blocking"
+    strict_synthesis = _writing_mode() == "synthetic_strict"
     thesis_fields = {
         "target_does": _normalize_line_text(str(draft.target_does or "")),
         "why_now": _normalize_line_text(str(draft.why_now or "")),
@@ -6679,11 +6810,13 @@ def _assess_draft_quality(
     }
     why_now_recency_passed = False
     why_now_soft_notes = [str(item) for item in list(draft.why_now_soft_notes or []) if str(item).strip()]
+    copy_guard_triggered_fields: list[str] = []
+    target_selection_consistent = True
 
     def _penalize(field: str, delta: float, reason: str) -> None:
         field_scores[field] = max(0.0, field_scores.get(field, 1.0) - delta)
         reasons.append(reason)
-        if field_scores[field] < _critic_min_field_score():
+        if field_scores[field] < _effective_min_field_score():
             failed_fields.add(field)
 
     for label, line in thesis_fields.items():
@@ -6742,6 +6875,12 @@ def _assess_draft_quality(
                 except Exception:
                     fact_cards_count_by_field[key] = 0
         why_now_recency_passed = bool(evidence_pack.get("why_now_recency_passed"))
+        selected_target = _normalize_source_text(str(evidence_pack.get("target") or ""), max_chars=100)
+        draft_target = _normalize_source_text(_extract_acquisition_target(draft.idea_line), max_chars=100)
+        if selected_target and draft_target and (_target_key(selected_target) != _target_key(draft_target)):
+            target_selection_consistent = False
+            reasons.append("target_selection_inconsistent")
+            _penalize("target_does", 0.25, "target_selection_inconsistent:target_does")
 
     strict_evidence_context = sum(int(value) for value in evidence_tier_mix.values()) >= 2
     if strict_evidence_context:
@@ -6788,6 +6927,7 @@ def _assess_draft_quality(
     quote_overlap_by_field = _quote_overlap_by_field(draft=draft, evidence_pack=evidence_pack)
     for field_name, overlap in quote_overlap_by_field.items():
         if overlap > _quote_overlap_max():
+            copy_guard_triggered_fields.append(field_name)
             _penalize(field_name, 0.45, f"quote_overlap_high:{field_name}")
 
     why_now_gate = _why_now_semantic_recency_assessment(
@@ -6813,11 +6953,17 @@ def _assess_draft_quality(
     for field_name, score in field_scores.items():
         if why_now_non_blocking and field_name == "why_now":
             continue
-        if score < _critic_min_field_score():
+        if score < _effective_min_field_score():
             failed_fields.add(field_name)
             reasons.append(f"critic_field_below_threshold:{field_name}")
 
     hard_fail = any(reason.startswith("artifact_contamination") for reason in reasons)
+    if strict_synthesis and copy_guard_triggered_fields:
+        hard_fail = True
+    if strict_synthesis and any(reason.startswith("near_duplicate") for reason in reasons):
+        hard_fail = True
+    if strict_synthesis and (not target_selection_consistent):
+        hard_fail = True
     passed = (overall >= _critic_min_overall_score()) and (not hard_fail) and (not failed_fields)
     return {
         "passed": passed,
@@ -6833,6 +6979,8 @@ def _assess_draft_quality(
         "why_now_recency_passed": why_now_recency_passed,
         "why_now_generated_fallback": bool(draft.why_now_generated_fallback),
         "why_now_soft_notes": why_now_soft_notes,
+        "copy_guard_triggered_fields": sorted(set(copy_guard_triggered_fields)),
+        "target_selection_consistent": bool(target_selection_consistent),
     }
 
 
@@ -6913,7 +7061,7 @@ def _llm_critic_assess(
     synthesized_not_copied = bool(payload.get("synthesized_not_copied", True))
     passed = (
         overall_score >= _critic_min_overall_score()
-        and all(field_scores.get(field, 0.0) >= _critic_min_field_score() for field in ("target_does", "why_now", "whats_different", "mos_risks"))
+        and all(field_scores.get(field, 0.0) >= _effective_min_field_score() for field in ("target_does", "why_now", "whats_different", "mos_risks"))
         and not failed_fields
         and synthesized_not_copied
     )
@@ -6948,7 +7096,7 @@ def _merge_quality_assessments(
     for key, value in field_scores.items():
         if why_now_non_blocking and key == "why_now":
             continue
-        if float(value) < _critic_min_field_score():
+        if float(value) < _effective_min_field_score():
             failed_fields.add(key)
     if why_now_non_blocking:
         failed_fields.discard("why_now")
@@ -6983,6 +7131,8 @@ def _merge_quality_assessments(
         "why_now_recency_passed": bool(deterministic.get("why_now_recency_passed")),
         "why_now_generated_fallback": bool(deterministic.get("why_now_generated_fallback")),
         "why_now_soft_notes": [str(item) for item in list(deterministic.get("why_now_soft_notes") or []) if str(item).strip()],
+        "copy_guard_triggered_fields": [str(item) for item in list(deterministic.get("copy_guard_triggered_fields") or []) if str(item).strip()],
+        "target_selection_consistent": bool(deterministic.get("target_selection_consistent", True)),
     }
 
 
@@ -7031,6 +7181,7 @@ def _llm_revise_draft(
         "- Avoid near-duplicate lines across thesis fields.\n"
         "- Keep content grounded in evidence but natural (inference allowed).\n"
         "- Synthesize from fact cards; do not copy source wording verbatim.\n"
+        "- Transform source phrasing into strategic language; never mirror sentence structure from evidence.\n"
         "- No HTML tags, UI crumbs, or copied nav snippets.\n"
         f"Failed fields (revise these first): {json.dumps(list(failed_fields or []), ensure_ascii=False)}\n"
         f"Current draft:\n{draft_json}\n"
@@ -7079,6 +7230,7 @@ def _quality_gate_draft(
     acquisition_rows: list[dict[str, str]],
     evidence_pack: dict[str, Any] | None,
 ) -> BoardSeatDraft:
+    synthesis_enforced = _writing_mode() == "synthetic_strict"
     if not _quality_gate_enabled():
         return replace(
             draft,
@@ -7098,12 +7250,17 @@ def _quality_gate_draft(
             why_now_generated_fallback=False,
             why_now_soft_notes=[],
             quality_warnings=[],
+            synthesis_enforced=synthesis_enforced,
+            copy_guard_triggered_fields=[],
+            target_selection_consistent=True,
         )
 
     current = draft
     attempts = 0
     light_mode = _quality_mode() == "light"
     max_retries = 1 if light_mode else _rewrite_max_retries()
+    if synthesis_enforced:
+        max_retries = min(max_retries, _synth_rewrite_max())
     while True:
         current = _sanitize_draft(company=company, draft=current, funding=funding, acquisition_rows=acquisition_rows)
         current = _apply_why_now_mode(company=company, draft=current, evidence_pack=evidence_pack)
@@ -7136,6 +7293,9 @@ def _quality_gate_draft(
                     why_now_generated_fallback=bool(quality.get("why_now_generated_fallback")),
                     why_now_soft_notes=[str(item) for item in list(quality.get("why_now_soft_notes") or []) if str(item).strip()],
                     quality_warnings=quality_warnings,
+                    synthesis_enforced=synthesis_enforced,
+                    copy_guard_triggered_fields=[str(item) for item in list(quality.get("copy_guard_triggered_fields") or []) if str(item).strip()],
+                    target_selection_consistent=bool(quality.get("target_selection_consistent", True)),
                 )
             revised = _llm_revise_draft(
                 company=company,
@@ -7171,6 +7331,9 @@ def _quality_gate_draft(
                 why_now_generated_fallback=bool(quality.get("why_now_generated_fallback")),
                 why_now_soft_notes=[str(item) for item in list(quality.get("why_now_soft_notes") or []) if str(item).strip()],
                 quality_warnings=[],
+                synthesis_enforced=synthesis_enforced,
+                copy_guard_triggered_fields=[str(item) for item in list(quality.get("copy_guard_triggered_fields") or []) if str(item).strip()],
+                target_selection_consistent=bool(quality.get("target_selection_consistent", True)),
             )
         if attempts >= max_retries:
             return replace(
@@ -7191,6 +7354,9 @@ def _quality_gate_draft(
                 why_now_generated_fallback=bool(quality.get("why_now_generated_fallback")),
                 why_now_soft_notes=[str(item) for item in list(quality.get("why_now_soft_notes") or []) if str(item).strip()],
                 quality_warnings=[],
+                synthesis_enforced=synthesis_enforced,
+                copy_guard_triggered_fields=[str(item) for item in list(quality.get("copy_guard_triggered_fields") or []) if str(item).strip()],
+                target_selection_consistent=bool(quality.get("target_selection_consistent", True)),
             )
         revised = _llm_revise_draft(
             company=company,
@@ -7260,6 +7426,7 @@ def _llm_draft(
         ensure_ascii=False,
     )
     theme_window_days = _why_now_theme_window_days()
+    synthesis_enforced = _writing_mode() == "synthetic_strict"
     prompt = (
         f"Generate a structured board-seat brief for {company}.\n"
         "Return strict JSON only with keys: "
@@ -7285,11 +7452,19 @@ def _llm_draft(
         "- do not copy source text verbatim; synthesize from fact cards and evidence into original prose.\n"
         "- fields must not repeat each other.\n"
         "- if a field lacks evidence, use a concise thematic inference instead of copying another field.\n"
+        "- avoid quote-like or snippet-like phrasing; write as a synthesized board memo.\n"
         f"Evidence pack (target/acquisition/funding):\n{evidence_json}\n"
         "- keep lines concrete; at most one generic fallback line across thesis/context lines.\n"
         "Recent channel context:\n"
         f"{joined}\n"
     )
+    if synthesis_enforced:
+        prompt += (
+            "Strict synthesis mode:\n"
+            "- Never reuse contiguous source wording longer than 6 tokens.\n"
+            "- If uncertain, provide conservative strategic inference instead of copying.\n"
+            "- Ensure target_does/why_now/whats_different/mos_risks are semantically distinct.\n"
+        )
     if prior_investments:
         prior = "\n".join(f"- {item}" for item in prior_investments[:5] if item.strip())
         prompt += (
@@ -7366,9 +7541,10 @@ def _build_draft(
     candidate_shortlist: list[str] = [selected_target] if selected_target else []
     candidate_selection_reason = "legacy_single_seed"
     candidate_selection_urls: list[str] = []
+    candidate_noise_rejections: list[str] = []
 
     if _selection_mode() == "candidate_first":
-        pool = _candidate_company_pool(
+        pool, candidate_noise_rejections = _candidate_company_pool(
             store=store,
             company=company,
             snippets=merged_snippets,
@@ -7435,13 +7611,32 @@ def _build_draft(
     draft = llm if llm is not None else _fallback_draft(company=company, snippets=merged_snippets, funding=funding, acquisition_rows=acquisition_rows)
     draft = replace(
         draft,
+        synthesis_enforced=(_writing_mode() == "synthetic_strict"),
         candidate_pool_size=len(candidate_shortlist),
         candidate_shortlist=[str(item).strip() for item in candidate_shortlist if str(item).strip()][: _candidate_pool_size()],
         candidate_selected=selected_target,
         candidate_selection_reason=candidate_selection_reason,
         candidate_selection_urls=candidate_selection_urls,
+        candidate_noise_rejections=[str(item) for item in candidate_noise_rejections if str(item).strip()][:20],
     )
     draft = _sanitize_draft(company=company, draft=draft, funding=funding, acquisition_rows=acquisition_rows)
+    aligned = True
+    if selected_target:
+        current_target = _normalize_source_text(_extract_acquisition_target(draft.idea_line), max_chars=100)
+        if current_target and (_target_key(current_target) != _target_key(selected_target)):
+            pattern = re.compile(rf"\b{re.escape(current_target)}\b", flags=re.IGNORECASE)
+            draft = replace(
+                draft,
+                idea_line=_normalize_line(f"Acquire {selected_target} to accelerate {company} execution in a strategic wedge."),
+                target_does=pattern.sub(selected_target, str(draft.target_does or "")),
+                why_now=pattern.sub(selected_target, str(draft.why_now or "")),
+                whats_different=pattern.sub(selected_target, str(draft.whats_different or "")),
+                mos_risks=pattern.sub(selected_target, str(draft.mos_risks or "")),
+                rewrite_reasons=[*list(draft.rewrite_reasons or []), "target_selection_align"],
+            )
+            draft = _sanitize_draft(company=company, draft=draft, funding=funding, acquisition_rows=acquisition_rows)
+            aligned = _target_key(_extract_acquisition_target(draft.idea_line)) == _target_key(selected_target)
+    draft = replace(draft, target_selection_consistent=bool(aligned))
     if scope == "target":
         final_target = _extract_acquisition_target(draft.idea_line)
         if _target_key(final_target) and _target_key(final_target) != _target_key(selected_target):
@@ -8726,6 +8921,8 @@ def status() -> dict[str, Any]:
         "candidate_evidence_per_target": _candidate_evidence_per_target(),
         "quality_mode": _quality_mode(),
         "critic_enabled": _critic_enabled(),
+        "synth_min_field_score": _synth_min_field_score(),
+        "synth_rewrite_max": _synth_rewrite_max(),
         "fact_card_mode": _fact_card_mode(),
         "quote_overlap_max": _quote_overlap_max(),
         "diagnostic_max_reasons": _diagnostic_max_reasons(),

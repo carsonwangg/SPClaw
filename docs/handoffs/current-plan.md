@@ -40,6 +40,29 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Board-seat writing fix v3 shipped in `src/coatue_claw/board_seat_daily.py`:
+  - passthrough-biased drafting replaced by strict synthesis defaults.
+  - defaults now prioritize quality-safe output:
+    - `writing_mode=synthetic_strict`
+    - `quality_mode=strict`
+    - `delivery_mode=diagnostic_fallback`
+    - tighter copy guard threshold (`quote_overlap_max=0.28`)
+  - strict-mode hard-fail now includes:
+    - quote-like overlap
+    - near-duplicate thesis sections
+    - selected-target/final-target inconsistency
+  - candidate extraction noise rejection added (all-caps/slogan fragments blocked before selection pool).
+  - added synthesis observability fields in run payload:
+    - `synthesis_enforced`
+    - `copy_guard_triggered_fields`
+    - `candidate_noise_rejections`
+    - `target_selection_consistent`
+  - new env knobs:
+    - `COATUE_CLAW_BOARD_SEAT_SYNTH_MIN_FIELD_SCORE=0.72`
+    - `COATUE_CLAW_BOARD_SEAT_SYNTH_REWRITE_MAX=3`
+  - validation:
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `79 passed`
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
 - Board-seat recovery v2 shipped in `src/coatue_claw/board_seat_daily.py`:
   - candidate-first selection flow added (multi-target pool, per-target evidence, LLM winner selection with deterministic fallback).
   - default delivery now posts best cleaned draft (`delivery_mode=post`) with light, advisory quality warnings.
