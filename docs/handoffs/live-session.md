@@ -104,6 +104,14 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py tests/test_launchd_runtime.py` -> `35 passed`
 
+## Update (2026-02-26, board-seat job/role phrase hard filter)
+- Added hard rejection for job/career/role phrases so non-company targets cannot be pitched (example blocked: `Corporate Development Integration`).
+- Filtering now applies in two places:
+  - target-name validation (`role_phrase_not_company`)
+  - candidate extraction row screening for job-intent text (`job`, `careers`, `hiring`, `application`, etc.).
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py tests/test_launchd_runtime.py` -> `36 passed`
+
 ## Update (2026-02-26, board-seat hard reset scaffold)
 - Board Seat was intentionally scrapped to start fresh after repeated output quality failures.
 - Replaced `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py` with a reset scaffold:
