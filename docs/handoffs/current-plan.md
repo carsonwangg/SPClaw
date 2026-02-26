@@ -43,7 +43,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Board Seat v1 rebuild is now implemented in `src/coatue_claw/board_seat_daily.py`:
   - weekday noon PT scheduling posture (`COATUE_CLAW_BOARD_SEAT_TIME=12:00`, `COATUE_CLAW_BOARD_SEAT_WEEKDAYS_ONLY=1`).
   - auto channel discovery (`company_match`) across public/private Slack channels with static fallback.
-  - web-first target discovery (Brave first, Serp fallback), candidate scoring, high-confidence new-target gate, and 14-day hard no-repeat.
+  - web-first target discovery (Brave first, Serp fallback), candidate scoring, high-confidence new-target gate, and 20-day hard no-repeat (default).
   - repitch requires significance score threshold and emits explicit prior-pitch/new-evidence note when resurfaced.
   - concise 5-section output contract with source citations moved to thread reply.
   - funding cache + confidence model (`verified|partial|weak`) with low-confidence warning line.
