@@ -5,6 +5,7 @@ import pytest
 from coatue_claw.hf_youtube_transcript import (
     TranscriptSegment,
     YouTubeTranscriptError,
+    _asr_transcript,
     fetch_youtube_transcript,
     parse_youtube_video_id,
 )
@@ -75,3 +76,36 @@ def test_fetch_youtube_transcript_raises_when_both_paths_fail(monkeypatch) -> No
 
     with pytest.raises(YouTubeTranscriptError, match="transcript_unavailable"):
         fetch_youtube_transcript("https://youtu.be/abcDEF12345")
+
+
+def test_asr_transcript_retries_without_response_format_on_incompatible_model(monkeypatch, tmp_path) -> None:
+    class _Transcriptions:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def create(self, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("response_format 'verbose_json' is not compatible with model 'x'")
+            assert "response_format" not in kwargs
+            return {"text": "Recovered ASR text"}
+
+    class _Audio:
+        def __init__(self) -> None:
+            self.transcriptions = _Transcriptions()
+
+    class _Client:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            self.audio = _Audio()
+
+    audio_path = tmp_path / "audio.mp3"
+    audio_path.write_bytes(b"fake-audio")
+    monkeypatch.setattr("coatue_claw.hf_youtube_transcript.OpenAI", _Client)
+    monkeypatch.setattr("coatue_claw.hf_youtube_transcript._download_audio", lambda url, tmp_dir: audio_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    segments = _asr_transcript("https://youtu.be/abcDEF12345")
+
+    assert len(segments) == 1
+    assert segments[0].text == "Recovered ASR text"
+    assert segments[0].source_type == "asr"

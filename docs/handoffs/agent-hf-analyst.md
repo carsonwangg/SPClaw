@@ -63,3 +63,10 @@
 - Validation run:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_hf_podcast.py tests/test_hf_youtube_transcript.py tests/test_hf_document_extract.py tests/test_slack_routing.py` -> `26 passed`
   - `PYTHONPATH=src python3 -m compileall -q src` -> pass
+
+## Patch Status (2026-02-26)
+- ASR fallback compatibility patch added for podcast transcription:
+  - `src/coatue_claw/hf_youtube_transcript.py` retries transcription without `response_format` when model/API rejects `verbose_json`.
+  - fixes production failure mode on mini where ASR model rejects verbose response format.
+- Regression coverage:
+  - `tests/test_hf_youtube_transcript.py::test_asr_transcript_retries_without_response_format_on_incompatible_model`
