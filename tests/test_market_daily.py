@@ -1433,6 +1433,76 @@ def test_run_earnings_recap_selects_top4_and_writes_artifact(tmp_path: Path, mon
     assert "X/Yahoo/web evidence" not in content
 
 
+def test_run_earnings_recap_manual_daytime_does_not_block_scheduled_slot(tmp_path: Path, monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_MD_DB_PATH", str(tmp_path / "db/market_daily.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_MD_ARTIFACT_DIR", str(tmp_path / "artifacts/market-daily"))
+    monkeypatch.setenv("COATUE_CLAW_MD_TZ", "UTC")
+    monkeypatch.setenv("COATUE_CLAW_MD_EARNINGS_RECAP_TIME", "19:00")
+    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: None)
+
+    class Frozen(datetime):
+        _calls = [
+            datetime(2026, 2, 25, 10, 0, 0, tzinfo=UTC),  # manual daytime
+            datetime(2026, 2, 25, 19, 0, 0, tzinfo=UTC),  # scheduled window
+        ]
+        _last = _calls[-1]
+
+        @classmethod
+        def now(cls, tz=None):
+            if cls._calls:
+                base = cls._calls.pop(0)
+                cls._last = base
+            else:
+                base = cls._last
+            return base if tz is None else base.astimezone(tz)
+
+    monkeypatch.setattr("coatue_claw.market_daily.datetime", Frozen)
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._build_final_universe",
+        lambda store, refresh_holdings=True: (
+            [QuoteSnapshot("CRM", 100.0, 103.0, 100.0, 0.03, "2026-02-25T19:00:00+00:00")],
+            {"CRM": "top40"},
+            set(),
+            set(),
+            None,
+        ),
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._collect_reported_today_rows",
+        lambda universe, now_utc=None: [
+            EarningsRecapRow("CRM", "Salesforce", "2026-02-25", "after_close", 100.0, 103.0, 100.0, 0.03)
+        ],
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._hydrate_recap_row",
+        lambda row, since_utc, client: replace(
+            row,
+            bullets=("Key catalyst: Demand held up [S1].", "Since regular close, shares traded +3.0% [S1]."),
+            evidence=("yahoo_news: CRM earnings beat",),
+            source_links=("https://example.com/crm-earnings",),
+        ),
+    )
+
+    manual_run = md.run_earnings_recap(manual=True, force=False, dry_run=True)
+    assert manual_run["ok"] is True
+    assert manual_run["slot"] == "earnings_recap_manual"
+    assert manual_run["status"] == "dry_run"
+
+    scheduled_run = md.run_earnings_recap(manual=False, force=False, dry_run=True)
+    assert scheduled_run["ok"] is True
+    assert scheduled_run["slot"] == "earnings_recap"
+    assert scheduled_run["status"] == "dry_run"
+    assert scheduled_run.get("reason") is None
+
+    store = md.MarketDailyStore()
+    slots = {(row["run_date_local"], row["slot_name"]) for row in store.latest_runs(limit=10)}
+    assert ("2026-02-25", "earnings_recap_manual") in slots
+    assert ("2026-02-25", "earnings_recap") in slots
+
+
 def test_catalyst_mode_defaults_to_simple(monkeypatch) -> None:
     from coatue_claw import market_daily as md
 

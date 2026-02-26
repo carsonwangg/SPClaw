@@ -5503,9 +5503,10 @@ def run_earnings_recap(
     now_utc = datetime.now(UTC)
     now_local = now_utc.astimezone(_timezone())
     recap_hh, recap_mm = _earnings_recap_time()
+    target = now_local.replace(hour=recap_hh, minute=recap_mm, second=0, microsecond=0)
+    within_scheduled_window = abs((now_local - target).total_seconds()) <= (20 * 60)
     if not manual:
-        target = now_local.replace(hour=recap_hh, minute=recap_mm, second=0, microsecond=0)
-        if abs((now_local - target).total_seconds()) > (20 * 60):
+        if not within_scheduled_window:
             return {
                 "ok": True,
                 "posted": False,
@@ -5514,7 +5515,10 @@ def run_earnings_recap(
                 "recap_time": f"{recap_hh:02d}:{recap_mm:02d}",
             }
 
+    # Keep daytime manual test runs from consuming the nightly scheduled slot.
     slot = "earnings_recap"
+    if manual and (not within_scheduled_window):
+        slot = "earnings_recap_manual"
     date_key = now_local.strftime("%Y-%m-%d")
     if (not force) and store.slot_already_recorded(run_date_local=date_key, slot_name=slot):
         return {

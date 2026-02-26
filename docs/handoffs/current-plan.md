@@ -40,6 +40,12 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Market Daily earnings recap dedupe fix shipped on role branch:
+  - manual recap runs outside the scheduled window now record under `earnings_recap_manual`.
+  - scheduled nightly recap keeps `earnings_recap`.
+  - this prevents daytime manual/test runs from blocking the 7:00 PM scheduled recap via same-slot dedupe.
+  - regression test:
+    - `tests/test_market_daily.py::test_run_earnings_recap_manual_daytime_does_not_block_scheduled_slot`
 - Board Seat has been reset to a scaffold baseline to restart from scratch:
   - `src/coatue_claw/board_seat_daily.py` no longer runs legacy drafting/quality logic.
   - default behavior is hard skip with `feature_reset_in_progress`.
