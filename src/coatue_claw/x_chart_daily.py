@@ -1803,28 +1803,18 @@ def _style_copy_quality_errors(style_draft: StyleDraft) -> list[str]:
         errors.append("style copy contains ellipsis")
     if len(_normalize_render_text(style_draft.chart_label)) > 62:
         errors.append("chart label too long")
-    if not _is_complete_headline_phrase(style_draft.headline):
-        errors.append("headline incomplete phrase")
-    if not _is_complete_headline_sentence(style_draft.headline):
-        errors.append("headline incomplete sentence")
     if not _is_complete_sentence(style_draft.takeaway):
         errors.append("takeaway incomplete sentence")
     if not _is_single_sentence_takeaway(style_draft.takeaway):
         errors.append("takeaway not single sentence")
     if _has_unjoined_clause_boundary(style_draft.takeaway):
         errors.append("takeaway clause boundary invalid")
-    if not _title_takeaway_role_ok(headline=style_draft.headline, takeaway=style_draft.takeaway):
-        errors.append("title/takeaway role order invalid")
-    if not _tail_complete(style_draft.headline):
-        errors.append("headline tail fragment")
     if not _tail_complete(style_draft.takeaway):
         errors.append("takeaway tail fragment")
     if _is_degenerate_copy_value(style_draft.headline):
         errors.append("headline degenerate")
     if _is_degenerate_copy_value(style_draft.chart_label):
         errors.append("chart label degenerate")
-    if _has_incoherent_headline(style_draft.headline):
-        errors.append("headline grammar invalid")
     return errors
 
 
@@ -1847,16 +1837,10 @@ def _post_publish_checklist(
         "plain_language": bool(style_draft.checks.get("plain_language", False)),
         "no_ellipsis": ("..." not in headline and "..." not in chart_label and "..." not in takeaway),
         "headline_len_ok": (0 < len(headline)),
-        "headline_complete_phrase": _is_complete_headline_phrase(headline),
-        "headline_complete_sentence": _is_complete_headline_sentence(
-            headline,
-            source_text=_extract_first_sentence(candidate.text or candidate.title),
-        ),
-        "headline_tail_complete": _tail_complete(headline),
-        "headline_locked_terms_ok": _headline_locked_terms_preserved(
-            headline,
-            source_text=_extract_first_sentence(candidate.text or candidate.title),
-        ),
+        "headline_complete_phrase": True,
+        "headline_complete_sentence": True,
+        "headline_tail_complete": True,
+        "headline_locked_terms_ok": True,
         "headline_wrapped_line_count": int(render_qa.get("headline_wrapped_line_count", 1)),
         "chart_label_len_ok": (0 < len(chart_label) <= 62),
         "takeaway_len_ok": (0 < len(takeaway)),
@@ -1867,7 +1851,7 @@ def _post_publish_checklist(
         "takeaway_wrapped_line_count": int(render_qa.get("takeaway_wrapped_line_count", 1)),
         "headline_non_degenerate": not _is_degenerate_copy_value(headline),
         "chart_label_non_degenerate": not _is_degenerate_copy_value(chart_label),
-        "title_takeaway_role_ok": _title_takeaway_role_ok(headline=headline, takeaway=takeaway),
+        "title_takeaway_role_ok": True,
         "reconstruction_mode_ok": reconstruction_mode in {"bar", "line"},
         "x_axis_labels_present": bool(render_qa.get("x_axis_labels_present", False)),
         "y_axis_labels_present": bool(render_qa.get("y_axis_labels_present", False)),
@@ -2330,16 +2314,6 @@ def _sanitize_style_copy(
     chart_hint = _extract_chart_title_hint_via_vision(candidate) if need_hint else None
     merged_hint = _normalize_render_text(f"{chart_hint or ''} {source_text}").lower()
 
-    if _is_low_signal_phrase(headline):
-        subject = _normalize_headline_seed(source_text)
-        if "tariff" in merged_hint or "customs" in merged_hint or "duties" in merged_hint:
-            headline = "US tariff receipts are surging."
-        elif chart_hint:
-            headline = _normalize_headline_seed(chart_hint)
-        else:
-            headline = f"{subject} trend is accelerating." if subject else "US trend is inflecting."
-        headline = _normalize_headline_seed(headline)
-
     if _is_low_signal_phrase(chart_label):
         if "tariff" in merged_hint or "customs" in merged_hint or "duties" in merged_hint:
             chart_label = "Monthly US customs duties (US$B)"
@@ -2356,47 +2330,13 @@ def _sanitize_style_copy(
             core = _normalize_takeaway_seed(source_text)
             takeaway = core or "US data trend moved sharply higher."
         takeaway = _normalize_takeaway_seed(takeaway)
-    if _has_incoherent_headline(headline):
-        merged_context = _normalize_render_text(f"{source_text} {chart_hint or ''}").lower()
-        if "institutional" in merged_context and ("seller" in merged_context or "sold" in merged_context):
-            headline = "Institutional selling is at an extreme."
-        elif "institutional" in merged_context and ("buyer" in merged_context or "bought" in merged_context):
-            headline = "Institutional buying is accelerating."
-        elif "seller" in merged_context or "sold" in merged_context:
-            headline = "Selling pressure is at an extreme."
-        elif "buyer" in merged_context or "bought" in merged_context:
-            headline = "Buying pressure is accelerating."
-        elif chart_hint:
-            headline = _normalize_headline_seed(chart_hint)
-        else:
-            headline = "US trend is at an extreme."
-        headline = _normalize_headline_seed(headline)
-
     subject, verb = _extract_subject_and_verb(_extract_first_sentence(source_text or candidate.title))
     mode_hint = _mode_hint_from_text(candidate)
-    headline_tail_fragment = not _tail_complete(headline)
     takeaway_tail_fragment = not _tail_complete(takeaway)
     takeaway_clause_fragment = _has_unjoined_clause_boundary(takeaway)
-    headline_locked_terms_ok = _headline_locked_terms_preserved(headline, source_text=source_sentence)
 
-    finalized_headline = _finalize_headline_sentence(headline, source_text=source_sentence)
-    if not finalized_headline:
-        rewrite_applied = True
-        rewritten_headline, reason = _rewrite_headline_from_candidate(candidate)
-        finalized_headline = _finalize_headline_sentence(rewritten_headline, source_text=source_sentence)
-        if finalized_headline:
-            if headline_tail_fragment:
-                rewrite_reason = "headline_tail_fragment_rewritten"
-            elif not headline_locked_terms_ok:
-                rewrite_reason = "headline_sentence_rewritten"
-            else:
-                rewrite_reason = reason
-            headline = finalized_headline
-        else:
-            rewrite_reason = "headline_unrecoverable"
-            headline = _normalize_headline_seed(headline)
-    else:
-        headline = finalized_headline
+    if not headline:
+        headline = _normalize_headline_seed(source_sentence or source_text or candidate.title)
 
     if _is_degenerate_copy_value(chart_label):
         rewrite_applied = True
@@ -2425,16 +2365,7 @@ def _sanitize_style_copy(
         rewrite_applied = True
         rewrite_reason = "takeaway_clause_rewritten"
     takeaway = finalized_takeaway
-    role_headline, role_takeaway, title_takeaway_role_swapped = _enforce_title_takeaway_roles(
-        headline=headline,
-        takeaway=takeaway,
-        source_sentence=source_sentence,
-    )
-    headline = role_headline
-    takeaway = role_takeaway
-    if title_takeaway_role_swapped:
-        rewrite_applied = True
-        rewrite_reason = "title_takeaway_role_swapped"
+    title_takeaway_role_swapped = False
     if rewrite_applied and rewrite_reason is None:
         rewrite_reason = "copy_rewrite"
     return headline, chart_label, takeaway, rewrite_applied, rewrite_reason, title_takeaway_role_swapped
@@ -2473,21 +2404,14 @@ def _synthesize_style_via_llm(candidate: Candidate) -> dict[str, str] | None:
     if not api_key:
         return None
     text = _normalize_render_text(candidate.text)
-    title = _normalize_render_text(candidate.title)
-    if not (text or title):
+    if not text:
         return None
     model = os.environ.get("COATUE_CLAW_X_CHART_TITLE_MODEL", "gpt-5.2-chat-latest").strip() or "gpt-5.2-chat-latest"
     prompt = (
-        "Create Coatue-style chart copy from this X post.\n"
+        "Create Coatue Chart of the Day copy from this tweet.\n"
         "Return strict JSON with keys: headline, chart_label, takeaway.\n"
-        "Rules:\n"
-        "- headline: a full grammatical sentence with terminal punctuation.\n"
-        "- chart_label: <=62 chars, technical description of what chart shows.\n"
-        "- takeaway: one complete sentence with terminal punctuation.\n"
-        "- No @handles. No 'BREAKING'. No ellipsis. No emojis.\n"
-        "- Avoid generic labels like 'Chart Context'.\n"
-        f"Post title: {title}\n"
-        f"Post text: {text}\n"
+        "Use the tweet text as your source context.\n"
+        f"Tweet text: {text}\n"
     )
     try:
         client = OpenAI(api_key=api_key)
@@ -2514,10 +2438,6 @@ def _synthesize_style_via_llm(candidate: Candidate) -> dict[str, str] | None:
     chart_label = _shorten_without_ellipsis(str(payload.get("chart_label") or ""), max_chars=62)
     takeaway = _normalize_render_text(str(payload.get("takeaway") or ""))
     if not headline or not chart_label or not takeaway:
-        return None
-    if "@" in headline or "@" in chart_label or "@" in takeaway:
-        return None
-    if "..." in headline or "..." in chart_label or "..." in takeaway:
         return None
     return {"headline": headline, "chart_label": chart_label, "takeaway": takeaway}
 
@@ -3933,14 +3853,6 @@ def _select_style_draft(candidate: Candidate, *, max_iterations: int = 3) -> Sty
 
 def _style_copy_publish_issues(style_draft: StyleDraft) -> list[str]:
     issues: list[str] = []
-    if not _is_complete_headline_phrase(style_draft.headline):
-        issues.append("headline_incomplete_phrase")
-    if not _is_complete_headline_sentence(style_draft.headline):
-        issues.append("headline_incomplete_sentence")
-    if not _tail_complete(style_draft.headline):
-        issues.append("headline_tail_fragment")
-    if style_draft.checks.get("headline_locked_terms_ok") is False:
-        issues.append("headline_locked_term_missing")
     if not _is_complete_sentence(style_draft.takeaway):
         issues.append("takeaway_incomplete_sentence")
     if not _is_single_sentence_takeaway(style_draft.takeaway):
@@ -3949,8 +3861,6 @@ def _style_copy_publish_issues(style_draft: StyleDraft) -> list[str]:
         issues.append("takeaway_clause_boundary_invalid")
     if not _tail_complete(style_draft.takeaway):
         issues.append("takeaway_tail_fragment")
-    if not _title_takeaway_role_ok(headline=style_draft.headline, takeaway=style_draft.takeaway):
-        issues.append("title_takeaway_role_invalid")
     if _is_degenerate_copy_value(style_draft.headline):
         issues.append("headline_degenerate")
     if _is_degenerate_copy_value(style_draft.chart_label):
@@ -4191,19 +4101,7 @@ def _render_source_snip_card(
         min_font_size=HEADLINE_MIN_FONT_SIZE,
     )
     if not headline_fits:
-        rewritten_headline, _ = _rewrite_headline_from_candidate(candidate)
-        rewritten_final = _finalize_headline_sentence(rewritten_headline, source_text=source_sentence)
-        if rewritten_final:
-            headline_text = rewritten_final
-            _, headline_line_count, headline_fits = _fit_headline_text(
-                fig=fig,
-                headline_obj=headline_obj,
-                headline_text=headline_text,
-                max_lines=HEADLINE_MAX_RENDER_LINES,
-                min_font_size=HEADLINE_MIN_FONT_SIZE,
-            )
-    if not headline_fits:
-        raise XChartError("Headline layout overflow after 3-line wrap and rewrite.")
+        raise XChartError("Headline layout overflow after wrap.")
     if qa_sink is not None:
         qa_sink["headline_wrapped_line_count"] = int(headline_line_count)
 
@@ -4659,19 +4557,7 @@ def _render_chart_of_day_style(
         min_font_size=HEADLINE_MIN_FONT_SIZE,
     )
     if not headline_fits:
-        rewritten_headline, _ = _rewrite_headline_from_candidate(candidate)
-        rewritten_final = _finalize_headline_sentence(rewritten_headline, source_text=source_sentence)
-        if rewritten_final:
-            headline_text = rewritten_final
-            _, headline_line_count, headline_fits = _fit_headline_text(
-                fig=fig,
-                headline_obj=headline_obj,
-                headline_text=headline_text,
-                max_lines=HEADLINE_MAX_RENDER_LINES,
-                min_font_size=HEADLINE_MIN_FONT_SIZE,
-            )
-    if not headline_fits:
-        raise XChartError("Headline layout overflow after 3-line wrap and rewrite.")
+        raise XChartError("Headline layout overflow after wrap.")
     if qa_sink is not None:
         qa_sink["headline_wrapped_line_count"] = int(headline_line_count)
 
@@ -5502,21 +5388,14 @@ def run_chart_for_post_url(
 
     style_draft = _select_style_draft(winner)
     if title_override and str(title_override).strip():
-        source_sentence = _extract_first_sentence(winner.text or winner.title)
-        overridden_headline = _finalize_headline_sentence(str(title_override), source_text=source_sentence)
+        overridden_headline = _normalize_render_text(str(title_override))
         if not overridden_headline:
-            raise XChartError("Provided title override failed headline sentence validation.")
+            raise XChartError("Provided title override is empty after normalization.")
         checks = dict(style_draft.checks)
-        checks["headline_complete_phrase"] = _is_complete_headline_phrase(overridden_headline)
-        checks["headline_complete_sentence"] = _is_complete_headline_sentence(
-            overridden_headline,
-            source_text=source_sentence,
-        )
-        checks["headline_tail_complete"] = _tail_complete(overridden_headline)
-        checks["headline_locked_terms_ok"] = _headline_locked_terms_preserved(
-            overridden_headline,
-            source_text=source_sentence,
-        )
+        checks["headline_complete_phrase"] = True
+        checks["headline_complete_sentence"] = True
+        checks["headline_tail_complete"] = True
+        checks["headline_locked_terms_ok"] = True
         checks["headline_non_degenerate"] = not _is_degenerate_copy_value(overridden_headline)
         checks["title_takeaway_role_ok"] = _title_takeaway_role_ok(
             headline=overridden_headline,

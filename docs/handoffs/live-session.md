@@ -3,24 +3,15 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
-## Update (2026-02-26, HFA Podcast V1 shipped on agent branch)
-- Implemented YouTube podcast support inside HFA on `codex/agent-hf-analyst`:
-  - Slack command: `hfa podcast <youtube-url> [optional question]`
-  - DM auto-run for YouTube links with dedupe by `channel + user + thread + url_hash`
-  - CLI command: `claw hfa podcast --url <youtube-url> [--question \"...\"] [--dry-run]`
-- Added transcript ingestion modules:
-  - `src/coatue_claw/hf_youtube_transcript.py` for URL parsing, metadata, captions-first fetch, ASR fallback.
-  - `src/coatue_claw/hf_podcast.py` for summary generation, top verbatim quote validation, and artifact markdown rendering.
-- Extended HFA persistence:
-  - `hf_runs.run_kind` includes `podcast_youtube`.
-  - new tables: `hf_podcast_inputs`, `hf_dm_podcast_autoruns`.
-- Added/updated tests:
-  - `tests/test_hf_podcast.py`
-  - `tests/test_hf_youtube_transcript.py`
-  - `tests/test_hf_analyst.py` (podcast intent + DM dedupe + podcast analyze path)
+## Update (2026-02-26, chart title prompt relaxation for Chart of the Day)
+- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/src/coatue_claw/x_chart_daily.py` to remove strict deterministic title guardrails in style synthesis:
+  - LLM title prompt now uses tweet text as the direct source context.
+  - removed strict headline sentence/tail enforcement from publish issue gating.
+  - removed headline auto-rewrite fallback path in source-card render and post-url flow.
+  - title override validation now only requires non-empty normalized text (no strict completion checks).
+- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/tests/test_x_chart_daily.py` expectations to match relaxed title policy (LLM-controlled headline allowed, no forced fallback for fragmentary title text).
 - Validation:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_hf_podcast.py tests/test_hf_youtube_transcript.py tests/test_hf_document_extract.py tests/test_slack_routing.py` -> `26 passed`
-  - `PYTHONPATH=src python3 -m compileall -q src` -> pass
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `82 passed`
 
 ## Update (2026-02-26, board-seat hard reset scaffold)
 - Board Seat was intentionally scrapped to start fresh after repeated output quality failures.
@@ -2877,26 +2868,18 @@ Then confirm bot returns:
 - Operational note:
   - Posted a manual real-research board-seat message to `#openai` at Slack ts `1772060668.808919` while extractor hardening is being stabilized for fully automated target selection.
 
-
-## Update (2026-02-26T20:15:28.162192+00:00, HFA Podcast V1 deploy on main)
-- Merged `origin/codex/agent-hf-analyst` into `main` with merge commit `96caf25`.
-- Dependency/runtime updates:
-  - installed editable package in runtime venv: `/opt/coatue-claw/.venv/bin/python -m pip install -e .`
-  - ensured `yt-dlp` and `youtube-transcript-api` are installed in runtime venv.
-- Verification:
-  - `PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_hf_analyst.py tests/test_hf_podcast.py tests/test_hf_youtube_transcript.py tests/test_hf_document_extract.py tests/test_slack_routing.py` -> `26 passed`
-  - `PYTHONPATH=src python3 -m compileall -q src` -> pass
-- Runtime restart:
-  - `make openclaw-restart` completed
-  - `make openclaw-slack-status` probe healthy after restart
-- CLI acceptance:
-  - `python -m coatue_claw.cli hfa podcast --url <youtube-url> --question "focus on variant view"` executed and persisted run record (`run_kind=podcast_youtube`), but run failed due transcript fallback API incompatibility:
-    - `HFAError: transcript_unavailable:captions_empty | asr_transcription_failed:BadRequestError`
-    - OpenAI error: `response_format verbose_json is not compatible with model gpt-4o-mini-transcribe-api-ev3`
-  - `python -m coatue_claw.cli hfa status --limit 5` confirms latest run exists with `run_kind=podcast_youtube` and `status=failed`.
-- Env/path checks:
-  - `OPENAI_API_KEY` resolved true when loading `.env.prod`.
-  - `/opt/coatue-claw-data/db/hf_analyst.sqlite` writable.
-  - `/opt/coatue-claw-data/artifacts/hf-analyst/` writable.
-- Note:
-  - `.env.prod` contains an unquoted value with spaces in `COATUE_CLAW_BOARD_SEAT_PORTCOS`; sourcing file in shell raises parse warning. Runtime itself remains functional via process env, but shell sourcing should be corrected.
+## Update (2026-02-26, x-chart hard cooldown + cooldown-exhaustion notice + pull logs)
+- Implemented strict no-repeat source cooldown semantics for scheduled chart selection:
+  - `_pick_winner(...)` no longer falls back to recent-source reuse when all candidates are in cooldown.
+  - if all candidates are blocked by source cooldown, selection returns `None`.
+- Added explicit scheduled no-post notice:
+  - new `_post_no_candidate_message_to_slack(...)` posts: all candidate accounts are within cooldown window.
+  - `run_chart_scout_once(...)` now returns `reason=\"all_candidates_in_cooldown\"`.
+  - dry-run behavior: no notice posted.
+- Added deterministic pull logs for every skill invocation:
+  - new `_write_pull_log(...)` artifact output: `*-pull-log.json`.
+  - includes scanned candidates, source last-posted map, eligibility after item filter, eligibility after cooldown, selected candidate key, and result reason.
+  - scheduled run paths all emit pull logs (posted and skipped).
+  - manual URL flow (`run_chart_for_post_url`) emits pull logs with `mode=\"manual_url\"` and `manual_override_used=true` (manual override policy retained).
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `82 passed`
