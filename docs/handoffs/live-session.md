@@ -95,6 +95,28 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py tests/test_launchd_runtime.py` -> `34 passed`
 
+## Update (2026-02-26, conversational HFA command parsing)
+- Improved HFA command flexibility for conversational phrasing in `src/coatue_claw/hf_analyst.py`:
+  - supports variants like:
+    - `hfa analyze this podcast <youtube-url>`
+    - `hfa summarize this youtube interview <youtube-url>`
+    - `hfa quotes for this podcast`
+- Added thread-context fallback in `src/coatue_claw/slack_bot.py` for podcast intents without an inline URL:
+  - when users ask podcast/quotes/transcript in-thread, bot scans thread text for a prior YouTube URL and runs podcast mode.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_slack_routing.py tests/test_hf_youtube_transcript.py` -> `17 passed`
+
+## Update (2026-02-26, bare command aliases without `hfa` prefix)
+- Added bare command aliases in `src/coatue_claw/hf_analyst.py` so users do not need `hfa` prefix:
+  - `analyze ...`
+  - `podcast <youtube-url> ...`
+  - `quotes <youtube-url>` (podcast quote mode)
+  - `analyze <youtube-url>` (podcast route)
+  - `status`
+- Updated usage text in `src/coatue_claw/slack_bot.py` to include bare aliases.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_slack_routing.py tests/test_hf_youtube_transcript.py` -> `17 passed`
+
 ## Update (2026-02-26, board-seat hard reset scaffold)
 - Board Seat was intentionally scrapped to start fresh after repeated output quality failures.
 - Replaced `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py` with a reset scaffold:
