@@ -40,12 +40,15 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
-- Market Daily earnings recap dedupe fix shipped on role branch:
-  - manual recap runs outside the scheduled window now record under `earnings_recap_manual`.
-  - scheduled nightly recap keeps `earnings_recap`.
-  - this prevents daytime manual/test runs from blocking the 7:00 PM scheduled recap via same-slot dedupe.
-  - regression test:
-    - `tests/test_market_daily.py::test_run_earnings_recap_manual_daytime_does_not_block_scheduled_slot`
+- HFA Podcast V1 implementation is complete on `codex/agent-hf-analyst`:
+  - YouTube transcript flow: captions first, ASR fallback.
+  - New HFA mode for podcast summarization with top verbatim quotes + timestamps.
+  - Slack command and DM auto-run routing are wired.
+  - CLI command `claw hfa podcast` is wired.
+  - HFA store schema extended for podcast runs + DM dedupe.
+  - targeted validation:
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_hf_podcast.py tests/test_hf_youtube_transcript.py tests/test_hf_document_extract.py tests/test_slack_routing.py` -> `26 passed`
+    - `PYTHONPATH=src python3 -m compileall -q src` -> pass
 - Board Seat has been reset to a scaffold baseline to restart from scratch:
   - `src/coatue_claw/board_seat_daily.py` no longer runs legacy drafting/quality logic.
   - default behavior is hard skip with `feature_reset_in_progress`.
@@ -1383,18 +1386,3 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `63 passed`.
 - Next:
   - add a post-sanitize target-lock re-check so retargeted outputs cannot bypass cooldown/new-target governance when final target differs from initial extraction.
-
-## Update (2026-02-26, Market Daily recap dedupe)
-- Deployed recap dedupe fix from role branch commit  via cherry-pick to  ().
-- Outcome: daytime manual recap runs no longer consume/block the scheduled nightly recap slot.
-- Verified in runtime DB () with same-day rows for both:
-  -  ()
-  -  ()
-
-
-## Update (2026-02-26, Market Daily recap dedupe)
-- Deployed recap dedupe fix from role branch commit 95ddd47 via cherry-pick to main (commit 67ad0f0).
-- Verified behavior in md_runs table for current local date:
-  - earnings_recap_manual with triggered_manual=1
-  - earnings_recap with triggered_manual=0
-- Result: daytime manual recap tests no longer consume the scheduled nightly recap slot.

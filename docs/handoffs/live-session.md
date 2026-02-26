@@ -3,17 +3,24 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
-## Update (2026-02-26, earnings recap manual-vs-scheduled slot isolation)
-- Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
-  - `run_earnings_recap(...)` now records daytime manual runs under `slot_name=earnings_recap_manual` when run outside the scheduled recap window.
-  - scheduled run keeps `slot_name=earnings_recap`.
-  - this prevents a daytime manual/test recap from consuming the nightly 7:00 PM PT scheduled slot.
-- Added regression test in `/Users/carsonwang/worktrees/coatue-claw/market-daily/tests/test_market_daily.py`:
-  - `test_run_earnings_recap_manual_daytime_does_not_block_scheduled_slot`
-  - validates same-day manual daytime run no longer blocks scheduled recap.
+## Update (2026-02-26, HFA Podcast V1 shipped on agent branch)
+- Implemented YouTube podcast support inside HFA on `codex/agent-hf-analyst`:
+  - Slack command: `hfa podcast <youtube-url> [optional question]`
+  - DM auto-run for YouTube links with dedupe by `channel + user + thread + url_hash`
+  - CLI command: `claw hfa podcast --url <youtube-url> [--question \"...\"] [--dry-run]`
+- Added transcript ingestion modules:
+  - `src/coatue_claw/hf_youtube_transcript.py` for URL parsing, metadata, captions-first fetch, ASR fallback.
+  - `src/coatue_claw/hf_podcast.py` for summary generation, top verbatim quote validation, and artifact markdown rendering.
+- Extended HFA persistence:
+  - `hf_runs.run_kind` includes `podcast_youtube`.
+  - new tables: `hf_podcast_inputs`, `hf_dm_podcast_autoruns`.
+- Added/updated tests:
+  - `tests/test_hf_podcast.py`
+  - `tests/test_hf_youtube_transcript.py`
+  - `tests/test_hf_analyst.py` (podcast intent + DM dedupe + podcast analyze path)
 - Validation:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_market_daily.py` -> `76 passed`
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_hf_podcast.py tests/test_hf_youtube_transcript.py tests/test_hf_document_extract.py tests/test_slack_routing.py` -> `26 passed`
+  - `PYTHONPATH=src python3 -m compileall -q src` -> pass
 
 ## Update (2026-02-26, board-seat hard reset scaffold)
 - Board Seat was intentionally scrapped to start fresh after repeated output quality failures.
@@ -2869,32 +2876,3 @@ Then confirm bot returns:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `63 passed`.
 - Operational note:
   - Posted a manual real-research board-seat message to `#openai` at Slack ts `1772060668.808919` while extractor hardening is being stabilized for fully automated target selection.
-
-## Update (2026-02-26, market-daily recap dedupe fix deployed)
-- Cherry-picked  onto  as commit .
-- Purpose: manual daytime recap runs now write slot  so they do not block scheduled  runs.
-- Validation:
-  -  -> 
-  -  -> 
-- Runtime:
-  - /opt/homebrew/bin/openclaw gateway restart completed.
-  - /opt/homebrew/bin/openclaw channels status --probe --json probe OK (HTTP 200).
-- Behavior verification:
-  - manual dry-run: , , , 
-  - scheduled-path dry-run (forced with temporary recap-time override to current minute): , , , 
-  - DB rows confirm both slots exist independently for the same local date.
-
-
-## Update (2026-02-26, market-daily recap dedupe fix deployed)
-- Cherry-picked role branch commit 95ddd47 onto main as commit 67ad0f0.
-- Fix intent: manual daytime earnings recap writes slot earnings_recap_manual so it does not block scheduled earnings_recap.
-- Validation:
-  - PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_market_daily.py -> 76 passed
-  - PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_launchd_runtime.py -> 8 passed
-- Runtime health:
-  - make openclaw-restart completed
-  - make openclaw-slack-status probe OK (status 200)
-- Behavior verification:
-  - Manual dry run: run_id 13, slot earnings_recap_manual, triggered_manual 1, status dry_run
-  - Scheduled-path dry run (forced with temporary recap-time override to current minute): run_id 14, slot earnings_recap, triggered_manual 0, status dry_run
-  - DB rows show both slots on same local date, confirming manual runs no longer block scheduled recap.
