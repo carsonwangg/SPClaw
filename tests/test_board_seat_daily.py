@@ -110,6 +110,9 @@ def test_target_validation_rejects_company_product_names() -> None:
     ok2, reason2 = board_seat_daily._is_valid_target_name(target="ChatGPT", company="OpenAI")
     assert ok2 is False
     assert reason2 == "product_not_company"
+    ok3, reason3 = board_seat_daily._is_valid_target_name(target="Lead", company="Anthropic")
+    assert ok3 is False
+    assert reason3 == "ambiguous_common_term"
 
 
 def test_candidate_extraction_rejects_company_product_targets() -> None:
@@ -129,6 +132,16 @@ def test_candidate_extraction_rejects_company_product_targets() -> None:
     names = [c.target for c in candidates]
     assert "Claude" not in names
     assert "Vercept" in names
+
+
+def test_filter_rows_for_target_drops_low_signal_sources() -> None:
+    rows = [
+        _row(title="Lead Funding, LLC profile", url="https://zoominfo.com/c/lead-funding", snippet="company profile"),
+        _row(title="Lead raises $40M funding", url="https://techcrunch.com/2026/01/01/lead-raises", snippet="funding round"),
+    ]
+    filtered = board_seat_daily._filter_rows_for_target(target="Lead", rows=rows)
+    assert len(filtered) == 1
+    assert "techcrunch.com" in filtered[0].domain
 
 
 def test_funding_snapshot_weak_adds_warning() -> None:
@@ -279,6 +292,19 @@ def test_run_once_memory_fallback_posts_warning(board_seat_env: Path, monkeypatc
             1.0,
             [],
             [],
+        ),
+    )
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_verify_target_candidate",
+        lambda **kwargs: (
+            True,
+            [
+                _row(title="Databento raises $40M", url="https://techcrunch.com/d", snippet="funding and company profile"),
+                _row(title="Databento funding profile", url="https://crunchbase.com/org/databento", snippet="company and investors"),
+            ],
+            "",
+            0.91,
         ),
     )
 
