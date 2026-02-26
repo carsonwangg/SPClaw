@@ -611,6 +611,7 @@ class Candidate:
     engagement: int
     source_priority: float
     score: float
+    discovered_via: str = "seed_list"
 
 
 @dataclass(frozen=True)
@@ -2545,11 +2546,16 @@ class XChartStore:
                     engagement INTEGER NOT NULL,
                     source_priority REAL NOT NULL,
                     score REAL NOT NULL,
+                    discovered_via TEXT NOT NULL DEFAULT 'seed_list',
                     first_seen_utc TEXT NOT NULL,
                     last_seen_utc TEXT NOT NULL
                 );
                 """
             )
+            try:
+                conn.execute("ALTER TABLE observed_candidates ADD COLUMN discovered_via TEXT NOT NULL DEFAULT 'seed_list'")
+            except Exception:
+                pass
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS post_reviews (
@@ -2660,6 +2666,26 @@ class XChartStore:
     def list_sources(self, *, limit: int = 100) -> list[dict[str, Any]]:
         return self.top_sources(limit=limit)
 
+    def has_source(self, handle: str) -> bool:
+        clean = _canonical_handle(handle)
+        if not clean:
+            return False
+        with self._connect() as conn:
+            row = conn.execute("SELECT 1 FROM sources WHERE handle = ? LIMIT 1", (clean,)).fetchone()
+        return row is not None
+
+    def auto_added_sources_count_since(self, *, since_utc: str) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(1) AS c
+                FROM sources
+                WHERE manual = 0 AND first_seen_utc >= ?
+                """,
+                (since_utc,),
+            ).fetchone()
+        return int((row["c"] if row is not None else 0) or 0)
+
     def was_slot_posted(self, slot_key: str) -> bool:
         with self._connect() as conn:
             row = conn.execute("SELECT 1 FROM posted_slots WHERE slot_key = ? LIMIT 1", (slot_key,)).fetchone()
@@ -2748,8 +2774,8 @@ class XChartStore:
                     """
                     INSERT OR REPLACE INTO observed_candidates (
                         candidate_key, source_type, source_id, author, title, text, url, image_url, created_at,
-                        engagement, source_priority, score, first_seen_utc, last_seen_utc
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        engagement, source_priority, score, discovered_via, first_seen_utc, last_seen_utc
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         candidate.candidate_key,
@@ -2764,6 +2790,7 @@ class XChartStore:
                         int(candidate.engagement),
                         float(candidate.source_priority),
                         float(candidate.score),
+                        str(candidate.discovered_via or "seed_list"),
                         first_seen,
                         now,
                     ),
@@ -2794,7 +2821,7 @@ class XChartStore:
                 rows = conn.execute(
                     """
                     SELECT candidate_key, source_type, source_id, author, title, text, url, image_url, created_at,
-                           engagement, source_priority, score, first_seen_utc, last_seen_utc
+                           engagement, source_priority, score, discovered_via, first_seen_utc, last_seen_utc
                     FROM observed_candidates
                     WHERE last_seen_utc > ?
                     ORDER BY score DESC, last_seen_utc DESC
@@ -2806,7 +2833,7 @@ class XChartStore:
                 rows = conn.execute(
                     """
                     SELECT candidate_key, source_type, source_id, author, title, text, url, image_url, created_at,
-                           engagement, source_priority, score, first_seen_utc, last_seen_utc
+                           engagement, source_priority, score, discovered_via, first_seen_utc, last_seen_utc
                     FROM observed_candidates
                     ORDER BY score DESC, last_seen_utc DESC
                     LIMIT ?
@@ -2829,6 +2856,7 @@ class XChartStore:
                     engagement=int(row["engagement"] or 0),
                     source_priority=float(row["source_priority"] or 0.0),
                     score=float(row["score"] or 0.0),
+                    discovered_via=str(row["discovered_via"] or "seed_list"),
                 )
             )
         return out
@@ -3401,6 +3429,34 @@ def _fetch_x_candidates_from_sources(*, handles: list[str], token: str, hours: i
     return out
 
 
+def _fetch_x_candidates_open_search(
+    *,
+    token: str,
+    priority_by_handle: dict[str, float],
+    hours: int = 48,
+) -> list[Candidate]:
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return []
+    if not _open_search_enabled():
+        return []
+    queries = _open_search_queries()
+    if not queries:
+        return []
+    per_query = max(10, min(60, int(os.environ.get("COATUE_CLAW_X_CHART_OPEN_SEARCH_MAX_RESULTS", "35"))))
+    out: list[Candidate] = []
+    for query in queries:
+        try:
+            payload = _x_search_recent(query, hours=hours, max_results=per_query, token=token)
+        except XChartError as exc:
+            logger.warning("x-chart open search failed for query '%s': %s", query, exc)
+            continue
+        parsed = _parse_x_candidates(payload, priority_by_handle=priority_by_handle)
+        if not parsed:
+            continue
+        out.extend([replace(c, discovered_via="open_search") for c in parsed])
+    return out
+
+
 def _discover_new_sources(*, token: str) -> list[tuple[str, int]]:
     query = os.environ.get(
         "COATUE_CLAW_X_CHART_DISCOVERY_QUERY",
@@ -3549,6 +3605,52 @@ def _source_repeat_days() -> int:
     return max(0, min(30, days))
 
 
+def _discovery_mode() -> str:
+    mode = (os.environ.get("COATUE_CLAW_X_CHART_DISCOVERY_MODE", "hybrid") or "hybrid").strip().lower()
+    if mode not in {"seed_only", "open_only", "hybrid"}:
+        return "hybrid"
+    return mode
+
+
+def _open_search_enabled() -> bool:
+    raw = (os.environ.get("COATUE_CLAW_X_CHART_OPEN_SEARCH_ENABLED", "1") or "1").strip().lower()
+    return raw not in {"0", "false", "off", "no"}
+
+
+def _auto_add_sources_enabled() -> bool:
+    raw = (os.environ.get("COATUE_CLAW_X_CHART_AUTO_ADD_SOURCES", "1") or "1").strip().lower()
+    return raw not in {"0", "false", "off", "no"}
+
+
+def _auto_add_daily_cap() -> int:
+    raw = (os.environ.get("COATUE_CLAW_X_CHART_AUTO_ADD_DAILY_CAP", "8") or "8").strip()
+    try:
+        cap = int(raw)
+    except Exception:
+        cap = 8
+    return max(0, min(100, cap))
+
+
+def _open_search_queries() -> list[str]:
+    raw = (
+        os.environ.get(
+            "COATUE_CLAW_X_CHART_OPEN_SEARCH_QUERIES",
+            (
+                "has:images (\"S&P 500\" OR breadth OR dispersion OR rotation) -is:retweet -is:reply lang:en || "
+                "has:images (\"data center\" OR \"power demand\" OR AI OR semiconductor) -is:retweet -is:reply lang:en || "
+                "has:images (backlog OR yoy OR cagr OR \"year to date\") -is:retweet -is:reply lang:en"
+            ),
+        )
+        or ""
+    ).strip()
+    out: list[str] = []
+    for part in raw.split("||"):
+        q = part.strip()
+        if q:
+            out.append(q)
+    return out[:6]
+
+
 def _collect_source_last_posted(*, store: XChartStore, limit: int = 120) -> dict[str, datetime]:
     recent = store.latest_posts(limit=max(1, limit))
     source_last_posted: dict[str, datetime] = {}
@@ -3595,7 +3697,46 @@ def _candidate_log_row(item: Candidate) -> dict[str, Any]:
         "source_type": item.source_type,
         "url": item.url,
         "score": float(item.score),
+        "discovered_via": item.discovered_via,
     }
+
+
+def _interesting_takeaway_bonus(*, candidate: Candidate, recent_texts: list[str]) -> float:
+    merged = _normalize_render_text(f"{candidate.title} {candidate.text}")
+    lower = merged.lower()
+    bonus = 0.0
+    if re.search(r"\b\d+(?:\.\d+)?%|\b\d+(?:\.\d+)?x\b|\b\d{1,3}(?:,\d{3})+\b", lower):
+        bonus += 2.0
+    if re.search(r"\b(vs|versus|yoy|qoq|cagr|year to date|ytd|through \d{4}|2030|forecast)\b", lower):
+        bonus += 1.8
+    if re.search(r"\b(breadth|dispersion|rotation|backlog|power demand|data center|underallocated)\b", lower):
+        bonus += 1.6
+    if re.search(r"\b(rose|fell|surged|dropped|accelerating|slowing|record high|record low)\b", lower):
+        bonus += 1.2
+    if candidate.discovered_via == "open_search":
+        bonus += 0.8
+    if "visualcapitalist.com" in candidate.source_id.lower():
+        bonus -= 0.8
+
+    tokens = {t for t in re.findall(r"[a-z0-9]{4,}", lower)}
+    overlap_penalty = 0.0
+    if tokens and recent_texts:
+        max_overlap = 0.0
+        for recent in recent_texts:
+            r_tokens = {t for t in re.findall(r"[a-z0-9]{4,}", recent.lower())}
+            if not r_tokens:
+                continue
+            union = len(tokens | r_tokens)
+            if union <= 0:
+                continue
+            jacc = len(tokens & r_tokens) / float(union)
+            if jacc > max_overlap:
+                max_overlap = jacc
+        if max_overlap >= 0.45:
+            overlap_penalty = 3.5
+        elif max_overlap >= 0.30:
+            overlap_penalty = 1.5
+    return bonus - overlap_penalty
 
 
 def _write_pull_log(
@@ -3612,6 +3753,12 @@ def _write_pull_log(
     selected_candidate_key: str | None,
     result_reason: str,
     manual_override_used: bool = False,
+    seed_candidates_count: int = 0,
+    open_search_candidates_count: int = 0,
+    merged_candidates_count: int = 0,
+    winner_discovered_via: str | None = None,
+    new_source_auto_added: bool = False,
+    new_source_handle: str | None = None,
 ) -> Path:
     output_dir = _output_dir()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -3625,13 +3772,20 @@ def _write_pull_log(
         "repeat_days": int(repeat_days),
         "cooldown_scope": "scheduled_only",
         "manual_override_used": bool(manual_override_used),
+        "seed_candidates_count": int(seed_candidates_count),
+        "open_search_candidates_count": int(open_search_candidates_count),
+        "merged_candidates_count": int(merged_candidates_count or len(scanned_candidates)),
         "scanned_candidates": [_candidate_log_row(c) for c in scanned_candidates],
+        "scanned_accounts": sorted({_canonical_handle(c.source_id) or c.source_id.lower() for c in scanned_candidates}),
         "source_last_posted": {k: v.isoformat() for k, v in source_last_posted.items()},
         "eligible_after_item_filter": [_candidate_log_row(c) for c in eligible_after_item_filter],
         "eligible_after_item_filter_count": len(eligible_after_item_filter),
         "eligible_after_cooldown": [_candidate_log_row(c) for c in eligible_after_cooldown],
         "eligible_after_cooldown_count": len(eligible_after_cooldown),
         "selected_candidate_key": selected_candidate_key,
+        "winner_discovered_via": winner_discovered_via,
+        "new_source_auto_added": bool(new_source_auto_added),
+        "new_source_handle": (new_source_handle or ""),
         "result_reason": result_reason,
     }
     out_path.write_text(json.dumps(payload, sort_keys=True, indent=2), encoding="utf-8")
@@ -3709,6 +3863,12 @@ def _pick_winner(*, store: XChartStore, candidates: list[Candidate]) -> Candidat
     recent = store.latest_posts(limit=max(lookback, 120))
     source_last_posted = _collect_source_last_posted(store=store, limit=max(lookback, 120))
 
+    recent_texts = [
+        _normalize_render_text(f"{row.get('title') or ''} {row.get('url') or ''}")
+        for row in recent
+        if isinstance(row, dict)
+    ]
+
     selection_pool = pool
     if repeat_days > 0:
         selection_pool = _eligible_after_source_cooldown(
@@ -3720,6 +3880,12 @@ def _pick_winner(*, store: XChartStore, candidates: list[Candidate]) -> Candidat
         if not selection_pool:
             return None
 
+    effective_score: dict[str, float] = {
+        c.candidate_key: float(c.score) + _interesting_takeaway_bonus(candidate=c, recent_texts=recent_texts)
+        for c in selection_pool
+    }
+    selection_pool = sorted(selection_pool, key=lambda c: effective_score.get(c.candidate_key, float(c.score)), reverse=True)
+
     # Keep "highest score" behavior but add source variety when alternatives are near the top score.
     top = selection_pool[0]
     recent_for_variety = recent[:lookback]
@@ -3730,14 +3896,15 @@ def _pick_winner(*, store: XChartStore, candidates: list[Candidate]) -> Candidat
             continue
         counts[key] = int(counts.get(key, 0)) + 1
 
-    score_floor = float(top.score) * float(floor)
-    near_top = [c for c in selection_pool if float(c.score) >= score_floor]
+    top_effective = float(effective_score.get(top.candidate_key, float(top.score)))
+    score_floor = top_effective * float(floor)
+    near_top = [c for c in selection_pool if float(effective_score.get(c.candidate_key, float(c.score))) >= score_floor]
     if len(near_top) <= 1:
         return top
 
     def _rank_key(c: Candidate) -> tuple[int, float]:
         source_key = _canonical_handle(c.source_id) or c.source_id.lower()
-        return (int(counts.get(source_key, 0)), -float(c.score))
+        return (int(counts.get(source_key, 0)), -float(effective_score.get(c.candidate_key, float(c.score))))
 
     near_top.sort(key=_rank_key)
     return near_top[0]
@@ -4951,10 +5118,29 @@ def run_chart_scout_once(
     token = _resolve_bearer_token()
     source_limit = max(8, min(60, int(os.environ.get("COATUE_CLAW_X_CHART_SOURCE_LIMIT", "25"))))
     top_sources = store.top_sources(limit=source_limit)
+    known_source_handles = {
+        _canonical_handle(str(item.get("handle") or ""))
+        for item in store.list_sources(limit=5000)
+        if str(item.get("handle") or "").strip()
+    }
+    source_priority_map = {
+        _canonical_handle(str(item.get("handle") or "")).lower(): float(item.get("priority") or 0.45)
+        for item in top_sources
+        if str(item.get("handle") or "").strip()
+    }
     handles = [_canonical_handle(str(item["handle"])) for item in top_sources if str(item.get("handle") or "").strip()]
-    x_candidates = _fetch_x_candidates_from_sources(handles=handles, token=token, hours=48)
+    discovery_mode = _discovery_mode()
+    x_seed_candidates: list[Candidate] = []
+    x_open_candidates: list[Candidate] = []
+    if discovery_mode in {"seed_only", "hybrid"}:
+        x_seed_candidates = [replace(c, discovered_via="seed_list") for c in _fetch_x_candidates_from_sources(handles=handles, token=token, hours=48)]
+    if discovery_mode in {"open_only", "hybrid"}:
+        x_open_candidates = _fetch_x_candidates_open_search(token=token, priority_by_handle=source_priority_map, hours=48)
     vc_candidates = _fetch_visualcapitalist_candidates(max_items=20)
-    all_candidates = _dedupe_candidates(x_candidates + vc_candidates)
+    all_candidates = _dedupe_candidates(x_seed_candidates + x_open_candidates + vc_candidates)
+    seed_candidates_count = len(x_seed_candidates) + len(vc_candidates)
+    open_search_candidates_count = len(x_open_candidates)
+    merged_candidates_count = len(all_candidates)
     observed_count = store.upsert_observed_candidates(all_candidates)
     pool_prune_days = max(2, min(30, int(os.environ.get("COATUE_CLAW_X_CHART_POOL_KEEP_DAYS", "10"))))
     pruned_count = store.prune_observed_candidates(keep_days=pool_prune_days)
@@ -4990,6 +5176,9 @@ def run_chart_scout_once(
             eligible_after_cooldown=eligible_after_cooldown,
             selected_candidate_key=None,
             result_reason="scouted_pool_updated",
+            seed_candidates_count=seed_candidates_count,
+            open_search_candidates_count=open_search_candidates_count,
+            merged_candidates_count=merged_candidates_count,
         )
         return {
             "ok": True,
@@ -5002,6 +5191,8 @@ def run_chart_scout_once(
             "now_local": now_local.isoformat(),
             "windows": windows_text,
             "candidates_scanned": len(all_candidates),
+            "seed_candidates_count": seed_candidates_count,
+            "open_search_candidates_count": open_search_candidates_count,
             "candidates_observed": observed_count,
             "pool_pruned": pruned_count,
             "pull_log_path": str(pull_log_path),
@@ -5020,6 +5211,9 @@ def run_chart_scout_once(
             eligible_after_cooldown=eligible_after_cooldown,
             selected_candidate_key=None,
             result_reason="slot_already_posted",
+            seed_candidates_count=seed_candidates_count,
+            open_search_candidates_count=open_search_candidates_count,
+            merged_candidates_count=merged_candidates_count,
         )
         return {
             "ok": True,
@@ -5031,6 +5225,8 @@ def run_chart_scout_once(
             "candidate_fallback_used": False,
             "title_takeaway_role_swapped": False,
             "candidates_scanned": len(all_candidates),
+            "seed_candidates_count": seed_candidates_count,
+            "open_search_candidates_count": open_search_candidates_count,
             "candidates_observed": observed_count,
             "pool_pruned": pruned_count,
             "pull_log_path": str(pull_log_path),
@@ -5055,6 +5251,9 @@ def run_chart_scout_once(
             eligible_after_cooldown=eligible_after_cooldown,
             selected_candidate_key=None,
             result_reason="no_candidate_available",
+            seed_candidates_count=seed_candidates_count,
+            open_search_candidates_count=open_search_candidates_count,
+            merged_candidates_count=merged_candidates_count,
         )
         return {
             "ok": True,
@@ -5066,6 +5265,8 @@ def run_chart_scout_once(
             "candidate_fallback_used": False,
             "title_takeaway_role_swapped": False,
             "candidates_scanned": len(all_candidates),
+            "seed_candidates_count": seed_candidates_count,
+            "open_search_candidates_count": open_search_candidates_count,
             "candidates_observed": observed_count,
             "pool_candidates": len(ranking_pool),
             "since_utc": since_utc,
@@ -5113,6 +5314,9 @@ def run_chart_scout_once(
             eligible_after_cooldown=cooled_candidates,
             selected_candidate_key=None,
             result_reason="all_candidates_in_cooldown",
+            seed_candidates_count=seed_candidates_count,
+            open_search_candidates_count=open_search_candidates_count,
+            merged_candidates_count=merged_candidates_count,
         )
         return {
             "ok": True,
@@ -5128,6 +5332,8 @@ def run_chart_scout_once(
             "candidate_fallback_used": False,
             "title_takeaway_role_swapped": False,
             "candidates_scanned": len(all_candidates),
+            "seed_candidates_count": seed_candidates_count,
+            "open_search_candidates_count": open_search_candidates_count,
             "candidates_observed": observed_count,
             "pool_candidates": len(ranking_pool),
             "since_utc": since_utc,
@@ -5142,6 +5348,8 @@ def run_chart_scout_once(
     copy_rewrite_applied = False
     copy_rewrite_reason: str | None = None
     title_takeaway_role_swapped = False
+    new_source_auto_added = False
+    new_source_handle: str | None = None
 
     for idx, candidate in enumerate(candidate_order):
         draft = _select_style_draft(candidate)
@@ -5179,6 +5387,9 @@ def run_chart_scout_once(
             ),
             selected_candidate_key=top_choice.candidate_key,
             result_reason="no_publishable_candidate_available",
+            seed_candidates_count=seed_candidates_count,
+            open_search_candidates_count=open_search_candidates_count,
+            merged_candidates_count=merged_candidates_count,
         )
         return {
             "ok": True,
@@ -5200,6 +5411,8 @@ def run_chart_scout_once(
                 "style_iteration": top_draft.iteration,
             },
             "candidates_scanned": len(all_candidates),
+            "seed_candidates_count": seed_candidates_count,
+            "open_search_candidates_count": open_search_candidates_count,
             "candidates_observed": observed_count,
             "pool_candidates": len(ranking_pool),
             "since_utc": since_utc,
@@ -5208,6 +5421,15 @@ def run_chart_scout_once(
         }
 
     convention_name = _convention_name(slot_key=slot_key, now_local=now_local, windows=windows)
+
+    if winner.source_type == "x" and _auto_add_sources_enabled():
+        candidate_handle = _canonical_handle(winner.source_id)
+        if candidate_handle and (candidate_handle not in known_source_handles):
+            day_start_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+            if store.auto_added_sources_count_since(since_utc=day_start_utc) < _auto_add_daily_cap():
+                store.upsert_source(candidate_handle, priority=max(0.45, float(winner.source_priority)), manual=False)
+                new_source_auto_added = True
+                new_source_handle = candidate_handle
 
     output_dir = _output_dir()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -5264,6 +5486,12 @@ def run_chart_scout_once(
             ),
             selected_candidate_key=winner.candidate_key,
             result_reason="dry_run",
+            seed_candidates_count=seed_candidates_count,
+            open_search_candidates_count=open_search_candidates_count,
+            merged_candidates_count=merged_candidates_count,
+            winner_discovered_via=winner.discovered_via,
+            new_source_auto_added=new_source_auto_added,
+            new_source_handle=new_source_handle,
         )
         return {
             "ok": True,
@@ -5283,7 +5511,10 @@ def run_chart_scout_once(
                 "score": winner.score,
                 "style_score": style_draft.score,
                 "style_iteration": style_draft.iteration,
+                "discovered_via": winner.discovered_via,
             },
+            "new_source_auto_added": new_source_auto_added,
+            "new_source_handle": new_source_handle,
             "artifact": str(out_path),
             "pool_candidates": len(ranking_pool),
             "since_utc": since_utc,
@@ -5318,6 +5549,12 @@ def run_chart_scout_once(
         ),
         selected_candidate_key=winner.candidate_key,
         result_reason="posted",
+        seed_candidates_count=seed_candidates_count,
+        open_search_candidates_count=open_search_candidates_count,
+        merged_candidates_count=merged_candidates_count,
+        winner_discovered_via=winner.discovered_via,
+        new_source_auto_added=new_source_auto_added,
+        new_source_handle=new_source_handle,
     )
     return {
         "ok": True,
@@ -5338,7 +5575,10 @@ def run_chart_scout_once(
             "score": winner.score,
             "style_score": style_draft.score,
             "style_iteration": style_draft.iteration,
+            "discovered_via": winner.discovered_via,
         },
+        "new_source_auto_added": new_source_auto_added,
+        "new_source_handle": new_source_handle,
         "artifact": str(out_path),
         "pool_candidates": len(ranking_pool),
         "since_utc": since_utc,
@@ -5450,6 +5690,10 @@ def run_chart_for_post_url(
         selected_candidate_key=winner.candidate_key,
         result_reason="posted",
         manual_override_used=True,
+        seed_candidates_count=len(candidates or [winner]),
+        open_search_candidates_count=0,
+        merged_candidates_count=len(candidates or [winner]),
+        winner_discovered_via=winner.discovered_via,
     )
     return {
         "ok": True,

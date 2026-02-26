@@ -13,6 +13,31 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `82 passed`
 
+## Update (2026-02-26, chart-day hybrid discovery + auto-source buildout)
+- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/src/coatue_claw/x_chart_daily.py` to treat source DB as a seed, not a hard boundary:
+  - added hybrid discovery mode (`seed_only|open_only|hybrid`, default `hybrid`).
+  - added per-run open X search fetch path (`_fetch_x_candidates_open_search`) and merged it into candidate selection.
+  - winner selection now applies an “interesting takeaway” bonus (novelty/specificity/theme/move signal) before source-variety tie-breaking.
+- Added account auto-enrollment behavior for winning new X sources:
+  - if winner account was not in pre-run source DB snapshot, it is auto-added (`manual=0`) with daily cap control.
+  - new env knobs:
+    - `COATUE_CLAW_X_CHART_OPEN_SEARCH_ENABLED`
+    - `COATUE_CLAW_X_CHART_DISCOVERY_MODE`
+    - `COATUE_CLAW_X_CHART_OPEN_SEARCH_QUERIES`
+    - `COATUE_CLAW_X_CHART_AUTO_ADD_SOURCES`
+    - `COATUE_CLAW_X_CHART_AUTO_ADD_DAILY_CAP`
+- Pull-log schema expanded for auditability:
+  - `seed_candidates_count`, `open_search_candidates_count`, `merged_candidates_count`
+  - `scanned_accounts`
+  - `winner_discovered_via`
+  - `new_source_auto_added`, `new_source_handle`
+- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/tests/test_x_chart_daily.py` with new coverage:
+  - hybrid flow can pick open-search candidate
+  - winner source auto-add for unseen account
+  - pull-log includes discovery metadata
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `85 passed`
+
 ## Update (2026-02-26, board-seat hard reset scaffold)
 - Board Seat was intentionally scrapped to start fresh after repeated output quality failures.
 - Replaced `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py` with a reset scaffold:
