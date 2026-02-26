@@ -314,6 +314,8 @@ def test_llm_evidence_pack_builds_section_bundles_and_quality_flags() -> None:
     assert "why_now" in pack["quality_required_evidence"]
     assert isinstance(pack["evidence_tier_mix"], dict)
     assert "tier_1" in pack["evidence_tier_mix"]
+    assert isinstance(pack["fact_cards"], dict)
+    assert isinstance(pack["fact_cards_count_by_field"], dict)
 
 
 def test_build_source_refs_tiered_policy_excludes_tier3_rows(monkeypatch) -> None:
@@ -1783,6 +1785,10 @@ def test_status_reports_funding_quality_metrics(tmp_path: Path, monkeypatch) -> 
     assert "quality_pass_rate_7d" in payload
     assert "top_failed_fields_7d" in payload
     assert "avg_rewrite_attempts_7d" in payload
+    assert "delivery_mode" in payload
+    assert "fact_card_mode" in payload
+    assert "quote_overlap_max" in payload
+    assert "diagnostic_fallback_count_7d" in payload
 
 
 def test_brave_api_key_accepts_coatue_claw_alias(monkeypatch) -> None:
@@ -1866,6 +1872,7 @@ def test_run_once_fail_closed_when_quality_gate_stays_failed(tmp_path: Path, mon
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_PORTCOS", "OpenAI:openai")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", "0")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_QUALITY_FAIL_POLICY", "skip")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DELIVERY_MODE", "skip")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REWRITE_MAX_RETRIES", "2")
     monkeypatch.setattr(board_seat_daily, "WebClient", None)
     monkeypatch.setattr(board_seat_daily, "_resolve_funding_snapshot", lambda **kwargs: _funding(source_type="cache"))
@@ -1884,6 +1891,8 @@ def test_run_once_fail_closed_when_quality_gate_stays_failed(tmp_path: Path, mon
     assert len(payload["skipped"]) == 1
     row = payload["skipped"][0]
     assert row["reason"] == "quality_gate_failed"
+    assert row["delivery_mode_applied"] == "skip"
+    assert row["quality_blocked"] is True
     assert row["quality_gate_passed"] is False
     assert row["rewrite_attempts"] == 2
     assert row["quality_fail_stage"] in {"source_filter", "reviewer", "draft_validator"}
@@ -1902,6 +1911,7 @@ def test_run_once_quality_fail_closed_applies_to_fallback_path(tmp_path: Path, m
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_PORTCOS", "OpenAI:openai")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", "0")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_QUALITY_FAIL_POLICY", "skip")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DELIVERY_MODE", "skip")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REWRITE_MAX_RETRIES", "1")
     monkeypatch.setattr(board_seat_daily, "WebClient", None)
     monkeypatch.setattr(board_seat_daily, "_resolve_funding_snapshot", lambda **kwargs: _funding(source_type="cache"))
@@ -1926,6 +1936,83 @@ def test_run_once_quality_fail_closed_applies_to_fallback_path(tmp_path: Path, m
     assert fallback_calls["count"] >= 1
     assert payload["sent"] == []
     assert payload["skipped"][0]["reason"] == "quality_gate_failed"
+
+
+def test_assess_draft_quality_flags_quote_overlap() -> None:
+    draft = board_seat_daily.BoardSeatDraft(
+        idea_line="Acquire Sourcegraph to accelerate Cursor execution in a strategic wedge.",
+        target_does="Sourcegraph enterprise plan offers self-hosted code hosts and private code hosts for large teams.",
+        why_now="Over the past month, enterprise demand for code intelligence accelerated after product launch updates.",
+        whats_different="Sourcegraph combines retrieval quality with enterprise governance controls.",
+        mos_risks="Risks include integration complexity and migration churn in enterprise environments.",
+        bottom_line="Execute one target-led move with clear milestones.",
+        context_current_efforts="Cursor already has enterprise design-partner momentum.",
+        context_domain_fit_gaps="Repository-scale search and governance remain a key gap.",
+        funding_history="Raised multiple rounds.",
+        funding_latest_round_backers="Series C with institutional backers.",
+        source_refs=[],
+    )
+    evidence_pack = {
+        "all_evidence": [
+            {
+                "title": "Sourcegraph enterprise",
+                "snippet": "Sourcegraph enterprise plan offers self-hosted code hosts and private code hosts for large teams.",
+                "url": "https://example.com/sourcegraph-enterprise",
+            }
+        ],
+        "quality_required_evidence": {
+            "target_does": True,
+            "why_now": True,
+            "whats_different": True,
+            "mos_risks": True,
+        },
+        "evidence_tier_mix": {"tier_1": 2, "tier_2": 0, "tier_3": 0},
+        "fact_cards_count_by_field": {"target_does": 1, "why_now": 1, "whats_different": 1, "mos_risks": 1},
+        "why_now_recency_passed": True,
+    }
+    assessment = board_seat_daily._assess_draft_quality(company="Cursor", draft=draft, evidence_pack=evidence_pack)
+    assert any(reason.startswith("quote_overlap_high:target_does") for reason in assessment["reasons"])
+    assert assessment["quote_overlap_by_field"]["target_does"] > board_seat_daily._quote_overlap_max()
+
+
+def test_run_once_quality_failure_posts_diagnostic_when_enabled(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_PORTCOS", "OpenAI:openai")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", "0")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DELIVERY_MODE", "diagnostic_fallback")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REWRITE_MAX_RETRIES", "1")
+    monkeypatch.setattr(board_seat_daily, "WebClient", None)
+    monkeypatch.setattr(board_seat_daily, "_resolve_funding_snapshot", lambda **kwargs: _funding(source_type="cache"))
+    monkeypatch.setattr(board_seat_daily, "_acquisition_search_rows", lambda **kwargs: [])
+    monkeypatch.setattr(board_seat_daily, "_llm_draft", lambda **kwargs: _v6_draft())
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_assess_draft_quality",
+        lambda **kwargs: {
+            "passed": False,
+            "score": 0.22,
+            "reasons": ["quote_overlap_high:target_does"],
+            "reason_codes": ["quote_overlap_high"],
+            "field_scores": {"target_does": 0.2, "why_now": 0.8, "whats_different": 0.8, "mos_risks": 0.8},
+            "failed_fields": ["target_does"],
+            "quality_required_evidence": {"target_does": True, "why_now": True, "whats_different": True, "mos_risks": True},
+            "evidence_tier_mix": {"tier_1": 2, "tier_2": 0, "tier_3": 0},
+            "fact_cards_count_by_field": {"target_does": 1, "why_now": 1, "whats_different": 1, "mos_risks": 1},
+            "quote_overlap_by_field": {"target_does": 0.9, "why_now": 0.1, "whats_different": 0.1, "mos_risks": 0.1},
+            "why_now_recency_passed": True,
+        },
+    )
+    monkeypatch.setattr(board_seat_daily, "_llm_revise_draft", lambda **kwargs: None)
+
+    payload = board_seat_daily.run_once(force=True, dry_run=True)
+    assert payload["ok"] is True
+    assert payload["skipped"] == []
+    assert len(payload["sent"]) == 1
+    row = payload["sent"][0]
+    assert row["delivery_mode_applied"] == "diagnostic_fallback"
+    assert row["quality_blocked"] is True
+    assert "Quality block (no reliable thesis draft)" in row["preview"]
 
 
 def test_run_once_sent_payload_includes_quality_fields(tmp_path: Path, monkeypatch) -> None:

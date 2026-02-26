@@ -3,6 +3,32 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-26, board-seat fact-cards + diagnostic fallback recovery)
+- Implemented Board Seat output recovery in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
+  - added fact-card pipeline (`FactCard`, `_build_fact_cards`) so writer input is sectioned claim cards instead of raw prose snippets.
+  - added quote-overlap quality guard (`_quote_overlap_score`, `_quote_overlap_by_field`) with env threshold:
+    - `COATUE_CLAW_BOARD_SEAT_QUOTE_OVERLAP_MAX=0.22`
+  - added delivery router behavior:
+    - `COATUE_CLAW_BOARD_SEAT_DELIVERY_MODE=diagnostic_fallback|skip|post`
+    - on unrecoverable quality failure in `diagnostic_fallback`, bot posts compact diagnostic text in the same portco channel instead of bad thesis text.
+  - diagnostic posts are now persisted for audit with `source=quality_diagnostic_post`.
+  - new env knobs implemented and documented:
+    - `COATUE_CLAW_BOARD_SEAT_FACT_CARD_MODE=always`
+    - `COATUE_CLAW_BOARD_SEAT_DIAGNOSTIC_MAX_REASONS=4`
+    - `COATUE_CLAW_BOARD_SEAT_DIAGNOSTIC_INCLUDE_URLS=1`
+  - run payload expansion:
+    - `delivery_mode_applied`, `quality_blocked`, `quality_failure_codes`, `fact_cards_count_by_field`, `quote_overlap_by_field`
+  - status metrics expansion:
+    - `diagnostic_fallback_count_7d`, `top_quality_failure_codes_7d`, `quote_overlap_violations_7d`, `fact_card_coverage_7d`
+- Updated `/Users/carsonwang/CoatueClaw/.env.example` with the new delivery/fact-card/diagnostic knobs.
+- Added/updated tests in `/Users/carsonwang/CoatueClaw/tests/test_board_seat_daily.py`:
+  - quote-overlap rejection regression
+  - diagnostic-fallback delivery behavior
+  - status/payload coverage for new fields
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `73 passed`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
+
 ## Update (2026-02-26, board-seat research+critic strict fail-closed pipeline)
 - Implemented strict Research+Critic quality recovery in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
   - default source policy switched to `tiered_trusted_first`.

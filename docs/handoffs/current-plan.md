@@ -40,6 +40,34 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Board-seat output recovery shipped in `src/coatue_claw/board_seat_daily.py` with fact-cards + diagnostic fallback:
+  - added delivery and anti-copy controls:
+    - `COATUE_CLAW_BOARD_SEAT_DELIVERY_MODE=diagnostic_fallback`
+    - `COATUE_CLAW_BOARD_SEAT_FACT_CARD_MODE=always`
+    - `COATUE_CLAW_BOARD_SEAT_QUOTE_OVERLAP_MAX=0.22`
+    - `COATUE_CLAW_BOARD_SEAT_DIAGNOSTIC_MAX_REASONS=4`
+    - `COATUE_CLAW_BOARD_SEAT_DIAGNOSTIC_INCLUDE_URLS=1`
+  - writer now receives fact-card evidence bundles (not raw snippet-heavy context) and enforces synthesized wording.
+  - deterministic quality checks now include quote-overlap by field; high-overlap fields are blocked.
+  - run payload now includes:
+    - `delivery_mode_applied`
+    - `quality_blocked`
+    - `quality_failure_codes`
+    - `fact_cards_count_by_field`
+    - `quote_overlap_by_field`
+  - quality failure routing:
+    - `skip` mode: skip with `reason=quality_gate_failed`
+    - `diagnostic_fallback` mode: post compact diagnostic in same channel, no bad thesis prose
+    - `post` mode: legacy compatibility path
+  - diagnostic posts are persisted in pitch history with `source=quality_diagnostic_post`.
+  - status/quality metrics now include:
+    - `diagnostic_fallback_count_7d`
+    - `top_quality_failure_codes_7d`
+    - `quote_overlap_violations_7d`
+    - `fact_card_coverage_7d`
+  - validation:
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `73 passed`
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
 - Board-seat Research+Critic strict fail-closed pipeline shipped in `src/coatue_claw/board_seat_daily.py`:
   - source policy default is now `tiered_trusted_first`.
   - section-aware evidence bundles are generated and passed to writer/critic:

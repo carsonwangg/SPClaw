@@ -143,6 +143,11 @@ QUALITY_GATE_ENABLED_DEFAULT = True
 REWRITE_MAX_RETRIES_DEFAULT = 4
 SOURCE_GATE_MODE_DEFAULT = "soft_block"
 QUALITY_FAIL_POLICY_DEFAULT = "skip"
+DELIVERY_MODE_DEFAULT = "diagnostic_fallback"
+FACT_CARD_MODE_DEFAULT = "always"
+QUOTE_OVERLAP_MAX_DEFAULT = 0.22
+DIAGNOSTIC_MAX_REASONS_DEFAULT = 4
+DIAGNOSTIC_INCLUDE_URLS_DEFAULT = True
 WHY_NOW_RECENCY_DAYS_DEFAULT = 45
 CRITIC_MIN_FIELD_SCORE_DEFAULT = 0.70
 CRITIC_MIN_OVERALL_SCORE_DEFAULT = 0.78
@@ -471,6 +476,18 @@ class EvidenceItem:
 
 
 @dataclass(frozen=True)
+class FactCard:
+    field: str
+    claim: str
+    source_url: str
+    source_title: str
+    published_hint: str
+    confidence: float
+    tier: str
+    page_type: str
+
+
+@dataclass(frozen=True)
 class BoardSeatDraft:
     idea_line: str
     target_does: str
@@ -499,8 +516,11 @@ class BoardSeatDraft:
     quality_fail_stage: str = ""
     quality_field_scores: dict[str, float] = field(default_factory=dict)
     quality_failed_fields: list[str] = field(default_factory=list)
+    quality_failure_codes: list[str] = field(default_factory=list)
     quality_required_evidence: dict[str, bool] = field(default_factory=dict)
     evidence_tier_mix: dict[str, int] = field(default_factory=dict)
+    fact_cards_count_by_field: dict[str, int] = field(default_factory=dict)
+    quote_overlap_by_field: dict[str, float] = field(default_factory=dict)
     why_now_recency_passed: bool = False
 
 
@@ -648,6 +668,51 @@ def _source_gate_mode() -> str:
 
 def _quality_fail_policy() -> str:
     return (os.environ.get("COATUE_CLAW_BOARD_SEAT_QUALITY_FAIL_POLICY", QUALITY_FAIL_POLICY_DEFAULT) or QUALITY_FAIL_POLICY_DEFAULT).strip().lower()
+
+
+def _delivery_mode() -> str:
+    return (
+        os.environ.get("COATUE_CLAW_BOARD_SEAT_DELIVERY_MODE", DELIVERY_MODE_DEFAULT)
+        or DELIVERY_MODE_DEFAULT
+    ).strip().lower()
+
+
+def _fact_card_mode() -> str:
+    return (
+        os.environ.get("COATUE_CLAW_BOARD_SEAT_FACT_CARD_MODE", FACT_CARD_MODE_DEFAULT)
+        or FACT_CARD_MODE_DEFAULT
+    ).strip().lower()
+
+
+def _quote_overlap_max() -> float:
+    raw = (
+        os.environ.get(
+            "COATUE_CLAW_BOARD_SEAT_QUOTE_OVERLAP_MAX",
+            str(QUOTE_OVERLAP_MAX_DEFAULT),
+        )
+        or str(QUOTE_OVERLAP_MAX_DEFAULT)
+    ).strip()
+    try:
+        value = float(raw)
+    except Exception:
+        value = QUOTE_OVERLAP_MAX_DEFAULT
+    return max(0.05, min(0.95, value))
+
+
+def _diagnostic_max_reasons() -> int:
+    return _env_int(
+        "COATUE_CLAW_BOARD_SEAT_DIAGNOSTIC_MAX_REASONS",
+        DIAGNOSTIC_MAX_REASONS_DEFAULT,
+        minimum=1,
+        maximum=10,
+    )
+
+
+def _diagnostic_include_urls() -> bool:
+    return _env_flag(
+        "COATUE_CLAW_BOARD_SEAT_DIAGNOSTIC_INCLUDE_URLS",
+        DIAGNOSTIC_INCLUDE_URLS_DEFAULT,
+    )
 
 
 def _why_now_recency_days() -> int:
@@ -1126,7 +1191,98 @@ def _line_information_density_score(text: str) -> float:
     return unique / float(len(tokens))
 
 
+def _quote_overlap_score(field_text: str, source_text: str) -> float:
+    field_tokens = set(_tokenize(_normalize_text(field_text, max_chars=2000)))
+    source_tokens = set(_tokenize(_normalize_text(source_text, max_chars=2000)))
+    if not field_tokens or not source_tokens:
+        return 0.0
+    return len(field_tokens & source_tokens) / float(len(field_tokens))
+
+
+def _quote_overlap_by_field(*, draft: BoardSeatDraft, evidence_pack: dict[str, Any] | None) -> dict[str, float]:
+    source_texts: list[str] = []
+    seen: set[str] = set()
+    if isinstance(evidence_pack, dict):
+        for bucket in (
+            "all_evidence",
+            "target_does_evidence",
+            "why_now_evidence",
+            "whats_different_evidence",
+            "mos_risks_evidence",
+        ):
+            items = evidence_pack.get(bucket)
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                parts = [
+                    str(item.get("title") or ""),
+                    str(item.get("snippet") or ""),
+                ]
+                blob = _normalize_line_text(" ".join(parts))
+                key = blob.lower()
+                if (not blob) or (key in seen):
+                    continue
+                seen.add(key)
+                source_texts.append(blob)
+        fact_cards = evidence_pack.get("fact_cards")
+        if isinstance(fact_cards, dict):
+            for cards in fact_cards.values():
+                if not isinstance(cards, list):
+                    continue
+                for card in cards:
+                    if not isinstance(card, dict):
+                        continue
+                    blob = _normalize_line_text(
+                        f"{str(card.get('claim') or '')} {str(card.get('source_title') or '')}"
+                    )
+                    key = blob.lower()
+                    if (not blob) or (key in seen):
+                        continue
+                    seen.add(key)
+                    source_texts.append(blob)
+    fields = {
+        "target_does": draft.target_does,
+        "why_now": draft.why_now,
+        "whats_different": draft.whats_different,
+        "mos_risks": draft.mos_risks,
+    }
+    out: dict[str, float] = {}
+    for field_name, field_text in fields.items():
+        if not source_texts:
+            out[field_name] = 0.0
+            continue
+        max_score = 0.0
+        for source_text in source_texts:
+            max_score = max(max_score, _quote_overlap_score(field_text, source_text))
+        out[field_name] = round(max_score, 4)
+    return out
+
+
+def _quality_failure_codes_from_reasons(reasons: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in reasons:
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        text = text.replace("draft_validator:", "")
+        text = text.replace("critic:", "")
+        code = text.split(":", 1)[0].strip().lower()
+        if not code:
+            continue
+        if code in seen:
+            continue
+        seen.add(code)
+        out.append(code)
+    return out
+
+
 def _quality_fields_payload(draft: BoardSeatDraft) -> dict[str, Any]:
+    failure_codes = [str(item) for item in list(draft.quality_failure_codes or []) if str(item).strip()]
+    if not failure_codes:
+        failure_codes = _quality_failure_codes_from_reasons([str(item) for item in list(draft.quality_reasons or [])])
     return {
         "quality_gate_passed": bool(draft.quality_gate_passed),
         "quality_score": round(float(draft.quality_score), 4),
@@ -1135,14 +1291,19 @@ def _quality_fields_payload(draft: BoardSeatDraft) -> dict[str, Any]:
         "quality_fail_stage": str(draft.quality_fail_stage or ""),
         "quality_field_scores": {str(key): round(float(value), 4) for key, value in dict(draft.quality_field_scores or {}).items()},
         "quality_failed_fields": [str(item) for item in list(draft.quality_failed_fields or [])],
+        "quality_failure_codes": failure_codes,
         "quality_required_evidence": {str(key): bool(value) for key, value in dict(draft.quality_required_evidence or {}).items()},
         "evidence_tier_mix": {str(key): int(value) for key, value in dict(draft.evidence_tier_mix or {}).items()},
+        "fact_cards_count_by_field": {str(key): int(value) for key, value in dict(draft.fact_cards_count_by_field or {}).items()},
+        "quote_overlap_by_field": {str(key): round(float(value), 4) for key, value in dict(draft.quote_overlap_by_field or {}).items()},
         "why_now_recency_passed": bool(draft.why_now_recency_passed),
     }
 
 
 def _quality_fields_default(*, passed: bool = False, stage: str = "not_run") -> dict[str, Any]:
     return {
+        "delivery_mode_applied": "normal" if passed else "skip",
+        "quality_blocked": not bool(passed),
         "quality_gate_passed": bool(passed),
         "quality_score": 0.0,
         "quality_reasons": [],
@@ -1150,8 +1311,11 @@ def _quality_fields_default(*, passed: bool = False, stage: str = "not_run") -> 
         "quality_fail_stage": stage,
         "quality_field_scores": {},
         "quality_failed_fields": [],
+        "quality_failure_codes": [],
         "quality_required_evidence": {},
         "evidence_tier_mix": {"tier_1": 0, "tier_2": 0, "tier_3": 0},
+        "fact_cards_count_by_field": {},
+        "quote_overlap_by_field": {},
         "why_now_recency_passed": False,
     }
 
@@ -1178,13 +1342,40 @@ def _persist_quality_run_metrics(result: dict[str, Any]) -> None:
         for row in skipped
         if isinstance(row, dict) and str(row.get("reason") or "") == "quality_gate_failed"
     ]
+    diagnostic_fallback_count = sum(
+        1
+        for row in sent
+        if isinstance(row, dict) and str(row.get("delivery_mode_applied") or "") == "diagnostic_fallback"
+    )
+    quote_overlap_violations = 0
+    fact_card_coverage_values: list[float] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        overlap = row.get("quote_overlap_by_field")
+        if isinstance(overlap, dict):
+            if any(float(value or 0.0) > _quote_overlap_max() for value in overlap.values()):
+                quote_overlap_violations += 1
+        cards = row.get("fact_cards_count_by_field")
+        if isinstance(cards, dict) and cards:
+            values = [int(value or 0) for value in cards.values()]
+            if values:
+                covered = sum(1 for value in values if value > 0)
+                fact_card_coverage_values.append(covered / float(len(values)))
     reason_counts: dict[str, int] = {}
+    failure_code_counts: dict[str, int] = {}
     for row in fails:
         for reason in list(row.get("quality_reasons") or []):
             key = str(reason).strip()
             if not key:
                 continue
             reason_counts[key] = reason_counts.get(key, 0) + 1
+        raw_codes = row.get("quality_failure_codes")
+        codes = [str(item).strip() for item in raw_codes if str(item).strip()] if isinstance(raw_codes, list) else []
+        if not codes:
+            codes = _quality_failure_codes_from_reasons([str(item) for item in list(row.get("quality_reasons") or [])])
+        for code in codes:
+            failure_code_counts[code] = failure_code_counts.get(code, 0) + 1
     failed_field_counts: dict[str, int] = {}
     for row in fails:
         for field_name in list(row.get("quality_failed_fields") or []):
@@ -1211,6 +1402,10 @@ def _persist_quality_run_metrics(result: dict[str, Any]) -> None:
             "quality_fail_count": len(fails),
             "rewrite_attempts": rewrite_values,
             "failed_fields": dict(failed_field_counts),
+            "quality_failure_codes": dict(failure_code_counts),
+            "diagnostic_fallback_count": diagnostic_fallback_count,
+            "quote_overlap_violations": quote_overlap_violations,
+            "fact_card_coverage_values": fact_card_coverage_values,
         }
     )
     cutoff = datetime.now(UTC) - timedelta(days=7)
@@ -1228,6 +1423,10 @@ def _persist_quality_run_metrics(result: dict[str, Any]) -> None:
     total_fail = 0
     rewrite_all: list[int] = []
     failed_fields_7d: dict[str, int] = {}
+    failure_codes_7d: dict[str, int] = {}
+    diagnostic_fallback_count_7d = 0
+    quote_overlap_violations_7d = 0
+    fact_card_coverage_all: list[float] = []
     for item in trimmed_history:
         total_pass += int(item.get("quality_pass_count") or 0)
         total_fail += int(item.get("quality_fail_count") or 0)
@@ -1243,6 +1442,20 @@ def _persist_quality_run_metrics(result: dict[str, Any]) -> None:
                 if not key:
                     continue
                 failed_fields_7d[key] = failed_fields_7d.get(key, 0) + int(count or 0)
+        codes_map = item.get("quality_failure_codes")
+        if isinstance(codes_map, dict):
+            for code, count in codes_map.items():
+                key = str(code).strip()
+                if not key:
+                    continue
+                failure_codes_7d[key] = failure_codes_7d.get(key, 0) + int(count or 0)
+        diagnostic_fallback_count_7d += int(item.get("diagnostic_fallback_count") or 0)
+        quote_overlap_violations_7d += int(item.get("quote_overlap_violations") or 0)
+        for value in list(item.get("fact_card_coverage_values") or []):
+            try:
+                fact_card_coverage_all.append(float(value))
+            except Exception:
+                continue
     total_checks = total_pass + total_fail
     quality_pass_rate_7d = round(total_pass / float(total_checks), 4) if total_checks else 0.0
     avg_rewrite_attempts_7d = round(sum(rewrite_all) / float(len(rewrite_all)), 3) if rewrite_all else 0.0
@@ -1250,11 +1463,24 @@ def _persist_quality_run_metrics(result: dict[str, Any]) -> None:
         {"field": key, "count": value}
         for key, value in sorted(failed_fields_7d.items(), key=lambda item: item[1], reverse=True)[:5]
     ]
+    top_quality_failure_codes_7d = [
+        {"code": key, "count": value}
+        for key, value in sorted(failure_codes_7d.items(), key=lambda item: item[1], reverse=True)[:6]
+    ]
+    fact_card_coverage_7d = (
+        round(sum(fact_card_coverage_all) / float(len(fact_card_coverage_all)), 4)
+        if fact_card_coverage_all
+        else 0.0
+    )
 
     payload = {
         "run_date_local": str(result.get("run_date_local") or ""),
         "recorded_at_utc": recorded_at,
         "quality_fail_count": len(fails),
+        "diagnostic_fallback_count_7d": diagnostic_fallback_count_7d,
+        "top_quality_failure_codes_7d": top_quality_failure_codes_7d,
+        "quote_overlap_violations_7d": quote_overlap_violations_7d,
+        "fact_card_coverage_7d": fact_card_coverage_7d,
         "avg_rewrite_attempts": round(sum(rewrite_values) / float(len(rewrite_values)), 3) if rewrite_values else 0.0,
         "top_failure_reasons": [{"reason": key, "count": value} for key, value in top_reasons],
         "quality_pass_rate_7d": quality_pass_rate_7d,
@@ -1871,6 +2097,99 @@ def _build_section_evidence(
     }
 
 
+def _fact_card_fields() -> tuple[str, ...]:
+    return ("target_does", "why_now", "whats_different", "mos_risks")
+
+
+def _fact_card_claim_from_item(*, item: dict[str, Any]) -> str:
+    raw = _normalize_text(
+        str(item.get("snippet") or "") or str(item.get("title") or ""),
+        max_chars=360,
+    )
+    if not raw:
+        return ""
+    stripped, _cleanups = _strip_obvious_writing_artifacts(raw)
+    line = _normalize_line(_trim_incomplete_sentence_tail(stripped), max_words=40)
+    if not line:
+        return ""
+    if _is_low_signal_copy(line) or _is_generic_source_wrapper(line):
+        return ""
+    if len(_tokenize(line)) < 6:
+        return ""
+    return line
+
+
+def _fact_card_from_item(*, field: str, item: dict[str, Any]) -> FactCard | None:
+    claim = _fact_card_claim_from_item(item=item)
+    if not claim:
+        return None
+    url = _normalize_source_url(str(item.get("url") or ""))
+    if not url:
+        return None
+    title = _normalize_source_text(str(item.get("title") or ""), max_chars=180) or "Reference"
+    published_hint = _extract_published_hint(str(item.get("published_hint") or ""))
+    tier = _normalize_source_text(str(item.get("tier") or ""), max_chars=16).lower() or "tier_2"
+    page_type = _normalize_source_text(str(item.get("page_type") or ""), max_chars=32).lower() or "news_report"
+    try:
+        confidence = float(item.get("quality_score") or 0.5)
+    except Exception:
+        confidence = 0.5
+    return FactCard(
+        field=field,
+        claim=claim,
+        source_url=url,
+        source_title=title,
+        published_hint=published_hint,
+        confidence=max(0.0, min(1.0, confidence)),
+        tier=tier,
+        page_type=page_type,
+    )
+
+
+def _fact_card_to_dict(card: FactCard) -> dict[str, Any]:
+    return {
+        "field": card.field,
+        "claim": card.claim,
+        "source_url": card.source_url,
+        "source_title": card.source_title,
+        "published_hint": card.published_hint,
+        "confidence": round(float(card.confidence), 4),
+        "tier": card.tier,
+        "page_type": card.page_type,
+    }
+
+
+def _build_fact_cards(section_evidence: dict[str, Any]) -> tuple[dict[str, list[dict[str, Any]]], dict[str, int]]:
+    if _fact_card_mode() == "off":
+        empty = {field: [] for field in _fact_card_fields()}
+        return empty, {field: 0 for field in _fact_card_fields()}
+    bucket_by_field = {
+        "target_does": "target_does_evidence",
+        "why_now": "why_now_evidence",
+        "whats_different": "whats_different_evidence",
+        "mos_risks": "mos_risks_evidence",
+    }
+    out: dict[str, list[dict[str, Any]]] = {field: [] for field in _fact_card_fields()}
+    counts: dict[str, int] = {field: 0 for field in _fact_card_fields()}
+    for field_name, bucket in bucket_by_field.items():
+        raw_items = list(section_evidence.get(bucket) or [])
+        cards: list[FactCard] = []
+        for raw in raw_items:
+            if not isinstance(raw, dict):
+                continue
+            card = _fact_card_from_item(field=field_name, item=raw)
+            if card is None:
+                continue
+            if any(_token_jaccard_similarity(card.claim, prev.claim) >= 0.86 for prev in cards):
+                continue
+            cards.append(card)
+            if len(cards) >= 4:
+                break
+        out[field_name] = [_fact_card_to_dict(item) for item in cards]
+        counts[field_name] = len(cards)
+    return out, counts
+
+
 def _target_search_rows(*, target: str, company: str, snippets: list[str]) -> list[dict[str, str]]:
     api_key = _brave_search_api_key()
     if not api_key:
@@ -2101,8 +2420,11 @@ def _high_conf_new_target_gate(
     quality_fail_stage = str(draft.quality_fail_stage or "")
     quality_field_scores = {str(key): round(float(value), 4) for key, value in dict(draft.quality_field_scores or {}).items()}
     quality_failed_fields = [str(item) for item in list(draft.quality_failed_fields or [])]
+    quality_failure_codes = [str(item) for item in list(draft.quality_failure_codes or [])]
     quality_required_evidence = {str(key): bool(value) for key, value in dict(draft.quality_required_evidence or {}).items()}
     evidence_tier_mix = {str(key): int(value) for key, value in dict(draft.evidence_tier_mix or {}).items()}
+    fact_cards_count_by_field = {str(key): int(value) for key, value in dict(draft.fact_cards_count_by_field or {}).items()}
+    quote_overlap_by_field = {str(key): round(float(value), 4) for key, value in dict(draft.quote_overlap_by_field or {}).items()}
     why_now_recency_passed = bool(draft.why_now_recency_passed)
     confidence_payload = _target_confidence_from_draft_sources(company=company, draft=draft)
     confidence = str(confidence_payload.get("confidence") or "Low")
@@ -2128,8 +2450,11 @@ def _high_conf_new_target_gate(
             "quality_fail_stage": quality_fail_stage,
             "quality_field_scores": quality_field_scores,
             "quality_failed_fields": quality_failed_fields,
+            "quality_failure_codes": quality_failure_codes,
             "quality_required_evidence": quality_required_evidence,
             "evidence_tier_mix": evidence_tier_mix,
+            "fact_cards_count_by_field": fact_cards_count_by_field,
+            "quote_overlap_by_field": quote_overlap_by_field,
             "why_now_recency_passed": why_now_recency_passed,
             "target_key": target_key,
             "target_confidence": confidence,
@@ -2156,8 +2481,11 @@ def _high_conf_new_target_gate(
             "quality_fail_stage": quality_fail_stage,
             "quality_field_scores": quality_field_scores,
             "quality_failed_fields": quality_failed_fields,
+            "quality_failure_codes": quality_failure_codes,
             "quality_required_evidence": quality_required_evidence,
             "evidence_tier_mix": evidence_tier_mix,
+            "fact_cards_count_by_field": fact_cards_count_by_field,
+            "quote_overlap_by_field": quote_overlap_by_field,
             "why_now_recency_passed": why_now_recency_passed,
             "target_key": target_key,
             "target_confidence": confidence,
@@ -2190,8 +2518,11 @@ def _high_conf_new_target_gate(
         "quality_fail_stage": quality_fail_stage,
         "quality_field_scores": quality_field_scores,
         "quality_failed_fields": quality_failed_fields,
+        "quality_failure_codes": quality_failure_codes,
         "quality_required_evidence": quality_required_evidence,
         "evidence_tier_mix": evidence_tier_mix,
+        "fact_cards_count_by_field": fact_cards_count_by_field,
+        "quote_overlap_by_field": quote_overlap_by_field,
         "why_now_recency_passed": why_now_recency_passed,
         "target_key": target_key,
         "target_confidence": confidence,
@@ -3353,6 +3684,130 @@ def _render_board_seat_message(*, company: str, draft: BoardSeatDraft) -> str:
     return "\n".join(lines)
 
 
+def _quality_reason_human(reason_code: str) -> str:
+    code = str(reason_code or "").strip().lower()
+    mapping = {
+        "artifact_contamination": "one or more sections contains menu/CTA artifact text",
+        "near_duplicate": "multiple thesis fields repeat the same point",
+        "missing_required_evidence": "required evidence coverage is missing for at least one field",
+        "why_now_not_monthly_theme": "why-now is not anchored to a recent catalyst or trend",
+        "why_now_recency_missing": "why-now lacks enough in-window dated evidence",
+        "why_now_no_in_window_source": "why-now evidence is stale for the configured recency window",
+        "why_now_weak_evidence_alignment": "why-now text is weakly aligned with available evidence",
+        "weak_evidence_alignment": "one or more sections is weakly aligned to supporting evidence",
+        "quote_overlap_high": "one or more sections is too close to source wording",
+        "critic_field_below_threshold": "critic score is below threshold for at least one field",
+        "critic_overall_below_threshold": "critic overall score is below threshold",
+        "missing_line": "a required field is blank",
+        "specificity_too_generic": "draft language is too generic to be decision-useful",
+        "missing_source_refs": "source references are missing from the draft",
+    }
+    return mapping.get(code, code.replace("_", " "))
+
+
+def _quality_delivery_mode_for_draft(draft: BoardSeatDraft) -> str:
+    if bool(draft.quality_gate_passed):
+        return "normal"
+    mode = _delivery_mode()
+    if mode == "post":
+        return "normal"
+    if mode == "skip":
+        return "skip"
+    return "diagnostic_fallback"
+
+
+def _diagnostic_debug_urls(*, draft: BoardSeatDraft, evidence_pack: dict[str, Any] | None, max_urls: int = 2) -> list[str]:
+    urls: list[str] = []
+    seen: set[str] = set()
+    for ref in list(draft.source_refs or []):
+        url = _normalize_source_url(ref.url)
+        key = url.lower()
+        if (not url) or (key in seen):
+            continue
+        seen.add(key)
+        urls.append(url)
+        if len(urls) >= max_urls:
+            return urls
+    if isinstance(evidence_pack, dict):
+        all_evidence = evidence_pack.get("all_evidence")
+        if isinstance(all_evidence, list):
+            for item in all_evidence:
+                if not isinstance(item, dict):
+                    continue
+                url = _normalize_source_url(str(item.get("url") or ""))
+                key = url.lower()
+                if (not url) or (key in seen):
+                    continue
+                seen.add(key)
+                urls.append(url)
+                if len(urls) >= max_urls:
+                    break
+    return urls[:max_urls]
+
+
+def _render_quality_diagnostic_message(
+    *,
+    company: str,
+    draft: BoardSeatDraft,
+    evidence_pack: dict[str, Any] | None = None,
+) -> str:
+    failed_fields = [str(item) for item in list(draft.quality_failed_fields or []) if str(item).strip()]
+    if not failed_fields:
+        failed_fields = [field for field, score in dict(draft.quality_field_scores or {}).items() if float(score or 0.0) < _critic_min_field_score()]
+    failure_codes = [str(item) for item in list(draft.quality_failure_codes or []) if str(item).strip()]
+    if not failure_codes:
+        failure_codes = _quality_failure_codes_from_reasons([str(item) for item in list(draft.quality_reasons or [])])
+    max_reasons = _diagnostic_max_reasons()
+    reason_humans = [_quality_reason_human(code) for code in failure_codes[:max_reasons]]
+    missing_evidence: list[str] = []
+    for field_name in _fact_card_fields():
+        required = bool(dict(draft.quality_required_evidence or {}).get(field_name, False))
+        cards = int(dict(draft.fact_cards_count_by_field or {}).get(field_name, 0))
+        if (not required) or cards <= 0:
+            missing_evidence.append(field_name)
+    lines = [
+        f"*Board Seat as a Service — {company}*",
+        "*Status:* Quality block (no reliable thesis draft)",
+        f"*Failed fields:* {', '.join(failed_fields) if failed_fields else 'unknown'}",
+        f"*Why blocked:* {'; '.join(reason_humans) if reason_humans else 'quality checks failed'}",
+        f"*Missing evidence:* {', '.join(missing_evidence) if missing_evidence else 'none'}",
+    ]
+    if _diagnostic_include_urls():
+        urls = _diagnostic_debug_urls(draft=draft, evidence_pack=evidence_pack, max_urls=2)
+        if urls:
+            lines.append("*Debug links:* " + " | ".join(f"<{url}>" for url in urls))
+    return "\n".join(lines)
+
+
+def _delivery_payload_for_draft(
+    *,
+    company: str,
+    draft: BoardSeatDraft,
+    evidence_pack: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    mode = _quality_delivery_mode_for_draft(draft)
+    quality_blocked = not bool(draft.quality_gate_passed)
+    if quality_blocked and mode == "diagnostic_fallback":
+        return {
+            "delivery_mode_applied": "diagnostic_fallback",
+            "quality_blocked": True,
+            "message": _render_quality_diagnostic_message(
+                company=company,
+                draft=draft,
+                evidence_pack=evidence_pack,
+            ),
+            "pitch_source": "quality_diagnostic_post",
+            "is_diagnostic": True,
+        }
+    return {
+        "delivery_mode_applied": "normal",
+        "quality_blocked": quality_blocked,
+        "message": _render_board_seat_message(company=company, draft=draft),
+        "pitch_source": "live_post",
+        "is_diagnostic": False,
+    }
+
+
 def _rich_text_header_block(header: str) -> list[dict[str, Any]]:
     return [
         {
@@ -4106,8 +4561,11 @@ def _sanitize_draft(
         quality_fail_stage=str(draft.quality_fail_stage or ""),
         quality_field_scores=dict(draft.quality_field_scores or {}),
         quality_failed_fields=list(draft.quality_failed_fields or []),
+        quality_failure_codes=list(draft.quality_failure_codes or []),
         quality_required_evidence=dict(draft.quality_required_evidence or {}),
         evidence_tier_mix=dict(draft.evidence_tier_mix or {}),
+        fact_cards_count_by_field=dict(draft.fact_cards_count_by_field or {}),
+        quote_overlap_by_field=dict(draft.quote_overlap_by_field or {}),
         why_now_recency_passed=bool(draft.why_now_recency_passed),
     )
 
@@ -5080,6 +5538,7 @@ def _llm_evidence_pack(
         evidence_items.append(item)
 
     section_evidence = _build_section_evidence(company=company, target=target, items=evidence_items)
+    fact_cards, fact_cards_count_by_field = _build_fact_cards(section_evidence)
     target_bundle = list(section_evidence.get("target_does_evidence") or [])[:6]
     acq_bundle = [
         _evidence_item_to_dict(item)
@@ -5091,6 +5550,9 @@ def _llm_evidence_pack(
         "company": company,
         "target": target,
         "source_policy": _source_policy(),
+        "fact_card_mode": _fact_card_mode(),
+        "fact_cards": fact_cards,
+        "fact_cards_count_by_field": fact_cards_count_by_field,
         "target_evidence": target_bundle,
         "acquisition_evidence": acq_bundle,
         "all_evidence": [_evidence_item_to_dict(item) for item in evidence_items],
@@ -5638,6 +6100,18 @@ def _assess_draft_quality(
         "mos_risks": False,
     }
     evidence_tier_mix: dict[str, int] = {"tier_1": 0, "tier_2": 0, "tier_3": 0}
+    fact_cards_count_by_field: dict[str, int] = {
+        "target_does": 0,
+        "why_now": 0,
+        "whats_different": 0,
+        "mos_risks": 0,
+    }
+    quote_overlap_by_field: dict[str, float] = {
+        "target_does": 0.0,
+        "why_now": 0.0,
+        "whats_different": 0.0,
+        "mos_risks": 0.0,
+    }
     why_now_recency_passed = False
 
     def _penalize(field: str, delta: float, reason: str) -> None:
@@ -5688,6 +6162,13 @@ def _assess_draft_quality(
                     evidence_tier_mix[key] = int(tier_mix_payload.get(key) or 0)
                 except Exception:
                     evidence_tier_mix[key] = 0
+        cards_payload = evidence_pack.get("fact_cards_count_by_field")
+        if isinstance(cards_payload, dict):
+            for key in fact_cards_count_by_field:
+                try:
+                    fact_cards_count_by_field[key] = int(cards_payload.get(key) or 0)
+                except Exception:
+                    fact_cards_count_by_field[key] = 0
         why_now_recency_passed = bool(evidence_pack.get("why_now_recency_passed"))
 
     strict_evidence_context = sum(int(value) for value in evidence_tier_mix.values()) >= 2
@@ -5724,6 +6205,11 @@ def _assess_draft_quality(
             continue
         _penalize(field_name, 0.2, f"weak_evidence_alignment:{field_name}")
 
+    quote_overlap_by_field = _quote_overlap_by_field(draft=draft, evidence_pack=evidence_pack)
+    for field_name, overlap in quote_overlap_by_field.items():
+        if overlap > _quote_overlap_max():
+            _penalize(field_name, 0.45, f"quote_overlap_high:{field_name}")
+
     overall = round(sum(field_scores.values()) / float(len(field_scores)), 4) if field_scores else 0.0
     if overall < _critic_min_overall_score():
         reasons.append("critic_overall_below_threshold")
@@ -5738,10 +6224,13 @@ def _assess_draft_quality(
         "passed": passed,
         "score": overall,
         "reasons": reasons,
+        "reason_codes": _quality_failure_codes_from_reasons(reasons),
         "field_scores": {key: round(float(value), 4) for key, value in field_scores.items()},
         "failed_fields": sorted(failed_fields),
         "quality_required_evidence": quality_required_evidence,
         "evidence_tier_mix": evidence_tier_mix,
+        "fact_cards_count_by_field": fact_cards_count_by_field,
+        "quote_overlap_by_field": quote_overlap_by_field,
         "why_now_recency_passed": why_now_recency_passed,
     }
 
@@ -5769,10 +6258,12 @@ def _llm_critic_assess(
     }
     prompt = (
         f"Assess this board-seat draft for {company}.\n"
-        "Return strict JSON only with keys: overall_score, field_scores, failed_fields, reasons.\n"
+        "Return strict JSON only with keys: overall_score, field_scores, failed_fields, reasons, reason_codes, synthesized_not_copied.\n"
         "field_scores keys must be: target_does, why_now, whats_different, mos_risks.\n"
         "Scoring rubric (0-1): relevance, non-duplication, factual alignment, specificity, writing clarity.\n"
-        "Hard-fail if there is menu/CTA contamination, semantic duplication, or obvious evidence mismatch.\n"
+        "Hard-fail if there is menu/CTA contamination, semantic duplication, obvious evidence mismatch, or quote-like copy from source text.\n"
+        "reason_codes should be short machine-friendly tokens (snake_case).\n"
+        "synthesized_not_copied must be true only if the draft is clearly synthesized rather than copied snippets.\n"
         f"Draft:\n{json.dumps(draft_payload, ensure_ascii=False)}\n"
         f"Evidence:\n{json.dumps(evidence_pack or {}, ensure_ascii=False)}\n"
     )
@@ -5816,10 +6307,14 @@ def _llm_critic_assess(
     failed_fields = [str(item) for item in failed_fields_raw if str(item)] if isinstance(failed_fields_raw, list) else []
     reasons_raw = payload.get("reasons")
     reasons = [str(item) for item in reasons_raw if str(item)] if isinstance(reasons_raw, list) else []
+    reason_codes_raw = payload.get("reason_codes")
+    reason_codes = [str(item).strip() for item in reason_codes_raw if str(item).strip()] if isinstance(reason_codes_raw, list) else []
+    synthesized_not_copied = bool(payload.get("synthesized_not_copied", True))
     passed = (
         overall_score >= _critic_min_overall_score()
         and all(field_scores.get(field, 0.0) >= _critic_min_field_score() for field in ("target_does", "why_now", "whats_different", "mos_risks"))
         and not failed_fields
+        and synthesized_not_copied
     )
     return {
         "passed": passed,
@@ -5827,6 +6322,7 @@ def _llm_critic_assess(
         "field_scores": field_scores,
         "failed_fields": failed_fields,
         "reasons": reasons,
+        "reason_codes": reason_codes,
     }
 
 
@@ -5852,16 +6348,21 @@ def _merge_quality_assessments(
             failed_fields.add(key)
     reasons = [str(item) for item in list(deterministic.get("reasons") or [])]
     reasons.extend(f"critic:{item}" for item in list(critic.get("reasons") or []))
+    reason_codes = [str(item) for item in list(deterministic.get("reason_codes") or [])]
+    reason_codes.extend(str(item) for item in list(critic.get("reason_codes") or []))
     overall = round(min(float(deterministic.get("score") or 0.0), float(critic.get("score") or 0.0)), 4)
     passed = bool(deterministic.get("passed")) and bool(critic.get("passed")) and not failed_fields and overall >= _critic_min_overall_score()
     return {
         "passed": passed,
         "score": overall,
         "reasons": reasons,
+        "reason_codes": _quality_failure_codes_from_reasons(reason_codes if reason_codes else reasons),
         "field_scores": field_scores,
         "failed_fields": sorted(failed_fields),
         "quality_required_evidence": dict(deterministic.get("quality_required_evidence") or {}),
         "evidence_tier_mix": dict(deterministic.get("evidence_tier_mix") or {}),
+        "fact_cards_count_by_field": dict(deterministic.get("fact_cards_count_by_field") or {}),
+        "quote_overlap_by_field": dict(deterministic.get("quote_overlap_by_field") or {}),
         "why_now_recency_passed": bool(deterministic.get("why_now_recency_passed")),
     }
 
@@ -5910,6 +6411,7 @@ def _llm_revise_draft(
         "- Remove low-signal CTA/menu artifacts (book a demo, see pricing, sign in, etc).\n"
         "- Avoid near-duplicate lines across thesis fields.\n"
         "- Keep content grounded in evidence but natural (inference allowed).\n"
+        "- Synthesize from fact cards; do not copy source wording verbatim.\n"
         "- No HTML tags, UI crumbs, or copied nav snippets.\n"
         f"Failed fields (revise these first): {json.dumps(list(failed_fields or []), ensure_ascii=False)}\n"
         f"Current draft:\n{draft_json}\n"
@@ -5968,8 +6470,11 @@ def _quality_gate_draft(
             quality_fail_stage="",
             quality_field_scores={},
             quality_failed_fields=[],
+            quality_failure_codes=[],
             quality_required_evidence={},
             evidence_tier_mix={},
+            fact_cards_count_by_field={},
+            quote_overlap_by_field={},
             why_now_recency_passed=False,
         )
 
@@ -5996,8 +6501,11 @@ def _quality_gate_draft(
                 quality_fail_stage="",
                 quality_field_scores=dict(quality.get("field_scores") or {}),
                 quality_failed_fields=list(quality.get("failed_fields") or []),
+                quality_failure_codes=list(quality.get("reason_codes") or []),
                 quality_required_evidence=dict(quality.get("quality_required_evidence") or {}),
                 evidence_tier_mix=dict(quality.get("evidence_tier_mix") or {}),
+                fact_cards_count_by_field=dict(quality.get("fact_cards_count_by_field") or {}),
+                quote_overlap_by_field=dict(quality.get("quote_overlap_by_field") or {}),
                 why_now_recency_passed=bool(quality.get("why_now_recency_passed")),
             )
         if attempts >= max_retries:
@@ -6010,8 +6518,11 @@ def _quality_gate_draft(
                 quality_fail_stage=stage,
                 quality_field_scores=dict(quality.get("field_scores") or {}),
                 quality_failed_fields=list(quality.get("failed_fields") or []),
+                quality_failure_codes=list(quality.get("reason_codes") or []),
                 quality_required_evidence=dict(quality.get("quality_required_evidence") or {}),
                 evidence_tier_mix=dict(quality.get("evidence_tier_mix") or {}),
+                fact_cards_count_by_field=dict(quality.get("fact_cards_count_by_field") or {}),
+                quote_overlap_by_field=dict(quality.get("quote_overlap_by_field") or {}),
                 why_now_recency_passed=bool(quality.get("why_now_recency_passed")),
             )
         revised = _llm_revise_draft(
@@ -6025,6 +6536,28 @@ def _quality_gate_draft(
         if revised is None:
             revised = replace(current, rewrite_reasons=[*list(current.rewrite_reasons or []), "quality_rewrite_missing"])
         current = revised
+
+
+def _writer_evidence_payload(evidence_pack: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(evidence_pack, dict):
+        return {}
+    fact_cards = evidence_pack.get("fact_cards")
+    if isinstance(fact_cards, dict) and fact_cards:
+        return {
+            "fact_cards": fact_cards,
+            "fact_cards_count_by_field": dict(evidence_pack.get("fact_cards_count_by_field") or {}),
+            "quality_required_evidence": dict(evidence_pack.get("quality_required_evidence") or {}),
+            "why_now_recency_passed": bool(evidence_pack.get("why_now_recency_passed")),
+            "funding_summary": dict(evidence_pack.get("funding_summary") or {}),
+        }
+    return {
+        "target_does_evidence": list(evidence_pack.get("target_does_evidence") or []),
+        "why_now_evidence": list(evidence_pack.get("why_now_evidence") or []),
+        "whats_different_evidence": list(evidence_pack.get("whats_different_evidence") or []),
+        "mos_risks_evidence": list(evidence_pack.get("mos_risks_evidence") or []),
+        "quality_required_evidence": dict(evidence_pack.get("quality_required_evidence") or {}),
+        "funding_summary": dict(evidence_pack.get("funding_summary") or {}),
+    }
 
 
 def _llm_draft(
@@ -6042,9 +6575,11 @@ def _llm_draft(
     client = OpenAI(api_key=api_key)
     joined = "\n".join(f"- {line}" for line in snippets[:10]) if snippets else "- no fresh channel snippets"
     evidence_json = json.dumps(
-        evidence_pack
-        if evidence_pack is not None
-        else _llm_evidence_pack(company=company, target="", target_rows=[], acquisition_rows=[], funding=funding),
+        _writer_evidence_payload(
+            evidence_pack
+            if evidence_pack is not None
+            else _llm_evidence_pack(company=company, target="", target_rows=[], acquisition_rows=[], funding=funding)
+        ),
         ensure_ascii=False,
     )
     prompt = (
@@ -6067,6 +6602,7 @@ def _llm_draft(
         "- source_refs is an array of objects with name_or_publisher, title, url.\n"
         "- source_refs must prioritize tier_1 evidence and exclude social/wrapper sources.\n"
         "- do not include HTML tags, menu text, or boilerplate snippets.\n"
+        "- do not copy source text verbatim; synthesize from fact cards and evidence into original prose.\n"
         "- fields must not repeat each other.\n"
         "- if a field lacks evidence, prefer a cautious but specific fallback instead of copying another field.\n"
         f"Evidence pack (target/acquisition/funding):\n{evidence_json}\n"
@@ -6471,12 +7007,45 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
             )
             funding = _resolve_funding_snapshot(store=store, company=_funding_entity_for_draft(company=company, draft=draft))
             draft = _sanitize_draft(company=company, draft=draft, funding=funding, acquisition_rows=[])
-            if (not bool(draft.quality_gate_passed)) and (_quality_fail_policy() == "skip"):
+            delivery_mode = _quality_delivery_mode_for_draft(draft)
+            if (not bool(draft.quality_gate_passed)) and (delivery_mode == "skip"):
                 result["skipped"].append(
                     {
                         "company": company,
                         "channel_ref": channel_ref,
                         "reason": "quality_gate_failed",
+                        "delivery_mode_applied": "skip",
+                        "quality_blocked": True,
+                        **_quality_fields_payload(draft),
+                    }
+                )
+                continue
+            if (not bool(draft.quality_gate_passed)) and (delivery_mode == "diagnostic_fallback"):
+                diagnostic_message = _render_quality_diagnostic_message(company=company, draft=draft)
+                result["sent"].append(
+                    {
+                        "company": company,
+                        "channel_ref": channel_ref,
+                        "preview": diagnostic_message,
+                        "format_version": BOARD_SEAT_FORMAT_VERSION,
+                        "funding_source_type": funding.source_type,
+                        "funding_as_of_utc": funding.as_of_utc,
+                        "funding_unknown": _is_funding_snapshot_unknown(funding),
+                        "funding_verification_status": _funding_verification_status(funding),
+                        "funding_confidence_band": _funding_confidence_band(funding),
+                        "funding_warning": _funding_warning_line(funding),
+                        "target": "",
+                        "target_confidence": "",
+                        "target_confidence_score": 0.0,
+                        "target_confidence_reasons": [],
+                        "target_validation_reason": "quality_gate_failed",
+                        "target_original": draft.target_original,
+                        "target_resolution_reason": draft.target_resolution_reason,
+                        "writing_mode": _writing_mode(),
+                        "writing_artifact_cleanups": list(draft.writing_artifact_cleanups or []),
+                        "writing_field_dedup_fixes": list(draft.writing_field_dedup_fixes or []),
+                        "delivery_mode_applied": "diagnostic_fallback",
+                        "quality_blocked": True,
                         **_quality_fields_payload(draft),
                     }
                 )
@@ -6506,8 +7075,13 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                         "quality_fail_stage": target_gate.get("quality_fail_stage"),
                         "quality_field_scores": target_gate.get("quality_field_scores"),
                         "quality_failed_fields": target_gate.get("quality_failed_fields"),
+                        "quality_failure_codes": target_gate.get("quality_failure_codes"),
                         "quality_required_evidence": target_gate.get("quality_required_evidence"),
                         "evidence_tier_mix": target_gate.get("evidence_tier_mix"),
+                        "fact_cards_count_by_field": target_gate.get("fact_cards_count_by_field"),
+                        "quote_overlap_by_field": target_gate.get("quote_overlap_by_field"),
+                        "delivery_mode_applied": "skip",
+                        "quality_blocked": bool(not target_gate.get("quality_gate_passed", True)),
                         "why_now_recency_passed": target_gate.get("why_now_recency_passed"),
                         "is_new_target": bool(target_gate.get("is_new_target")),
                         "gate_reason": target_gate.get("reason"),
@@ -6553,6 +7127,8 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                     "writing_mode": target_gate.get("writing_mode"),
                     "writing_artifact_cleanups": target_gate.get("writing_artifact_cleanups"),
                     "writing_field_dedup_fixes": target_gate.get("writing_field_dedup_fixes"),
+                    "delivery_mode_applied": "normal",
+                    "quality_blocked": bool(not target_gate.get("quality_gate_passed", True)),
                     "quality_gate_passed": target_gate.get("quality_gate_passed"),
                     "quality_score": target_gate.get("quality_score"),
                     "quality_reasons": target_gate.get("quality_reasons"),
@@ -6560,8 +7136,11 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                     "quality_fail_stage": target_gate.get("quality_fail_stage"),
                     "quality_field_scores": target_gate.get("quality_field_scores"),
                     "quality_failed_fields": target_gate.get("quality_failed_fields"),
+                    "quality_failure_codes": target_gate.get("quality_failure_codes"),
                     "quality_required_evidence": target_gate.get("quality_required_evidence"),
                     "evidence_tier_mix": target_gate.get("evidence_tier_mix"),
+                    "fact_cards_count_by_field": target_gate.get("fact_cards_count_by_field"),
+                    "quote_overlap_by_field": target_gate.get("quote_overlap_by_field"),
                     "why_now_recency_passed": target_gate.get("why_now_recency_passed"),
                 }
             )
@@ -6688,13 +7267,121 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                 )
                 funding = _resolve_funding_snapshot(store=store, company=_funding_entity_for_draft(company=company, draft=draft))
                 draft = _sanitize_draft(company=company, draft=draft, funding=funding, acquisition_rows=[])
-                if (not bool(draft.quality_gate_passed)) and (_quality_fail_policy() == "skip"):
+                delivery_mode = _quality_delivery_mode_for_draft(draft)
+                if (not bool(draft.quality_gate_passed)) and (delivery_mode == "skip"):
                     result["skipped"].append(
                         {
                             "company": company,
                             "channel_ref": channel_ref,
                             "channel_id": channel_id,
                             "reason": "quality_gate_failed",
+                            "delivery_mode_applied": "skip",
+                            "quality_blocked": True,
+                            **_quality_fields_payload(draft),
+                        }
+                    )
+                    posted = True
+                    break
+                if (not bool(draft.quality_gate_passed)) and (delivery_mode == "diagnostic_fallback"):
+                    diagnostic_message = _render_quality_diagnostic_message(company=company, draft=draft)
+                    if dry_run:
+                        result["sent"].append(
+                            {
+                                "company": company,
+                                "channel_ref": channel_ref,
+                                "channel_id": channel_id,
+                                "preview": diagnostic_message,
+                                "target": "",
+                                "significant_change": False,
+                                "format_version": BOARD_SEAT_FORMAT_VERSION,
+                                "funding_source_type": funding.source_type,
+                                "funding_as_of_utc": funding.as_of_utc,
+                                "funding_unknown": _is_funding_snapshot_unknown(funding),
+                                "funding_verification_status": _funding_verification_status(funding),
+                                "funding_confidence_band": _funding_confidence_band(funding),
+                                "funding_warning": _funding_warning_line(funding),
+                                "is_repitch": False,
+                                "repitch_of_pitch_id": None,
+                                "repitch_prev_posted_at_utc": None,
+                                "repitch_similarity": 0.0,
+                                "repitch_new_evidence": [],
+                                "target_confidence": "",
+                                "target_confidence_score": 0.0,
+                                "target_confidence_reasons": [],
+                                "target_validation_reason": "quality_gate_failed",
+                                "target_original": draft.target_original,
+                                "target_resolution_reason": draft.target_resolution_reason,
+                                "writing_mode": _writing_mode(),
+                                "writing_artifact_cleanups": list(draft.writing_artifact_cleanups or []),
+                                "writing_field_dedup_fixes": list(draft.writing_field_dedup_fixes or []),
+                                "delivery_mode_applied": "diagnostic_fallback",
+                                "quality_blocked": True,
+                                **_quality_fields_payload(draft),
+                            }
+                        )
+                        posted = True
+                        break
+                    post = client.chat_postMessage(channel=channel_id, text=diagnostic_message)
+                    ts = str(post.get("ts") or "")
+                    store.record_post(
+                        run_date_local=run_date,
+                        company=company,
+                        channel_ref=channel_ref,
+                        channel_id=channel_id,
+                        message_ts=(ts or None),
+                        summary=diagnostic_message,
+                    )
+                    diagnostic_signature = _token_signature(
+                        _normalize_text("quality diagnostic block", max_chars=120),
+                        max_tokens=20,
+                    )
+                    store.record_pitch(
+                        company=company,
+                        channel_ref=channel_ref,
+                        channel_id=channel_id,
+                        source="quality_diagnostic_post",
+                        message_ts=(ts or None),
+                        run_date_local=run_date,
+                        posted_at_utc=_iso_from_slack_ts(ts),
+                        message_text=diagnostic_message,
+                        investment_text="quality diagnostic block",
+                        investment_hash=_stable_hash(f"{company}:{run_date}:quality_diagnostic"),
+                        investment_signature=diagnostic_signature,
+                        context_signature="quality_diagnostic",
+                        context_snippets=[],
+                        significant_change=False,
+                    )
+                    result["sent"].append(
+                        {
+                            "company": company,
+                            "channel_ref": channel_ref,
+                            "channel_id": channel_id,
+                            "ts": ts,
+                            "target": "",
+                            "significant_change": False,
+                            "format_version": BOARD_SEAT_FORMAT_VERSION,
+                            "funding_source_type": funding.source_type,
+                            "funding_as_of_utc": funding.as_of_utc,
+                            "funding_unknown": _is_funding_snapshot_unknown(funding),
+                            "funding_verification_status": _funding_verification_status(funding),
+                            "funding_confidence_band": _funding_confidence_band(funding),
+                            "funding_warning": _funding_warning_line(funding),
+                            "is_repitch": False,
+                            "repitch_of_pitch_id": None,
+                            "repitch_prev_posted_at_utc": None,
+                            "repitch_similarity": 0.0,
+                            "repitch_new_evidence": [],
+                            "target_confidence": "",
+                            "target_confidence_score": 0.0,
+                            "target_confidence_reasons": [],
+                            "target_validation_reason": "quality_gate_failed",
+                            "target_original": draft.target_original,
+                            "target_resolution_reason": draft.target_resolution_reason,
+                            "writing_mode": _writing_mode(),
+                            "writing_artifact_cleanups": list(draft.writing_artifact_cleanups or []),
+                            "writing_field_dedup_fixes": list(draft.writing_field_dedup_fixes or []),
+                            "delivery_mode_applied": "diagnostic_fallback",
+                            "quality_blocked": True,
                             **_quality_fields_payload(draft),
                         }
                     )
@@ -6726,8 +7413,13 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                             "quality_fail_stage": target_gate.get("quality_fail_stage"),
                             "quality_field_scores": target_gate.get("quality_field_scores"),
                             "quality_failed_fields": target_gate.get("quality_failed_fields"),
+                            "quality_failure_codes": target_gate.get("quality_failure_codes"),
                             "quality_required_evidence": target_gate.get("quality_required_evidence"),
                             "evidence_tier_mix": target_gate.get("evidence_tier_mix"),
+                            "fact_cards_count_by_field": target_gate.get("fact_cards_count_by_field"),
+                            "quote_overlap_by_field": target_gate.get("quote_overlap_by_field"),
+                            "delivery_mode_applied": "skip",
+                            "quality_blocked": bool(not target_gate.get("quality_gate_passed", True)),
                             "why_now_recency_passed": target_gate.get("why_now_recency_passed"),
                             "is_new_target": bool(target_gate.get("is_new_target")),
                             "gate_reason": target_gate.get("reason"),
@@ -6949,6 +7641,8 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                             "writing_mode": target_gate.get("writing_mode"),
                             "writing_artifact_cleanups": target_gate.get("writing_artifact_cleanups"),
                             "writing_field_dedup_fixes": target_gate.get("writing_field_dedup_fixes"),
+                            "delivery_mode_applied": "normal",
+                            "quality_blocked": bool(not target_gate.get("quality_gate_passed", True)),
                             "quality_gate_passed": target_gate.get("quality_gate_passed"),
                             "quality_score": target_gate.get("quality_score"),
                             "quality_reasons": target_gate.get("quality_reasons"),
@@ -6956,8 +7650,11 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                             "quality_fail_stage": target_gate.get("quality_fail_stage"),
                             "quality_field_scores": target_gate.get("quality_field_scores"),
                             "quality_failed_fields": target_gate.get("quality_failed_fields"),
+                            "quality_failure_codes": target_gate.get("quality_failure_codes"),
                             "quality_required_evidence": target_gate.get("quality_required_evidence"),
                             "evidence_tier_mix": target_gate.get("evidence_tier_mix"),
+                            "fact_cards_count_by_field": target_gate.get("fact_cards_count_by_field"),
+                            "quote_overlap_by_field": target_gate.get("quote_overlap_by_field"),
                             "why_now_recency_passed": target_gate.get("why_now_recency_passed"),
                         }
                     )
@@ -7046,6 +7743,8 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                         "writing_mode": target_gate.get("writing_mode"),
                         "writing_artifact_cleanups": target_gate.get("writing_artifact_cleanups"),
                         "writing_field_dedup_fixes": target_gate.get("writing_field_dedup_fixes"),
+                        "delivery_mode_applied": "normal",
+                        "quality_blocked": bool(not target_gate.get("quality_gate_passed", True)),
                         "quality_gate_passed": target_gate.get("quality_gate_passed"),
                         "quality_score": target_gate.get("quality_score"),
                         "quality_reasons": target_gate.get("quality_reasons"),
@@ -7053,8 +7752,11 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                         "quality_fail_stage": target_gate.get("quality_fail_stage"),
                         "quality_field_scores": target_gate.get("quality_field_scores"),
                         "quality_failed_fields": target_gate.get("quality_failed_fields"),
+                        "quality_failure_codes": target_gate.get("quality_failure_codes"),
                         "quality_required_evidence": target_gate.get("quality_required_evidence"),
                         "evidence_tier_mix": target_gate.get("evidence_tier_mix"),
+                        "fact_cards_count_by_field": target_gate.get("fact_cards_count_by_field"),
+                        "quote_overlap_by_field": target_gate.get("quote_overlap_by_field"),
                         "why_now_recency_passed": target_gate.get("why_now_recency_passed"),
                     }
                 )
@@ -7120,6 +7822,10 @@ def status() -> dict[str, Any]:
         "quality_pass_rate_7d": 0.0,
         "top_failed_fields_7d": [],
         "avg_rewrite_attempts_7d": 0.0,
+        "diagnostic_fallback_count_7d": 0,
+        "top_quality_failure_codes_7d": [],
+        "quote_overlap_violations_7d": 0,
+        "fact_card_coverage_7d": 0.0,
     }
     quality_path = _quality_metrics_path()
     if quality_path.exists():
@@ -7135,6 +7841,10 @@ def status() -> dict[str, Any]:
                     "quality_pass_rate_7d": float(payload.get("quality_pass_rate_7d") or 0.0),
                     "top_failed_fields_7d": list(payload.get("top_failed_fields_7d") or []),
                     "avg_rewrite_attempts_7d": float(payload.get("avg_rewrite_attempts_7d") or 0.0),
+                    "diagnostic_fallback_count_7d": int(payload.get("diagnostic_fallback_count_7d") or 0),
+                    "top_quality_failure_codes_7d": list(payload.get("top_quality_failure_codes_7d") or []),
+                    "quote_overlap_violations_7d": int(payload.get("quote_overlap_violations_7d") or 0),
+                    "fact_card_coverage_7d": float(payload.get("fact_card_coverage_7d") or 0.0),
                 }
         except Exception:
             pass
@@ -7200,6 +7910,11 @@ def status() -> dict[str, Any]:
         "rewrite_max_retries": _rewrite_max_retries(),
         "source_gate_mode": _source_gate_mode(),
         "quality_fail_policy": _quality_fail_policy(),
+        "delivery_mode": _delivery_mode(),
+        "fact_card_mode": _fact_card_mode(),
+        "quote_overlap_max": _quote_overlap_max(),
+        "diagnostic_max_reasons": _diagnostic_max_reasons(),
+        "diagnostic_include_urls": _diagnostic_include_urls(),
         "source_policy": _source_policy(),
         "why_now_recency_days": _why_now_recency_days(),
         "critic_min_field_score": _critic_min_field_score(),
@@ -7239,6 +7954,10 @@ def status() -> dict[str, Any]:
         "quality_pass_rate_7d": quality_metrics.get("quality_pass_rate_7d", 0.0),
         "top_failed_fields_7d": quality_metrics.get("top_failed_fields_7d", []),
         "avg_rewrite_attempts_7d": quality_metrics.get("avg_rewrite_attempts_7d", 0.0),
+        "diagnostic_fallback_count_7d": quality_metrics.get("diagnostic_fallback_count_7d", 0),
+        "top_quality_failure_codes_7d": quality_metrics.get("top_quality_failure_codes_7d", []),
+        "quote_overlap_violations_7d": quality_metrics.get("quote_overlap_violations_7d", 0),
+        "fact_card_coverage_7d": quality_metrics.get("fact_card_coverage_7d", 0.0),
         "ledger_paths": {
             "artifact_dir": str(_ledger_dir()),
             "mirror_dir": str(_ledger_mirror_path()) if _ledger_mirror_enabled() else "",
