@@ -122,6 +122,7 @@ def test_run_chart_scout_dry_run(tmp_path: Path, monkeypatch) -> None:
     assert result["ok"] is True
     assert result["reason"] == "dry_run"
     assert result["winner"]["source"] == "x:fiscal_AI"
+    assert Path(result["pull_log_path"]).exists()
 
 
 def test_run_chart_scout_before_first_window_updates_pool(tmp_path: Path, monkeypatch) -> None:
@@ -165,6 +166,7 @@ def test_run_chart_scout_before_first_window_updates_pool(tmp_path: Path, monkey
     assert result["posted"] is False
     assert result["reason"] == "scouted_pool_updated"
     assert result["candidates_observed"] == 1
+    assert Path(result["pull_log_path"]).exists()
 
     store = XChartStore()
     pooled = store.observed_candidates_since(since_utc=None, limit=20)
@@ -246,6 +248,7 @@ def test_run_chart_scout_window_uses_hourly_pool_since_last_slot(tmp_path: Path,
     assert second["posted"] is True
     assert posted["candidate_url"] == "https://x.com/fiscal_AI/status/high"
     assert second["convention"] == "Coatue Chart of the Afternoon"
+    assert Path(second["pull_log_path"]).exists()
 
 
 def test_run_chart_scout_falls_back_when_top_candidate_copy_is_bad(tmp_path: Path, monkeypatch) -> None:
@@ -695,7 +698,7 @@ def test_pick_winner_enforces_source_repeat_cooldown_with_alternative(monkeypatc
     assert picked.source_id == "fiscal_AI"
 
 
-def test_pick_winner_allows_recent_source_when_no_alternative(monkeypatch) -> None:
+def test_pick_winner_returns_none_when_all_sources_in_cooldown(monkeypatch) -> None:
     monkeypatch.setenv("COATUE_CLAW_X_CHART_SOURCE_REPEAT_DAYS", "3")
     recent_iso = datetime.now(UTC).isoformat()
 
@@ -721,8 +724,7 @@ def test_pick_winner_allows_recent_source_when_no_alternative(monkeypatch) -> No
         score=100.0,
     )
     picked = _pick_winner(store=_Store(), candidates=[kobeissi])
-    assert picked is not None
-    assert picked.source_id == "KobeissiLetter"
+    assert picked is None
 
 
 def test_candidate_pool_permanently_excludes_posted_candidate(tmp_path: Path, monkeypatch) -> None:
@@ -762,6 +764,141 @@ def test_candidate_pool_permanently_excludes_posted_candidate(tmp_path: Path, mo
     store.record_post(slot_key="manual-20260224-120000", channel="C123", candidate=already_posted)
     pool = _candidate_pool_for_post(store=store, candidates=[already_posted, fresh])
     assert [item.candidate_key for item in pool] == ["x:fresh-candidate"]
+
+
+def test_run_chart_scout_posts_cooldown_exhaustion_notice(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_SOURCE_REPEAT_DAYS", "3")
+
+    candidate = Candidate(
+        candidate_key="x:cooldown-hit",
+        source_type="x",
+        source_id="KobeissiLetter",
+        author="@KobeissiLetter",
+        title="Top cooldown",
+        text="Top cooldown",
+        url="https://x.com/KobeissiLetter/status/cooldown-hit",
+        image_url="https://example.com/top.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=1000,
+        source_priority=1.3,
+        score=100.0,
+    )
+
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = datetime(2026, 2, 19, 12, 0, 0, tzinfo=UTC)
+            if tz is None:
+                return base
+            return base.astimezone(tz)
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
+    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [candidate])
+
+    store = XChartStore()
+    recent_same_source = Candidate(
+        candidate_key="x:prior-recent-source",
+        source_type="x",
+        source_id="KobeissiLetter",
+        author="@KobeissiLetter",
+        title="Prior source hit",
+        text="Prior source hit",
+        url="https://x.com/KobeissiLetter/status/prior-recent-source",
+        image_url="https://example.com/prior.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=500,
+        source_priority=1.3,
+        score=80.0,
+    )
+    store.record_post(slot_key="2026-02-19-09:00", channel="C123", candidate=recent_same_source)
+
+    notice: dict[str, object] = {}
+
+    def _fake_notice(**kwargs):
+        notice["channel"] = kwargs["channel"]
+        return {"ok": True, "channel": kwargs["channel"], "ts": "123.456"}
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily._post_no_candidate_message_to_slack", _fake_notice)
+    result = run_chart_scout_once(manual=False, dry_run=False, channel_override="C123")
+    assert result["posted"] is False
+    assert result["reason"] == "all_candidates_in_cooldown"
+    assert result["notice_posted"] is True
+    assert notice["channel"] == "C123"
+    assert Path(result["pull_log_path"]).exists()
+
+
+def test_run_chart_scout_does_not_notice_in_dry_run_on_cooldown_exhaustion(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_SOURCE_REPEAT_DAYS", "3")
+
+    candidate = Candidate(
+        candidate_key="x:cooldown-hit-dry",
+        source_type="x",
+        source_id="KobeissiLetter",
+        author="@KobeissiLetter",
+        title="Top cooldown dry",
+        text="Top cooldown dry",
+        url="https://x.com/KobeissiLetter/status/cooldown-hit-dry",
+        image_url="https://example.com/top.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=1000,
+        source_priority=1.3,
+        score=100.0,
+    )
+
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = datetime(2026, 2, 19, 12, 0, 0, tzinfo=UTC)
+            if tz is None:
+                return base
+            return base.astimezone(tz)
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
+    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [candidate])
+
+    store = XChartStore()
+    recent_same_source = Candidate(
+        candidate_key="x:prior-recent-source-dry",
+        source_type="x",
+        source_id="KobeissiLetter",
+        author="@KobeissiLetter",
+        title="Prior source hit dry",
+        text="Prior source hit dry",
+        url="https://x.com/KobeissiLetter/status/prior-recent-source-dry",
+        image_url="https://example.com/prior.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=500,
+        source_priority=1.3,
+        score=80.0,
+    )
+    store.record_post(slot_key="2026-02-19-09:00", channel="C123", candidate=recent_same_source)
+
+    notice_called = {"called": False}
+
+    def _fake_notice(**kwargs):
+        notice_called["called"] = True
+        return {"ok": True}
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily._post_no_candidate_message_to_slack", _fake_notice)
+    result = run_chart_scout_once(manual=False, dry_run=True, channel_override="C123")
+    assert result["posted"] is False
+    assert result["reason"] == "all_candidates_in_cooldown"
+    assert notice_called["called"] is False
+    assert Path(result["pull_log_path"]).exists()
 
 
 def test_cli_run_post_url_command(monkeypatch, capsys) -> None:
@@ -1596,6 +1733,7 @@ def test_extract_rebuilt_bars_prefers_grouped_cv_for_employee_robot_chart(monkey
 
 
 def test_run_chart_for_post_url_posts_specific_tweet(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
     monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
@@ -1647,9 +1785,14 @@ def test_run_chart_for_post_url_posts_specific_tweet(monkeypatch, tmp_path: Path
     assert result["posted"] is True
     assert captured["candidate_url"] == "https://x.com/KobeissiLetter/status/2024543034734768600"
     assert captured["channel"] == "C123"
+    assert Path(result["pull_log_path"]).exists()
+    pull = json.loads(Path(result["pull_log_path"]).read_text(encoding="utf-8"))
+    assert pull["mode"] == "manual_url"
+    assert pull["manual_override_used"] is True
 
 
 def test_run_chart_for_post_url_rewrites_takeaway_but_keeps_requested_url(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
     monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
@@ -1758,6 +1901,7 @@ def test_style_draft_swaps_title_and_takeaway_roles_for_market_cap_copy(monkeypa
 def test_run_chart_for_post_url_errors_when_headline_unrecoverable(monkeypatch, tmp_path: Path) -> None:
     import pytest
 
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
     monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
@@ -1810,6 +1954,7 @@ def test_run_chart_for_post_url_errors_when_headline_unrecoverable(monkeypatch, 
 
 
 def test_run_chart_for_post_url_applies_title_override(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
     monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
@@ -1856,6 +2001,7 @@ def test_run_chart_for_post_url_applies_title_override(monkeypatch, tmp_path: Pa
 def test_run_chart_for_post_url_invalid_title_override_raises(monkeypatch, tmp_path: Path) -> None:
     import pytest
 
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
     monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
@@ -1891,6 +2037,7 @@ def test_run_chart_for_post_url_invalid_title_override_raises(monkeypatch, tmp_p
 
 
 def test_run_chart_for_post_url_uses_vxtwitter_fallback(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
     monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")

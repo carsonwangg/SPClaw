@@ -3629,6 +3629,135 @@ def _source_repeat_days() -> int:
     return max(0, min(30, days))
 
 
+def _collect_source_last_posted(*, store: XChartStore, limit: int = 120) -> dict[str, datetime]:
+    recent = store.latest_posts(limit=max(1, limit))
+    source_last_posted: dict[str, datetime] = {}
+    for row in recent:
+        key = _normalize_posted_source(str(row.get("source") or ""))
+        if not key:
+            continue
+        raw_posted = str(row.get("posted_at_utc") or "").strip()
+        if not raw_posted:
+            continue
+        try:
+            posted_dt = datetime.fromisoformat(raw_posted.replace("Z", "+00:00")).astimezone(UTC)
+        except Exception:
+            continue
+        prev = source_last_posted.get(key)
+        if prev is None or posted_dt > prev:
+            source_last_posted[key] = posted_dt
+    return source_last_posted
+
+
+def _eligible_after_source_cooldown(
+    *,
+    candidates: list[Candidate],
+    source_last_posted: dict[str, datetime],
+    repeat_days: int,
+    now_utc: datetime,
+) -> list[Candidate]:
+    if repeat_days <= 0:
+        return list(candidates)
+    cutoff = now_utc - timedelta(days=repeat_days)
+    out: list[Candidate] = []
+    for item in candidates:
+        source_key = _canonical_handle(item.source_id) or item.source_id.lower()
+        last_posted = source_last_posted.get(source_key)
+        if last_posted is None or last_posted <= cutoff:
+            out.append(item)
+    return out
+
+
+def _candidate_log_row(item: Candidate) -> dict[str, Any]:
+    return {
+        "candidate_key": item.candidate_key,
+        "source_id": item.source_id,
+        "source_type": item.source_type,
+        "url": item.url,
+        "score": float(item.score),
+    }
+
+
+def _write_pull_log(
+    *,
+    slot_key: str,
+    mode: str,
+    channel: str | None,
+    windows_text: str,
+    repeat_days: int,
+    scanned_candidates: list[Candidate],
+    source_last_posted: dict[str, datetime],
+    eligible_after_item_filter: list[Candidate],
+    eligible_after_cooldown: list[Candidate],
+    selected_candidate_key: str | None,
+    result_reason: str,
+    manual_override_used: bool = False,
+) -> Path:
+    output_dir = _output_dir()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out_path = output_dir / f"{slot_key}-pull-log.json"
+    payload = {
+        "ts_utc": datetime.now(UTC).isoformat(),
+        "mode": mode,
+        "slot_key": slot_key,
+        "channel": channel or "",
+        "windows": windows_text,
+        "repeat_days": int(repeat_days),
+        "cooldown_scope": "scheduled_only",
+        "manual_override_used": bool(manual_override_used),
+        "scanned_candidates": [_candidate_log_row(c) for c in scanned_candidates],
+        "source_last_posted": {k: v.isoformat() for k, v in source_last_posted.items()},
+        "eligible_after_item_filter": [_candidate_log_row(c) for c in eligible_after_item_filter],
+        "eligible_after_item_filter_count": len(eligible_after_item_filter),
+        "eligible_after_cooldown": [_candidate_log_row(c) for c in eligible_after_cooldown],
+        "eligible_after_cooldown_count": len(eligible_after_cooldown),
+        "selected_candidate_key": selected_candidate_key,
+        "result_reason": result_reason,
+    }
+    out_path.write_text(json.dumps(payload, sort_keys=True, indent=2), encoding="utf-8")
+    return out_path
+
+
+def _post_no_candidate_message_to_slack(
+    *,
+    channel: str,
+    convention_name: str,
+    repeat_days: int,
+    scanned_count: int,
+    pool_count: int,
+    unique_sources_in_cooldown: int,
+) -> dict[str, Any]:
+    from slack_sdk import WebClient
+    from slack_sdk.errors import SlackApiError
+
+    tokens = _slack_tokens()
+    text = "\n".join(
+        [
+            f"*{_normalize_render_text(convention_name)}*",
+            f"No chart posted: all candidate accounts are within the {repeat_days}-day cooldown window.",
+            f"Scanned candidates: `{scanned_count}` | Pool candidates: `{pool_count}` | Sources in cooldown: `{unique_sources_in_cooldown}`",
+        ]
+    )
+    last_error: str | None = None
+    for token in tokens:
+        client = WebClient(token=token)
+        try:
+            response = client.chat_postMessage(channel=channel, text=text)
+            return {
+                "ok": bool(response.get("ok")),
+                "channel": channel,
+                "ts": response.get("ts"),
+            }
+        except SlackApiError as exc:
+            err = str(exc.response.get("error", "")) if exc.response is not None else str(exc)
+            last_error = err or str(exc)
+            if err in {"account_inactive", "invalid_auth", "token_revoked"}:
+                logger.warning("x-chart slack token rejected (%s), trying next token if available", err)
+                continue
+            raise
+    raise XChartError(f"Slack notice post failed for all available tokens: {last_error or 'unknown_error'}")
+
+
 def _was_candidate_posted_ever(*, store: Any, candidate_key: str) -> bool:
     posted_ever = getattr(store, "was_item_posted", None)
     if callable(posted_ever):
@@ -3658,34 +3787,18 @@ def _pick_winner(*, store: XChartStore, candidates: list[Candidate]) -> Candidat
     lookback, floor = _source_variety_params()
     # Pull enough recent rows to support both "variety lookback" and source cooldown checks.
     recent = store.latest_posts(limit=max(lookback, 120))
-    source_last_posted: dict[str, datetime] = {}
-    for row in recent:
-        key = _normalize_posted_source(str(row.get("source") or ""))
-        if not key:
-            continue
-        raw_posted = str(row.get("posted_at_utc") or "").strip()
-        if not raw_posted:
-            continue
-        try:
-            posted_dt = datetime.fromisoformat(raw_posted.replace("Z", "+00:00")).astimezone(UTC)
-        except Exception:
-            continue
-        prev = source_last_posted.get(key)
-        if prev is None or posted_dt > prev:
-            source_last_posted[key] = posted_dt
+    source_last_posted = _collect_source_last_posted(store=store, limit=max(lookback, 120))
 
     selection_pool = pool
     if repeat_days > 0:
-        cutoff = datetime.now(UTC) - timedelta(days=repeat_days)
-        cooled_pool: list[Candidate] = []
-        for item in pool:
-            source_key = _canonical_handle(item.source_id) or item.source_id.lower()
-            last_posted = source_last_posted.get(source_key)
-            if last_posted is None or last_posted <= cutoff:
-                cooled_pool.append(item)
-        # Avoid starvation: if everything is within cooldown, fall back to normal score ordering.
-        if cooled_pool:
-            selection_pool = cooled_pool
+        selection_pool = _eligible_after_source_cooldown(
+            candidates=pool,
+            source_last_posted=source_last_posted,
+            repeat_days=repeat_days,
+            now_utc=datetime.now(UTC),
+        )
+        if not selection_pool:
+            return None
 
     # Keep "highest score" behavior but add source variety when alternatives are near the top score.
     top = selection_pool[0]
@@ -4946,7 +5059,9 @@ def run_chart_scout_once(
     now_local = now_utc.astimezone(tz)
     windows = _parse_windows()
     slot_key = _slot_key(now_local=now_local, windows=windows, manual=manual)
+    pull_slot_key = slot_key or f"scout-{now_local.strftime('%Y%m%d-%H%M%S')}"
     windows_text = ",".join(f"{h:02d}:{m:02d}" for h, m in windows)
+    repeat_days = _source_repeat_days()
     token = _resolve_bearer_token()
     source_limit = max(8, min(60, int(os.environ.get("COATUE_CLAW_X_CHART_SOURCE_LIMIT", "25"))))
     top_sources = store.top_sources(limit=source_limit)
@@ -4967,7 +5082,29 @@ def run_chart_scout_once(
         if engagement >= int(os.environ.get("COATUE_CLAW_X_CHART_DISCOVERY_MIN_ENGAGEMENT", "120")):
             store.note_candidate_observed(handle, engagement=engagement)
 
+    source_last_posted = _collect_source_last_posted(store=store, limit=400)
+    eligible_after_item_filter = [c for c in all_candidates if not _was_candidate_posted_ever(store=store, candidate_key=c.candidate_key)]
+    eligible_after_cooldown = _eligible_after_source_cooldown(
+        candidates=eligible_after_item_filter,
+        source_last_posted=source_last_posted,
+        repeat_days=repeat_days,
+        now_utc=now_utc,
+    )
+
     if slot_key is None:
+        pull_log_path = _write_pull_log(
+            slot_key=pull_slot_key,
+            mode="scheduled",
+            channel=(channel_override or "").strip(),
+            windows_text=windows_text,
+            repeat_days=repeat_days,
+            scanned_candidates=all_candidates,
+            source_last_posted=source_last_posted,
+            eligible_after_item_filter=eligible_after_item_filter,
+            eligible_after_cooldown=eligible_after_cooldown,
+            selected_candidate_key=None,
+            result_reason="scouted_pool_updated",
+        )
         return {
             "ok": True,
             "posted": False,
@@ -4981,9 +5118,23 @@ def run_chart_scout_once(
             "candidates_scanned": len(all_candidates),
             "candidates_observed": observed_count,
             "pool_pruned": pruned_count,
+            "pull_log_path": str(pull_log_path),
         }
 
     if (not manual) and store.was_slot_posted(slot_key):
+        pull_log_path = _write_pull_log(
+            slot_key=pull_slot_key,
+            mode="scheduled",
+            channel=(channel_override or "").strip(),
+            windows_text=windows_text,
+            repeat_days=repeat_days,
+            scanned_candidates=all_candidates,
+            source_last_posted=source_last_posted,
+            eligible_after_item_filter=eligible_after_item_filter,
+            eligible_after_cooldown=eligible_after_cooldown,
+            selected_candidate_key=None,
+            result_reason="slot_already_posted",
+        )
         return {
             "ok": True,
             "posted": False,
@@ -4996,6 +5147,7 @@ def run_chart_scout_once(
             "candidates_scanned": len(all_candidates),
             "candidates_observed": observed_count,
             "pool_pruned": pruned_count,
+            "pull_log_path": str(pull_log_path),
         }
 
     since_utc = None if manual else store.latest_scheduled_posted_at_utc()
@@ -5005,6 +5157,19 @@ def run_chart_scout_once(
 
     candidate_pool = _candidate_pool_for_post(store=store, candidates=ranking_pool)
     if not candidate_pool:
+        pull_log_path = _write_pull_log(
+            slot_key=pull_slot_key,
+            mode="scheduled",
+            channel=(channel_override or "").strip(),
+            windows_text=windows_text,
+            repeat_days=repeat_days,
+            scanned_candidates=all_candidates,
+            source_last_posted=source_last_posted,
+            eligible_after_item_filter=eligible_after_item_filter,
+            eligible_after_cooldown=eligible_after_cooldown,
+            selected_candidate_key=None,
+            result_reason="no_candidate_available",
+        )
         return {
             "ok": True,
             "posted": False,
@@ -5019,8 +5184,70 @@ def run_chart_scout_once(
             "pool_candidates": len(ranking_pool),
             "since_utc": since_utc,
             "pool_pruned": pruned_count,
+            "pull_log_path": str(pull_log_path),
         }
-    top_choice = _pick_winner(store=store, candidates=candidate_pool) or candidate_pool[0]
+    top_choice = _pick_winner(store=store, candidates=candidate_pool)
+    if top_choice is None:
+        convention_name = _convention_name(slot_key=slot_key, now_local=now_local, windows=windows)
+        channel = (channel_override or "").strip() or _slack_channel()
+        cooled_candidates = _eligible_after_source_cooldown(
+            candidates=candidate_pool,
+            source_last_posted=source_last_posted,
+            repeat_days=repeat_days,
+            now_utc=now_utc,
+        )
+        notice_posted = False
+        notice: dict[str, Any] | None = None
+        if not dry_run:
+            unique_sources_in_cooldown = len(
+                {
+                    _canonical_handle(c.source_id) or c.source_id.lower()
+                    for c in candidate_pool
+                    if c not in cooled_candidates
+                }
+            )
+            notice = _post_no_candidate_message_to_slack(
+                channel=channel,
+                convention_name=convention_name,
+                repeat_days=repeat_days,
+                scanned_count=len(all_candidates),
+                pool_count=len(ranking_pool),
+                unique_sources_in_cooldown=unique_sources_in_cooldown,
+            )
+            notice_posted = bool(notice.get("ok"))
+        pull_log_path = _write_pull_log(
+            slot_key=pull_slot_key,
+            mode="scheduled",
+            channel=channel,
+            windows_text=windows_text,
+            repeat_days=repeat_days,
+            scanned_candidates=all_candidates,
+            source_last_posted=source_last_posted,
+            eligible_after_item_filter=eligible_after_item_filter,
+            eligible_after_cooldown=cooled_candidates,
+            selected_candidate_key=None,
+            result_reason="all_candidates_in_cooldown",
+        )
+        return {
+            "ok": True,
+            "posted": False,
+            "reason": "all_candidates_in_cooldown",
+            "slot_key": slot_key,
+            "convention": convention_name,
+            "notice_posted": notice_posted,
+            "notice_channel": channel,
+            "notice": notice,
+            "copy_rewrite_applied": False,
+            "copy_rewrite_reason": None,
+            "candidate_fallback_used": False,
+            "title_takeaway_role_swapped": False,
+            "candidates_scanned": len(all_candidates),
+            "candidates_observed": observed_count,
+            "pool_candidates": len(ranking_pool),
+            "since_utc": since_utc,
+            "pool_pruned": pruned_count,
+            "pull_log_path": str(pull_log_path),
+        }
     candidate_order = [top_choice] + [c for c in candidate_pool if c.candidate_key != top_choice.candidate_key]
 
     winner: Candidate | None = None
@@ -5049,6 +5276,24 @@ def run_chart_scout_once(
     if winner is None or style_draft is None:
         top_draft = _select_style_draft(top_choice)
         top_issues = _style_copy_publish_issues(top_draft)
+        pull_log_path = _write_pull_log(
+            slot_key=pull_slot_key,
+            mode="scheduled",
+            channel=(channel_override or "").strip(),
+            windows_text=windows_text,
+            repeat_days=repeat_days,
+            scanned_candidates=all_candidates,
+            source_last_posted=source_last_posted,
+            eligible_after_item_filter=eligible_after_item_filter,
+            eligible_after_cooldown=_eligible_after_source_cooldown(
+                candidates=candidate_pool,
+                source_last_posted=source_last_posted,
+                repeat_days=repeat_days,
+                now_utc=now_utc,
+            ),
+            selected_candidate_key=top_choice.candidate_key,
+            result_reason="no_publishable_candidate_available",
+        )
         return {
             "ok": True,
             "posted": False,
@@ -5073,6 +5318,7 @@ def run_chart_scout_once(
             "pool_candidates": len(ranking_pool),
             "since_utc": since_utc,
             "pool_pruned": pruned_count,
+            "pull_log_path": str(pull_log_path),
         }
 
     convention_name = _convention_name(slot_key=slot_key, now_local=now_local, windows=windows)
@@ -5115,6 +5361,24 @@ def run_chart_scout_once(
     )
 
     if dry_run:
+        pull_log_path = _write_pull_log(
+            slot_key=pull_slot_key,
+            mode="scheduled",
+            channel=(channel_override or "").strip(),
+            windows_text=windows_text,
+            repeat_days=repeat_days,
+            scanned_candidates=all_candidates,
+            source_last_posted=source_last_posted,
+            eligible_after_item_filter=eligible_after_item_filter,
+            eligible_after_cooldown=_eligible_after_source_cooldown(
+                candidates=candidate_pool,
+                source_last_posted=source_last_posted,
+                repeat_days=repeat_days,
+                now_utc=now_utc,
+            ),
+            selected_candidate_key=winner.candidate_key,
+            result_reason="dry_run",
+        )
         return {
             "ok": True,
             "posted": False,
@@ -5137,6 +5401,7 @@ def run_chart_scout_once(
             "artifact": str(out_path),
             "pool_candidates": len(ranking_pool),
             "since_utc": since_utc,
+            "pull_log_path": str(pull_log_path),
         }
 
     channel = (channel_override or "").strip() or _slack_channel()
@@ -5150,6 +5415,24 @@ def run_chart_scout_once(
         store=store,
     )
     store.record_post(slot_key=slot_key, channel=channel, candidate=winner)
+    pull_log_path = _write_pull_log(
+        slot_key=pull_slot_key,
+        mode="scheduled",
+        channel=channel,
+        windows_text=windows_text,
+        repeat_days=repeat_days,
+        scanned_candidates=all_candidates,
+        source_last_posted=source_last_posted,
+        eligible_after_item_filter=eligible_after_item_filter,
+        eligible_after_cooldown=_eligible_after_source_cooldown(
+            candidates=candidate_pool,
+            source_last_posted=source_last_posted,
+            repeat_days=repeat_days,
+            now_utc=now_utc,
+        ),
+        selected_candidate_key=winner.candidate_key,
+        result_reason="posted",
+    )
     return {
         "ok": True,
         "posted": True,
@@ -5173,6 +5456,7 @@ def run_chart_scout_once(
         "artifact": str(out_path),
         "pool_candidates": len(ranking_pool),
         "since_utc": since_utc,
+        "pull_log_path": str(pull_log_path),
     }
 
 
@@ -5259,6 +5543,7 @@ def run_chart_for_post_url(
     channel = (channel_override or "").strip() or _slack_channel()
     now_local = datetime.now(UTC).astimezone(_timezone())
     slot_key = f"manual-url-{now_local.strftime('%Y%m%d-%H%M%S')}"
+    repeat_days = _source_repeat_days()
     windows = _parse_windows()
     windows_text = ",".join(f"{h:02d}:{m:02d}" for h, m in windows)
     convention_name = _convention_name(slot_key=slot_key, now_local=now_local, windows=windows)
@@ -5272,6 +5557,21 @@ def run_chart_for_post_url(
         store=store,
     )
     store.record_post(slot_key=slot_key, channel=channel, candidate=winner)
+    source_last_posted = _collect_source_last_posted(store=store, limit=400)
+    pull_log_path = _write_pull_log(
+        slot_key=slot_key,
+        mode="manual_url",
+        channel=channel,
+        windows_text=windows_text,
+        repeat_days=repeat_days,
+        scanned_candidates=candidates or [winner],
+        source_last_posted=source_last_posted,
+        eligible_after_item_filter=candidates or [winner],
+        eligible_after_cooldown=candidates or [winner],
+        selected_candidate_key=winner.candidate_key,
+        result_reason="posted",
+        manual_override_used=True,
+    )
     return {
         "ok": True,
         "posted": True,
@@ -5292,6 +5592,7 @@ def run_chart_for_post_url(
             "style_score": style_draft.score,
             "style_iteration": style_draft.iteration,
         },
+        "pull_log_path": str(pull_log_path),
     }
 
 
