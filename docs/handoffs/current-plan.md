@@ -40,6 +40,12 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- HFA bare command aliases shipped on `codex/agent-hf-analyst`:
+  - users can invoke HFA flows without prefix:
+    - `analyze ...`, `podcast <url> ...`, `quotes <url>`, `status`
+  - YouTube link in `analyze <url>` routes to podcast mode.
+  - validation:
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_slack_routing.py tests/test_hf_youtube_transcript.py` -> `17 passed`
 - HFA conversational command support shipped on `codex/agent-hf-analyst`:
   - `src/coatue_claw/hf_analyst.py` now maps conversational variants into HFA intents (especially podcast/quotes/transcript phrasings).
   - `src/coatue_claw/slack_bot.py` now resolves YouTube URL from prior thread messages when podcast intent is present but URL is omitted.

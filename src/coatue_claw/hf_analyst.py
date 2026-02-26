@@ -924,46 +924,60 @@ def extract_youtube_urls(text: str) -> list[str]:
 def parse_hfa_intent(text: str) -> tuple[str | None, str | None]:
     stripped = re.sub(r"<@[^>]+>", " ", text or "").strip()
     lower = stripped.lower()
-    if not re.search(r"^\s*hfa\b", lower):
-        return (None, None)
+    has_hfa_prefix = re.search(r"^\s*hfa\b", lower) is not None
+    body = re.sub(r"^\s*hfa\b", "", stripped, flags=re.IGNORECASE).strip() if has_hfa_prefix else stripped
+    body_lower = body.lower()
 
-    if re.search(r"^\s*hfa\s+status\b", lower):
+    # Support both prefixed and bare commands:
+    # - hfa analyze ...
+    # - analyze ...
+    # - quotes <youtube-url>
+    # - podcast <youtube-url>
+    # - status
+    if re.search(r"^\s*status\b", body_lower):
         return ("status", None)
-    match = re.search(r"^\s*hfa\s+podcast\s+(\S+)(.*)$", stripped, re.IGNORECASE)
+
+    match = re.search(r"^\s*podcast\s+(\S+)(.*)$", body, re.IGNORECASE)
     if match:
         url = str(match.group(1) or "").strip()
         tail = str(match.group(2) or "").strip()
         if is_youtube_url(url):
             payload = url if not tail else f"{url} {tail}"
-            return ("podcast", payload)
-        return ("podcast", stripped)
+            return ("podcast", payload if not has_hfa_prefix else payload)
+        return ("podcast", body if not has_hfa_prefix else stripped)
+
+    match = re.search(r"^\s*quotes?\b(.*)$", body, re.IGNORECASE)
+    if match:
+        tail = str(match.group(1) or "").strip()
+        payload = tail if tail else body
+        return ("podcast", payload if not has_hfa_prefix else payload)
 
     # Conversational podcast intents:
     # - "hfa analyze this podcast <url>"
     # - "hfa quotes for this podcast"
     # - "hfa summarize this youtube interview <url>"
-    urls = extract_youtube_urls(stripped)
+    urls = extract_youtube_urls(body)
     if urls:
         url = urls[0]
-        tail = stripped.replace(url, "").strip()
-        if re.search(r"\b(podcast|youtube|transcript|quote|quotes|summary|summarize)\b", lower):
+        tail = body.replace(url, "").strip()
+        if re.search(r"\b(podcast|youtube|transcript|quote|quotes|summary|summarize)\b", body_lower):
             payload = url if not tail else f"{url} {tail}"
             return ("podcast", payload)
-        if re.search(r"^\s*hfa\s+analyze\b", lower):
+        if re.search(r"^\s*analyze\b", body_lower):
             payload = url if not tail else f"{url} {tail}"
             return ("podcast", payload)
 
-    if re.search(r"\b(podcast|youtube|transcript|quote|quotes)\b", lower):
+    if has_hfa_prefix and re.search(r"\b(podcast|youtube|transcript|quote|quotes)\b", body_lower):
         # Allow Slack-side thread URL resolution when URL isn't explicitly included.
-        return ("podcast", stripped)
+        return ("podcast", body)
 
-    match = re.search(r"^\s*hfa\s+analyze\b(.*)$", stripped, re.IGNORECASE)
+    match = re.search(r"^\s*analyze\b(.*)$", body, re.IGNORECASE)
     if match:
         tail = str(match.group(1) or "").strip()
         return ("analyze", tail or None)
 
-    if re.search(r"\b(summarize|summary|readout|memo|packet|analyze|analysis)\b", lower):
-        return ("analyze", stripped)
+    if has_hfa_prefix and re.search(r"\b(summarize|summary|readout|memo|packet|analyze|analysis)\b", body_lower):
+        return ("analyze", body)
 
     return (None, None)
 

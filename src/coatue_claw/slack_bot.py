@@ -229,7 +229,10 @@ def _format_chart_usage() -> str:
     return (
         "Usage:\n"
         "- `diligence TICKER`\n"
-        "- `hfa analyze [optional question]` / `hfa podcast <youtube-url> [optional question]` / `hfa status`\n"
+        "- `hfa analyze [optional question]` / `analyze [optional question]`\n"
+        "- `hfa podcast <youtube-url> [optional question]` / `podcast <youtube-url> [optional question]`\n"
+        "- `quotes <youtube-url>` or `analyze <youtube-url>` for podcast quote mode\n"
+        "- `hfa status` / `status`\n"
         "- `md now` / `md status` / `md holdings refresh`\n"
         "- `x digest <topic|ticker|handle> [last 24h] [limit 50]`\n"
         "- `x chart now` (run chart-scout winner now)\n"
