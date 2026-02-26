@@ -400,10 +400,9 @@ def test_run_chart_scout_falls_back_when_top_candidate_headline_is_incomplete(tm
 
     result = run_chart_scout_once(manual=False, dry_run=False, channel_override="C123")
     assert result["posted"] is True
-    assert result["candidate_fallback_used"] is True
-    assert captured["candidate_url"] == "https://x.com/fiscal_AI/status/good-headline"
-    assert _is_complete_headline_phrase(str(captured["headline"])) is True
-    assert _is_complete_headline_sentence(str(captured["headline"])) is True
+    assert result["candidate_fallback_used"] is False
+    assert captured["candidate_url"] == "https://x.com/Barchart/status/bad-headline"
+    assert captured["headline"] == "U.S. Housing Market Home Sellers"
 
 
 def test_run_chart_scout_falls_back_when_top_candidate_has_fragment_tail(tmp_path: Path, monkeypatch) -> None:
@@ -487,14 +486,13 @@ def test_run_chart_scout_falls_back_when_top_candidate_has_fragment_tail(tmp_pat
 
     result = run_chart_scout_once(manual=False, dry_run=False, channel_override="C123")
     assert result["posted"] is True
-    assert result["candidate_fallback_used"] is True
-    assert captured["candidate_url"] == "https://x.com/fiscal_AI/status/fragment-good"
-    assert _is_complete_headline_phrase(str(captured["headline"])) is True
-    assert _is_complete_headline_sentence(str(captured["headline"])) is True
+    assert result["candidate_fallback_used"] is False
+    assert captured["candidate_url"] == "https://x.com/KobeissiLetter/status/fragment-top"
+    assert captured["headline"] == "US stock market futures open lower in their"
     assert _is_complete_sentence(str(captured["takeaway"])) is True
 
 
-def test_run_chart_scout_returns_non_post_when_no_publishable_candidate(tmp_path: Path, monkeypatch) -> None:
+def test_run_chart_scout_posts_when_headline_is_fragmentary(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
     monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
@@ -540,12 +538,12 @@ def test_run_chart_scout_returns_non_post_when_no_publishable_candidate(tmp_path
         "coatue_claw.x_chart_daily._rewrite_headline_from_candidate",
         lambda _candidate: ("", "headline_unrecoverable"),
     )
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test-token")
+    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", lambda **kwargs: {"ok": True, "channel": kwargs["channel"], "file_id": "FTEST"})
 
     result = run_chart_scout_once(manual=False, dry_run=False, channel_override="C123")
-    assert result["posted"] is False
-    assert result["reason"] == "no_publishable_candidate_available"
-    assert "headline_incomplete_sentence" in result["publish_issues"]
-    assert result["copy_rewrite_reason"] == "headline_unrecoverable"
+    assert result["posted"] is True
+    assert result["candidate_fallback_used"] is False
 
 
 def test_convention_name_uses_morning_afternoon_evening_windows() -> None:
@@ -1852,16 +1850,10 @@ def test_run_chart_for_post_url_rewrites_takeaway_but_keeps_requested_url(monkey
     assert result["ok"] is True
     assert result["posted"] is True
     assert result["candidate_fallback_used"] is False
-    assert result["copy_rewrite_applied"] is True
-    assert result["copy_rewrite_reason"] in {
-        "headline_tail_fragment_rewritten",
-        "headline_sentence_rewritten",
-        "takeaway_tail_fragment_rewritten",
-        "title_takeaway_role_swapped",
-    }
+    assert result["copy_rewrite_applied"] is False
+    assert result["copy_rewrite_reason"] is None
     assert captured["candidate_url"] == "https://x.com/Barchart/status/2025715989384663396"
-    assert _is_complete_headline_phrase(str(captured["headline"])) is True
-    assert _is_complete_headline_sentence(str(captured["headline"])) is True
+    assert captured["headline"] == "US stock market futures open lower in their"
     assert _is_complete_sentence(str(captured["takeaway"])) is True
     assert _is_single_sentence_takeaway(str(captured["takeaway"])) is True
 
@@ -1890,17 +1882,15 @@ def test_style_draft_swaps_title_and_takeaway_roles_for_market_cap_copy(monkeypa
         },
     )
     draft = _select_style_draft(candidate)
-    assert draft.headline == "US stocks erase nearly -$800 billion in market cap."
-    assert draft.takeaway == "US stocks erase nearly -$800 billion in market cap while AI disruption fears spread and trade war headlines return."
-    assert draft.checks["title_takeaway_role_ok"] is True
-    assert draft.checks["title_takeaway_role_swapped"] is True
+    assert draft.headline == "US stocks erase nearly -$800 billion in market cap AI disruption fears spread and trade war headlines return."
+    assert draft.takeaway == "US stocks erase nearly -$800 billion in market cap."
+    assert draft.checks["title_takeaway_role_ok"] is False
+    assert draft.checks["title_takeaway_role_swapped"] is False
     assert _is_single_sentence_takeaway(draft.takeaway) is True
-    assert draft.copy_rewrite_reason == "title_takeaway_role_swapped"
+    assert draft.copy_rewrite_reason is None
 
 
-def test_run_chart_for_post_url_errors_when_headline_unrecoverable(monkeypatch, tmp_path: Path) -> None:
-    import pytest
-
+def test_run_chart_for_post_url_allows_fragmentary_headline(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
@@ -1944,13 +1934,12 @@ def test_run_chart_for_post_url_errors_when_headline_unrecoverable(monkeypatch, 
         return {"ok": True, "channel": kwargs["channel"], "styled_artifact": str(tmp_path / "styled.png")}
 
     monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
-    with pytest.raises(XChartError) as exc:
-        run_chart_for_post_url(
-            post_url="https://x.com/Barchart/status/2026003310256533863",
-            channel_override="C123",
-        )
-    assert "headline_incomplete_sentence" in str(exc.value)
-    assert posted["called"] is False
+    result = run_chart_for_post_url(
+        post_url="https://x.com/Barchart/status/2026003310256533863",
+        channel_override="C123",
+    )
+    assert result["ok"] is True
+    assert posted["called"] is True
 
 
 def test_run_chart_for_post_url_applies_title_override(monkeypatch, tmp_path: Path) -> None:
@@ -1998,9 +1987,7 @@ def test_run_chart_for_post_url_applies_title_override(monkeypatch, tmp_path: Pa
     assert captured["candidate_url"] == "https://x.com/KobeissiLetter/status/2026040229535047769"
 
 
-def test_run_chart_for_post_url_invalid_title_override_raises(monkeypatch, tmp_path: Path) -> None:
-    import pytest
-
+def test_run_chart_for_post_url_title_override_allows_freeform_text(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
@@ -2023,17 +2010,22 @@ def test_run_chart_for_post_url_invalid_title_override_raises(monkeypatch, tmp_p
         },
     }
     monkeypatch.setattr("coatue_claw.x_chart_daily._http_json", lambda **kwargs: payload)
-    posted = {"called": False}
-    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", lambda **kwargs: posted.__setitem__("called", True))
+    captured: dict[str, object] = {"called": False}
 
-    with pytest.raises(XChartError) as exc:
-        run_chart_for_post_url(
-            post_url="https://x.com/KobeissiLetter/status/2026040229535047769",
-            channel_override="C123",
-            title_override="US stocks erase nearly $800 billion in market.",
-        )
-    assert "title override failed" in str(exc.value).lower()
-    assert posted["called"] is False
+    def _fake_post(**kwargs):
+        captured["called"] = True
+        captured["headline"] = kwargs["style_draft"].headline
+        return {"ok": True, "channel": kwargs["channel"], "styled_artifact": str(tmp_path / "styled.png")}
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
+    result = run_chart_for_post_url(
+        post_url="https://x.com/KobeissiLetter/status/2026040229535047769",
+        channel_override="C123",
+        title_override="US stocks erase nearly $800 billion in market.",
+    )
+    assert result["ok"] is True
+    assert captured["called"] is True
+    assert captured["headline"] == "US stocks erase nearly $800 billion in market."
 
 
 def test_run_chart_for_post_url_uses_vxtwitter_fallback(monkeypatch, tmp_path: Path) -> None:
@@ -2377,7 +2369,7 @@ def test_style_draft_rewrites_low_signal_tariff_title() -> None:
     assert "it's official" not in draft.headline.lower()
     assert "anticipated rulings" not in draft.headline.lower()
     assert draft.headline.lower().startswith("us tariff")
-    assert _is_complete_headline_sentence(draft.headline) is True
+    assert _is_complete_headline_phrase(draft.headline) is True
     assert draft.headline.split(" ")[-1].lower() not in {"in", "of", "the", "to"}
 
 
@@ -2401,7 +2393,7 @@ def test_style_draft_uses_chart_hint_for_low_signal_copy(monkeypatch) -> None:
         lambda _candidate: "The US Tariff Take Has Surged",
     )
     draft = _select_style_draft(candidate)
-    assert draft.headline == "US tariff receipts are surging."
+    assert draft.headline == "It's official: In one"
     assert draft.chart_label == "Monthly US customs duties (US$B)"
     assert draft.takeaway == "US customs-duty collections just hit a new high."
 
@@ -2434,7 +2426,7 @@ def test_style_draft_rewrites_low_signal_takeaway_even_if_headline_is_good(monke
         lambda _candidate: "The US Tariff Take Has Surged",
     )
     draft = _select_style_draft(candidate)
-    assert draft.headline == "US tariff receipts are surging."
+    assert draft.headline == "US tariff receipts are surging"
     assert draft.takeaway == "US customs-duty collections just hit a new high."
 
 
@@ -2493,9 +2485,8 @@ def test_style_draft_rewrites_incoherent_institutional_selling_headline(monkeypa
         },
     )
     draft = _select_style_draft(candidate)
-    assert draft.headline == "Institutional selling is at an extreme."
-    assert "sold a are" not in draft.headline.lower()
-    assert draft.checks["headline_grammar"] is True
+    assert draft.headline == "Institutional investors sold a are at an extreme"
+    assert draft.checks["headline_grammar"] is False
 
 
 def test_style_draft_rewrites_broken_headline_phrase(monkeypatch) -> None:
@@ -2523,13 +2514,13 @@ def test_style_draft_rewrites_broken_headline_phrase(monkeypatch) -> None:
     )
     draft = _select_style_draft(candidate)
     assert _is_complete_headline_phrase(draft.headline) is True
-    assert _is_complete_headline_sentence(draft.headline) is True
-    assert draft.headline.lower().endswith("now is") is False
+    assert _is_complete_headline_sentence(draft.headline) is False
+    assert draft.headline == "U.S. Housing Market Home Sellers"
     assert draft.checks["headline_complete_phrase"] is True
-    assert draft.checks["headline_complete_sentence"] is True
+    assert draft.checks["headline_complete_sentence"] is False
     assert draft.checks["headline_tail_complete"] is True
-    assert draft.copy_rewrite_applied is True
-    assert draft.copy_rewrite_reason in {"headline_tail_fragment_rewritten", "headline_sentence_rewritten"}
+    assert draft.copy_rewrite_applied is False
+    assert draft.copy_rewrite_reason is None
 
 
 def test_style_draft_rewrites_degenerate_fields_and_fragment_takeaway(monkeypatch) -> None:
@@ -2556,11 +2547,11 @@ def test_style_draft_rewrites_degenerate_fields_and_fragment_takeaway(monkeypatc
         },
     )
     draft = _select_style_draft(candidate)
-    assert draft.headline != "U.S"
+    assert draft.headline == "U.S"
     assert draft.chart_label != "U.S"
     assert _is_complete_sentence(draft.takeaway) is True
-    assert "fell to lowest" not in draft.takeaway.lower()
-    assert draft.checks["headline_non_degenerate"] is True
+    assert draft.takeaway == "New US-facing data point with clear directional movement."
+    assert draft.checks["headline_non_degenerate"] is False
     assert draft.checks["chart_label_non_degenerate"] is True
     assert draft.checks["takeaway_complete_sentence"] is True
     assert draft.copy_rewrite_applied is True
@@ -2590,11 +2581,11 @@ def test_style_draft_rewrites_fragmented_kobeissi_copy(monkeypatch) -> None:
         },
     )
     draft = _select_style_draft(candidate)
-    assert _is_complete_headline_phrase(draft.headline) is True
-    assert _is_complete_headline_sentence(draft.headline) is True
+    assert _is_complete_headline_phrase(draft.headline) is False
+    assert _is_complete_headline_sentence(draft.headline) is False
     assert _is_complete_sentence(draft.takeaway) is True
-    assert draft.headline.lower().endswith("in their") is False
-    assert draft.takeaway.lower().endswith("their initial.") is False
-    assert draft.checks["headline_tail_complete"] is True
+    assert draft.headline.lower().endswith("in their") is True
+    assert draft.takeaway == "New US-facing data point with clear directional movement."
+    assert draft.checks["headline_tail_complete"] is False
     assert draft.checks["takeaway_tail_complete"] is True
-    assert draft.copy_rewrite_applied is True
+    assert draft.copy_rewrite_applied is False

@@ -3,6 +3,16 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-26, chart title prompt relaxation for Chart of the Day)
+- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/src/coatue_claw/x_chart_daily.py` to remove strict deterministic title guardrails in style synthesis:
+  - LLM title prompt now uses tweet text as the direct source context.
+  - removed strict headline sentence/tail enforcement from publish issue gating.
+  - removed headline auto-rewrite fallback path in source-card render and post-url flow.
+  - title override validation now only requires non-empty normalized text (no strict completion checks).
+- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/tests/test_x_chart_daily.py` expectations to match relaxed title policy (LLM-controlled headline allowed, no forced fallback for fragmentary title text).
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `82 passed`
+
 ## Update (2026-02-26, board-seat hard reset scaffold)
 - Board Seat was intentionally scrapped to start fresh after repeated output quality failures.
 - Replaced `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py` with a reset scaffold:

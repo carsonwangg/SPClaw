@@ -3,6 +3,15 @@
 ## Objective
 Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as the primary runtime and control plane.
 
+## Chart-of-Day Title Policy (2026-02-26)
+- Applied relaxed title policy in `x_chart_daily` for chart-of-the-day styling:
+  - title/headline generation is now primarily LLM-directed from tweet text.
+  - strict deterministic headline completion guardrails are no longer used as publish blockers.
+  - post-url title overrides accept freeform non-empty text (no strict sentence-finalization requirement).
+- Regression coverage aligned in `tests/test_x_chart_daily.py`.
+- Current validation status:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` passes (`82 passed`).
+
 ## V1 Scope
 - SEC + transcript + macro ingestion
 - Diligence packets (bull/bear + peer comp + charts)
