@@ -33,6 +33,12 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_youtube_transcript.py tests/test_hf_podcast.py tests/test_hf_analyst.py` -> `16 passed`
   - `PYTHONPATH=src python3 -m compileall -q src` -> pass
 
+## Update (2026-02-26, HFA Slack routing fast-path hardening)
+- Patched `src/coatue_claw/slack_bot.py` to route explicit `hfa ...` commands before change-request heuristics and generic fallback logic.
+- Goal: prevent non-HFA conversational handling from intercepting explicit HFA commands (which was surfacing irrelevant `Exec:` warnings in Slack replies).
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_slack_routing.py` -> `12 passed`
+
 ## Update (2026-02-26, board-seat hard reset scaffold)
 - Board Seat was intentionally scrapped to start fresh after repeated output quality failures.
 - Replaced `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py` with a reset scaffold:

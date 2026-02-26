@@ -40,6 +40,11 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- HFA Slack command routing hardening shipped on `codex/agent-hf-analyst`:
+  - `src/coatue_claw/slack_bot.py` now fast-path handles `hfa ...` commands before change-request heuristics/fallback.
+  - this reduces/avoids off-contract conversational replies and unrelated `Exec:` warning noise for explicit HFA command messages.
+  - validation:
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_slack_routing.py` -> `12 passed`
 - HFA podcast ASR compatibility patch shipped on `codex/agent-hf-analyst`:
   - `src/coatue_claw/hf_youtube_transcript.py` now retries OpenAI audio transcription without `response_format` when model/API rejects `verbose_json`.
   - this resolves failures like: `response_format 'verbose_json' is not compatible with model ...`.
