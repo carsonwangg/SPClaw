@@ -24,11 +24,18 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `10 passed`
   - `PYTHONPATH=src python3 -m pytest -q` currently blocked in this environment by missing optional deps (`yfinance`, `matplotlib`) during collection.
 
-## Update (2026-02-26, HFA Slack routing fast-path hardening)
-- Patched `src/coatue_claw/slack_bot.py` to route explicit `hfa ...` commands before change-request heuristics and generic fallback logic.
-- Goal: prevent non-HFA conversational handling from intercepting explicit HFA commands (which was surfacing irrelevant `Exec:` warnings in Slack replies).
+## Update (2026-02-26, board-seat schema auto-migration fix)
+- Fixed DB schema evolution bug in `src/coatue_claw/board_seat_daily.py` that caused live runs to fail on legacy DBs (notably missing `board_seat_target_events.source_url`).
+- Added additive, idempotent migrations in `BoardSeatStore._migrate_legacy_schema(...)`:
+  - `board_seat_target_events`: adds missing `source_url` and other event fields.
+  - `board_seat_runs`: adds v1 run-audit columns (`generation_mode`, `sources_thread_ts`, `warning_message_ts`, etc.).
+  - `board_seat_funding_cache`: adds v1 funding-confidence columns where absent.
+- Added regression tests in `tests/test_board_seat_daily.py`:
+  - `test_schema_migration_adds_missing_source_url`
+  - `test_schema_migration_adds_missing_board_seat_runs_columns`
 - Validation:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_slack_routing.py` -> `12 passed`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `17 passed`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `10 passed`
 
 ## Update (2026-02-26, board-seat hard reset scaffold)
 - Board Seat was intentionally scrapped to start fresh after repeated output quality failures.

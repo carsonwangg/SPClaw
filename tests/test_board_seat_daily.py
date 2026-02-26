@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 
@@ -305,6 +306,101 @@ def test_status_reports_metrics(board_seat_env: Path) -> None:
     assert payload["ok"] is True
     assert "schedule_time" in payload
     assert "funding_confidence_distribution" in payload
+
+
+def test_schema_migration_adds_missing_source_url(board_seat_env: Path) -> None:
+    db_path = Path(os.environ["COATUE_CLAW_BOARD_SEAT_DB_PATH"])
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE board_seat_target_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company TEXT NOT NULL,
+            target TEXT NOT NULL,
+            target_key TEXT NOT NULL,
+            title TEXT,
+            snippet TEXT,
+            canonical_url TEXT,
+            publisher TEXT,
+            domain TEXT,
+            significance REAL,
+            occurred_at_utc TEXT,
+            created_at_utc TEXT NOT NULL
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    store = board_seat_daily.BoardSeatStore(path=db_path)
+    store.record_event(
+        company="OpenAI",
+        target="Databento",
+        row=_row(title="OpenAI acquires Databento", url="https://news.example.com/1", snippet="deal"),
+        significance=0.9,
+    )
+
+    conn = sqlite3.connect(db_path)
+    columns = [r[1] for r in conn.execute("PRAGMA table_info(board_seat_target_events)").fetchall()]
+    conn.close()
+    assert "source_url" in columns
+
+
+def test_schema_migration_adds_missing_board_seat_runs_columns(board_seat_env: Path) -> None:
+    db_path = Path(os.environ["COATUE_CLAW_BOARD_SEAT_DB_PATH"])
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE board_seat_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_date_local TEXT NOT NULL,
+            company TEXT NOT NULL,
+            channel_ref TEXT,
+            status TEXT NOT NULL,
+            reason TEXT,
+            target TEXT,
+            target_key TEXT,
+            message_ts TEXT,
+            posted_at_utc TEXT,
+            created_at_utc TEXT NOT NULL
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    store = board_seat_daily.BoardSeatStore(path=db_path)
+    store.record_run(
+        {
+            "run_date_local": board_seat_daily._today_key(),
+            "company": "OpenAI",
+            "channel_ref": "openai",
+            "channel_id": "C123",
+            "status": "sent",
+            "reason": "",
+            "gate_reason": "",
+            "target": "Databento",
+            "target_key": "databento",
+            "target_confidence": "high",
+            "funding_confidence": "partial",
+            "generation_mode": "web_synth",
+            "quality_fail_codes": [],
+            "memory_rewrite_used": False,
+            "message_ts": "100.1",
+            "sources_thread_ts": "100.2",
+            "warning_message_ts": "",
+            "posted_at_utc": board_seat_daily._utc_now_iso(),
+        }
+    )
+
+    conn = sqlite3.connect(db_path)
+    columns = [r[1] for r in conn.execute("PRAGMA table_info(board_seat_runs)").fetchall()]
+    conn.close()
+    assert "warning_message_ts" in columns
+    assert "sources_thread_ts" in columns
+    assert "generation_mode" in columns
 
 
 def test_cli_status_json(board_seat_env: Path) -> None:

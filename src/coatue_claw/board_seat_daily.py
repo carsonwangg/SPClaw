@@ -1580,6 +1580,73 @@ class BoardSeatStore:
                 )
                 """
             )
+            self._migrate_legacy_schema(conn)
+
+    def _table_columns(self, conn: sqlite3.Connection, table_name: str) -> set[str]:
+        rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        out: set[str] = set()
+        for row in rows:
+            try:
+                out.add(str(row["name"]))
+            except Exception:
+                if len(row) >= 2:
+                    out.add(str(row[1]))
+        return out
+
+    def _ensure_columns(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        table_name: str,
+        column_specs: list[tuple[str, str]],
+    ) -> None:
+        existing = self._table_columns(conn, table_name)
+        for column_name, spec in column_specs:
+            if column_name in existing:
+                continue
+            conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {spec}")
+            existing.add(column_name)
+
+    def _migrate_legacy_schema(self, conn: sqlite3.Connection) -> None:
+        # Idempotent, additive-only migrations for legacy DB files.
+        self._ensure_columns(
+            conn,
+            table_name="board_seat_runs",
+            column_specs=[
+                ("channel_id", "channel_id TEXT"),
+                ("gate_reason", "gate_reason TEXT"),
+                ("target_confidence", "target_confidence TEXT"),
+                ("funding_confidence", "funding_confidence TEXT"),
+                ("generation_mode", "generation_mode TEXT"),
+                ("quality_fail_codes", "quality_fail_codes TEXT"),
+                ("memory_rewrite_used", "memory_rewrite_used INTEGER NOT NULL DEFAULT 0"),
+                ("sources_thread_ts", "sources_thread_ts TEXT"),
+                ("warning_message_ts", "warning_message_ts TEXT"),
+            ],
+        )
+        self._ensure_columns(
+            conn,
+            table_name="board_seat_target_events",
+            column_specs=[
+                ("source_url", "source_url TEXT"),
+                ("canonical_url", "canonical_url TEXT"),
+                ("publisher", "publisher TEXT"),
+                ("domain", "domain TEXT"),
+                ("significance", "significance REAL"),
+                ("occurred_at_utc", "occurred_at_utc TEXT"),
+            ],
+        )
+        self._ensure_columns(
+            conn,
+            table_name="board_seat_funding_cache",
+            column_specs=[
+                ("source_rows_json", "source_rows_json TEXT NOT NULL DEFAULT '[]'"),
+                ("evidence_count", "evidence_count INTEGER NOT NULL DEFAULT 0"),
+                ("distinct_domains", "distinct_domains INTEGER NOT NULL DEFAULT 0"),
+                ("conflict_flags", "conflict_flags TEXT"),
+                ("verification_status", "verification_status TEXT"),
+            ],
+        )
 
     def record_run(self, payload: dict[str, Any]) -> None:
         with self._connect() as conn:
