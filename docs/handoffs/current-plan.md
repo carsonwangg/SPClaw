@@ -12,6 +12,21 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Current validation status:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` passes (`82 passed`).
 
+## Chart-of-Day Discovery Expansion (2026-02-26)
+- Shipped hybrid candidate discovery for chart-of-day:
+  - source-list pull is now only one input leg.
+  - open X search is executed each scheduled scout run (configurable, default enabled).
+  - merged pool is deduped and ranked with added “interesting takeaway” bias before final source-variety selection.
+- Source DB is no longer treated as static truth:
+  - unseen winning X accounts are auto-added to `sources` (bounded by daily cap).
+- Pull-log artifact contract now includes discovery and source-building telemetry:
+  - candidate counts by channel (`seed`, `open_search`, `merged`)
+  - scanned accounts list
+  - winner discovery origin
+  - auto-add action metadata
+- Validation status:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` passes (`85 passed`).
+
 ## V1 Scope
 - SEC + transcript + macro ingestion
 - Diligence packets (bull/bear + peer comp + charts)

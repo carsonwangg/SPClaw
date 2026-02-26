@@ -125,6 +125,216 @@ def test_run_chart_scout_dry_run(tmp_path: Path, monkeypatch) -> None:
     assert Path(result["pull_log_path"]).exists()
 
 
+def test_run_chart_scout_hybrid_can_pick_open_search_candidate(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DISCOVERY_MODE", "hybrid")
+
+    seed = Candidate(
+        candidate_key="x:seed-1",
+        source_type="x",
+        source_id="fiscal_AI",
+        author="@fiscal_AI",
+        title="US software growth is steady.",
+        text="US software growth is steady.",
+        url="https://x.com/fiscal_AI/status/seed-1",
+        image_url="https://example.com/seed.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=80,
+        source_priority=1.0,
+        score=70.0,
+        discovered_via="seed_list",
+    )
+    open_pick = Candidate(
+        candidate_key="x:open-1",
+        source_type="x",
+        source_id="newmacrodesk",
+        author="@newmacrodesk",
+        title="S&P 500 breadth just crossed 60% YTD.",
+        text="More than 60% of S&P 500 stocks are beating the index year to date.",
+        url="https://x.com/newmacrodesk/status/open-1",
+        image_url="https://example.com/open.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=300,
+        source_priority=0.7,
+        score=95.0,
+        discovered_via="open_search",
+    )
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [seed])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_open_search", lambda **kwargs: [open_pick])
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._select_style_draft",
+        lambda _candidate: StyleDraft(
+            headline="S&P 500 breadth is broadening.",
+            chart_label="S&P 500 outperformers (%)",
+            takeaway="More than 60% of S&P 500 stocks are outperforming year to date.",
+            why_now="Breadth has expanded materially this week.",
+            iteration=1,
+            checks={"us_relevant": True},
+            score=9.0,
+            copy_rewrite_applied=False,
+            copy_rewrite_reason=None,
+        ),
+    )
+
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = datetime(2026, 2, 19, 9, 0, 0, tzinfo=UTC)
+            if tz is None:
+                return base
+            return base.astimezone(tz)
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
+    result = run_chart_scout_once(manual=False, dry_run=True)
+    assert result["ok"] is True
+    assert result["reason"] == "dry_run"
+    assert result["winner"]["url"] == "https://x.com/newmacrodesk/status/open-1"
+    assert result["winner"]["discovered_via"] == "open_search"
+
+
+def test_run_chart_scout_auto_adds_new_winner_source(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DISCOVERY_MODE", "open_only")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_AUTO_ADD_SOURCES", "1")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_AUTO_ADD_DAILY_CAP", "10")
+
+    open_pick = Candidate(
+        candidate_key="x:open-fresh",
+        source_type="x",
+        source_id="freshcharts99",
+        author="@freshcharts99",
+        title="US data center power demand accelerates into 2030.",
+        text="US data center power demand accelerates into 2030 as AI share rises.",
+        url="https://x.com/freshcharts99/status/open-fresh",
+        image_url="https://example.com/fresh.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=250,
+        source_priority=0.7,
+        score=96.0,
+        discovered_via="open_search",
+    )
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_open_search", lambda **kwargs: [open_pick])
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._select_style_draft",
+        lambda _candidate: StyleDraft(
+            headline="US data center power demand is accelerating.",
+            chart_label="US data center power demand (TWh)",
+            takeaway="US data center power demand is accelerating into 2030.",
+            why_now="AI infrastructure forecasts are being revised higher.",
+            iteration=1,
+            checks={"us_relevant": True},
+            score=9.0,
+            copy_rewrite_applied=False,
+            copy_rewrite_reason=None,
+        ),
+    )
+
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = datetime(2026, 2, 19, 9, 0, 0, tzinfo=UTC)
+            if tz is None:
+                return base
+            return base.astimezone(tz)
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
+    result = run_chart_scout_once(manual=False, dry_run=True)
+    assert result["ok"] is True
+    assert result["new_source_auto_added"] is True
+    assert result["new_source_handle"] == "freshcharts99"
+    store = XChartStore()
+    assert store.has_source("freshcharts99") is True
+
+
+def test_run_chart_scout_pull_log_includes_discovery_metadata(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DISCOVERY_MODE", "hybrid")
+
+    seed = Candidate(
+        candidate_key="x:seed-meta",
+        source_type="x",
+        source_id="fiscal_AI",
+        author="@fiscal_AI",
+        title="US software momentum improves.",
+        text="US software momentum improves.",
+        url="https://x.com/fiscal_AI/status/seed-meta",
+        image_url="https://example.com/seed-meta.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=90,
+        source_priority=1.0,
+        score=72.0,
+        discovered_via="seed_list",
+    )
+    open_pick = Candidate(
+        candidate_key="x:open-meta",
+        source_type="x",
+        source_id="metaopen",
+        author="@metaopen",
+        title="S&P 500 breadth is widening.",
+        text="More than 60% of S&P 500 stocks are outperforming year to date.",
+        url="https://x.com/metaopen/status/open-meta",
+        image_url="https://example.com/open-meta.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=260,
+        source_priority=0.7,
+        score=97.0,
+        discovered_via="open_search",
+    )
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [seed])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_open_search", lambda **kwargs: [open_pick])
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._select_style_draft",
+        lambda _candidate: StyleDraft(
+            headline="S&P 500 breadth is widening.",
+            chart_label="S&P 500 outperformers (%)",
+            takeaway="More than 60% of S&P 500 stocks are outperforming year to date.",
+            why_now="Breadth changed quickly this week.",
+            iteration=1,
+            checks={"us_relevant": True},
+            score=9.0,
+        ),
+    )
+
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = datetime(2026, 2, 19, 9, 0, 0, tzinfo=UTC)
+            if tz is None:
+                return base
+            return base.astimezone(tz)
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
+    result = run_chart_scout_once(manual=False, dry_run=True)
+    payload = json.loads(Path(result["pull_log_path"]).read_text(encoding="utf-8"))
+    assert payload["seed_candidates_count"] == 1
+    assert payload["open_search_candidates_count"] == 1
+    assert payload["merged_candidates_count"] == 2
+    assert payload["winner_discovered_via"] == "open_search"
+    assert "metaopen" in payload["scanned_accounts"]
+
+
 def test_run_chart_scout_before_first_window_updates_pool(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
