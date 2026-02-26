@@ -143,9 +143,9 @@ QUALITY_GATE_ENABLED_DEFAULT = True
 REWRITE_MAX_RETRIES_DEFAULT = 4
 SOURCE_GATE_MODE_DEFAULT = "soft_block"
 QUALITY_FAIL_POLICY_DEFAULT = "skip"
-DELIVERY_MODE_DEFAULT = "diagnostic_fallback"
+DELIVERY_MODE_DEFAULT = "post"
 FACT_CARD_MODE_DEFAULT = "always"
-QUOTE_OVERLAP_MAX_DEFAULT = 0.22
+QUOTE_OVERLAP_MAX_DEFAULT = 0.55
 DIAGNOSTIC_MAX_REASONS_DEFAULT = 4
 DIAGNOSTIC_INCLUDE_URLS_DEFAULT = True
 WHY_NOW_MODE_DEFAULT = "thematic_non_blocking"
@@ -156,6 +156,11 @@ CRITIC_MIN_OVERALL_SCORE_DEFAULT = 0.78
 EVIDENCE_FETCH_ENABLED_DEFAULT = True
 EVIDENCE_FETCH_TIMEOUT_MS_DEFAULT = 2500
 EVIDENCE_MAX_URLS_DEFAULT = 12
+SELECTION_MODE_DEFAULT = "candidate_first"
+CANDIDATE_POOL_SIZE_DEFAULT = 8
+CANDIDATE_EVIDENCE_PER_TARGET_DEFAULT = 6
+QUALITY_MODE_DEFAULT = "light"
+CRITIC_ENABLED_DEFAULT = True
 CONFIDENCE_MODEL_DEFAULT = "broad_weighted_v1"
 CONFIDENCE_HIGH_MIN_DEFAULT = 2.40
 CONFIDENCE_MEDIUM_MIN_DEFAULT = 1.35
@@ -490,6 +495,17 @@ class FactCard:
 
 
 @dataclass(frozen=True)
+class CandidateSelectionCard:
+    target: str
+    score: float
+    evidence_count: int
+    distinct_domains: int
+    recency_hits: int
+    refs: list[SourceRef] = field(default_factory=list)
+    summary: str = ""
+
+
+@dataclass(frozen=True)
 class BoardSeatDraft:
     idea_line: str
     target_does: str
@@ -526,6 +542,13 @@ class BoardSeatDraft:
     why_now_recency_passed: bool = False
     why_now_generated_fallback: bool = False
     why_now_soft_notes: list[str] = field(default_factory=list)
+    candidate_pool_size: int = 0
+    candidate_shortlist: list[str] = field(default_factory=list)
+    candidate_selected: str = ""
+    candidate_selection_reason: str = ""
+    candidate_selection_urls: list[str] = field(default_factory=list)
+    quality_warnings: list[str] = field(default_factory=list)
+    hard_gate_applied: list[str] = field(default_factory=list)
 
 
 def _utc_now_iso() -> str:
@@ -679,6 +702,48 @@ def _delivery_mode() -> str:
         os.environ.get("COATUE_CLAW_BOARD_SEAT_DELIVERY_MODE", DELIVERY_MODE_DEFAULT)
         or DELIVERY_MODE_DEFAULT
     ).strip().lower()
+
+
+def _selection_mode() -> str:
+    mode = (
+        os.environ.get("COATUE_CLAW_BOARD_SEAT_SELECTION_MODE", SELECTION_MODE_DEFAULT)
+        or SELECTION_MODE_DEFAULT
+    ).strip().lower()
+    if mode not in {"candidate_first", "legacy_single_seed"}:
+        return SELECTION_MODE_DEFAULT
+    return mode
+
+
+def _candidate_pool_size() -> int:
+    return _env_int(
+        "COATUE_CLAW_BOARD_SEAT_CANDIDATE_POOL_SIZE",
+        CANDIDATE_POOL_SIZE_DEFAULT,
+        minimum=3,
+        maximum=20,
+    )
+
+
+def _candidate_evidence_per_target() -> int:
+    return _env_int(
+        "COATUE_CLAW_BOARD_SEAT_CANDIDATE_EVIDENCE_PER_TARGET",
+        CANDIDATE_EVIDENCE_PER_TARGET_DEFAULT,
+        minimum=2,
+        maximum=12,
+    )
+
+
+def _quality_mode() -> str:
+    mode = (
+        os.environ.get("COATUE_CLAW_BOARD_SEAT_QUALITY_MODE", QUALITY_MODE_DEFAULT)
+        or QUALITY_MODE_DEFAULT
+    ).strip().lower()
+    if mode not in {"light", "strict"}:
+        return QUALITY_MODE_DEFAULT
+    return mode
+
+
+def _critic_enabled() -> bool:
+    return _env_flag("COATUE_CLAW_BOARD_SEAT_CRITIC_ENABLED", CRITIC_ENABLED_DEFAULT)
 
 
 def _fact_card_mode() -> str:
@@ -930,7 +995,7 @@ def _funding_warning_mode() -> bool:
 
 
 def _require_high_conf_new_target() -> bool:
-    return _env_flag("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", True)
+    return _env_flag("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", False)
 
 
 def _crunchbase_enabled() -> bool:
@@ -1329,6 +1394,17 @@ def _quality_fields_payload(draft: BoardSeatDraft) -> dict[str, Any]:
         "why_now_theme_window_days": _why_now_theme_window_days(),
         "why_now_generated_fallback": bool(draft.why_now_generated_fallback),
         "why_now_soft_notes": [str(item) for item in list(draft.why_now_soft_notes or []) if str(item).strip()],
+        "candidate_pool_size": int(draft.candidate_pool_size or 0),
+        "candidate_shortlist": [str(item) for item in list(draft.candidate_shortlist or []) if str(item).strip()],
+        "candidate_selected": _normalize_source_text(str(draft.candidate_selected or ""), max_chars=100),
+        "candidate_selection_reason": _normalize_text(str(draft.candidate_selection_reason or ""), max_chars=280),
+        "candidate_selection_urls": [
+            _normalize_source_url(str(item or ""))
+            for item in list(draft.candidate_selection_urls or [])
+            if _normalize_source_url(str(item or ""))
+        ][:4],
+        "quality_warnings": [str(item) for item in list(draft.quality_warnings or []) if str(item).strip()],
+        "hard_gate_applied": [str(item) for item in list(draft.hard_gate_applied or []) if str(item).strip()],
     }
 
 
@@ -1353,6 +1429,13 @@ def _quality_fields_default(*, passed: bool = False, stage: str = "not_run") -> 
         "why_now_theme_window_days": _why_now_theme_window_days(),
         "why_now_generated_fallback": False,
         "why_now_soft_notes": [],
+        "candidate_pool_size": 0,
+        "candidate_shortlist": [],
+        "candidate_selected": "",
+        "candidate_selection_reason": "",
+        "candidate_selection_urls": [],
+        "quality_warnings": [],
+        "hard_gate_applied": [],
     }
 
 
@@ -2501,6 +2584,16 @@ def _high_conf_new_target_gate(
     why_now_theme_window_days = _why_now_theme_window_days()
     why_now_generated_fallback = bool(draft.why_now_generated_fallback)
     why_now_soft_notes = [str(item) for item in list(draft.why_now_soft_notes or []) if str(item).strip()]
+    quality_warnings = [str(item) for item in list(draft.quality_warnings or []) if str(item).strip()]
+    candidate_pool_size = int(draft.candidate_pool_size or 0)
+    candidate_shortlist = [str(item) for item in list(draft.candidate_shortlist or []) if str(item).strip()]
+    candidate_selected = _normalize_source_text(str(draft.candidate_selected or ""), max_chars=100)
+    candidate_selection_reason = _normalize_text(str(draft.candidate_selection_reason or ""), max_chars=280)
+    candidate_selection_urls = [
+        _normalize_source_url(str(item or ""))
+        for item in list(draft.candidate_selection_urls or [])
+        if _normalize_source_url(str(item or ""))
+    ][:4]
     confidence_payload = _target_confidence_from_draft_sources(company=company, draft=draft)
     confidence = str(confidence_payload.get("confidence") or "Low")
     confidence_score = round(float(confidence_payload.get("score") or 0.0), 4)
@@ -2508,86 +2601,17 @@ def _high_conf_new_target_gate(
     target_validation_reason = _target_validation_reason(company=company, target=target)
     latest = store.latest_target_pitch(company=company, target_key=target_key) if target_key else None
     is_new_target = bool(target_key) and latest is None
-    if not _require_high_conf_new_target():
-        return {
-            "allow": True,
-            "reason": "gate_disabled",
-            "target": target,
-            "target_original": target_original,
-            "target_resolution_reason": target_resolution_reason,
-            "writing_mode": writing_mode,
-            "writing_artifact_cleanups": writing_artifact_cleanups,
-            "writing_field_dedup_fixes": writing_field_dedup_fixes,
-            "quality_gate_passed": quality_gate_passed,
-            "quality_score": quality_score,
-            "quality_reasons": quality_reasons,
-            "rewrite_attempts": rewrite_attempts,
-            "quality_fail_stage": quality_fail_stage,
-            "quality_field_scores": quality_field_scores,
-            "quality_failed_fields": quality_failed_fields,
-            "quality_failure_codes": quality_failure_codes,
-            "quality_required_evidence": quality_required_evidence,
-            "evidence_tier_mix": evidence_tier_mix,
-            "fact_cards_count_by_field": fact_cards_count_by_field,
-            "quote_overlap_by_field": quote_overlap_by_field,
-            "why_now_recency_passed": why_now_recency_passed,
-            "why_now_mode": why_now_mode,
-            "why_now_theme_window_days": why_now_theme_window_days,
-            "why_now_generated_fallback": why_now_generated_fallback,
-            "why_now_soft_notes": why_now_soft_notes,
-            "target_key": target_key,
-            "target_confidence": confidence,
-            "target_confidence_score": confidence_score,
-            "target_confidence_reasons": confidence_reasons,
-            "target_validation_reason": target_validation_reason,
-            "is_new_target": is_new_target,
-            "matched_posted_at_utc": str((latest or {}).get("posted_at_utc") or ""),
-        }
-    if (not target_key) or (target_validation_reason != "ok"):
-        return {
-            "allow": False,
-            "reason": "invalid_target",
-            "target": target,
-            "target_original": target_original,
-            "target_resolution_reason": target_resolution_reason,
-            "writing_mode": writing_mode,
-            "writing_artifact_cleanups": writing_artifact_cleanups,
-            "writing_field_dedup_fixes": writing_field_dedup_fixes,
-            "quality_gate_passed": quality_gate_passed,
-            "quality_score": quality_score,
-            "quality_reasons": quality_reasons,
-            "rewrite_attempts": rewrite_attempts,
-            "quality_fail_stage": quality_fail_stage,
-            "quality_field_scores": quality_field_scores,
-            "quality_failed_fields": quality_failed_fields,
-            "quality_failure_codes": quality_failure_codes,
-            "quality_required_evidence": quality_required_evidence,
-            "evidence_tier_mix": evidence_tier_mix,
-            "fact_cards_count_by_field": fact_cards_count_by_field,
-            "quote_overlap_by_field": quote_overlap_by_field,
-            "why_now_recency_passed": why_now_recency_passed,
-            "why_now_mode": why_now_mode,
-            "why_now_theme_window_days": why_now_theme_window_days,
-            "why_now_generated_fallback": why_now_generated_fallback,
-            "why_now_soft_notes": why_now_soft_notes,
-            "target_key": target_key,
-            "target_confidence": confidence,
-            "target_confidence_score": confidence_score,
-            "target_confidence_reasons": confidence_reasons,
-            "target_validation_reason": target_validation_reason,
-            "is_new_target": is_new_target,
-            "matched_posted_at_utc": "",
-        }
-    allowed_confidence = _allowed_new_target_confidences()
-    allow = is_new_target and confidence in allowed_confidence
-    reason = ""
-    if not is_new_target:
-        reason = "target_not_new"
-    elif confidence not in allowed_confidence:
-        reason = "target_confidence_not_high"
-    return {
-        "allow": allow,
-        "reason": reason if not allow else "ok",
+    cooldown_hit = (
+        store.recent_target_hit(
+            company=company,
+            target_key=target_key,
+            lookback_days=_target_lock_days(),
+        )
+        if target_key
+        else None
+    )
+    hard_gate_applied = ["company_only", "cooldown_repeat_block"]
+    base_payload = {
         "target": target,
         "target_original": target_original,
         "target_resolution_reason": target_resolution_reason,
@@ -2611,6 +2635,13 @@ def _high_conf_new_target_gate(
         "why_now_theme_window_days": why_now_theme_window_days,
         "why_now_generated_fallback": why_now_generated_fallback,
         "why_now_soft_notes": why_now_soft_notes,
+        "quality_warnings": quality_warnings,
+        "candidate_pool_size": candidate_pool_size,
+        "candidate_shortlist": candidate_shortlist,
+        "candidate_selected": candidate_selected,
+        "candidate_selection_reason": candidate_selection_reason,
+        "candidate_selection_urls": candidate_selection_urls,
+        "hard_gate_applied": hard_gate_applied,
         "target_key": target_key,
         "target_confidence": confidence,
         "target_confidence_score": confidence_score,
@@ -2618,6 +2649,37 @@ def _high_conf_new_target_gate(
         "target_validation_reason": target_validation_reason,
         "is_new_target": is_new_target,
         "matched_posted_at_utc": str((latest or {}).get("posted_at_utc") or ""),
+        "cooldown_matched_posted_at_utc": str((cooldown_hit or {}).get("posted_at_utc") or ""),
+    }
+    if (not target_key) or (target_validation_reason != "ok"):
+        return {
+            "allow": False,
+            "reason": "invalid_target",
+            **base_payload,
+        }
+    if cooldown_hit is not None:
+        return {
+            "allow": False,
+            "reason": "cooldown_repeat_blocked",
+            **base_payload,
+        }
+    if not _require_high_conf_new_target():
+        return {
+            "allow": True,
+            "reason": "ok",
+            **base_payload,
+        }
+    allowed_confidence = _allowed_new_target_confidences()
+    allow = is_new_target and confidence in allowed_confidence
+    reason = ""
+    if not is_new_target:
+        reason = "target_not_new"
+    elif confidence not in allowed_confidence:
+        reason = "target_confidence_not_high"
+    return {
+        "allow": allow,
+        "reason": reason if not allow else "ok",
+        **base_payload,
     }
 
 
@@ -4284,6 +4346,253 @@ def _best_effort_target(*, company: str, seed_text: str, blocked_keys: set[str] 
     return _default_target_for_company(company, blocked_keys=blocked)
 
 
+def _target_in_cooldown(*, store: BoardSeatStore, company: str, target: str) -> bool:
+    target_key = _target_key(target)
+    if not target_key:
+        return False
+    hit = store.recent_target_hit(
+        company=company,
+        target_key=target_key,
+        lookback_days=_target_lock_days(),
+    )
+    return hit is not None
+
+
+def _candidate_company_pool(
+    *,
+    store: BoardSeatStore,
+    company: str,
+    snippets: list[str],
+    acquisition_rows: list[dict[str, str]],
+    target_rows: list[dict[str, str]],
+) -> list[str]:
+    seed_text = " ".join(snippets[:10])
+    raw_candidates: list[str] = []
+    raw_candidates.extend(_target_candidates_from_seed(company=company, seed_text=seed_text))
+    for row in [*list(acquisition_rows or []), *list(target_rows or [])]:
+        row_text = " ".join(
+            [
+                str(row.get("title") or ""),
+                str(row.get("snippet") or ""),
+            ]
+        ).strip()
+        if not row_text:
+            continue
+        raw_candidates.extend(_target_candidates_from_seed(company=company, seed_text=row_text))
+    company_key = _slug_company(company)
+    raw_candidates.extend(list(TARGET_ROTATION_BY_COMPANY.get(company_key, ())))
+    raw_candidates.append(_default_target_for_company(company))
+
+    out: list[str] = []
+    seen: set[str] = set()
+    cap = _candidate_pool_size()
+    for raw in raw_candidates:
+        candidate = _normalize_source_text(str(raw or ""), max_chars=100)
+        key = _target_key(candidate)
+        if (not key) or (key in seen):
+            continue
+        seen.add(key)
+        resolved, _reason = _resolve_target_to_company(
+            company=company,
+            extracted_target=candidate,
+            blocked_keys=set(),
+        )
+        resolved_key = _target_key(resolved)
+        if (not resolved) or (not resolved_key):
+            continue
+        if _target_validation_reason(company=company, target=resolved) != "ok":
+            continue
+        if _target_in_cooldown(store=store, company=company, target=resolved):
+            continue
+        if resolved_key in {_target_key(item) for item in out}:
+            continue
+        out.append(resolved)
+        if len(out) >= cap:
+            break
+    return out
+
+
+def _candidate_evidence_rows(*, company: str, candidate: str, snippets: list[str]) -> list[dict[str, str]]:
+    rows = _target_search_rows(
+        target=candidate,
+        company=company,
+        snippets=list(snippets or [])[:4],
+    )
+    return list(rows or [])[: _candidate_evidence_per_target()]
+
+
+def _candidate_selection_card(
+    *,
+    company: str,
+    target: str,
+    rows: list[dict[str, str]],
+) -> CandidateSelectionCard:
+    refs: list[SourceRef] = []
+    seen_urls: set[str] = set()
+    quality_hits = 0.0
+    recency_hits = 0
+    domains: set[str] = set()
+    for row in list(rows or []):
+        url = _normalize_source_url(str(row.get("url") or ""))
+        if not url:
+            continue
+        key = url.lower()
+        if key in seen_urls:
+            continue
+        seen_urls.add(key)
+        domain = _source_domain(url)
+        if domain:
+            domains.add(domain)
+        if _is_quality_source(url):
+            quality_hits += 1.0
+        elif _is_low_quality_source(url):
+            quality_hits -= 0.5
+        published_hint = _extract_published_hint(
+            " ".join(
+                [
+                    str(row.get("published_hint") or ""),
+                    str(row.get("published") or ""),
+                    str(row.get("date") or ""),
+                    str(row.get("title") or ""),
+                    str(row.get("snippet") or ""),
+                ]
+            )
+        )
+        if _is_recent_published_hint(published_hint, days=_why_now_theme_window_days()):
+            recency_hits += 1
+        if len(refs) < 4:
+            ref = _source_ref_from_row(row)
+            if ref is not None:
+                refs.append(ref)
+    evidence_count = len(seen_urls)
+    score = (
+        float(min(6, evidence_count)) * 0.35
+        + float(min(4, len(domains))) * 0.3
+        + float(min(3, recency_hits)) * 0.35
+        + quality_hits * 0.2
+    )
+    summary = _target_description_from_rows(target=target, rows=list(rows or []))
+    if not summary:
+        summary = f"{target} appears repeatedly in current web evidence tied to {company}'s strategy."
+    return CandidateSelectionCard(
+        target=target,
+        score=round(score, 4),
+        evidence_count=evidence_count,
+        distinct_domains=len(domains),
+        recency_hits=recency_hits,
+        refs=refs,
+        summary=summary,
+    )
+
+
+def _deterministic_candidate_selection(cards: list[CandidateSelectionCard]) -> dict[str, Any]:
+    ranked = sorted(
+        list(cards or []),
+        key=lambda item: (float(item.score), int(item.evidence_count), int(item.distinct_domains), int(item.recency_hits)),
+        reverse=True,
+    )
+    if not ranked:
+        return {"winner": "", "runners_up": [], "reasoning": "no_candidates", "confidence": "low", "used_urls": []}
+    winner = ranked[0]
+    return {
+        "winner": winner.target,
+        "runners_up": [item.target for item in ranked[1:3]],
+        "reasoning": "deterministic: highest evidence score (coverage + diversity + recency)",
+        "confidence": "medium",
+        "used_urls": [ref.url for ref in list(winner.refs or [])[:3]],
+    }
+
+
+def _llm_select_best_candidate(
+    *,
+    company: str,
+    cards: list[CandidateSelectionCard],
+    recent_pitches: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    baseline = _deterministic_candidate_selection(cards)
+    if not cards:
+        return baseline
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if OpenAI is None or (not api_key):
+        return baseline
+    client = OpenAI(api_key=api_key)
+    model = (os.environ.get("COATUE_CLAW_BOARD_SEAT_MODEL", "gpt-5.2-chat-latest") or "gpt-5.2-chat-latest").strip()
+    cards_payload: list[dict[str, Any]] = []
+    for card in list(cards or [])[: _candidate_pool_size()]:
+        cards_payload.append(
+            {
+                "target": card.target,
+                "summary": card.summary,
+                "score": card.score,
+                "evidence_count": card.evidence_count,
+                "distinct_domains": card.distinct_domains,
+                "recency_hits": card.recency_hits,
+                "urls": [ref.url for ref in list(card.refs or [])[:3]],
+            }
+        )
+    prior_text = [
+        str(item.get("investment_text") or "").strip()
+        for item in list(recent_pitches or [])[:6]
+        if str(item.get("investment_text") or "").strip()
+    ]
+    prompt = (
+        f"Select the best acquisition target for {company} from the candidate cards.\n"
+        "Return strict JSON only with keys: winner, runners_up, reasoning, confidence, used_urls.\n"
+        "Rules:\n"
+        "- winner must be one of candidate targets.\n"
+        "- avoid targets that look too similar to recent pitches when alternatives are strong.\n"
+        "- prefer practical strategic fit, evidence quality/diversity, and recent momentum.\n"
+        "- concise reasoning (one sentence).\n"
+        f"Candidates:\n{json.dumps(cards_payload, ensure_ascii=False)}\n"
+        f"Recent pitches:\n{json.dumps(prior_text, ensure_ascii=False)}\n"
+    )
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            temperature=0.1,
+            messages=[
+                {"role": "system", "content": "You are selecting one high-fit acquisition target. Return JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+        )
+    except Exception:
+        return baseline
+    text = ""
+    if response and response.choices:
+        text = str(response.choices[0].message.content or "").strip()
+    if not text:
+        return baseline
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return baseline
+    try:
+        payload = json.loads(text[start : end + 1])
+    except Exception:
+        return baseline
+    winner = _normalize_source_text(str(payload.get("winner") or ""), max_chars=100)
+    valid_targets = {card.target for card in cards}
+    if winner not in valid_targets:
+        return baseline
+    runners_up = [
+        _normalize_source_text(str(item or ""), max_chars=100)
+        for item in list(payload.get("runners_up") or [])
+        if _normalize_source_text(str(item or ""), max_chars=100) in valid_targets and str(item or "").strip()
+    ][:2]
+    used_urls = [
+        _normalize_source_url(str(item or ""))
+        for item in list(payload.get("used_urls") or [])
+        if _normalize_source_url(str(item or ""))
+    ][:4]
+    return {
+        "winner": winner,
+        "runners_up": runners_up,
+        "reasoning": _normalize_text(str(payload.get("reasoning") or ""), max_chars=280) or str(baseline.get("reasoning") or ""),
+        "confidence": _normalize_source_text(str(payload.get("confidence") or ""), max_chars=24).lower() or str(baseline.get("confidence") or "medium"),
+        "used_urls": used_urls,
+    }
+
+
 def _resolve_target_to_company(
     *,
     company: str,
@@ -4642,12 +4951,22 @@ def _sanitize_draft(
             target_resolution_reason = _target_fallback_reason(company=company, target=fallback_target)
         else:
             target_resolution_reason = "invalid_after_resolution"
+    rewritten_target_does = str(draft.target_does or "")
+    rewritten_why_now = str(draft.why_now or "")
+    rewritten_whats_different = str(draft.whats_different or "")
+    rewritten_mos_risks = str(draft.mos_risks or "")
+    if resolved_target and target_original and (_target_key(target_original) != _target_key(resolved_target)):
+        target_pattern = re.compile(rf"\b{re.escape(target_original)}\b", flags=re.IGNORECASE)
+        rewritten_target_does = target_pattern.sub(resolved_target, rewritten_target_does)
+        rewritten_why_now = target_pattern.sub(resolved_target, rewritten_why_now)
+        rewritten_whats_different = target_pattern.sub(resolved_target, rewritten_whats_different)
+        rewritten_mos_risks = target_pattern.sub(resolved_target, rewritten_mos_risks)
     source_draft = BoardSeatDraft(
         idea_line=idea_line,
-        target_does=draft.target_does,
-        why_now=draft.why_now,
-        whats_different=draft.whats_different,
-        mos_risks=draft.mos_risks,
+        target_does=rewritten_target_does,
+        why_now=rewritten_why_now,
+        whats_different=rewritten_whats_different,
+        mos_risks=rewritten_mos_risks,
         bottom_line=draft.bottom_line,
         context_current_efforts=draft.context_current_efforts,
         context_domain_fit_gaps=draft.context_domain_fit_gaps,
@@ -4661,6 +4980,13 @@ def _sanitize_draft(
         rewrite_reasons=draft.rewrite_reasons,
         target_original=target_original,
         target_resolution_reason=target_resolution_reason,
+        candidate_pool_size=draft.candidate_pool_size,
+        candidate_shortlist=list(draft.candidate_shortlist or []),
+        candidate_selected=draft.candidate_selected,
+        candidate_selection_reason=draft.candidate_selection_reason,
+        candidate_selection_urls=list(draft.candidate_selection_urls or []),
+        quality_warnings=list(draft.quality_warnings or []),
+        hard_gate_applied=list(draft.hard_gate_applied or []),
     )
     source_selection = _build_source_refs(company=company, draft=source_draft, funding=funding, acquisition_rows=acq_rows)
     target = _extract_acquisition_target(idea_line) or _default_target_for_company(company, blocked_keys=set())
@@ -4680,12 +5006,12 @@ def _sanitize_draft(
         writing_artifact_cleanups.extend(f"{label}:{item}" for item in cleanups)
         return _normalize_line(stripped)
 
-    target_does = _clean("target_does", draft.target_does) or _clean("target_description", source_selection.target_description) or _normalize_line(
+    target_does = _clean("target_does", rewritten_target_does) or _clean("target_description", source_selection.target_description) or _normalize_line(
         f"{target} builds enterprise software and automation infrastructure for production workflows."
     )
-    why_now = _clean("why_now", draft.why_now) or _normalize_line(default_why_now)
-    whats_different = _clean("whats_different", draft.whats_different) or _normalize_line(default_whats_different)
-    mos_risks = _clean("mos_risks", draft.mos_risks) or _normalize_line(default_mos)
+    why_now = _clean("why_now", rewritten_why_now) or _normalize_line(default_why_now)
+    whats_different = _clean("whats_different", rewritten_whats_different) or _normalize_line(default_whats_different)
+    mos_risks = _clean("mos_risks", rewritten_mos_risks) or _normalize_line(default_mos)
     bottom_line = _clean("bottom_line", draft.bottom_line) or _normalize_line(default_bottom)
     context_current_efforts = _clean("context_current_efforts", draft.context_current_efforts) or _normalize_line(default_context_efforts)
     context_domain_fit_gaps = _clean("context_domain_fit_gaps", draft.context_domain_fit_gaps) or _normalize_line(default_context_fit)
@@ -4755,6 +5081,19 @@ def _sanitize_draft(
         fact_cards_count_by_field=dict(draft.fact_cards_count_by_field or {}),
         quote_overlap_by_field=dict(draft.quote_overlap_by_field or {}),
         why_now_recency_passed=bool(draft.why_now_recency_passed),
+        why_now_generated_fallback=bool(draft.why_now_generated_fallback),
+        why_now_soft_notes=[str(item) for item in list(draft.why_now_soft_notes or []) if str(item).strip()],
+        candidate_pool_size=int(draft.candidate_pool_size or 0),
+        candidate_shortlist=[str(item) for item in list(draft.candidate_shortlist or []) if str(item).strip()],
+        candidate_selected=_normalize_source_text(str(draft.candidate_selected or ""), max_chars=100),
+        candidate_selection_reason=_normalize_text(str(draft.candidate_selection_reason or ""), max_chars=280),
+        candidate_selection_urls=[
+            _normalize_source_url(str(item or ""))
+            for item in list(draft.candidate_selection_urls or [])
+            if _normalize_source_url(str(item or ""))
+        ][:4],
+        quality_warnings=[str(item) for item in list(draft.quality_warnings or []) if str(item).strip()],
+        hard_gate_applied=[str(item) for item in list(draft.hard_gate_applied or []) if str(item).strip()],
     )
 
 
@@ -5705,6 +6044,9 @@ def _llm_evidence_pack(
     target_rows: list[dict[str, str]],
     acquisition_rows: list[dict[str, str]],
     funding: FundingSnapshot,
+    candidate_shortlist: list[str] | None = None,
+    candidate_selection_reason: str = "",
+    candidate_selection_urls: list[str] | None = None,
 ) -> dict[str, Any]:
     merged_rows: list[dict[str, str]] = []
     seen_urls: set[str] = set()
@@ -5764,6 +6106,13 @@ def _llm_evidence_pack(
     return {
         "company": company,
         "target": target,
+        "candidate_shortlist": [str(item).strip() for item in list(candidate_shortlist or []) if str(item).strip()],
+        "candidate_selection_reason": _normalize_text(candidate_selection_reason, max_chars=280),
+        "candidate_selection_urls": [
+            _normalize_source_url(str(item or ""))
+            for item in list(candidate_selection_urls or [])
+            if _normalize_source_url(str(item or ""))
+        ][:4],
         "source_policy": _source_policy(),
         "fact_card_mode": _fact_card_mode(),
         "fact_cards": fact_cards,
@@ -6748,22 +7097,61 @@ def _quality_gate_draft(
             why_now_recency_passed=False,
             why_now_generated_fallback=False,
             why_now_soft_notes=[],
+            quality_warnings=[],
         )
 
     current = draft
     attempts = 0
-    max_retries = _rewrite_max_retries()
+    light_mode = _quality_mode() == "light"
+    max_retries = 1 if light_mode else _rewrite_max_retries()
     while True:
         current = _sanitize_draft(company=company, draft=current, funding=funding, acquisition_rows=acquisition_rows)
         current = _apply_why_now_mode(company=company, draft=current, evidence_pack=evidence_pack)
         validation_errors = _validate_draft(current, company=company, evidence_pack=evidence_pack)
         deterministic = _assess_draft_quality(company=company, draft=current, evidence_pack=evidence_pack)
-        critic = _llm_critic_assess(company=company, draft=current, evidence_pack=evidence_pack)
+        critic = _llm_critic_assess(company=company, draft=current, evidence_pack=evidence_pack) if _critic_enabled() else None
         quality = _merge_quality_assessments(deterministic=deterministic, critic=critic)
         reasons = [*[f"draft_validator:{item}" for item in validation_errors], *list(quality.get("reasons") or [])]
         stage = "draft_validator" if validation_errors else "reviewer"
         if any(str(item).startswith("artifact_contamination") for item in list(quality.get("reasons") or [])):
             stage = "source_filter"
+        quality_warnings = _dedupe_preserve_order([str(item) for item in reasons if str(item).strip()])
+        if light_mode:
+            if (not validation_errors) or (attempts >= max_retries):
+                return replace(
+                    current,
+                    quality_gate_passed=True,
+                    quality_score=float(quality.get("score") or 0.0),
+                    quality_reasons=list(quality.get("reasons") or []),
+                    rewrite_attempts=attempts,
+                    quality_fail_stage="",
+                    quality_field_scores=dict(quality.get("field_scores") or {}),
+                    quality_failed_fields=[],
+                    quality_failure_codes=list(quality.get("reason_codes") or []),
+                    quality_required_evidence=dict(quality.get("quality_required_evidence") or {}),
+                    evidence_tier_mix=dict(quality.get("evidence_tier_mix") or {}),
+                    fact_cards_count_by_field=dict(quality.get("fact_cards_count_by_field") or {}),
+                    quote_overlap_by_field=dict(quality.get("quote_overlap_by_field") or {}),
+                    why_now_recency_passed=bool(quality.get("why_now_recency_passed")),
+                    why_now_generated_fallback=bool(quality.get("why_now_generated_fallback")),
+                    why_now_soft_notes=[str(item) for item in list(quality.get("why_now_soft_notes") or []) if str(item).strip()],
+                    quality_warnings=quality_warnings,
+                )
+            revised = _llm_revise_draft(
+                company=company,
+                draft=current,
+                evidence_pack=evidence_pack,
+                quality_reasons=reasons,
+                failed_fields=list(quality.get("failed_fields") or []),
+            )
+            attempts += 1
+            if revised is None:
+                revised = replace(
+                    current,
+                    rewrite_reasons=[*list(current.rewrite_reasons or []), "quality_rewrite_missing"],
+                )
+            current = revised
+            continue
         if (not validation_errors) and bool(quality.get("passed")):
             return replace(
                 current,
@@ -6782,6 +7170,7 @@ def _quality_gate_draft(
                 why_now_recency_passed=bool(quality.get("why_now_recency_passed")),
                 why_now_generated_fallback=bool(quality.get("why_now_generated_fallback")),
                 why_now_soft_notes=[str(item) for item in list(quality.get("why_now_soft_notes") or []) if str(item).strip()],
+                quality_warnings=[],
             )
         if attempts >= max_retries:
             return replace(
@@ -6801,6 +7190,7 @@ def _quality_gate_draft(
                 why_now_recency_passed=bool(quality.get("why_now_recency_passed")),
                 why_now_generated_fallback=bool(quality.get("why_now_generated_fallback")),
                 why_now_soft_notes=[str(item) for item in list(quality.get("why_now_soft_notes") or []) if str(item).strip()],
+                quality_warnings=[],
             )
         revised = _llm_revise_draft(
             company=company,
@@ -6823,6 +7213,9 @@ def _writer_evidence_payload(evidence_pack: dict[str, Any] | None) -> dict[str, 
         return {
             "fact_cards": fact_cards,
             "fact_cards_count_by_field": dict(evidence_pack.get("fact_cards_count_by_field") or {}),
+            "candidate_shortlist": list(evidence_pack.get("candidate_shortlist") or []),
+            "candidate_selection_reason": str(evidence_pack.get("candidate_selection_reason") or ""),
+            "candidate_selection_urls": list(evidence_pack.get("candidate_selection_urls") or []),
             "quality_required_evidence": dict(evidence_pack.get("quality_required_evidence") or {}),
             "why_now_recency_passed": bool(evidence_pack.get("why_now_recency_passed")),
             "why_now_mode": _why_now_mode(),
@@ -6834,6 +7227,9 @@ def _writer_evidence_payload(evidence_pack: dict[str, Any] | None) -> dict[str, 
         "why_now_evidence": list(evidence_pack.get("why_now_evidence") or []),
         "whats_different_evidence": list(evidence_pack.get("whats_different_evidence") or []),
         "mos_risks_evidence": list(evidence_pack.get("mos_risks_evidence") or []),
+        "candidate_shortlist": list(evidence_pack.get("candidate_shortlist") or []),
+        "candidate_selection_reason": str(evidence_pack.get("candidate_selection_reason") or ""),
+        "candidate_selection_urls": list(evidence_pack.get("candidate_selection_urls") or []),
         "quality_required_evidence": dict(evidence_pack.get("quality_required_evidence") or {}),
         "why_now_mode": _why_now_mode(),
         "why_now_theme_window_days": _why_now_theme_window_days(),
@@ -6873,6 +7269,7 @@ def _llm_draft(
         "Constraints:\n"
         "- each value should be one to two concise sentences.\n"
         "- idea_line must start with Acquire or Acquihire and name a concrete target.\n"
+        "- use the selected candidate context from candidate_shortlist/candidate_selection_reason; do not invent a disconnected target.\n"
         "- target_does must explain exactly what the target sells and who buys it, using target_does_evidence.\n"
         f"- why_now should describe a thematic trend from roughly the past {theme_window_days} days.\n"
         "- why_now can be inferred from broader evidence when dated proofs are sparse, but must remain plausible and strategic.\n"
@@ -6962,16 +7359,70 @@ def _build_draft(
         merged_snippets.append(item)
         if len(merged_snippets) >= 12:
             break
-    funding_entity = seed_target if scope == "target" else company
-    funding = _resolve_funding_snapshot(store=store, company=funding_entity)
-    target_rows = _target_search_rows(target=seed_target or company, company=company, snippets=merged_snippets[:4])
     acquisition_rows = _acquisition_search_rows(company=company, snippets=merged_snippets)
+    seed_target_rows = _target_search_rows(target=seed_target or company, company=company, snippets=merged_snippets[:4])
+    selected_target = seed_target
+    selected_target_rows = list(seed_target_rows or [])
+    candidate_shortlist: list[str] = [selected_target] if selected_target else []
+    candidate_selection_reason = "legacy_single_seed"
+    candidate_selection_urls: list[str] = []
+
+    if _selection_mode() == "candidate_first":
+        pool = _candidate_company_pool(
+            store=store,
+            company=company,
+            snippets=merged_snippets,
+            acquisition_rows=acquisition_rows,
+            target_rows=seed_target_rows,
+        )
+        if not pool:
+            pool = [seed_target]
+        cards: list[CandidateSelectionCard] = []
+        rows_by_target: dict[str, list[dict[str, str]]] = {}
+        for candidate in list(pool or [])[: _candidate_pool_size()]:
+            rows = _candidate_evidence_rows(company=company, candidate=candidate, snippets=merged_snippets)
+            rows_by_target[candidate] = rows
+            cards.append(_candidate_selection_card(company=company, target=candidate, rows=rows))
+        candidate_shortlist = [card.target for card in cards] or list(pool or [])
+        selection = _llm_select_best_candidate(
+            company=company,
+            cards=cards,
+            recent_pitches=recent_pitches,
+        )
+        selected_target = _normalize_source_text(str(selection.get("winner") or ""), max_chars=100) or seed_target
+        if selected_target not in rows_by_target:
+            rows_by_target[selected_target] = _candidate_evidence_rows(
+                company=company,
+                candidate=selected_target,
+                snippets=merged_snippets,
+            )
+        selected_target_rows = list(rows_by_target.get(selected_target) or [])
+        candidate_selection_reason = _normalize_text(
+            str(selection.get("reasoning") or "selected from candidate-first ranking"),
+            max_chars=280,
+        )
+        candidate_selection_urls = [
+            _normalize_source_url(str(item or ""))
+            for item in list(selection.get("used_urls") or [])
+            if _normalize_source_url(str(item or ""))
+        ][:4]
+        if (not candidate_selection_urls) and selected_target_rows:
+            candidate_selection_urls = [
+                _normalize_source_url(str(item.get("url") or ""))
+                for item in selected_target_rows
+                if _normalize_source_url(str(item.get("url") or ""))
+            ][:4]
+    funding_entity = selected_target if scope == "target" else company
+    funding = _resolve_funding_snapshot(store=store, company=funding_entity)
     evidence_pack = _llm_evidence_pack(
         company=company,
-        target=seed_target or company,
-        target_rows=target_rows,
+        target=selected_target or company,
+        target_rows=selected_target_rows,
         acquisition_rows=acquisition_rows,
         funding=funding,
+        candidate_shortlist=candidate_shortlist,
+        candidate_selection_reason=candidate_selection_reason,
+        candidate_selection_urls=candidate_selection_urls,
     )
     prior_investments = [str(item.get("investment_text") or "").strip() for item in (recent_pitches or [])]
     llm = _llm_draft(
@@ -6982,10 +7433,18 @@ def _build_draft(
         prior_investments=prior_investments,
     )
     draft = llm if llm is not None else _fallback_draft(company=company, snippets=merged_snippets, funding=funding, acquisition_rows=acquisition_rows)
+    draft = replace(
+        draft,
+        candidate_pool_size=len(candidate_shortlist),
+        candidate_shortlist=[str(item).strip() for item in candidate_shortlist if str(item).strip()][: _candidate_pool_size()],
+        candidate_selected=selected_target,
+        candidate_selection_reason=candidate_selection_reason,
+        candidate_selection_urls=candidate_selection_urls,
+    )
     draft = _sanitize_draft(company=company, draft=draft, funding=funding, acquisition_rows=acquisition_rows)
     if scope == "target":
         final_target = _extract_acquisition_target(draft.idea_line)
-        if _target_key(final_target) and _target_key(final_target) != _target_key(seed_target):
+        if _target_key(final_target) and _target_key(final_target) != _target_key(selected_target):
             target_funding = _resolve_funding_snapshot(store=store, company=final_target)
             draft = _sanitize_draft(company=company, draft=draft, funding=target_funding, acquisition_rows=acquisition_rows)
     gated = _quality_gate_draft(
@@ -7342,7 +7801,7 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                     {
                         "company": company,
                         "channel_ref": channel_ref,
-                        "reason": "no_high_confidence_new_target",
+                        "reason": "hard_gate_blocked",
                         "target": target_gate.get("target"),
                         "target_key": target_gate.get("target_key"),
                         "target_confidence": target_gate.get("target_confidence"),
@@ -7366,6 +7825,13 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                         "evidence_tier_mix": target_gate.get("evidence_tier_mix"),
                         "fact_cards_count_by_field": target_gate.get("fact_cards_count_by_field"),
                         "quote_overlap_by_field": target_gate.get("quote_overlap_by_field"),
+                        "quality_warnings": target_gate.get("quality_warnings"),
+                        "candidate_pool_size": target_gate.get("candidate_pool_size"),
+                        "candidate_shortlist": target_gate.get("candidate_shortlist"),
+                        "candidate_selected": target_gate.get("candidate_selected"),
+                        "candidate_selection_reason": target_gate.get("candidate_selection_reason"),
+                        "candidate_selection_urls": target_gate.get("candidate_selection_urls"),
+                        "hard_gate_applied": target_gate.get("hard_gate_applied"),
                         "delivery_mode_applied": "skip",
                         "quality_blocked": bool(not target_gate.get("quality_gate_passed", True)),
                         "why_now_recency_passed": target_gate.get("why_now_recency_passed"),
@@ -7376,6 +7842,7 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                         "is_new_target": bool(target_gate.get("is_new_target")),
                         "gate_reason": target_gate.get("reason"),
                         "matched_posted_at_utc": target_gate.get("matched_posted_at_utc"),
+                        "cooldown_matched_posted_at_utc": target_gate.get("cooldown_matched_posted_at_utc"),
                     }
                 )
                 continue
@@ -7431,6 +7898,13 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                     "evidence_tier_mix": target_gate.get("evidence_tier_mix"),
                     "fact_cards_count_by_field": target_gate.get("fact_cards_count_by_field"),
                     "quote_overlap_by_field": target_gate.get("quote_overlap_by_field"),
+                    "quality_warnings": target_gate.get("quality_warnings"),
+                    "candidate_pool_size": target_gate.get("candidate_pool_size"),
+                    "candidate_shortlist": target_gate.get("candidate_shortlist"),
+                    "candidate_selected": target_gate.get("candidate_selected"),
+                    "candidate_selection_reason": target_gate.get("candidate_selection_reason"),
+                    "candidate_selection_urls": target_gate.get("candidate_selection_urls"),
+                    "hard_gate_applied": target_gate.get("hard_gate_applied"),
                     "why_now_recency_passed": target_gate.get("why_now_recency_passed"),
                     "why_now_mode": target_gate.get("why_now_mode"),
                     "why_now_theme_window_days": target_gate.get("why_now_theme_window_days"),
@@ -7691,7 +8165,7 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                             "company": company,
                             "channel_ref": channel_ref,
                             "channel_id": channel_id,
-                            "reason": "no_high_confidence_new_target",
+                            "reason": "hard_gate_blocked",
                             "target": target_gate.get("target"),
                             "target_key": target_gate.get("target_key"),
                             "target_confidence": target_gate.get("target_confidence"),
@@ -7715,6 +8189,13 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                             "evidence_tier_mix": target_gate.get("evidence_tier_mix"),
                             "fact_cards_count_by_field": target_gate.get("fact_cards_count_by_field"),
                             "quote_overlap_by_field": target_gate.get("quote_overlap_by_field"),
+                            "quality_warnings": target_gate.get("quality_warnings"),
+                            "candidate_pool_size": target_gate.get("candidate_pool_size"),
+                            "candidate_shortlist": target_gate.get("candidate_shortlist"),
+                            "candidate_selected": target_gate.get("candidate_selected"),
+                            "candidate_selection_reason": target_gate.get("candidate_selection_reason"),
+                            "candidate_selection_urls": target_gate.get("candidate_selection_urls"),
+                            "hard_gate_applied": target_gate.get("hard_gate_applied"),
                             "delivery_mode_applied": "skip",
                             "quality_blocked": bool(not target_gate.get("quality_gate_passed", True)),
                             "why_now_recency_passed": target_gate.get("why_now_recency_passed"),
@@ -7725,6 +8206,7 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                             "is_new_target": bool(target_gate.get("is_new_target")),
                             "gate_reason": target_gate.get("reason"),
                             "matched_posted_at_utc": target_gate.get("matched_posted_at_utc"),
+                            "cooldown_matched_posted_at_utc": target_gate.get("cooldown_matched_posted_at_utc"),
                         }
                     )
                     posted = True
@@ -7959,6 +8441,13 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                             "evidence_tier_mix": target_gate.get("evidence_tier_mix"),
                             "fact_cards_count_by_field": target_gate.get("fact_cards_count_by_field"),
                             "quote_overlap_by_field": target_gate.get("quote_overlap_by_field"),
+                            "quality_warnings": target_gate.get("quality_warnings"),
+                            "candidate_pool_size": target_gate.get("candidate_pool_size"),
+                            "candidate_shortlist": target_gate.get("candidate_shortlist"),
+                            "candidate_selected": target_gate.get("candidate_selected"),
+                            "candidate_selection_reason": target_gate.get("candidate_selection_reason"),
+                            "candidate_selection_urls": target_gate.get("candidate_selection_urls"),
+                            "hard_gate_applied": target_gate.get("hard_gate_applied"),
                             "why_now_recency_passed": target_gate.get("why_now_recency_passed"),
                             "why_now_mode": target_gate.get("why_now_mode"),
                             "why_now_theme_window_days": target_gate.get("why_now_theme_window_days"),
@@ -8065,6 +8554,13 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                         "evidence_tier_mix": target_gate.get("evidence_tier_mix"),
                         "fact_cards_count_by_field": target_gate.get("fact_cards_count_by_field"),
                         "quote_overlap_by_field": target_gate.get("quote_overlap_by_field"),
+                        "quality_warnings": target_gate.get("quality_warnings"),
+                        "candidate_pool_size": target_gate.get("candidate_pool_size"),
+                        "candidate_shortlist": target_gate.get("candidate_shortlist"),
+                        "candidate_selected": target_gate.get("candidate_selected"),
+                        "candidate_selection_reason": target_gate.get("candidate_selection_reason"),
+                        "candidate_selection_urls": target_gate.get("candidate_selection_urls"),
+                        "hard_gate_applied": target_gate.get("hard_gate_applied"),
                         "why_now_recency_passed": target_gate.get("why_now_recency_passed"),
                         "why_now_mode": target_gate.get("why_now_mode"),
                         "why_now_theme_window_days": target_gate.get("why_now_theme_window_days"),
@@ -8225,6 +8721,11 @@ def status() -> dict[str, Any]:
         "source_gate_mode": _source_gate_mode(),
         "quality_fail_policy": _quality_fail_policy(),
         "delivery_mode": _delivery_mode(),
+        "selection_mode": _selection_mode(),
+        "candidate_pool_size": _candidate_pool_size(),
+        "candidate_evidence_per_target": _candidate_evidence_per_target(),
+        "quality_mode": _quality_mode(),
+        "critic_enabled": _critic_enabled(),
         "fact_card_mode": _fact_card_mode(),
         "quote_overlap_max": _quote_overlap_max(),
         "diagnostic_max_reasons": _diagnostic_max_reasons(),

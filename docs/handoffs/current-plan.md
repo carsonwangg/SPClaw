@@ -40,6 +40,17 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Board-seat recovery v2 shipped in `src/coatue_claw/board_seat_daily.py`:
+  - candidate-first selection flow added (multi-target pool, per-target evidence, LLM winner selection with deterministic fallback).
+  - default delivery now posts best cleaned draft (`delivery_mode=post`) with light, advisory quality warnings.
+  - hard gates now centered on:
+    - company-only target validity
+    - strict cooldown repeat prevention via target memory lock window
+  - confidence/new-target gate defaults relaxed (`COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET=0`) while cooldown hard-block remains enforced.
+  - payload diagnostics now include candidate selection details + quality warnings + hard gate metadata.
+  - validation:
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `79 passed`
+    - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
 - Board-seat why-now relaxation shipped in `src/coatue_claw/board_seat_daily.py`:
   - `why_now` is now thematic and non-blocking by default:
     - `COATUE_CLAW_BOARD_SEAT_WHY_NOW_MODE=thematic_non_blocking`

@@ -3,6 +3,40 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-26, board-seat recovery v2: candidate-first + light guardrails)
+- Implemented in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
+  - candidate-first target selection pipeline:
+    - new candidate pool builder from snippets + acquisition rows + search rows + rotation/defaults.
+    - per-candidate evidence collection and deterministic scoring.
+    - LLM winner selection (`winner`, `runners_up`, `reasoning`, `used_urls`) with deterministic fallback.
+  - drafting now uses selected-candidate context in the writer evidence payload.
+  - quality gate now supports `light` mode:
+    - quality and critic checks are advisory warnings (non-blocking) with one rewrite attempt.
+    - posting defaults to best cleaned draft (`COATUE_CLAW_BOARD_SEAT_DELIVERY_MODE=post`).
+  - hard gates preserved/enforced:
+    - company-only target validity.
+    - strict cooldown repeat block via target memory (`COATUE_CLAW_BOARD_SEAT_TARGET_LOCK_DAYS`).
+  - default configuration changes:
+    - `COATUE_CLAW_BOARD_SEAT_DELIVERY_MODE=post`
+    - `COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET=0`
+    - `COATUE_CLAW_BOARD_SEAT_QUOTE_OVERLAP_MAX=0.55`
+    - added:
+      - `COATUE_CLAW_BOARD_SEAT_SELECTION_MODE=candidate_first`
+      - `COATUE_CLAW_BOARD_SEAT_CANDIDATE_POOL_SIZE=8`
+      - `COATUE_CLAW_BOARD_SEAT_CANDIDATE_EVIDENCE_PER_TARGET=6`
+      - `COATUE_CLAW_BOARD_SEAT_QUALITY_MODE=light`
+      - `COATUE_CLAW_BOARD_SEAT_CRITIC_ENABLED=1`
+  - run payload observability expanded:
+    - `candidate_pool_size`, `candidate_shortlist`, `candidate_selected`, `candidate_selection_reason`, `candidate_selection_urls`
+    - `quality_warnings`
+    - `hard_gate_applied`
+    - cooldown diagnostics (`cooldown_matched_posted_at_utc`) on hard-gate blocks.
+- Updated `/Users/carsonwang/CoatueClaw/.env.example` with new defaults/knobs for candidate-first and light quality mode.
+- Updated tests in `/Users/carsonwang/CoatueClaw/tests/test_board_seat_daily.py` for new hard-gate and delivery behavior, plus candidate selection payload coverage.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `79 passed`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
+
 ## Update (2026-02-26, board-seat why-now thematic non-blocking relaxation)
 - Updated `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py` so `why_now` no longer blocks Board Seat posting when evidence is sparse:
   - new defaults:

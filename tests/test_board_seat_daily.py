@@ -1381,7 +1381,7 @@ def test_high_conf_new_target_gate_rejects_non_new_target_even_if_high_conf(tmp_
     )
     gate = board_seat_daily._high_conf_new_target_gate(store=store, company="OpenAI", draft=draft)
     assert gate["allow"] is False
-    assert gate["reason"] == "target_not_new"
+    assert gate["reason"] in {"target_not_new", "cooldown_repeat_blocked"}
     assert gate["is_new_target"] is False
     assert gate["target_confidence"] == "High"
 
@@ -1421,8 +1421,8 @@ def test_run_once_skips_when_no_high_confidence_new_target(tmp_path: Path, monke
     payload = board_seat_daily.run_once(force=True, dry_run=True)
     assert payload["ok"] is True
     assert payload["sent"] == []
-    assert payload["skipped"][0]["reason"] == "no_high_confidence_new_target"
-    assert payload["skipped"][0]["gate_reason"] in {"target_confidence_not_high", "target_not_new", "invalid_target"}
+    assert payload["skipped"][0]["reason"] == "hard_gate_blocked"
+    assert payload["skipped"][0]["gate_reason"] in {"target_confidence_not_high", "target_not_new", "invalid_target", "cooldown_repeat_blocked"}
     assert "target_confidence_score" in payload["skipped"][0]
     assert "target_confidence_reasons" in payload["skipped"][0]
     assert "target_validation_reason" in payload["skipped"][0]
@@ -1525,6 +1525,27 @@ def test_run_once_dry_run_payload_includes_target_resolution_fields(tmp_path: Pa
         "fallback_default",
         "invalid_after_resolution",
     }
+
+
+def test_run_once_payload_includes_candidate_selection_fields(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(tmp_path / "db/board.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_PORTCOS", "OpenAI:openai")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", "0")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SELECTION_MODE", "candidate_first")
+    monkeypatch.setattr(board_seat_daily, "WebClient", None)
+    monkeypatch.setattr(board_seat_daily, "_resolve_funding_snapshot", lambda **kwargs: _funding(source_type="cache"))
+    monkeypatch.setattr(board_seat_daily, "_acquisition_search_rows", lambda **kwargs: [])
+    payload = board_seat_daily.run_once(force=True, dry_run=True)
+    assert payload["ok"] is True
+    assert payload["sent"]
+    row = payload["sent"][0]
+    assert "candidate_pool_size" in row
+    assert "candidate_shortlist" in row
+    assert "candidate_selected" in row
+    assert "candidate_selection_reason" in row
+    assert "candidate_selection_urls" in row
+    assert "hard_gate_applied" in row
 
 
 def test_run_once_dry_run_cleans_noisy_llm_fields_and_emits_writing_observability(tmp_path: Path, monkeypatch) -> None:
@@ -1839,7 +1860,7 @@ def test_status_reports_funding_quality_metrics(tmp_path: Path, monkeypatch) -> 
     assert metrics["total_companies"] == 1
     assert metrics["verified_count"] == 1
     assert metrics["low_confidence_count"] == 0
-    assert payload["require_high_conf_new_target"] is True
+    assert payload["require_high_conf_new_target"] is False
     assert payload["funding_verification_by_company"]["Anduril"]["verification_status"] == "verified"
     assert "quality_pass_rate_7d" in payload
     assert "top_failed_fields_7d" in payload
@@ -1936,6 +1957,7 @@ def test_run_once_fail_closed_when_quality_gate_stays_failed(tmp_path: Path, mon
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", "0")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_QUALITY_FAIL_POLICY", "skip")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DELIVERY_MODE", "skip")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_QUALITY_MODE", "strict")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REWRITE_MAX_RETRIES", "2")
     monkeypatch.setattr(board_seat_daily, "WebClient", None)
     monkeypatch.setattr(board_seat_daily, "_resolve_funding_snapshot", lambda **kwargs: _funding(source_type="cache"))
@@ -1975,6 +1997,7 @@ def test_run_once_quality_fail_closed_applies_to_fallback_path(tmp_path: Path, m
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", "0")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_QUALITY_FAIL_POLICY", "skip")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DELIVERY_MODE", "skip")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_QUALITY_MODE", "strict")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REWRITE_MAX_RETRIES", "1")
     monkeypatch.setattr(board_seat_daily, "WebClient", None)
     monkeypatch.setattr(board_seat_daily, "_resolve_funding_snapshot", lambda **kwargs: _funding(source_type="cache"))
@@ -2105,6 +2128,7 @@ def test_run_once_quality_failure_posts_diagnostic_when_enabled(tmp_path: Path, 
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_PORTCOS", "OpenAI:openai")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", "0")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DELIVERY_MODE", "diagnostic_fallback")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_QUALITY_MODE", "strict")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REWRITE_MAX_RETRIES", "1")
     monkeypatch.setattr(board_seat_daily, "WebClient", None)
     monkeypatch.setattr(board_seat_daily, "_resolve_funding_snapshot", lambda **kwargs: _funding(source_type="cache"))
