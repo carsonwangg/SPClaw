@@ -924,6 +924,9 @@ def extract_youtube_urls(text: str) -> list[str]:
 def parse_hfa_intent(text: str) -> tuple[str | None, str | None]:
     stripped = re.sub(r"<@[^>]+>", " ", text or "").strip()
     lower = stripped.lower()
+    if not re.search(r"^\s*hfa\b", lower):
+        return (None, None)
+
     if re.search(r"^\s*hfa\s+status\b", lower):
         return ("status", None)
     match = re.search(r"^\s*hfa\s+podcast\s+(\S+)(.*)$", stripped, re.IGNORECASE)
@@ -934,10 +937,34 @@ def parse_hfa_intent(text: str) -> tuple[str | None, str | None]:
             payload = url if not tail else f"{url} {tail}"
             return ("podcast", payload)
         return ("podcast", stripped)
+
+    # Conversational podcast intents:
+    # - "hfa analyze this podcast <url>"
+    # - "hfa quotes for this podcast"
+    # - "hfa summarize this youtube interview <url>"
+    urls = extract_youtube_urls(stripped)
+    if urls:
+        url = urls[0]
+        tail = stripped.replace(url, "").strip()
+        if re.search(r"\b(podcast|youtube|transcript|quote|quotes|summary|summarize)\b", lower):
+            payload = url if not tail else f"{url} {tail}"
+            return ("podcast", payload)
+        if re.search(r"^\s*hfa\s+analyze\b", lower):
+            payload = url if not tail else f"{url} {tail}"
+            return ("podcast", payload)
+
+    if re.search(r"\b(podcast|youtube|transcript|quote|quotes)\b", lower):
+        # Allow Slack-side thread URL resolution when URL isn't explicitly included.
+        return ("podcast", stripped)
+
     match = re.search(r"^\s*hfa\s+analyze\b(.*)$", stripped, re.IGNORECASE)
     if match:
         tail = str(match.group(1) or "").strip()
         return ("analyze", tail or None)
+
+    if re.search(r"\b(summarize|summary|readout|memo|packet|analyze|analysis)\b", lower):
+        return ("analyze", stripped)
+
     return (None, None)
 
 

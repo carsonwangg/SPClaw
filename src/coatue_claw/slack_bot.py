@@ -426,6 +426,15 @@ def _handle_hfa_command(
 
     if kind == "podcast":
         urls = extract_youtube_urls(tail or "")
+        if (not urls) and channel:
+            # Conversational commands like "hfa quotes for this podcast" may rely on
+            # a prior YouTube URL in the same thread; resolve from thread history.
+            try:
+                messages = _thread_messages(slack_client=app.client, channel=channel, thread_ts=thread_ts)
+            except Exception:
+                messages = []
+            blob = " ".join(str(item.get("text") or "") for item in messages if isinstance(item, dict))
+            urls = extract_youtube_urls(blob)
         if not urls:
             say(text="HFA podcast command requires a valid YouTube URL.", thread_ts=thread_ts)
             return True
