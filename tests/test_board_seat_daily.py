@@ -39,6 +39,7 @@ def board_seat_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SEARCH_ORDER", "brave,serp")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", "1")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_LLM_CANDIDATE_GEN_ENABLED", "0")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE", "0")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_CHANNEL_DISCOVERY", "static")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_MEMORY_REWRITE_ON_FAIL", "1")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SOURCES_IN_THREAD", "1")
@@ -580,6 +581,117 @@ def test_run_once_replenishes_batches_until_winner(board_seat_env: Path, monkeyp
     assert sent_row["target"] == "DealB"
     assert sent_row["llm_batches_used"] == 2
     assert sent_row["rejections_by_reason"].get("entity_unverified", 0) >= 1
+
+
+def test_run_once_simple_mode_sends_valid_target(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE", "1")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_LLM_CANDIDATE_GEN_ENABLED", "1")
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_discover_channels_from_slack",
+        lambda: ([board_seat_daily.DiscoveryChannel(company="Anduril", channel_ref="anduril", channel_id="C123")], []),
+    )
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_llm_generate_candidate_batch",
+        lambda **kwargs: [board_seat_daily.CandidateIdea(name="Saronic", one_line_fit="maritime autonomy", why_now="navy demand")],
+    )
+
+    def _collect(queries):
+        q = " ".join(queries).lower()
+        if "saronic" in q and "funding" in q:
+            return ([_row(title="Saronic raises $600M", url="https://techcrunch.com/saronic", snippet="funding round")], [])
+        if "saronic" in q and "company" in q:
+            return ([_row(title="Saronic company profile", url="https://www.saronic.com", snippet="autonomous vessels company")], [])
+        return ([_row(title="Anduril acquisition context", url="https://example.com/anduril", snippet="strategy")], [])
+
+    monkeypatch.setattr(board_seat_daily, "_collect_web_rows", _collect)
+    monkeypatch.setattr(board_seat_daily, "_post_to_slack", lambda **kwargs: ("C123", "100.3", None))
+
+    payload = board_seat_daily.run_once(force=True, dry_run=False)
+    assert len(payload["sent"]) == 1
+    sent = payload["sent"][0]
+    assert sent["selection_mode"] == "simple_llm"
+    assert sent["target"] == "Saronic"
+    assert sent["final_decision_path"] == "sent"
+
+
+def test_run_once_simple_mode_respects_cooldown(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE", "1")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_LLM_CANDIDATE_GEN_ENABLED", "1")
+    store = board_seat_daily.BoardSeatStore()
+    store.record_target(
+        company="Anduril",
+        target="Saronic",
+        channel_ref="anduril",
+        channel_id="C123",
+        source="manual",
+        posted_at_utc=board_seat_daily._utc_now_iso(),
+        run_date_local=board_seat_daily._today_key(),
+        message_ts="1.3",
+    )
+
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_discover_channels_from_slack",
+        lambda: ([board_seat_daily.DiscoveryChannel(company="Anduril", channel_ref="anduril", channel_id="C123")], []),
+    )
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_llm_generate_candidate_batch",
+        lambda **kwargs: [board_seat_daily.CandidateIdea(name="Saronic", one_line_fit="fit", why_now="now")],
+    )
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_collect_web_rows",
+        lambda queries: ([_row(title="Saronic company profile", url="https://www.saronic.com", snippet="company")], []),
+    )
+
+    payload = board_seat_daily.run_once(force=True, dry_run=True)
+    assert payload["sent"] == []
+    assert len(payload["skipped"]) == 1
+    row = payload["skipped"][0]
+    assert row["selection_mode"] == "simple_llm"
+    assert any(r.get("reason") == "target_not_new" for r in row["candidate_rejections"])
+    assert row["final_decision_path"] == "exhausted_no_valid_target"
+
+
+def test_run_once_simple_mode_regenerates_batches(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE", "1")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_LLM_CANDIDATE_GEN_ENABLED", "1")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SIMPLE_MAX_REGEN_BATCHES", "2")
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_discover_channels_from_slack",
+        lambda: ([board_seat_daily.DiscoveryChannel(company="OpenAI", channel_ref="openai", channel_id="C123")], []),
+    )
+    calls = {"n": 0}
+
+    def _batch(**kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return [board_seat_daily.CandidateIdea(name="NonRealCo", one_line_fit="", why_now="")]
+        return [board_seat_daily.CandidateIdea(name="Databento", one_line_fit="", why_now="")]
+
+    monkeypatch.setattr(board_seat_daily, "_llm_generate_candidate_batch", _batch)
+
+    def _collect(queries):
+        q = " ".join(queries).lower()
+        if "nonrealco" in q:
+            return ([], [])
+        if "databento" in q:
+            return ([_row(title="Databento company profile", url="https://www.databento.com", snippet="company")], [])
+        return ([_row(title="Databento raises funding", url="https://techcrunch.com/d", snippet="funding")], [])
+
+    monkeypatch.setattr(board_seat_daily, "_collect_web_rows", _collect)
+
+    payload = board_seat_daily.run_once(force=True, dry_run=True)
+    assert len(payload["sent"]) == 1
+    row = payload["sent"][0]
+    assert row["selection_mode"] == "simple_llm"
+    assert row["regen_batches_used"] == 2
+    assert row["candidates_evaluated_total"] >= 2
+    assert any(r.get("target") == "NonRealCo" for r in row["candidate_rejections"])
 
 
 def test_run_once_skip_reports_rejection_breakdown(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
