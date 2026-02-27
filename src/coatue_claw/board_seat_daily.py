@@ -522,21 +522,21 @@ def _simple_max_evals() -> int:
 
 
 def _simple_source_fetch_pages() -> int:
-    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_SIMPLE_SOURCE_FETCH_PAGES", "8") or "8").strip()
+    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_SIMPLE_SOURCE_FETCH_PAGES", "15") or "15").strip()
     try:
         val = int(raw)
     except Exception:
-        val = 8
+        val = 15
     return max(1, min(20, val))
 
 
 def _simple_source_doc_chars() -> int:
-    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_SIMPLE_SOURCE_DOC_CHARS", "2500") or "2500").strip()
+    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_SIMPLE_SOURCE_DOC_CHARS", "0") or "0").strip()
     try:
         val = int(raw)
     except Exception:
-        val = 2500
-    return max(400, min(12000, val))
+        val = 0
+    return max(0, min(100000, val))
 
 
 def _simple_use_all_backends() -> bool:
@@ -982,7 +982,7 @@ def _fetch_page_text(url: str, *, max_chars: int) -> str:
         )
         with urlopen(req, timeout=10) as resp:
             ctype = str(resp.headers.get("Content-Type", "")).lower()
-            body = resp.read(350_000)
+            body = resp.read(2_000_000)
     except Exception:
         return ""
     if "text/html" not in ctype and "text/plain" not in ctype and "application/xhtml+xml" not in ctype:
@@ -998,6 +998,8 @@ def _fetch_page_text(url: str, *, max_chars: int) -> str:
     text = _normalize_whitespace(text)
     if not text:
         return ""
+    if max_chars <= 0:
+        return text
     return text[: max(400, max_chars)]
 
 
@@ -1258,23 +1260,17 @@ def _build_draft_simple(
     funding_rows: list[EvidenceRow],
 ) -> DraftResult:
     filtered_funding_rows = _filter_rows_for_target(target=target, rows=funding_rows)
-    funding = _funding_from_rows(target, filtered_funding_rows)
     merged_rows = _dedupe_rows(evidence_rows + filtered_funding_rows)
-    claims = _claims_from_rows(merged_rows, limit=14)
     source_extracts = _source_content_extracts(merged_rows)
     prompt = json.dumps(
         {
             "company": company,
             "target": target,
-            "claims": claims,
             "source_extracts": source_extracts,
-            "funding": {
-                "total_raised": funding.total_raised,
-                "latest_round": funding.latest_round,
-                "latest_round_date": funding.latest_round_date,
-                "backers": list(funding.backers),
-                "warning": LOW_CONF_WARNING if funding.verification_status == "weak" else "",
-            },
+            "funding_instruction": (
+                "Infer total raised, latest round/date, and notable backers using only source_extracts. "
+                "If uncertain, explicitly write unknown. Do not invent."
+            ),
             "output_sections": [
                 "Thesis",
                 "What the target does",
@@ -1289,14 +1285,27 @@ def _build_draft_simple(
         prompt=prompt,
         system=(
             "Write a specific board-style acquisition pitch. "
-            "Use concrete facts from source_extracts and claims (products, customers, contracts, launches, funding dates/amounts). "
+            "Use concrete facts from source_extracts (products, customers, contracts, launches, funding dates/amounts). "
             "Avoid generic filler language. Output markdown with exactly the five required sections and short bullets."
         ),
         temperature=0.2,
         max_tokens=900,
     )
-    text = generated or _deterministic_draft(company=company, target=target, funding=funding, repitch_note=None)
-    ok, reasons = _quality_gate(text, source_rows=evidence_rows)
+    fallback_funding = FundingSnapshot(
+        target=target,
+        target_key=_target_key(target),
+        total_raised="unknown",
+        latest_round="unknown",
+        latest_round_date="unknown",
+        backers=(),
+        evidence_count=len(filtered_funding_rows),
+        distinct_domains=len({r.domain for r in filtered_funding_rows if r.domain}),
+        conflict_flags=(),
+        verification_status="weak",
+        source_rows=tuple(filtered_funding_rows),
+    )
+    text = generated or _deterministic_draft(company=company, target=target, funding=fallback_funding, repitch_note=None)
+    ok, reasons = _quality_gate(text, source_rows=merged_rows)
     if ok:
         return DraftResult(
             text=text,
@@ -1305,7 +1314,7 @@ def _build_draft_simple(
             memory_rewrite_used=False,
         )
     return DraftResult(
-        text=_deterministic_draft(company=company, target=target, funding=funding, repitch_note=None),
+        text=_deterministic_draft(company=company, target=target, funding=fallback_funding, repitch_note=None),
         generation_mode="memory_rewrite",
         quality_fail_codes=tuple(reasons),
         memory_rewrite_used=True,

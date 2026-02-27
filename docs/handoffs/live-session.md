@@ -2950,3 +2950,9 @@ Then confirm bot returns:
   - `COATUE_CLAW_BOARD_SEAT_SIMPLE_USE_ALL_BACKENDS`
   - `COATUE_CLAW_BOARD_SEAT_SIMPLE_SOURCE_FETCH_PAGES`
   - `COATUE_CLAW_BOARD_SEAT_SIMPLE_SOURCE_DOC_CHARS`
+
+## Update (2026-02-27, simple-mode prompt/input change per operator request)
+- Removed `claims` from simple-mode draft prompt payload.
+- Funding section in simple mode is now LLM-inferred from fetched `source_extracts` only (no deterministic funding parser in this path).
+- Increased default source breadth to top 15 links.
+- `COATUE_CLAW_BOARD_SEAT_SIMPLE_SOURCE_DOC_CHARS=0` now means no truncation cap (full extracted text passed to prompt).
