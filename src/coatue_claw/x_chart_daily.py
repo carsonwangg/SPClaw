@@ -2252,7 +2252,6 @@ def _extract_chart_title_hint_via_vision(candidate: Candidate) -> str | None:
         data_url = f"data:{mime};base64,{b64}"
         response = client.chat.completions.create(
             model=model,
-            temperature=0,
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": "You extract concise chart text cues."},
@@ -2412,7 +2411,6 @@ def _synthesize_style_via_llm(candidate: Candidate) -> dict[str, str] | None:
         client = OpenAI(api_key=api_key)
         response = client.chat.completions.create(
             model=model,
-            temperature=0.2,
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": "You write concise institutional chart titles."},

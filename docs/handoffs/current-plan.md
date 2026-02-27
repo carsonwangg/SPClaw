@@ -40,6 +40,12 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- X-chart LLM copy fallback fix shipped on role branch:
+  - in `src/coatue_claw/x_chart_daily.py`, removed explicit `temperature` from OpenAI calls used by:
+    - `_synthesize_style_via_llm(...)`
+    - `_extract_chart_title_hint_via_vision(...)`
+  - target issue: `gpt-5.2-chat-latest` rejecting non-default temperature and causing `Warning: LLM copy generation error (api_error); using raw tweet fallback copy`.
+  - validation: `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `85 passed`.
 - Chart-day splitter fix shipped on role branch:
   - removed sentence-splitting behavior from `_extract_first_sentence` in `src/coatue_claw/x_chart_daily.py`.
   - goal: avoid abbreviation truncation (`U.S.`) that produced fragment headlines/takeaways.

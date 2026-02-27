@@ -3,6 +3,14 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-27, x-chart LLM copy fallback fix for gpt-5.2 temperature API errors)
+- Updated `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/x_chart_daily.py`:
+  - removed explicit `temperature` in `_synthesize_style_via_llm(...)` OpenAI call.
+  - removed explicit `temperature` in `_extract_chart_title_hint_via_vision(...)` OpenAI call.
+  - reason: `gpt-5.2-chat-latest` rejects non-default temperature values and was triggering `api_error` fallback copy warnings.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `85 passed`
+
 ## Update (2026-02-27, removed sentence splitter in chart-day title extraction)
 - Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/src/coatue_claw/x_chart_daily.py`:
   - `_extract_first_sentence(...)` no longer splits on punctuation.
