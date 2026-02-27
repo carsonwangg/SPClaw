@@ -1455,15 +1455,9 @@ def _extract_first_sentence(text: str) -> str:
     normalized = _normalize_render_text(text)
     if not normalized:
         return ""
-    parts = re.split(r"(?<=[.!?])\s+", normalized)
-    if not parts:
-        return normalized
-    first = parts[0].strip()
-    if len(parts) > 1 and len(first.split()) < 3:
-        merged = _normalize_render_text(f"{first} {parts[1]}").strip()
-        if len(merged.split()) >= 3:
-            return merged
-    return first or normalized
+    # Intentionally avoid sentence splitting; punctuation like "U.S." can
+    # incorrectly truncate key chart context.
+    return normalized
 
 
 def _strip_news_prefix(text: str) -> str:
