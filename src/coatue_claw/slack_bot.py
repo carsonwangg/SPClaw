@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import logging
@@ -15,6 +16,8 @@ from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_sdk.errors import SlackApiError
 
+from coatue_claw.board_seat_daily import run_once as run_board_seat_once
+from coatue_claw.board_seat_daily import status as board_seat_status
 from coatue_claw.chart_intent import parse_chart_intent
 from coatue_claw.chart_metrics import METRIC_SPECS, metric_label
 from coatue_claw.chart_title_context import infer_chart_title_context
@@ -116,6 +119,7 @@ class PendingChartFeedback:
 PENDING_CHART_CHOICES: dict[str, PendingChartChoice] = {}
 PENDING_CHART_FEEDBACK: dict[str, PendingChartFeedback] = {}
 PIPELINE_LOCK = threading.Lock()
+BOARD_SEAT_RUN_LOCK = threading.Lock()
 _MEMORY_RUNTIME: MemoryRuntime | None = None
 _SPENCER_CHANGE_LOG: SpencerChangeLog | None = None
 
@@ -234,6 +238,7 @@ def _format_chart_usage() -> str:
         "- `quotes <youtube-url>` or `analyze <youtube-url>` for podcast quote mode\n"
         "- `hfa status` / `status`\n"
         "- `md now` / `md status` / `md holdings refresh`\n"
+        "- `bs now` / `bs status`\n"
         "- `x digest <topic|ticker|handle> [last 24h] [limit 50]`\n"
         "- `x chart now` (run chart-scout winner now)\n"
         "- `x chart sources` / `x chart add @handle priority 1.2`\n"
@@ -1533,6 +1538,201 @@ def _handle_market_daily_command(*, text: str, channel: str | None, thread_ts: s
     return True
 
 
+@contextmanager
+def _temporary_env(values: dict[str, str | None]):
+    previous: dict[str, str | None] = {}
+    for key, value in values.items():
+        previous[key] = os.environ.get(key)
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+    try:
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def _slug_text(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
+
+
+def _channel_name_from_id(channel_id: str | None) -> str | None:
+    if not channel_id:
+        return None
+    try:
+        resp = app.client.conversations_info(channel=channel_id)
+        row = resp.get("channel") if isinstance(resp, dict) else None
+        if isinstance(row, dict):
+            name = str(row.get("name") or "").strip()
+            if name:
+                return name
+    except Exception:
+        logger.exception("Failed to resolve channel name for board-seat command channel=%s", channel_id)
+    return None
+
+
+def _handle_board_seat_command(*, text: str, channel: str | None, thread_ts: str, say) -> bool:
+    stripped = _strip_slack_mentions(text).strip()
+    lower = stripped.lower()
+    if not re.match(r"^(bs|board\s+seat)\b", lower):
+        return False
+
+    if re.fullmatch(r"(bs|board\s+seat)(\s+help)?", lower):
+        say(
+            text=(
+                "Board Seat commands:\n"
+                "- `bs now` (run now for this portco channel)\n"
+                "- `bs now dry` (preview only)\n"
+                "- `bs now for <Company>` (run in current channel for explicit company)\n"
+                "- `bs status`"
+            ),
+            thread_ts=thread_ts,
+        )
+        return True
+
+    if re.fullmatch(r"(bs|board\s+seat)\s+status", lower):
+        try:
+            payload = board_seat_status()
+        except Exception as exc:
+            say(text=f"Board Seat status failed: {exc}", thread_ts=thread_ts)
+            return True
+        lines = [
+            "Board Seat status:",
+            f"- format_version: `{payload.get('format_version')}`",
+            f"- status: `{payload.get('status')}`",
+            f"- enabled: `{payload.get('board_seat_enabled')}`",
+            f"- schedule_time: `{payload.get('schedule_time')}`",
+            f"- target_lock_days: `{payload.get('target_lock_days')}`",
+        ]
+        portcos = payload.get("portcos") if isinstance(payload.get("portcos"), list) else []
+        lines.append(f"- portcos: `{len(portcos)}`")
+        say(text="\n".join(lines), thread_ts=thread_ts)
+        return True
+
+    if not re.match(r"^(bs|board\s+seat)\s+now\b", lower):
+        say(text="Try `bs help` for board-seat commands.", thread_ts=thread_ts)
+        return True
+
+    is_dry_run = bool(re.search(r"\b(dry|dry-run)\b", lower))
+    company_hint_match = re.search(r"\bfor\s+(.+)$", stripped, flags=re.IGNORECASE)
+    company_hint = company_hint_match.group(1).strip() if company_hint_match else ""
+
+    try:
+        status_payload = board_seat_status()
+    except Exception as exc:
+        say(text=f"Board Seat command failed to load status: {exc}", thread_ts=thread_ts)
+        return True
+
+    portcos = status_payload.get("portcos") if isinstance(status_payload.get("portcos"), list) else []
+    channel_name = _channel_name_from_id(channel)
+    channel_slug = _slug_text(channel_name or "")
+
+    selected_company = ""
+    if company_hint:
+        hint_slug = _slug_text(company_hint)
+        for row in portcos:
+            if not isinstance(row, dict):
+                continue
+            company = str(row.get("company") or "").strip()
+            if company and _slug_text(company) == hint_slug:
+                selected_company = company
+                break
+        if not selected_company:
+            say(text=f"Unknown Board Seat company: `{company_hint}`", thread_ts=thread_ts)
+            return True
+    else:
+        for row in portcos:
+            if not isinstance(row, dict):
+                continue
+            company = str(row.get("company") or "").strip()
+            channel_ref = str(row.get("channel_ref") or "").strip()
+            if not company:
+                continue
+            if channel_slug and _slug_text(channel_ref) == channel_slug:
+                selected_company = company
+                break
+            if channel_slug and _slug_text(company) == channel_slug:
+                selected_company = company
+                break
+
+    if not selected_company:
+        say(
+            text=(
+                "Could not infer the portco for this channel.\n"
+                "Use: `bs now for <Company>`"
+            ),
+            thread_ts=thread_ts,
+        )
+        return True
+
+    selected_channel_ref = channel_name or channel or ""
+    scope_value = f"{selected_company}:{selected_channel_ref}"
+    say(
+        text=(
+            f"Running Board Seat now for `{selected_company}` "
+            f"({ 'dry-run' if is_dry_run else 'live' })..."
+        ),
+        thread_ts=thread_ts,
+    )
+    try:
+        with BOARD_SEAT_RUN_LOCK:
+            with _temporary_env(
+                {
+                    "COATUE_CLAW_BOARD_SEAT_PORTCOS": scope_value,
+                    "COATUE_CLAW_BOARD_SEAT_CHANNEL_DISCOVERY": "static",
+                }
+            ):
+                result = run_board_seat_once(force=True, dry_run=is_dry_run)
+    except Exception as exc:
+        say(text=f"Board Seat run failed: {exc}", thread_ts=thread_ts)
+        return True
+
+    sent_rows = [row for row in (result.get("sent") or []) if str(row.get("company") or "") == selected_company]
+    if sent_rows:
+        row = sent_rows[-1]
+        target = str(row.get("target") or "").strip() or "n/a"
+        reason = str(row.get("reason") or "sent")
+        say(
+            text=(
+                "Board Seat completed.\n"
+                f"- company: `{selected_company}`\n"
+                f"- target: `{target}`\n"
+                f"- mode: `{'dry_run' if is_dry_run else 'live'}`\n"
+                f"- reason: `{reason}`"
+            ),
+            thread_ts=thread_ts,
+        )
+        return True
+
+    skipped_rows = [row for row in (result.get("skipped") or []) if str(row.get("company") or "") == selected_company]
+    if skipped_rows:
+        row = skipped_rows[-1]
+        say(
+            text=(
+                "Board Seat did not post.\n"
+                f"- company: `{selected_company}`\n"
+                f"- reason: `{row.get('reason', 'unknown')}`\n"
+                f"- gate_reason: `{row.get('gate_reason', '')}`"
+            ),
+            thread_ts=thread_ts,
+        )
+        return True
+
+    say(
+        text=(
+            "Board Seat run completed but no company row matched in output.\n"
+            f"- company: `{selected_company}`"
+        ),
+        thread_ts=thread_ts,
+    )
+    return True
+
+
 def _handle_x_chart_command(*, text: str, channel: str | None, thread_ts: str, say) -> bool:
     stripped = _strip_slack_mentions(text).strip()
     lower = stripped.lower()
@@ -2167,6 +2367,10 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
 
     if _handle_market_daily_command(text=text, channel=channel, thread_ts=thread_ts, say=say):
         _mark_spencer_change(change_id, status="implemented", note="Handled by market daily workflow.")
+        return
+
+    if _handle_board_seat_command(text=text, channel=channel, thread_ts=thread_ts, say=say):
+        _mark_spencer_change(change_id, status="implemented", note="Handled by board seat workflow.")
         return
 
     try:

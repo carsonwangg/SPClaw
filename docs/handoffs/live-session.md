@@ -3006,3 +3006,18 @@ Then confirm bot returns:
   - `llm_warning_reason`
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `95 passed`.
+
+## Update (2026-02-27, Slack Board Seat manual command)
+- Added explicit Slack command handler for Board Seat manual runs in `src/coatue_claw/slack_bot.py`.
+- New commands:
+  - `bs now` (live run-now for current portco channel)
+  - `bs now dry` (dry-run preview for current portco channel)
+  - `bs now for <Company>` (explicit company override in current channel)
+  - `bs status` / `bs help`
+- Command executes scheduler-equivalent `board_seat_daily.run_once(force=True, dry_run=...)` path, scoped to a single company/channel via temporary env override:
+  - `COATUE_CLAW_BOARD_SEAT_PORTCOS=<Company>:<channel>`
+  - `COATUE_CLAW_BOARD_SEAT_CHANNEL_DISCOVERY=static`
+- Added lock-guarded temporary-env wrapper in Slack bot to avoid cross-request env leakage during run invocation.
+- Validation:
+  - `python3 -m compileall -q src/coatue_claw/slack_bot.py`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_slack_routing.py` -> `5 passed`.

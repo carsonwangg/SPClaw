@@ -1487,3 +1487,21 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
     - `llm_copy_status`, `llm_warning_posted`, `llm_warning_reason`.
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `95 passed`.
+
+## Slack Bot - Board Seat Manual Command (2026-02-27)
+- Status: implemented on `codex/agent-board-seat-slack-bs` branch.
+- Added Board Seat command surface in Slack bot:
+  - `bs now`
+  - `bs now dry`
+  - `bs now for <Company>`
+  - `bs status`
+- Execution model:
+  - runs `board_seat_daily.run_once(force=True, dry_run=...)`
+  - scoped to current channel/company via temporary env overrides
+  - uses static discovery for the manual command run to avoid accidental all-portco fanout
+- Guardrails:
+  - channel/company inference + explicit override support
+  - lock around env-scoped run to avoid cross-request contamination
+- Validation:
+  - `python3 -m compileall -q src/coatue_claw/slack_bot.py`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_slack_routing.py` -> `5 passed`.
