@@ -3,6 +3,20 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-27, MD richer article-context grounding for LLM relevance + one-liner)
+- Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
+  - added article-body context extraction + cache for catalyst evidence URLs.
+  - LLM relevance selection (`_select_anchor_support_llm`) and one-line synthesis (`_synthesize_catalyst_sentence_simple`) now receive enriched article context for top candidates, not only headline/snippet text.
+  - new controls:
+    - `COATUE_CLAW_MD_ARTICLE_CONTEXT_ENABLED` (default `1`)
+    - `COATUE_CLAW_MD_ARTICLE_CONTEXT_TIMEOUT_MS` (default `3500`)
+    - `COATUE_CLAW_MD_ARTICLE_CONTEXT_MAX_CHARS` (default `6000`)
+    - `COATUE_CLAW_MD_ARTICLE_CONTEXT_LIMIT` (default `4`)
+  - status payload now exposes these context-enrichment settings.
+- Added tests in `/Users/carsonwang/worktrees/coatue-claw/market-daily/tests/test_market_daily.py`:
+  - `test_extract_article_context_from_html_prefers_body_text`
+  - `test_evidence_context_for_llm_includes_article_body`
+
 ## Update (2026-02-26, MD LLM-first relevance mode for catalyst anchor/support selection)
 - Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
   - added `COATUE_CLAW_MD_RELEVANCE_MODE` (`llm_first` default, `deterministic` fallback mode).
