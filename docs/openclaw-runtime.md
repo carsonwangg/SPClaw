@@ -253,6 +253,10 @@ MD (Market Daily) environment controls:
 - `COATUE_CLAW_MD_REJECT_HISTORICAL_CALLBACK`: reject headlines/summaries that cite materially older event dates (for example “On January 26 ...”) (`1` default)
 - `COATUE_CLAW_MD_PUBLISH_TIME_ENRICH_ENABLED`: attempt publish-time enrichment from article metadata when feed/search timestamp is missing (`1` default)
 - `COATUE_CLAW_MD_PUBLISH_TIME_ENRICH_TIMEOUT_MS`: per-url publish-time enrichment timeout in milliseconds (default `1200`)
+- `COATUE_CLAW_MD_ARTICLE_CONTEXT_ENABLED`: enable article-body context enrichment for LLM relevance + one-line catalyst writing (`1` default)
+- `COATUE_CLAW_MD_ARTICLE_CONTEXT_TIMEOUT_MS`: per-url article fetch timeout for context enrichment (default `3500`)
+- `COATUE_CLAW_MD_ARTICLE_CONTEXT_MAX_CHARS`: max context chars extracted per article before prompting (default `6000`)
+- `COATUE_CLAW_MD_ARTICLE_CONTEXT_LIMIT`: max candidate articles to enrich with full body context per ticker in LLM steps (default `4`)
 - `COATUE_CLAW_MD_MAX_LOOKBACK_HOURS`: max evidence lookback cap for session windows (default `96`)
 - `COATUE_CLAW_MD_WEB_SEARCH_ENABLED`: enable web fallback retrieval (`1`/`0`, default `1`)
 - `COATUE_CLAW_MD_WEB_SEARCH_BACKEND`: web backend (`google_serp` primary with `ddg_html` fallback, default `google_serp`)
@@ -281,6 +285,7 @@ MD (Market Daily) environment controls:
   - chooses one anchor evidence candidate plus supports using `COATUE_CLAW_MD_RELEVANCE_MODE`:
     - `llm_first`: LLM selects anchor/support from ranked candidates
     - `deterministic`: code-only anchor/support selector
+  - in `llm_first`, includes richer article-body context (not just title/snippet) for top candidates before relevance selection and sentence drafting
   - synthesizes one free-sentence catalyst line (not forced `Shares rose/fell after ...` wrapper)
   - aligns `[News]/[Web]` links to the anchor/support evidence used for that generated sentence
   - with LLM unavailable/error, uses deterministic anchor-based sentence backup before generic fallback

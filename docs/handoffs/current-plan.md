@@ -40,6 +40,16 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Market Daily LLM grounding upgrade shipped on role branch:
+  - simple-synthesis relevance selection + one-line drafting now use richer article-body context for top candidates (not headline/snippet only).
+  - added per-run controls for context enrichment:
+    - `COATUE_CLAW_MD_ARTICLE_CONTEXT_ENABLED`
+    - `COATUE_CLAW_MD_ARTICLE_CONTEXT_TIMEOUT_MS`
+    - `COATUE_CLAW_MD_ARTICLE_CONTEXT_MAX_CHARS`
+    - `COATUE_CLAW_MD_ARTICLE_CONTEXT_LIMIT`
+  - coverage:
+    - `tests/test_market_daily.py::test_extract_article_context_from_html_prefers_body_text`
+    - `tests/test_market_daily.py::test_evidence_context_for_llm_includes_article_body`
 - Market Daily LLM-first relevance mode shipped on role branch:
   - new `COATUE_CLAW_MD_RELEVANCE_MODE` control (`llm_first` default, `deterministic` fallback).
   - in simple-synthesis mode, model now selects anchor/support evidence IDs before writing the catalyst sentence.

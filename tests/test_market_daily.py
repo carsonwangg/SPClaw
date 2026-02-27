@@ -1566,6 +1566,41 @@ def test_select_anchor_support_llm_parses_json() -> None:
     assert supports and supports[0].url == c1.url
 
 
+def test_extract_article_context_from_html_prefers_body_text() -> None:
+    from coatue_claw import market_daily as md
+
+    html = """
+    <html><head><script>var x=1;</script></head>
+    <body>
+      <p>Netflix stock rose after reports said the company dropped its bid for Warner assets.</p>
+      <p>Investors viewed the move as improving capital discipline and reducing deal risk.</p>
+    </body></html>
+    """
+    text = md._extract_article_context_from_html(html)
+    assert "dropped its bid" in text.lower()
+    assert "capital discipline" in text.lower()
+
+
+def test_evidence_context_for_llm_includes_article_body(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    item = md._EvidenceCandidate(
+        source_type="web",
+        text="Why Netflix Stock Climbed Today",
+        context_text="Shares rose as the deal outlook changed.",
+        url="https://example.com/nflx",
+        published_at_utc=datetime(2026, 2, 27, 14, 0, 0, tzinfo=UTC),
+        score=0.8,
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._article_context_from_url",
+        lambda url: "Article body: Netflix walked away from the Paramount path, reducing acquisition risk.",
+    )
+    merged = md._evidence_context_for_llm(item)
+    assert "walked away from the paramount path" in merged.lower()
+    assert "shares rose as the deal outlook changed" in merged.lower()
+
+
 def test_simple_mode_outputs_full_sentence_not_after_wrapper(monkeypatch) -> None:
     from coatue_claw import market_daily as md
 
