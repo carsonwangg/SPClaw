@@ -40,6 +40,10 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Chart-day splitter fix shipped on role branch:
+  - removed sentence-splitting behavior from `_extract_first_sentence` in `src/coatue_claw/x_chart_daily.py`.
+  - goal: avoid abbreviation truncation (`U.S.`) that produced fragment headlines/takeaways.
+  - validation: `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `85 passed`.
 - Market Daily LLM grounding upgrade shipped on role branch:
   - simple-synthesis relevance selection + one-line drafting now use richer article-body context for top candidates (not headline/snippet only).
   - added per-run controls for context enrichment:
