@@ -3,20 +3,13 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
-## Update (2026-02-27, enforce `chart_label == title` across chart-day)
-- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/src/coatue_claw/x_chart_daily.py`:
-  - `chart_label` is now synchronized to final `headline` in style draft generation.
-  - manual `run-post-url --title` override now updates both `headline` and `chart_label`.
-  - renderer no longer truncates chart label text independently; it preserves exact label text and fails closed on overflow (`Chart label layout overflow without truncation.`).
-  - removed independent chart-label rewrite behavior in `_sanitize_style_copy(...)` so label cannot diverge from title path.
-- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/tests/test_x_chart_daily.py`:
-  - added regression tests:
-    - `test_style_draft_chart_label_matches_headline_llm_path`
-    - `test_style_draft_chart_label_matches_headline_fallback_path`
-    - `test_run_post_url_title_override_syncs_chart_label`
-  - updated prior assertions that expected chart-label-specific text.
+## Update (2026-02-27, x-chart LLM copy fallback fix for gpt-5.2 temperature API errors)
+- Updated `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/x_chart_daily.py`:
+  - removed explicit `temperature` in `_synthesize_style_via_llm(...)` OpenAI call.
+  - removed explicit `temperature` in `_extract_chart_title_hint_via_vision(...)` OpenAI call.
+  - reason: `gpt-5.2-chat-latest` rejects non-default temperature values and was triggering `api_error` fallback copy warnings.
 - Validation:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `88 passed`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `85 passed`
 
 ## Update (2026-02-27, removed sentence splitter in chart-day title extraction)
 - Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/src/coatue_claw/x_chart_daily.py`:
@@ -2951,47 +2944,3 @@ Then confirm bot returns:
 - market_daily status confirms article_context_enabled/article_context_timeout_ms/article_context_max_chars/article_context_limit plus relevance_mode=llm_first.
 - Dry-run artifact: /opt/coatue-claw-data/artifacts/market-daily/md-open-20260227-174225.md.
 - Smoke: md now force posted via run-once; debug-catalyst NFLX close shows richer context fields but anchor still selected from web explainer set (TipRanks/247/Invezz), so article-context quality tuning remains follow-up.
-
-## Update (2026-02-27, chart-day `$` render hardening)
-- Fixed chart-day render-path crashes caused by cashtags (`$AXP`, `$JPM`, etc.) being interpreted as matplotlib math syntax.
-- Added `_matplotlib_safe_text(...)` and applied it to all headline/chart-label/takeaway/source text writes in both renderers:
-  - `_render_source_snip_card`
-  - `_render_chart_of_day_style`
-  - `_fit_headline_text`, `_fit_chart_label_text`, `_fit_takeaway_text`
-- Kept source URL text intact via `preserve_urls=True` in source footer rendering.
-- Added regression test:
-  - `test_render_source_snip_card_handles_cashtag_copy`
-- Validation:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `89 passed`.
-
-## Update (2026-02-27, run-post-url slot behavior aligned to scheduled windows)
-- Changed manual URL posting to use normal scheduled slot keys (e.g., `YYYY-MM-DD-12:00`) instead of ad-hoc `manual-url-<timestamp>` keys.
-- Added deterministic slot helper for manual URL flow:
-  - `_slot_key_for_manual_post_url(...)`
-  - Uses latest elapsed window; if called before first window, maps to that day’s first configured window.
-- Added hard duplicate-slot guard in `run_chart_for_post_url(...)`:
-  - if target slot already posted, return `reason=slot_already_posted` and skip Slack post.
-  - still writes pull log with `mode=manual_url` and `result_reason=slot_already_posted`.
-- Added regression test:
-  - `test_run_chart_for_post_url_uses_window_slot_and_blocks_duplicate_slot`
-- Validation:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `90 passed`.
-
-## Update (2026-02-27, chart-day LLM-first copy + warning fallback flow)
-- Shifted chart-day copy generation to LLM-first with full context:
-  - tweet title + tweet text + chart hint + chart image (multimodal when available).
-  - prompt now uses broad contextual instructions for title/takeaway, no tweet-only restatement framing.
-- Removed style-guardrail publish blocking:
-  - no length-based role gate, no rewrite-driven rejection path for title/takeaway quality.
-  - publish checks now only enforce minimal technical viability (non-empty headline/takeaway and render-safe takeaway).
-- Updated role telemetry semantics:
-  - `_title_takeaway_role_ok` now checks non-empty + non-identical normalized strings.
-- Added LLM error warning flow:
-  - on technical LLM copy failure (`api_error`/`invalid_json`/`missing_fields`), bot posts warning in chart channel and continues with raw tweet fallback copy.
-  - warning post failures are non-fatal (logs warning and continues posting fallback chart).
-- Runtime payload additions in scheduled + manual flows:
-  - `llm_copy_status`
-  - `llm_warning_posted`
-  - `llm_warning_reason`
-- Validation:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `95 passed`.

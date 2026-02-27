@@ -40,11 +40,12 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
-- Chart-day label/title sync update shipped on role branch:
-  - `chart_label` now mirrors final `headline` in all chart-day flows.
-  - manual post-url title override now syncs label to override text.
-  - renderer no longer truncates chart label independently; overflow is fail-closed.
-  - validation: `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `88 passed`.
+- X-chart LLM copy fallback fix shipped on role branch:
+  - in `src/coatue_claw/x_chart_daily.py`, removed explicit `temperature` from OpenAI calls used by:
+    - `_synthesize_style_via_llm(...)`
+    - `_extract_chart_title_hint_via_vision(...)`
+  - target issue: `gpt-5.2-chat-latest` rejecting non-default temperature and causing `Warning: LLM copy generation error (api_error); using raw tweet fallback copy`.
+  - validation: `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `85 passed`.
 - Chart-day splitter fix shipped on role branch:
   - removed sentence-splitting behavior from `_extract_first_sentence` in `src/coatue_claw/x_chart_daily.py`.
   - goal: avoid abbreviation truncation (`U.S.`) that produced fragment headlines/takeaways.
@@ -1433,51 +1434,3 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Status keys present: article_context_enabled, article_context_timeout_ms, article_context_max_chars, article_context_limit; relevance_mode remains llm_first.
 - Dry-run + live smoke executed; artifact generated and posted.
 - NFLX debug close shows contextual synthesis fields active, with remaining improvement opportunity in source-anchor quality selection.
-
-## Chart Day - Cashtag Render Stability (2026-02-27)
-- Status: implemented on `codex/agent-chart-day`, validated.
-- Completed in this update:
-  - Added deterministic matplotlib-safe text sanitizer for render copy, escaping `$` to prevent accidental mathtext parsing.
-  - Applied sanitizer across headline, chart label, takeaway, and source line rendering in both chart-day image render paths.
-  - Preserved URL visibility in source footer via URL-preserving sanitizer mode.
-  - Added regression test for multi-cashtag copy (`$AXP`, `$JPM`) to ensure render no longer falls back/crashes.
-- Validation:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `89 passed`.
-
-## Chart Day - Manual URL Slot Governance Alignment (2026-02-27)
-- Status: implemented on `codex/agent-chart-day`, validated.
-- Completed in this update:
-  - `run_chart_for_post_url` now uses standard scheduled slot keys instead of `manual-url-<timestamp>`.
-  - Added `_slot_key_for_manual_post_url` helper:
-    - maps to latest elapsed configured window for current day,
-    - falls back to same-day first window if invoked before first window.
-  - Added duplicate-slot guard for manual URL posting:
-    - returns `reason=slot_already_posted`,
-    - does not post to Slack for that second attempt,
-    - still emits pull-log artifact for auditability.
-- Validation:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `90 passed`.
-
-## Chart Day - LLM-First Copy + Error Warning Fallback (2026-02-27)
-- Status: implemented on `codex/agent-chart-day`, validated.
-- Completed in this update:
-  - `_synthesize_style_via_llm` now consumes richer context:
-    - tweet title + tweet text + chart hint + chart image (when fetchable).
-  - LLM prompt revised to broad context-driven instructions for title/takeaway generation.
-  - Removed style guardrail enforcement from publish gating:
-    - no length-based role block,
-    - no rewrite-driven rejection for copy quality.
-  - Minimal publish checks now enforce only technical viability:
-    - non-empty headline,
-    - non-empty takeaway,
-    - render-safe takeaway text.
-  - `_title_takeaway_role_ok` changed to telemetry-only semantic:
-    - true when normalized headline/takeaway are both present and not identical.
-  - Added warning + fallback flow for technical LLM failures:
-    - posts channel warning with reason + slot/source context,
-    - continues posting with raw tweet fallback copy.
-    - warning post failure is logged but non-fatal.
-  - Added runtime response telemetry:
-    - `llm_copy_status`, `llm_warning_posted`, `llm_warning_reason`.
-- Validation:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `95 passed`.
