@@ -92,14 +92,19 @@ def _spencer_digest_schedule() -> list[dict[str, int]]:
 
 
 def _board_seat_schedule() -> list[dict[str, int]]:
-    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_TIME", "08:30") or "").strip()
+    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_TIME", "12:00") or "").strip()
     m = re.fullmatch(r"(\d{1,2}):(\d{2})", raw)
     if not m:
-        return [{"Hour": 8, "Minute": 30}]
-    hour = int(m.group(1))
-    minute = int(m.group(2))
-    if not (0 <= hour <= 23 and 0 <= minute <= 59):
-        return [{"Hour": 8, "Minute": 30}]
+        hour, minute = 12, 0
+    else:
+        hour = int(m.group(1))
+        minute = int(m.group(2))
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            hour, minute = 12, 0
+    weekdays_only_raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_WEEKDAYS_ONLY", "1") or "1").strip().lower()
+    weekdays_only = weekdays_only_raw in {"1", "true", "yes", "on"}
+    if weekdays_only:
+        return [{"Weekday": weekday, "Hour": hour, "Minute": minute} for weekday in (1, 2, 3, 4, 5)]
     return [{"Hour": hour, "Minute": minute}]
 
 

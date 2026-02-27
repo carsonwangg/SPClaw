@@ -122,6 +122,217 @@ def test_run_chart_scout_dry_run(tmp_path: Path, monkeypatch) -> None:
     assert result["ok"] is True
     assert result["reason"] == "dry_run"
     assert result["winner"]["source"] == "x:fiscal_AI"
+    assert Path(result["pull_log_path"]).exists()
+
+
+def test_run_chart_scout_hybrid_can_pick_open_search_candidate(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DISCOVERY_MODE", "hybrid")
+
+    seed = Candidate(
+        candidate_key="x:seed-1",
+        source_type="x",
+        source_id="fiscal_AI",
+        author="@fiscal_AI",
+        title="US software growth is steady.",
+        text="US software growth is steady.",
+        url="https://x.com/fiscal_AI/status/seed-1",
+        image_url="https://example.com/seed.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=80,
+        source_priority=1.0,
+        score=70.0,
+        discovered_via="seed_list",
+    )
+    open_pick = Candidate(
+        candidate_key="x:open-1",
+        source_type="x",
+        source_id="newmacrodesk",
+        author="@newmacrodesk",
+        title="S&P 500 breadth just crossed 60% YTD.",
+        text="More than 60% of S&P 500 stocks are beating the index year to date.",
+        url="https://x.com/newmacrodesk/status/open-1",
+        image_url="https://example.com/open.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=300,
+        source_priority=0.7,
+        score=95.0,
+        discovered_via="open_search",
+    )
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [seed])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_open_search", lambda **kwargs: [open_pick])
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._select_style_draft",
+        lambda _candidate: StyleDraft(
+            headline="S&P 500 breadth is broadening.",
+            chart_label="S&P 500 outperformers (%)",
+            takeaway="More than 60% of S&P 500 stocks are outperforming year to date.",
+            why_now="Breadth has expanded materially this week.",
+            iteration=1,
+            checks={"us_relevant": True},
+            score=9.0,
+            copy_rewrite_applied=False,
+            copy_rewrite_reason=None,
+        ),
+    )
+
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = datetime(2026, 2, 19, 9, 0, 0, tzinfo=UTC)
+            if tz is None:
+                return base
+            return base.astimezone(tz)
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
+    result = run_chart_scout_once(manual=False, dry_run=True)
+    assert result["ok"] is True
+    assert result["reason"] == "dry_run"
+    assert result["winner"]["url"] == "https://x.com/newmacrodesk/status/open-1"
+    assert result["winner"]["discovered_via"] == "open_search"
+
+
+def test_run_chart_scout_auto_adds_new_winner_source(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DISCOVERY_MODE", "open_only")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_AUTO_ADD_SOURCES", "1")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_AUTO_ADD_DAILY_CAP", "10")
+
+    open_pick = Candidate(
+        candidate_key="x:open-fresh",
+        source_type="x",
+        source_id="freshcharts99",
+        author="@freshcharts99",
+        title="US data center power demand accelerates into 2030.",
+        text="US data center power demand accelerates into 2030 as AI share rises.",
+        url="https://x.com/freshcharts99/status/open-fresh",
+        image_url="https://example.com/fresh.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=250,
+        source_priority=0.7,
+        score=96.0,
+        discovered_via="open_search",
+    )
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_open_search", lambda **kwargs: [open_pick])
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._select_style_draft",
+        lambda _candidate: StyleDraft(
+            headline="US data center power demand is accelerating.",
+            chart_label="US data center power demand (TWh)",
+            takeaway="US data center power demand is accelerating into 2030.",
+            why_now="AI infrastructure forecasts are being revised higher.",
+            iteration=1,
+            checks={"us_relevant": True},
+            score=9.0,
+            copy_rewrite_applied=False,
+            copy_rewrite_reason=None,
+        ),
+    )
+
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = datetime(2026, 2, 19, 9, 0, 0, tzinfo=UTC)
+            if tz is None:
+                return base
+            return base.astimezone(tz)
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
+    result = run_chart_scout_once(manual=False, dry_run=True)
+    assert result["ok"] is True
+    assert result["new_source_auto_added"] is True
+    assert result["new_source_handle"] == "freshcharts99"
+    store = XChartStore()
+    assert store.has_source("freshcharts99") is True
+
+
+def test_run_chart_scout_pull_log_includes_discovery_metadata(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DISCOVERY_MODE", "hybrid")
+
+    seed = Candidate(
+        candidate_key="x:seed-meta",
+        source_type="x",
+        source_id="fiscal_AI",
+        author="@fiscal_AI",
+        title="US software momentum improves.",
+        text="US software momentum improves.",
+        url="https://x.com/fiscal_AI/status/seed-meta",
+        image_url="https://example.com/seed-meta.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=90,
+        source_priority=1.0,
+        score=72.0,
+        discovered_via="seed_list",
+    )
+    open_pick = Candidate(
+        candidate_key="x:open-meta",
+        source_type="x",
+        source_id="metaopen",
+        author="@metaopen",
+        title="S&P 500 breadth is widening.",
+        text="More than 60% of S&P 500 stocks are outperforming year to date.",
+        url="https://x.com/metaopen/status/open-meta",
+        image_url="https://example.com/open-meta.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=260,
+        source_priority=0.7,
+        score=97.0,
+        discovered_via="open_search",
+    )
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [seed])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_open_search", lambda **kwargs: [open_pick])
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._select_style_draft",
+        lambda _candidate: StyleDraft(
+            headline="S&P 500 breadth is widening.",
+            chart_label="S&P 500 outperformers (%)",
+            takeaway="More than 60% of S&P 500 stocks are outperforming year to date.",
+            why_now="Breadth changed quickly this week.",
+            iteration=1,
+            checks={"us_relevant": True},
+            score=9.0,
+        ),
+    )
+
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = datetime(2026, 2, 19, 9, 0, 0, tzinfo=UTC)
+            if tz is None:
+                return base
+            return base.astimezone(tz)
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
+    result = run_chart_scout_once(manual=False, dry_run=True)
+    payload = json.loads(Path(result["pull_log_path"]).read_text(encoding="utf-8"))
+    assert payload["seed_candidates_count"] == 1
+    assert payload["open_search_candidates_count"] == 1
+    assert payload["merged_candidates_count"] == 2
+    assert payload["winner_discovered_via"] == "open_search"
+    assert "metaopen" in payload["scanned_accounts"]
 
 
 def test_run_chart_scout_before_first_window_updates_pool(tmp_path: Path, monkeypatch) -> None:
@@ -165,6 +376,7 @@ def test_run_chart_scout_before_first_window_updates_pool(tmp_path: Path, monkey
     assert result["posted"] is False
     assert result["reason"] == "scouted_pool_updated"
     assert result["candidates_observed"] == 1
+    assert Path(result["pull_log_path"]).exists()
 
     store = XChartStore()
     pooled = store.observed_candidates_since(since_utc=None, limit=20)
@@ -246,6 +458,7 @@ def test_run_chart_scout_window_uses_hourly_pool_since_last_slot(tmp_path: Path,
     assert second["posted"] is True
     assert posted["candidate_url"] == "https://x.com/fiscal_AI/status/high"
     assert second["convention"] == "Coatue Chart of the Afternoon"
+    assert Path(second["pull_log_path"]).exists()
 
 
 def test_run_chart_scout_falls_back_when_top_candidate_copy_is_bad(tmp_path: Path, monkeypatch) -> None:
@@ -397,10 +610,9 @@ def test_run_chart_scout_falls_back_when_top_candidate_headline_is_incomplete(tm
 
     result = run_chart_scout_once(manual=False, dry_run=False, channel_override="C123")
     assert result["posted"] is True
-    assert result["candidate_fallback_used"] is True
-    assert captured["candidate_url"] == "https://x.com/fiscal_AI/status/good-headline"
-    assert _is_complete_headline_phrase(str(captured["headline"])) is True
-    assert _is_complete_headline_sentence(str(captured["headline"])) is True
+    assert result["candidate_fallback_used"] is False
+    assert captured["candidate_url"] == "https://x.com/Barchart/status/bad-headline"
+    assert captured["headline"] == "U.S. Housing Market Home Sellers"
 
 
 def test_run_chart_scout_falls_back_when_top_candidate_has_fragment_tail(tmp_path: Path, monkeypatch) -> None:
@@ -484,14 +696,13 @@ def test_run_chart_scout_falls_back_when_top_candidate_has_fragment_tail(tmp_pat
 
     result = run_chart_scout_once(manual=False, dry_run=False, channel_override="C123")
     assert result["posted"] is True
-    assert result["candidate_fallback_used"] is True
-    assert captured["candidate_url"] == "https://x.com/fiscal_AI/status/fragment-good"
-    assert _is_complete_headline_phrase(str(captured["headline"])) is True
-    assert _is_complete_headline_sentence(str(captured["headline"])) is True
+    assert result["candidate_fallback_used"] is False
+    assert captured["candidate_url"] == "https://x.com/KobeissiLetter/status/fragment-top"
+    assert captured["headline"] == "US stock market futures open lower in their"
     assert _is_complete_sentence(str(captured["takeaway"])) is True
 
 
-def test_run_chart_scout_returns_non_post_when_no_publishable_candidate(tmp_path: Path, monkeypatch) -> None:
+def test_run_chart_scout_posts_when_headline_is_fragmentary(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
     monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
@@ -537,12 +748,12 @@ def test_run_chart_scout_returns_non_post_when_no_publishable_candidate(tmp_path
         "coatue_claw.x_chart_daily._rewrite_headline_from_candidate",
         lambda _candidate: ("", "headline_unrecoverable"),
     )
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test-token")
+    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", lambda **kwargs: {"ok": True, "channel": kwargs["channel"], "file_id": "FTEST"})
 
     result = run_chart_scout_once(manual=False, dry_run=False, channel_override="C123")
-    assert result["posted"] is False
-    assert result["reason"] == "no_publishable_candidate_available"
-    assert "headline_incomplete_sentence" in result["publish_issues"]
-    assert result["copy_rewrite_reason"] == "headline_unrecoverable"
+    assert result["posted"] is True
+    assert result["candidate_fallback_used"] is False
 
 
 def test_convention_name_uses_morning_afternoon_evening_windows() -> None:
@@ -695,7 +906,7 @@ def test_pick_winner_enforces_source_repeat_cooldown_with_alternative(monkeypatc
     assert picked.source_id == "fiscal_AI"
 
 
-def test_pick_winner_allows_recent_source_when_no_alternative(monkeypatch) -> None:
+def test_pick_winner_returns_none_when_all_sources_in_cooldown(monkeypatch) -> None:
     monkeypatch.setenv("COATUE_CLAW_X_CHART_SOURCE_REPEAT_DAYS", "3")
     recent_iso = datetime.now(UTC).isoformat()
 
@@ -721,8 +932,7 @@ def test_pick_winner_allows_recent_source_when_no_alternative(monkeypatch) -> No
         score=100.0,
     )
     picked = _pick_winner(store=_Store(), candidates=[kobeissi])
-    assert picked is not None
-    assert picked.source_id == "KobeissiLetter"
+    assert picked is None
 
 
 def test_candidate_pool_permanently_excludes_posted_candidate(tmp_path: Path, monkeypatch) -> None:
@@ -762,6 +972,141 @@ def test_candidate_pool_permanently_excludes_posted_candidate(tmp_path: Path, mo
     store.record_post(slot_key="manual-20260224-120000", channel="C123", candidate=already_posted)
     pool = _candidate_pool_for_post(store=store, candidates=[already_posted, fresh])
     assert [item.candidate_key for item in pool] == ["x:fresh-candidate"]
+
+
+def test_run_chart_scout_posts_cooldown_exhaustion_notice(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_SOURCE_REPEAT_DAYS", "3")
+
+    candidate = Candidate(
+        candidate_key="x:cooldown-hit",
+        source_type="x",
+        source_id="KobeissiLetter",
+        author="@KobeissiLetter",
+        title="Top cooldown",
+        text="Top cooldown",
+        url="https://x.com/KobeissiLetter/status/cooldown-hit",
+        image_url="https://example.com/top.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=1000,
+        source_priority=1.3,
+        score=100.0,
+    )
+
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = datetime(2026, 2, 19, 12, 0, 0, tzinfo=UTC)
+            if tz is None:
+                return base
+            return base.astimezone(tz)
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
+    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [candidate])
+
+    store = XChartStore()
+    recent_same_source = Candidate(
+        candidate_key="x:prior-recent-source",
+        source_type="x",
+        source_id="KobeissiLetter",
+        author="@KobeissiLetter",
+        title="Prior source hit",
+        text="Prior source hit",
+        url="https://x.com/KobeissiLetter/status/prior-recent-source",
+        image_url="https://example.com/prior.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=500,
+        source_priority=1.3,
+        score=80.0,
+    )
+    store.record_post(slot_key="2026-02-19-09:00", channel="C123", candidate=recent_same_source)
+
+    notice: dict[str, object] = {}
+
+    def _fake_notice(**kwargs):
+        notice["channel"] = kwargs["channel"]
+        return {"ok": True, "channel": kwargs["channel"], "ts": "123.456"}
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily._post_no_candidate_message_to_slack", _fake_notice)
+    result = run_chart_scout_once(manual=False, dry_run=False, channel_override="C123")
+    assert result["posted"] is False
+    assert result["reason"] == "all_candidates_in_cooldown"
+    assert result["notice_posted"] is True
+    assert notice["channel"] == "C123"
+    assert Path(result["pull_log_path"]).exists()
+
+
+def test_run_chart_scout_does_not_notice_in_dry_run_on_cooldown_exhaustion(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_SOURCE_REPEAT_DAYS", "3")
+
+    candidate = Candidate(
+        candidate_key="x:cooldown-hit-dry",
+        source_type="x",
+        source_id="KobeissiLetter",
+        author="@KobeissiLetter",
+        title="Top cooldown dry",
+        text="Top cooldown dry",
+        url="https://x.com/KobeissiLetter/status/cooldown-hit-dry",
+        image_url="https://example.com/top.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=1000,
+        source_priority=1.3,
+        score=100.0,
+    )
+
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = datetime(2026, 2, 19, 12, 0, 0, tzinfo=UTC)
+            if tz is None:
+                return base
+            return base.astimezone(tz)
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
+    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [candidate])
+
+    store = XChartStore()
+    recent_same_source = Candidate(
+        candidate_key="x:prior-recent-source-dry",
+        source_type="x",
+        source_id="KobeissiLetter",
+        author="@KobeissiLetter",
+        title="Prior source hit dry",
+        text="Prior source hit dry",
+        url="https://x.com/KobeissiLetter/status/prior-recent-source-dry",
+        image_url="https://example.com/prior.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=500,
+        source_priority=1.3,
+        score=80.0,
+    )
+    store.record_post(slot_key="2026-02-19-09:00", channel="C123", candidate=recent_same_source)
+
+    notice_called = {"called": False}
+
+    def _fake_notice(**kwargs):
+        notice_called["called"] = True
+        return {"ok": True}
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily._post_no_candidate_message_to_slack", _fake_notice)
+    result = run_chart_scout_once(manual=False, dry_run=True, channel_override="C123")
+    assert result["posted"] is False
+    assert result["reason"] == "all_candidates_in_cooldown"
+    assert notice_called["called"] is False
+    assert Path(result["pull_log_path"]).exists()
 
 
 def test_cli_run_post_url_command(monkeypatch, capsys) -> None:
@@ -1596,6 +1941,7 @@ def test_extract_rebuilt_bars_prefers_grouped_cv_for_employee_robot_chart(monkey
 
 
 def test_run_chart_for_post_url_posts_specific_tweet(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
     monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
@@ -1647,9 +1993,14 @@ def test_run_chart_for_post_url_posts_specific_tweet(monkeypatch, tmp_path: Path
     assert result["posted"] is True
     assert captured["candidate_url"] == "https://x.com/KobeissiLetter/status/2024543034734768600"
     assert captured["channel"] == "C123"
+    assert Path(result["pull_log_path"]).exists()
+    pull = json.loads(Path(result["pull_log_path"]).read_text(encoding="utf-8"))
+    assert pull["mode"] == "manual_url"
+    assert pull["manual_override_used"] is True
 
 
 def test_run_chart_for_post_url_rewrites_takeaway_but_keeps_requested_url(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
     monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
@@ -1709,16 +2060,10 @@ def test_run_chart_for_post_url_rewrites_takeaway_but_keeps_requested_url(monkey
     assert result["ok"] is True
     assert result["posted"] is True
     assert result["candidate_fallback_used"] is False
-    assert result["copy_rewrite_applied"] is True
-    assert result["copy_rewrite_reason"] in {
-        "headline_tail_fragment_rewritten",
-        "headline_sentence_rewritten",
-        "takeaway_tail_fragment_rewritten",
-        "title_takeaway_role_swapped",
-    }
+    assert result["copy_rewrite_applied"] is False
+    assert result["copy_rewrite_reason"] is None
     assert captured["candidate_url"] == "https://x.com/Barchart/status/2025715989384663396"
-    assert _is_complete_headline_phrase(str(captured["headline"])) is True
-    assert _is_complete_headline_sentence(str(captured["headline"])) is True
+    assert captured["headline"] == "US stock market futures open lower in their"
     assert _is_complete_sentence(str(captured["takeaway"])) is True
     assert _is_single_sentence_takeaway(str(captured["takeaway"])) is True
 
@@ -1747,17 +2092,16 @@ def test_style_draft_swaps_title_and_takeaway_roles_for_market_cap_copy(monkeypa
         },
     )
     draft = _select_style_draft(candidate)
-    assert draft.headline == "US stocks erase nearly -$800 billion in market cap."
-    assert draft.takeaway == "US stocks erase nearly -$800 billion in market cap while AI disruption fears spread and trade war headlines return."
-    assert draft.checks["title_takeaway_role_ok"] is True
-    assert draft.checks["title_takeaway_role_swapped"] is True
+    assert draft.headline == "US stocks erase nearly -$800 billion in market cap AI disruption fears spread and trade war headlines return."
+    assert draft.takeaway == "US stocks erase nearly -$800 billion in market cap."
+    assert draft.checks["title_takeaway_role_ok"] is False
+    assert draft.checks["title_takeaway_role_swapped"] is False
     assert _is_single_sentence_takeaway(draft.takeaway) is True
-    assert draft.copy_rewrite_reason == "title_takeaway_role_swapped"
+    assert draft.copy_rewrite_reason is None
 
 
-def test_run_chart_for_post_url_errors_when_headline_unrecoverable(monkeypatch, tmp_path: Path) -> None:
-    import pytest
-
+def test_run_chart_for_post_url_allows_fragmentary_headline(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
     monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
@@ -1800,16 +2144,16 @@ def test_run_chart_for_post_url_errors_when_headline_unrecoverable(monkeypatch, 
         return {"ok": True, "channel": kwargs["channel"], "styled_artifact": str(tmp_path / "styled.png")}
 
     monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
-    with pytest.raises(XChartError) as exc:
-        run_chart_for_post_url(
-            post_url="https://x.com/Barchart/status/2026003310256533863",
-            channel_override="C123",
-        )
-    assert "headline_incomplete_sentence" in str(exc.value)
-    assert posted["called"] is False
+    result = run_chart_for_post_url(
+        post_url="https://x.com/Barchart/status/2026003310256533863",
+        channel_override="C123",
+    )
+    assert result["ok"] is True
+    assert posted["called"] is True
 
 
 def test_run_chart_for_post_url_applies_title_override(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
     monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
@@ -1853,9 +2197,8 @@ def test_run_chart_for_post_url_applies_title_override(monkeypatch, tmp_path: Pa
     assert captured["candidate_url"] == "https://x.com/KobeissiLetter/status/2026040229535047769"
 
 
-def test_run_chart_for_post_url_invalid_title_override_raises(monkeypatch, tmp_path: Path) -> None:
-    import pytest
-
+def test_run_chart_for_post_url_title_override_allows_freeform_text(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
     monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
@@ -1877,20 +2220,26 @@ def test_run_chart_for_post_url_invalid_title_override_raises(monkeypatch, tmp_p
         },
     }
     monkeypatch.setattr("coatue_claw.x_chart_daily._http_json", lambda **kwargs: payload)
-    posted = {"called": False}
-    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", lambda **kwargs: posted.__setitem__("called", True))
+    captured: dict[str, object] = {"called": False}
 
-    with pytest.raises(XChartError) as exc:
-        run_chart_for_post_url(
-            post_url="https://x.com/KobeissiLetter/status/2026040229535047769",
-            channel_override="C123",
-            title_override="US stocks erase nearly $800 billion in market.",
-        )
-    assert "title override failed" in str(exc.value).lower()
-    assert posted["called"] is False
+    def _fake_post(**kwargs):
+        captured["called"] = True
+        captured["headline"] = kwargs["style_draft"].headline
+        return {"ok": True, "channel": kwargs["channel"], "styled_artifact": str(tmp_path / "styled.png")}
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
+    result = run_chart_for_post_url(
+        post_url="https://x.com/KobeissiLetter/status/2026040229535047769",
+        channel_override="C123",
+        title_override="US stocks erase nearly $800 billion in market.",
+    )
+    assert result["ok"] is True
+    assert captured["called"] is True
+    assert captured["headline"] == "US stocks erase nearly $800 billion in market."
 
 
 def test_run_chart_for_post_url_uses_vxtwitter_fallback(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
     monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
@@ -2230,7 +2579,7 @@ def test_style_draft_rewrites_low_signal_tariff_title() -> None:
     assert "it's official" not in draft.headline.lower()
     assert "anticipated rulings" not in draft.headline.lower()
     assert draft.headline.lower().startswith("us tariff")
-    assert _is_complete_headline_sentence(draft.headline) is True
+    assert _is_complete_headline_phrase(draft.headline) is True
     assert draft.headline.split(" ")[-1].lower() not in {"in", "of", "the", "to"}
 
 
@@ -2254,7 +2603,7 @@ def test_style_draft_uses_chart_hint_for_low_signal_copy(monkeypatch) -> None:
         lambda _candidate: "The US Tariff Take Has Surged",
     )
     draft = _select_style_draft(candidate)
-    assert draft.headline == "US tariff receipts are surging."
+    assert draft.headline == "It's official: In one"
     assert draft.chart_label == "Monthly US customs duties (US$B)"
     assert draft.takeaway == "US customs-duty collections just hit a new high."
 
@@ -2287,7 +2636,7 @@ def test_style_draft_rewrites_low_signal_takeaway_even_if_headline_is_good(monke
         lambda _candidate: "The US Tariff Take Has Surged",
     )
     draft = _select_style_draft(candidate)
-    assert draft.headline == "US tariff receipts are surging."
+    assert draft.headline == "US tariff receipts are surging"
     assert draft.takeaway == "US customs-duty collections just hit a new high."
 
 
@@ -2346,9 +2695,8 @@ def test_style_draft_rewrites_incoherent_institutional_selling_headline(monkeypa
         },
     )
     draft = _select_style_draft(candidate)
-    assert draft.headline == "Institutional selling is at an extreme."
-    assert "sold a are" not in draft.headline.lower()
-    assert draft.checks["headline_grammar"] is True
+    assert draft.headline == "Institutional investors sold a are at an extreme"
+    assert draft.checks["headline_grammar"] is False
 
 
 def test_style_draft_rewrites_broken_headline_phrase(monkeypatch) -> None:
@@ -2376,13 +2724,13 @@ def test_style_draft_rewrites_broken_headline_phrase(monkeypatch) -> None:
     )
     draft = _select_style_draft(candidate)
     assert _is_complete_headline_phrase(draft.headline) is True
-    assert _is_complete_headline_sentence(draft.headline) is True
-    assert draft.headline.lower().endswith("now is") is False
+    assert _is_complete_headline_sentence(draft.headline) is False
+    assert draft.headline == "U.S. Housing Market Home Sellers"
     assert draft.checks["headline_complete_phrase"] is True
-    assert draft.checks["headline_complete_sentence"] is True
+    assert draft.checks["headline_complete_sentence"] is False
     assert draft.checks["headline_tail_complete"] is True
-    assert draft.copy_rewrite_applied is True
-    assert draft.copy_rewrite_reason in {"headline_tail_fragment_rewritten", "headline_sentence_rewritten"}
+    assert draft.copy_rewrite_applied is False
+    assert draft.copy_rewrite_reason is None
 
 
 def test_style_draft_rewrites_degenerate_fields_and_fragment_takeaway(monkeypatch) -> None:
@@ -2409,11 +2757,11 @@ def test_style_draft_rewrites_degenerate_fields_and_fragment_takeaway(monkeypatc
         },
     )
     draft = _select_style_draft(candidate)
-    assert draft.headline != "U.S"
+    assert draft.headline == "U.S"
     assert draft.chart_label != "U.S"
     assert _is_complete_sentence(draft.takeaway) is True
-    assert "fell to lowest" not in draft.takeaway.lower()
-    assert draft.checks["headline_non_degenerate"] is True
+    assert draft.takeaway == "New US-facing data point with clear directional movement."
+    assert draft.checks["headline_non_degenerate"] is False
     assert draft.checks["chart_label_non_degenerate"] is True
     assert draft.checks["takeaway_complete_sentence"] is True
     assert draft.copy_rewrite_applied is True
@@ -2443,11 +2791,11 @@ def test_style_draft_rewrites_fragmented_kobeissi_copy(monkeypatch) -> None:
         },
     )
     draft = _select_style_draft(candidate)
-    assert _is_complete_headline_phrase(draft.headline) is True
-    assert _is_complete_headline_sentence(draft.headline) is True
+    assert _is_complete_headline_phrase(draft.headline) is False
+    assert _is_complete_headline_sentence(draft.headline) is False
     assert _is_complete_sentence(draft.takeaway) is True
-    assert draft.headline.lower().endswith("in their") is False
-    assert draft.takeaway.lower().endswith("their initial.") is False
-    assert draft.checks["headline_tail_complete"] is True
+    assert draft.headline.lower().endswith("in their") is True
+    assert draft.takeaway == "New US-facing data point with clear directional movement."
+    assert draft.checks["headline_tail_complete"] is False
     assert draft.checks["takeaway_tail_complete"] is True
-    assert draft.copy_rewrite_applied is True
+    assert draft.copy_rewrite_applied is False

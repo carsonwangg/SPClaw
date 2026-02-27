@@ -130,18 +130,24 @@ Detailed runbook for humans and Codex:
 - Final chart artifact should be the source chart image snip from the X post (no Coatue-style redraw/reconstruction required).
 - If source image is unavailable, return the explicit error to Slack.
 
-## Board Seat V4 Rule (Acquisition/Acquihire)
+## Board Seat V1 Rule (Acquisition/Acquihire)
 - Applies to both:
   - scheduled board-seat runs (`board_seat_daily`)
   - conversational board-seat replies in Slack portco channels.
 - Required structure:
   - `Board Seat as a Service — {Company}`
-  - `Thesis` with explicit first line:
-    - `Idea: Acquire/Acquihire {Target} — {one-line rationale}`
-  - `Why now`, `What's different`, `MOS/risks`, `Bottom line`
-  - `{Company} context` and `Funding snapshot`
-  - `Sources`
+  - `Thesis`
+  - `What the target does`
+  - `Why it’s a fit for portfolio company`
+  - `Risks`
+  - `Funding history and backers`
 - Primary recommendation must be acquisition/acquihire-oriented (no internal build-first thesis).
+- Main message should be concise and high-skim.
 - Citations must be named and human-readable:
   - `Publisher/Source — Article title: <url>`
+- Citations are posted in thread reply (not main message).
 - Numeric labels like `Source 1/2/3` are disallowed.
+- Simplified targeting mode (now default runtime path; legacy disabled) guardrails:
+  - target must pass basic web existence sanity as a real company
+  - same `{company,target}` cannot be repitched within 20 days
+  - if no candidate passes within configured regen/eval caps, skip posting for that channel

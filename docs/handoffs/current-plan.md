@@ -1408,3 +1408,19 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `63 passed`.
 - Next:
   - add a post-sanitize target-lock re-check so retargeted outputs cannot bypass cooldown/new-target governance when final target differs from initial extraction.
+
+## Market Daily - Earnings Recap Manual Slot Dedupe Verification (2026-02-26)
+- Verified on main in /opt/coatue-claw.
+- Behavior for 95ddd47 is present: daytime manual runs use earnings_recap_manual and do not consume scheduled recap slot.
+- Validation: tests/test_market_daily.py 79 passed; tests/test_launchd_runtime.py 10 passed.
+- Runtime: recap scheduler service com.coatueclaw.market-daily-earnings-recap loaded.
+- DB checks confirmed slot separation between earnings_recap_manual and earnings_recap.
+- Scheduled-path dry-run result in this window was no_reporters.
+
+## Market Daily - Article Context Grounding Deploy (2026-02-27)
+- Deployed commit d817abc (main commit d0b440f) to add richer article context for LLM relevance + drafting.
+- Test results: market_daily 81 passed; launchd_runtime 10 passed (venv).
+- Runtime health: openclaw restart complete; slack probe healthy.
+- Status keys present: article_context_enabled, article_context_timeout_ms, article_context_max_chars, article_context_limit; relevance_mode remains llm_first.
+- Dry-run + live smoke executed; artifact generated and posted.
+- NFLX debug close shows contextual synthesis fields active, with remaining improvement opportunity in source-anchor quality selection.

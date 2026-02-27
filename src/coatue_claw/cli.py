@@ -8,6 +8,7 @@ import json
 
 from coatue_claw.chart_metrics import DEFAULT_X_METRIC, DEFAULT_Y_METRIC, METRIC_SPECS
 from coatue_claw.diligence_report import build_neutral_investment_memo
+from coatue_claw.hf_analyst import analyze_podcast_url as hfa_analyze_podcast_url
 from coatue_claw.hf_analyst import analyze_thread as hfa_analyze_thread
 from coatue_claw.hf_analyst import hfa_status
 from coatue_claw.memory_runtime import MemoryRuntime
@@ -227,6 +228,29 @@ def _run_hfa_command(args) -> None:
         print(json.dumps(payload, indent=2, sort_keys=True))
         return
 
+    if args.hfa_cmd == "podcast":
+        result = hfa_analyze_podcast_url(
+            url=str(args.url).strip(),
+            question=(str(args.question).strip() or None),
+            requested_by="cli",
+            channel="cli",
+            thread_ts=f"podcast-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}",
+            trigger_mode="cli_podcast",
+            dry_run=bool(args.dry_run),
+            memory_runtime=MemoryRuntime(),
+        )
+        payload = {
+            "run_id": result.run_id,
+            "summary_text": result.summary_text,
+            "artifact_path": result.artifact_path,
+            "score": result.scorecard.weighted_total,
+            "confidence": result.scorecard.confidence_label,
+            "warnings": list(result.warnings),
+            "memory_facts": list(result.memory_facts),
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return
+
     if args.hfa_cmd == "status":
         print(
             json.dumps(
@@ -346,6 +370,11 @@ def main():
     hfas.add_argument("--channel", default="")
     hfas.add_argument("--thread-ts", default="")
     hfas.add_argument("--limit", type=int, default=20)
+
+    hfap = hfa_sub.add_parser("podcast")
+    hfap.add_argument("--url", required=True)
+    hfap.add_argument("--question", default="")
+    hfap.add_argument("--dry-run", action="store_true")
 
     args = parser.parse_args()
 

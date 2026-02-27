@@ -55,7 +55,13 @@ def test_service_specs_build_expected_commands(tmp_path: Path, monkeypatch) -> N
     board = specs[launchd_runtime.BOARD_SEAT_DAILY_LABEL]
     assert board["ProgramArguments"] == ["/tmp/python", "-m", "coatue_claw.board_seat_daily", "run-once"]
     assert board["RunAtLoad"] is False
-    assert board["StartCalendarInterval"] == [{"Hour": 8, "Minute": 30}]
+    assert board["StartCalendarInterval"] == [
+        {"Weekday": 1, "Hour": 12, "Minute": 0},
+        {"Weekday": 2, "Hour": 12, "Minute": 0},
+        {"Weekday": 3, "Hour": 12, "Minute": 0},
+        {"Weekday": 4, "Hour": 12, "Minute": 0},
+        {"Weekday": 5, "Hour": 12, "Minute": 0},
+    ]
 
     md = specs[launchd_runtime.MARKET_DAILY_LABEL]
     assert md["ProgramArguments"] == ["/tmp/python", "-m", "coatue_claw.market_daily", "run-once"]
@@ -151,6 +157,24 @@ def test_market_daily_schedule_env_override(monkeypatch) -> None:
         {"Weekday": 5, "Hour": 8, "Minute": 5},
         {"Weekday": 5, "Hour": 15, "Minute": 40},
     ]
+
+
+def test_board_seat_schedule_env_override_weekday(monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_TIME", "13:15")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_WEEKDAYS_ONLY", "1")
+    assert launchd_runtime._board_seat_schedule() == [
+        {"Weekday": 1, "Hour": 13, "Minute": 15},
+        {"Weekday": 2, "Hour": 13, "Minute": 15},
+        {"Weekday": 3, "Hour": 13, "Minute": 15},
+        {"Weekday": 4, "Hour": 13, "Minute": 15},
+        {"Weekday": 5, "Hour": 13, "Minute": 15},
+    ]
+
+
+def test_board_seat_schedule_env_override_daily(monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_TIME", "13:15")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_WEEKDAYS_ONLY", "0")
+    assert launchd_runtime._board_seat_schedule() == [{"Hour": 13, "Minute": 15}]
 
 
 def test_market_daily_earnings_recap_schedule_env_override(monkeypatch) -> None:

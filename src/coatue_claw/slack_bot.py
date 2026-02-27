@@ -19,9 +19,11 @@ from coatue_claw.chart_intent import parse_chart_intent
 from coatue_claw.chart_metrics import METRIC_SPECS, metric_label
 from coatue_claw.chart_title_context import infer_chart_title_context
 from coatue_claw.cli import run_diligence
-from coatue_claw.hf_analyst import HFAError, analyze_thread as run_hfa_thread
+from coatue_claw.hf_analyst import HFAError, analyze_podcast_url as run_hfa_podcast
+from coatue_claw.hf_analyst import analyze_thread as run_hfa_thread
+from coatue_claw.hf_analyst import extract_youtube_urls
 from coatue_claw.hf_analyst import format_hfa_slack_summary, hfa_status as hfa_status_lookup
-from coatue_claw.hf_analyst import parse_hfa_intent, record_dm_autorun, should_run_dm_autorun
+from coatue_claw.hf_analyst import parse_hfa_intent, record_dm_autorun, record_dm_podcast_autorun, should_run_dm_autorun, should_run_dm_podcast_autorun
 from coatue_claw.memory_extraction import parse_memory_lookup_query
 from coatue_claw.memory_runtime import MemoryRuntime
 from coatue_claw.market_daily import MarketDailyError
@@ -227,7 +229,10 @@ def _format_chart_usage() -> str:
     return (
         "Usage:\n"
         "- `diligence TICKER`\n"
-        "- `hfa analyze [optional question]` / `hfa status`\n"
+        "- `hfa analyze [optional question]` / `analyze [optional question]`\n"
+        "- `hfa podcast <youtube-url> [optional question]` / `podcast <youtube-url> [optional question]`\n"
+        "- `quotes <youtube-url>` or `analyze <youtube-url>` for podcast quote mode\n"
+        "- `hfa status` / `status`\n"
         "- `md now` / `md status` / `md holdings refresh`\n"
         "- `x digest <topic|ticker|handle> [last 24h] [limit 50]`\n"
         "- `x chart now` (run chart-scout winner now)\n"
@@ -374,6 +379,7 @@ def _handle_hfa_command(
         lines = [
             "HFA status:",
             f"- run_id: `{latest.get('run_id')}`",
+            f"- run_kind: `{latest.get('run_kind')}`",
             f"- status: `{latest.get('status')}`",
             f"- created_at_utc: `{latest.get('created_at_utc')}`",
         ]
@@ -384,6 +390,26 @@ def _handle_hfa_command(
         return True
 
     if kind == "analyze":
+        analyze_urls = extract_youtube_urls(tail or "")
+        if analyze_urls:
+            url = analyze_urls[0]
+            question = (tail or "").replace(url, "").strip() or None
+            try:
+                result = run_hfa_podcast(
+                    url=url,
+                    question=question,
+                    requested_by=user_id,
+                    channel=channel,
+                    thread_ts=thread_ts,
+                    trigger_mode="slack_podcast_alias_from_analyze",
+                    dry_run=False,
+                    memory_runtime=_memory_runtime(),
+                )
+            except HFAError as exc:
+                say(text=f"HFA podcast failed: `{exc}`", thread_ts=thread_ts)
+                return True
+            say(text=format_hfa_slack_summary(result), thread_ts=thread_ts)
+            return True
         try:
             result = run_hfa_thread(
                 channel=channel,
@@ -397,6 +423,39 @@ def _handle_hfa_command(
             )
         except HFAError as exc:
             say(text=f"HFA analyze failed: `{exc}`", thread_ts=thread_ts)
+            return True
+        say(text=format_hfa_slack_summary(result), thread_ts=thread_ts)
+        return True
+
+    if kind == "podcast":
+        urls = extract_youtube_urls(tail or "")
+        if (not urls) and channel:
+            # Conversational commands like "hfa quotes for this podcast" may rely on
+            # a prior YouTube URL in the same thread; resolve from thread history.
+            try:
+                messages = _thread_messages(slack_client=app.client, channel=channel, thread_ts=thread_ts)
+            except Exception:
+                messages = []
+            blob = " ".join(str(item.get("text") or "") for item in messages if isinstance(item, dict))
+            urls = extract_youtube_urls(blob)
+        if not urls:
+            say(text="HFA podcast command requires a valid YouTube URL.", thread_ts=thread_ts)
+            return True
+        url = urls[0]
+        question = (tail or "").replace(url, "").strip() or None
+        try:
+            result = run_hfa_podcast(
+                url=url,
+                question=question,
+                requested_by=user_id,
+                channel=channel,
+                thread_ts=thread_ts,
+                trigger_mode="slack_podcast_command",
+                dry_run=False,
+                memory_runtime=_memory_runtime(),
+            )
+        except HFAError as exc:
+            say(text=f"HFA podcast failed: `{exc}`", thread_ts=thread_ts)
             return True
         say(text=format_hfa_slack_summary(result), thread_ts=thread_ts)
         return True
@@ -439,6 +498,47 @@ def _maybe_auto_run_hfa_dm(
     record_dm_autorun(channel=channel, user_id=user_id, thread_ts=thread_ts, file_ids=file_ids)
     say(
         text=f"{format_hfa_slack_summary(result)}\n- trigger_mode: `dm_auto`",
+        thread_ts=thread_ts,
+    )
+    return True
+
+
+def _maybe_auto_run_hfa_podcast_dm(
+    *,
+    event: dict,
+    text: str,
+    thread_ts: str,
+    channel: str | None,
+    user_id: str | None,
+    say,
+) -> bool:
+    if not _is_dm_event(event):
+        return False
+    if not channel or not user_id:
+        return False
+    urls = extract_youtube_urls(text)
+    if not urls:
+        return False
+    url = urls[0]
+    if not should_run_dm_podcast_autorun(channel=channel, user_id=user_id, thread_ts=thread_ts, url=url):
+        return False
+    try:
+        result = run_hfa_podcast(
+            url=url,
+            question=None,
+            requested_by=user_id,
+            channel=channel,
+            thread_ts=thread_ts,
+            trigger_mode="dm_podcast_auto",
+            dry_run=False,
+            memory_runtime=_memory_runtime(),
+        )
+    except HFAError as exc:
+        say(text=f"HFA podcast auto-run failed: `{exc}`", thread_ts=thread_ts)
+        return True
+    record_dm_podcast_autorun(channel=channel, user_id=user_id, thread_ts=thread_ts, url=url)
+    say(
+        text=f"{format_hfa_slack_summary(result)}\n- trigger_mode: `dm_podcast_auto`",
         thread_ts=thread_ts,
     )
     return True
@@ -1915,6 +2015,21 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
         )
         return
 
+    if _maybe_auto_run_hfa_podcast_dm(
+        event=event,
+        text=text,
+        thread_ts=thread_ts,
+        channel=channel,
+        user_id=user_id,
+        say=say,
+    ):
+        return
+
+    # Fast-path HFA commands before change-request heuristics/conversational fallbacks.
+    # This avoids ambiguous generic responses when users explicitly invoke `hfa ...`.
+    if _handle_hfa_command(text=text, channel=channel, thread_ts=thread_ts, user_id=user_id, say=say):
+        return
+
     git_memory_text = _parse_git_memory_request_text(text)
     if git_memory_text is not None:
         memory = _memory_runtime()
@@ -2052,10 +2167,6 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
 
     if _handle_market_daily_command(text=text, channel=channel, thread_ts=thread_ts, say=say):
         _mark_spencer_change(change_id, status="implemented", note="Handled by market daily workflow.")
-        return
-
-    if _handle_hfa_command(text=text, channel=channel, thread_ts=thread_ts, user_id=user_id, say=say):
-        _mark_spencer_change(change_id, status="implemented", note="Handled by HFA workflow.")
         return
 
     try:
