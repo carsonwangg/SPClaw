@@ -2963,3 +2963,16 @@ Then confirm bot returns:
   - `test_render_source_snip_card_handles_cashtag_copy`
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `89 passed`.
+
+## Update (2026-02-27, run-post-url slot behavior aligned to scheduled windows)
+- Changed manual URL posting to use normal scheduled slot keys (e.g., `YYYY-MM-DD-12:00`) instead of ad-hoc `manual-url-<timestamp>` keys.
+- Added deterministic slot helper for manual URL flow:
+  - `_slot_key_for_manual_post_url(...)`
+  - Uses latest elapsed window; if called before first window, maps to that day’s first configured window.
+- Added hard duplicate-slot guard in `run_chart_for_post_url(...)`:
+  - if target slot already posted, return `reason=slot_already_posted` and skip Slack post.
+  - still writes pull log with `mode=manual_url` and `result_reason=slot_already_posted`.
+- Added regression test:
+  - `test_run_chart_for_post_url_uses_window_slot_and_blocks_duplicate_slot`
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `90 passed`.
