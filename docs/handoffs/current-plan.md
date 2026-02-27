@@ -1416,3 +1416,13 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - legacy DB auto-migration for added `board_seat_runs` telemetry columns.
 - Next:
   - integrator can run dry-run canary on Anthropic/Anduril and confirm rejection telemetry in payload/log output.
+
+## Board Seat - Simplified LLM Pipeline (2026-02-27)
+- Status: implemented on `codex/agent-board-seat`, gated behind env toggle.
+- Completed scope:
+  - simple selection path (`simple_llm`) using LLM candidate batches + lightweight company existence check.
+  - hard 20-day no-repeat retained; complex repitch significance gate not used in simple mode.
+  - regenerate-until-cap behavior with explicit rejection list in payload.
+  - simple draft builder added while retaining 5-section output contract + threaded sources.
+- Next:
+  - integrator can enable `COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE=1` on mini for dry-run canary.

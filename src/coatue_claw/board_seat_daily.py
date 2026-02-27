@@ -289,6 +289,24 @@ class CandidateDecision:
     eval_index: int
 
 
+@dataclass(frozen=True)
+class CandidateIdea:
+    name: str
+    one_line_fit: str
+    why_now: str
+
+
+@dataclass(frozen=True)
+class SelectionResult:
+    target: str
+    target_key: str
+    evidence_rows: tuple[EvidenceRow, ...]
+    source_rows: tuple[EvidenceRow, ...]
+    regen_batches_used: int
+    candidates_evaluated_total: int
+    candidate_rejections: tuple[dict[str, str], ...]
+
+
 def _env_flag(name: str, default: bool) -> bool:
     raw = str(os.environ.get(name, "")).strip().lower()
     if not raw:
@@ -471,6 +489,37 @@ def _openai_model() -> str:
 
 def _llm_candidate_generation_enabled() -> bool:
     return _env_flag("COATUE_CLAW_BOARD_SEAT_LLM_CANDIDATE_GEN_ENABLED", True)
+
+
+def _simple_mode_enabled() -> bool:
+    return _env_flag("COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE", False)
+
+
+def _simple_batch_size() -> int:
+    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_SIMPLE_BATCH_SIZE", "8") or "8").strip()
+    try:
+        val = int(raw)
+    except Exception:
+        val = 8
+    return max(1, min(20, val))
+
+
+def _simple_max_regen_batches() -> int:
+    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_SIMPLE_MAX_REGEN_BATCHES", "4") or "4").strip()
+    try:
+        val = int(raw)
+    except Exception:
+        val = 4
+    return max(1, min(20, val))
+
+
+def _simple_max_evals() -> int:
+    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_SIMPLE_MAX_EVALS", "40") or "40").strip()
+    try:
+        val = int(raw)
+    except Exception:
+        val = 40
+    return max(1, min(200, val))
 
 
 def _llm_first_mode_enabled() -> bool:
@@ -928,6 +977,227 @@ def _llm_candidate_ideas(*, company: str, used_target_keys: set[str], batch_size
         if len(out) >= size:
             break
     return out
+
+
+def _llm_generate_candidate_batch(*, company: str, exclude_keys: set[str], batch_size: int) -> list[CandidateIdea]:
+    if not _llm_candidate_generation_enabled():
+        return []
+    prompt = json.dumps(
+        {
+            "company": company,
+            "task": "Return real company acquisition targets for this portfolio company.",
+            "constraints": [
+                f"return up to {max(1, min(20, batch_size))} rows",
+                "each row must be a real company name only",
+                "no products, no roles, no generic phrases",
+                "exclude keys in exclude_target_keys",
+            ],
+            "exclude_target_keys": sorted(exclude_keys)[:200],
+            "output_schema": {
+                "targets": [
+                    {
+                        "name": "Company Name",
+                        "one_line_fit": "Why this fits",
+                        "why_now": "Why now",
+                    }
+                ]
+            },
+        },
+        indent=2,
+    )
+
+    def _parse(raw: str) -> list[CandidateIdea]:
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            m = re.search(r"\{.*\}", raw, flags=re.DOTALL)
+            if not m:
+                return []
+            try:
+                payload = json.loads(m.group(0))
+            except Exception:
+                return []
+        rows = payload.get("targets") if isinstance(payload, dict) else None
+        if not isinstance(rows, list):
+            return []
+        out: list[CandidateIdea] = []
+        seen: set[str] = set()
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            name = _normalize_whitespace(str(row.get("name") or ""))
+            key = _target_key(name)
+            if not name or not key or key in seen or key in exclude_keys:
+                continue
+            valid, _reason = _is_valid_target_name(target=name, company=company)
+            if not valid:
+                continue
+            seen.add(key)
+            out.append(
+                CandidateIdea(
+                    name=name,
+                    one_line_fit=_normalize_whitespace(str(row.get("one_line_fit") or "")),
+                    why_now=_normalize_whitespace(str(row.get("why_now") or "")),
+                )
+            )
+            if len(out) >= batch_size:
+                break
+        return out
+
+    raw = _chat_completion(
+        prompt=prompt,
+        system="Return strict JSON only with key `targets` following the schema.",
+        temperature=0.2,
+        max_tokens=600,
+    )
+    if raw:
+        parsed = _parse(raw)
+        if parsed:
+            return parsed
+    # one retry for non-json/empty outputs
+    raw_retry = _chat_completion(
+        prompt=prompt,
+        system="Retry. Return valid JSON only; no markdown.",
+        temperature=0.1,
+        max_tokens=600,
+    )
+    return _parse(raw_retry or "")
+
+
+def _candidate_exists_on_web(target: str) -> tuple[bool, list[EvidenceRow], str]:
+    rows, _ = _collect_web_rows([f"\"{target}\" company", f"\"{target}\" funding"])
+    filtered = _filter_rows_for_target(target=target, rows=rows)
+    if not filtered:
+        return False, [], "entity_unverified"
+    return True, filtered, ""
+
+
+def _locked_target_keys(*, store: BoardSeatStore, company: str, now_utc: datetime) -> set[str]:
+    keys: set[str] = set()
+    for row in store.target_ledger_rows(company=company, limit=1000):
+        target_key = str(row.get("target_key") or "")
+        posted = _parse_iso(str(row.get("posted_at_utc") or ""))
+        if not target_key or posted is None:
+            continue
+        if (now_utc - posted) < timedelta(days=_target_lock_days()):
+            keys.add(target_key)
+    return keys
+
+
+def _select_target_simple(
+    *,
+    company: str,
+    store: BoardSeatStore,
+    now_utc: datetime,
+    run_date_local: str,
+) -> tuple[SelectionResult | None, dict[str, Any]]:
+    excluded_keys = _locked_target_keys(store=store, company=company, now_utc=now_utc)
+    rejected: list[dict[str, str]] = []
+    eval_count = 0
+    source_rows: list[EvidenceRow] = []
+
+    for batch_idx in range(1, _simple_max_regen_batches() + 1):
+        if eval_count >= _simple_max_evals():
+            break
+        ideas = _llm_generate_candidate_batch(
+            company=company,
+            exclude_keys=excluded_keys,
+            batch_size=_simple_batch_size(),
+        )
+        if not ideas:
+            continue
+        for idea in ideas:
+            if eval_count >= _simple_max_evals():
+                break
+            target = idea.name
+            target_key = _target_key(target)
+            if not target_key:
+                continue
+            eval_count += 1
+            if target_key in excluded_keys:
+                rejected.append({"target": target, "reason": "target_not_new"})
+                continue
+            ok, rows, reason = _candidate_exists_on_web(target)
+            source_rows.extend(rows[:3])
+            if not ok:
+                excluded_keys.add(target_key)
+                rejected.append({"target": target, "reason": reason or "entity_unverified"})
+                continue
+            result = SelectionResult(
+                target=target,
+                target_key=target_key,
+                evidence_rows=tuple(rows),
+                source_rows=tuple(_dedupe_rows(source_rows)),
+                regen_batches_used=batch_idx,
+                candidates_evaluated_total=eval_count,
+                candidate_rejections=tuple(rejected),
+            )
+            return result, {
+                "gate_reason": "",
+                "regen_batches_used": batch_idx,
+                "candidates_evaluated_total": eval_count,
+                "candidate_rejections": list(rejected),
+            }
+    return None, {
+        "gate_reason": "no_high_confidence_new_target",
+        "regen_batches_used": _simple_max_regen_batches(),
+        "candidates_evaluated_total": eval_count,
+        "candidate_rejections": list(rejected),
+    }
+
+
+def _build_draft_simple(
+    *,
+    company: str,
+    target: str,
+    evidence_rows: list[EvidenceRow],
+    funding_rows: list[EvidenceRow],
+) -> DraftResult:
+    funding = _funding_from_rows(target, _filter_rows_for_target(target=target, rows=funding_rows))
+    claims = _claims_from_rows(_dedupe_rows(evidence_rows), limit=8)
+    prompt = json.dumps(
+        {
+            "company": company,
+            "target": target,
+            "claims": claims,
+            "funding": {
+                "total_raised": funding.total_raised,
+                "latest_round": funding.latest_round,
+                "latest_round_date": funding.latest_round_date,
+                "backers": list(funding.backers),
+                "warning": LOW_CONF_WARNING if funding.verification_status == "weak" else "",
+            },
+            "output_sections": [
+                "Thesis",
+                "What the target does",
+                "Why it’s a fit for portfolio company",
+                "Risks",
+                "Funding history and backers",
+            ],
+        },
+        indent=2,
+    )
+    generated = _chat_completion(
+        prompt=prompt,
+        system="Write concise natural markdown with exactly the required five sections and short bullets.",
+        temperature=0.2,
+        max_tokens=700,
+    )
+    text = generated or _deterministic_draft(company=company, target=target, funding=funding, repitch_note=None)
+    ok, reasons = _quality_gate(text, source_rows=evidence_rows)
+    if ok:
+        return DraftResult(
+            text=text,
+            generation_mode="web_synth",
+            quality_fail_codes=tuple(),
+            memory_rewrite_used=False,
+        )
+    return DraftResult(
+        text=_deterministic_draft(company=company, target=target, funding=funding, repitch_note=None),
+        generation_mode="memory_rewrite",
+        quality_fail_codes=tuple(reasons),
+        memory_rewrite_used=True,
+    )
 
 
 def _verify_target_candidate(*, company: str, target: str) -> tuple[bool, list[EvidenceRow], str, float]:
@@ -2595,6 +2865,119 @@ def _process_company(
         "format_version": BOARD_SEAT_FORMAT_VERSION,
     }
 
+    if _simple_mode_enabled():
+        selection, selection_meta = _select_target_simple(
+            company=company,
+            store=store,
+            now_utc=now_utc,
+            run_date_local=run_date_local,
+        )
+        if selection is None:
+            payload = {
+                **result_base,
+                "status": "skipped",
+                "reason": "no_high_confidence_new_target",
+                "gate_reason": str(selection_meta.get("gate_reason") or "entity_unverified"),
+                "selection_mode": "simple_llm",
+                "regen_batches_used": int(selection_meta.get("regen_batches_used") or 0),
+                "candidates_evaluated_total": int(selection_meta.get("candidates_evaluated_total") or 0),
+                "candidate_rejections": list(selection_meta.get("candidate_rejections") or []),
+                "final_decision_path": "exhausted_no_valid_target",
+                "delivery_mode_applied": "skip",
+            }
+            store.record_run(payload)
+            return "skipped", payload
+
+        funding_rows, search_notes = _collect_web_rows(_search_queries_for_funding(selection.target))
+        draft = _build_draft_simple(
+            company=company,
+            target=selection.target,
+            evidence_rows=list(selection.evidence_rows),
+            funding_rows=funding_rows,
+        )
+        funding = _funding_from_rows(selection.target, _filter_rows_for_target(target=selection.target, rows=funding_rows))
+        posted_at_utc = _utc_now_iso()
+        message_ts: str | None = None
+        sources_thread_ts: str | None = None
+        post_error: str | None = None
+        effective_channel_ref = channel.channel_id or channel.channel_ref
+        posted_channel_id = channel.channel_id
+
+        if dry_run:
+            text = draft.text
+        else:
+            channel_id, ts, err = _post_to_slack(channel_ref=effective_channel_ref, text=draft.text)
+            if err:
+                post_error = err
+            else:
+                message_ts = ts
+                posted_channel_id = channel_id or posted_channel_id
+                effective_channel_ref = posted_channel_id or channel.channel_ref
+                if _sources_in_thread():
+                    thread_rows = _dedupe_rows(list(selection.evidence_rows) + list(selection.source_rows) + funding_rows)
+                    _, src_ts, _ = _post_to_slack(
+                        channel_ref=effective_channel_ref,
+                        text=_render_sources_thread(thread_rows),
+                        thread_ts=message_ts,
+                    )
+                    sources_thread_ts = src_ts
+            text = draft.text
+
+        if post_error:
+            payload = {
+                **result_base,
+                "status": "skipped",
+                "reason": post_error,
+                "gate_reason": "delivery_failed",
+                "target": selection.target,
+                "target_key": selection.target_key,
+                "selection_mode": "simple_llm",
+                "regen_batches_used": selection.regen_batches_used,
+                "candidates_evaluated_total": selection.candidates_evaluated_total,
+                "candidate_rejections": list(selection.candidate_rejections),
+                "final_decision_path": "exhausted_no_valid_target",
+                "delivery_mode_applied": "skip",
+            }
+            store.record_run(payload)
+            return "skipped", payload
+
+        store.record_target(
+            company=company,
+            target=selection.target,
+            channel_ref=channel.channel_ref,
+            channel_id=posted_channel_id,
+            source="board_seat_v1",
+            posted_at_utc=posted_at_utc,
+            run_date_local=run_date_local,
+            message_ts=message_ts,
+        )
+        payload = {
+            **result_base,
+            "status": "sent",
+            "channel_id": posted_channel_id,
+            "target": selection.target,
+            "target_key": selection.target_key,
+            "funding_confidence": funding.verification_status,
+            "generation_mode": draft.generation_mode,
+            "quality_fail_codes": list(draft.quality_fail_codes),
+            "memory_rewrite_used": draft.memory_rewrite_used,
+            "selection_mode": "simple_llm",
+            "regen_batches_used": selection.regen_batches_used,
+            "candidates_evaluated_total": selection.candidates_evaluated_total,
+            "candidate_rejections": list(selection.candidate_rejections),
+            "final_decision_path": "sent",
+            "reason": "",
+            "gate_reason": "",
+            "message_ts": message_ts,
+            "sources_thread_ts": sources_thread_ts,
+            "posted_at_utc": posted_at_utc,
+            "search_notes": search_notes,
+            "preview": text if dry_run else "",
+            "delivery_mode_applied": "dry_run_preview" if dry_run else "post",
+        }
+        store.record_run(payload)
+        return "sent", payload
+
     rows, search_notes = _collect_web_rows(_search_queries_for_company(company))
     if not rows and not _llm_first_mode_enabled():
         payload = {
@@ -2886,6 +3269,10 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
         "sent": [],
         "skipped": [],
         "search_order": _search_order(),
+        "simple_mode": _simple_mode_enabled(),
+        "simple_batch_size": _simple_batch_size(),
+        "simple_max_regen_batches": _simple_max_regen_batches(),
+        "simple_max_evals": _simple_max_evals(),
         "llm_first_mode": _llm_first_mode_enabled(),
         "web_candidate_enrichment": _web_candidate_enrichment_enabled(),
         "llm_batch_size": _llm_batch_size(),
@@ -3035,6 +3422,10 @@ def status() -> dict[str, Any]:
         "channel_discovery_mode": _channel_discovery_mode(),
         "channel_types": _channel_types(),
         "search_order": _search_order(),
+        "simple_mode": _simple_mode_enabled(),
+        "simple_batch_size": _simple_batch_size(),
+        "simple_max_regen_batches": _simple_max_regen_batches(),
+        "simple_max_evals": _simple_max_evals(),
         "llm_first_mode": _llm_first_mode_enabled(),
         "web_candidate_enrichment": _web_candidate_enrichment_enabled(),
         "llm_batch_size": _llm_batch_size(),

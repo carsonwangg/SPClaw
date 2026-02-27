@@ -2988,3 +2988,21 @@ Then confirm bot returns:
 - Added audit table:
   - `board_seat_candidate_decisions` (accepted/rejected decision rows with reason and batch/eval indexes).
 - Added schema migrations for legacy DBs to include new `board_seat_runs` telemetry columns.
+
+## Update (2026-02-27, board-seat simplified llm-first mode)
+- Added optional simplified pipeline behind `COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE`.
+- Simple mode behavior:
+  - target selection is LLM-generated in batches (`_llm_generate_candidate_batch`) with strict JSON schema.
+  - only two hard gates enforced: real company sanity via lightweight web check + 20-day no-repeat lock.
+  - regeneration continues until configured caps, then channel is skipped.
+- New simple-mode env knobs:
+  - `COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE`
+  - `COATUE_CLAW_BOARD_SEAT_SIMPLE_BATCH_SIZE`
+  - `COATUE_CLAW_BOARD_SEAT_SIMPLE_MAX_REGEN_BATCHES`
+  - `COATUE_CLAW_BOARD_SEAT_SIMPLE_MAX_EVALS`
+- Run payload now includes simple-mode fields when active:
+  - `selection_mode=simple_llm`
+  - `regen_batches_used`
+  - `candidates_evaluated_total`
+  - `candidate_rejections`
+  - `final_decision_path`
