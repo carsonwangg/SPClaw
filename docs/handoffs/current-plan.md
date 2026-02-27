@@ -1416,3 +1416,11 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Runtime: recap scheduler service com.coatueclaw.market-daily-earnings-recap loaded.
 - DB checks confirmed slot separation between earnings_recap_manual and earnings_recap.
 - Scheduled-path dry-run result in this window was no_reporters.
+
+## Market Daily - Article Context Grounding Deploy (2026-02-27)
+- Deployed commit d817abc (main commit d0b440f) to add richer article context for LLM relevance + drafting.
+- Test results: market_daily 81 passed; launchd_runtime 10 passed (venv).
+- Runtime health: openclaw restart complete; slack probe healthy.
+- Status keys present: article_context_enabled, article_context_timeout_ms, article_context_max_chars, article_context_limit; relevance_mode remains llm_first.
+- Dry-run + live smoke executed; artifact generated and posted.
+- NFLX debug close shows contextual synthesis fields active, with remaining improvement opportunity in source-anchor quality selection.

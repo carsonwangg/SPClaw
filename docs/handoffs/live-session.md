@@ -2920,3 +2920,11 @@ Then confirm bot returns:
 - Runtime: openclaw restart and slack status probe healthy; 24x7 status shows com.coatueclaw.market-daily-earnings-recap loaded.
 - Slot check: outside-window manual run wrote slot earnings_recap_manual.
 - Scheduled-path run used slot earnings_recap and result was no_reporters, not blocked by manual-slot reuse.
+
+## Update (2026-02-27, MD article-context grounding deploy)
+- Integrated commit d817abc on main as d0b440f.
+- Validation: tests/test_market_daily.py 81 passed; tests/test_launchd_runtime.py 10 passed (venv python).
+- Runtime restarted; Slack status probe healthy after restart transient.
+- market_daily status confirms article_context_enabled/article_context_timeout_ms/article_context_max_chars/article_context_limit plus relevance_mode=llm_first.
+- Dry-run artifact: /opt/coatue-claw-data/artifacts/market-daily/md-open-20260227-174225.md.
+- Smoke: md now force posted via run-once; debug-catalyst NFLX close shows richer context fields but anchor still selected from web explainer set (TipRanks/247/Invezz), so article-context quality tuning remains follow-up.
