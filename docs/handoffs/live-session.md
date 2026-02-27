@@ -2951,3 +2951,15 @@ Then confirm bot returns:
 - market_daily status confirms article_context_enabled/article_context_timeout_ms/article_context_max_chars/article_context_limit plus relevance_mode=llm_first.
 - Dry-run artifact: /opt/coatue-claw-data/artifacts/market-daily/md-open-20260227-174225.md.
 - Smoke: md now force posted via run-once; debug-catalyst NFLX close shows richer context fields but anchor still selected from web explainer set (TipRanks/247/Invezz), so article-context quality tuning remains follow-up.
+
+## Update (2026-02-27, chart-day `$` render hardening)
+- Fixed chart-day render-path crashes caused by cashtags (`$AXP`, `$JPM`, etc.) being interpreted as matplotlib math syntax.
+- Added `_matplotlib_safe_text(...)` and applied it to all headline/chart-label/takeaway/source text writes in both renderers:
+  - `_render_source_snip_card`
+  - `_render_chart_of_day_style`
+  - `_fit_headline_text`, `_fit_chart_label_text`, `_fit_takeaway_text`
+- Kept source URL text intact via `preserve_urls=True` in source footer rendering.
+- Added regression test:
+  - `test_render_source_snip_card_handles_cashtag_copy`
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `89 passed`.

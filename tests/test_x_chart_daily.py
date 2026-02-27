@@ -2475,6 +2475,51 @@ def test_render_source_snip_card_wraps_takeaway_to_two_lines(monkeypatch, tmp_pa
     assert int(qa.get("takeaway_wrapped_line_count", 0)) <= 2
 
 
+def test_render_source_snip_card_handles_cashtag_copy(monkeypatch, tmp_path: Path) -> None:
+    try:
+        import numpy as np
+        import matplotlib.pyplot as plt
+    except Exception:
+        return
+
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    source_path = tmp_path / "source-cashtag.png"
+    plt.imsave(str(source_path), np.ones((220, 420, 3), dtype=float))
+
+    candidate = Candidate(
+        candidate_key="x:cashtag-safe",
+        source_type="x",
+        source_id="fiscal_AI",
+        author="@fiscal_AI",
+        title="Financials outperform as $AXP and $JPM trend higher.",
+        text="Financials outperform as $AXP and $JPM trend higher with broad participation.",
+        url="https://x.com/fiscal_AI/status/2026405287058657719",
+        image_url="https://example.com/chart.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=280,
+        source_priority=1.6,
+        score=88.0,
+    )
+    style_draft = StyleDraft(
+        headline="Financials outperform as $AXP and $JPM trend higher.",
+        chart_label="Financials outperform as $AXP and $JPM trend higher.",
+        takeaway="Financials outperform as $AXP and $JPM move higher while breadth improves.",
+        why_now="Clear market breadth shift.",
+        iteration=1,
+        checks={"takeaway_single_sentence": True, "title_takeaway_role_ok": True},
+        score=8.0,
+    )
+
+    out_path, rendered_headline = _render_source_snip_card(
+        candidate=candidate,
+        slot_key="manual-cashtag-safe",
+        style_draft=style_draft,
+        source_path=source_path,
+    )
+    assert out_path.exists()
+    assert rendered_headline == "Financials outperform as $AXP and $JPM trend higher."
+
+
 def test_render_chart_rejects_screenshot_fallback_even_if_env_disabled(monkeypatch, tmp_path: Path) -> None:
     import numpy as np
     import pytest

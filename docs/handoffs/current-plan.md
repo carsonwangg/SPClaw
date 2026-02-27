@@ -1433,3 +1433,13 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Status keys present: article_context_enabled, article_context_timeout_ms, article_context_max_chars, article_context_limit; relevance_mode remains llm_first.
 - Dry-run + live smoke executed; artifact generated and posted.
 - NFLX debug close shows contextual synthesis fields active, with remaining improvement opportunity in source-anchor quality selection.
+
+## Chart Day - Cashtag Render Stability (2026-02-27)
+- Status: implemented on `codex/agent-chart-day`, validated.
+- Completed in this update:
+  - Added deterministic matplotlib-safe text sanitizer for render copy, escaping `$` to prevent accidental mathtext parsing.
+  - Applied sanitizer across headline, chart label, takeaway, and source line rendering in both chart-day image render paths.
+  - Preserved URL visibility in source footer via URL-preserving sanitizer mode.
+  - Added regression test for multi-cashtag copy (`$AXP`, `$JPM`) to ensure render no longer falls back/crashes.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `89 passed`.

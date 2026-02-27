@@ -799,6 +799,23 @@ def _normalize_render_text(text: str) -> str:
     return cleaned
 
 
+def _matplotlib_safe_text(text: str, *, preserve_urls: bool = False) -> str:
+    """Return text that won't trigger matplotlib math parsing."""
+    if preserve_urls:
+        cleaned = text or ""
+        cleaned = cleaned.replace("\u2019", "'").replace("\u2018", "'").replace("\u201c", '"').replace("\u201d", '"')
+        cleaned = cleaned.replace("\u2013", "-").replace("\u2014", "-")
+        cleaned = unicodedata.normalize("NFKD", cleaned)
+        cleaned = cleaned.encode("ascii", "ignore").decode("ascii")
+        cleaned = cleaned.replace("\ufffd", "")
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    else:
+        cleaned = _normalize_render_text(text)
+    if not cleaned:
+        return ""
+    return cleaned.replace("$", r"\$")
+
+
 def _shorten_without_ellipsis(text: str, *, max_chars: int) -> str:
     cleaned = _normalize_render_text(text).replace("...", " ").strip(". ")
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
@@ -4135,7 +4152,7 @@ def _fit_headline_text(
         for line_cap in range(1, max_lines + 1):
             wrapped, line_count = _wrap_text_to_max_lines(normalized, max_lines=line_cap)
             headline_obj.set_fontsize(float(font_size))
-            headline_obj.set_text(wrapped)
+            headline_obj.set_text(_matplotlib_safe_text(wrapped))
             fig.canvas.draw()
             renderer = fig.canvas.get_renderer()
             fig_bbox = fig.bbox
@@ -4146,7 +4163,7 @@ def _fit_headline_text(
 
     wrapped, line_count = _wrap_text_to_max_lines(normalized, max_lines=max_lines)
     headline_obj.set_fontsize(float(min_font_size))
-    headline_obj.set_text(wrapped)
+    headline_obj.set_text(_matplotlib_safe_text(wrapped))
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
     fig_bbox = fig.bbox
@@ -4180,7 +4197,7 @@ def _fit_takeaway_text(
         for line_cap in range(1, max_lines + 1):
             wrapped, line_count = _wrap_text_to_max_lines(normalized, max_lines=line_cap)
             takeaway_obj.set_fontsize(float(font_size))
-            takeaway_obj.set_text(f"Takeaway: {wrapped}")
+            takeaway_obj.set_text(_matplotlib_safe_text(f"Takeaway: {wrapped}"))
             fig.canvas.draw()
             renderer = fig.canvas.get_renderer()
             fig_bbox = fig.bbox
@@ -4191,7 +4208,7 @@ def _fit_takeaway_text(
 
     wrapped, line_count = _wrap_text_to_max_lines(normalized, max_lines=max_lines)
     takeaway_obj.set_fontsize(float(min_font_size))
-    takeaway_obj.set_text(f"Takeaway: {wrapped}")
+    takeaway_obj.set_text(_matplotlib_safe_text(f"Takeaway: {wrapped}"))
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
     fig_bbox = fig.bbox
@@ -4222,7 +4239,7 @@ def _fit_chart_label_text(
 
     for font_size in font_sizes:
         chart_label_obj.set_fontsize(float(font_size))
-        chart_label_obj.set_text(normalized)
+        chart_label_obj.set_text(_matplotlib_safe_text(normalized))
         fig.canvas.draw()
         renderer = fig.canvas.get_renderer()
         fig_bbox = fig.bbox
@@ -4231,7 +4248,7 @@ def _fit_chart_label_text(
         if bb.x1 <= max_x:
             return float(font_size), True
     chart_label_obj.set_fontsize(float(min_font_size))
-    chart_label_obj.set_text(normalized)
+    chart_label_obj.set_text(_matplotlib_safe_text(normalized))
     return float(min_font_size), False
 
 
@@ -4268,7 +4285,7 @@ def _render_source_snip_card(
     headline_obj = fig.text(
         0.05,
         0.935,
-        headline_text,
+        _matplotlib_safe_text(headline_text),
         ha="left",
         va="center",
         fontsize=28,
@@ -4310,7 +4327,7 @@ def _render_source_snip_card(
     takeaway_obj = fig.text(
         0.05,
         0.115,
-        f"Takeaway: {takeaway_text}",
+        _matplotlib_safe_text(f"Takeaway: {takeaway_text}"),
         fontsize=10.8,
         color="#1F2430",
         family=COATUE_FONT_FAMILY,
@@ -4343,7 +4360,7 @@ def _render_source_snip_card(
     fig.text(
         0.05,
         0.045,
-        f"Source: {candidate.url}",
+        _matplotlib_safe_text(f"Source: {candidate.url}", preserve_urls=True),
         fontsize=9.2,
         color="#4B5563",
         family=COATUE_FONT_FAMILY,
@@ -4725,7 +4742,7 @@ def _render_chart_of_day_style(
     headline_obj = fig.text(
         0.05,
         0.935,
-        headline_text,
+        _matplotlib_safe_text(headline_text),
         ha="left",
         va="center",
         fontsize=27,
@@ -4757,7 +4774,7 @@ def _render_chart_of_day_style(
     chart_label_obj = fig.text(
         0.05,
         chart_label_y,
-        chart_label_text,
+        _matplotlib_safe_text(chart_label_text),
         ha="left",
         va="center",
         fontsize=10.8,
@@ -4908,7 +4925,16 @@ def _render_chart_of_day_style(
             qa_sink["y_axis_labels_present"] = len(y_non_empty) >= 3
 
     takeaway_text = _finalize_takeaway_sentence(style_draft.takeaway) or _normalize_render_text(style_draft.takeaway)
-    takeaway_obj = fig.text(0.05, 0.118, f"Takeaway: {takeaway_text}", fontsize=10.6, color="#1F2430", family=COATUE_FONT_FAMILY, weight="bold", va="top")
+    takeaway_obj = fig.text(
+        0.05,
+        0.118,
+        _matplotlib_safe_text(f"Takeaway: {takeaway_text}"),
+        fontsize=10.6,
+        color="#1F2430",
+        family=COATUE_FONT_FAMILY,
+        weight="bold",
+        va="top",
+    )
     _, takeaway_line_count, takeaway_fits = _fit_takeaway_text(
         fig=fig,
         takeaway_obj=takeaway_obj,
@@ -4931,7 +4957,14 @@ def _render_chart_of_day_style(
         raise XChartError("Takeaway layout overflow after 2-line wrap and rewrite.")
     if qa_sink is not None:
         qa_sink["takeaway_wrapped_line_count"] = int(takeaway_line_count)
-    source_obj = fig.text(0.05, 0.045, f"Source: {candidate.url}", fontsize=9, color="#4B5563", family=COATUE_FONT_FAMILY)
+    source_obj = fig.text(
+        0.05,
+        0.045,
+        _matplotlib_safe_text(f"Source: {candidate.url}", preserve_urls=True),
+        fontsize=9,
+        color="#4B5563",
+        family=COATUE_FONT_FAMILY,
+    )
 
     # Prevent overlapping labels by shrinking header/plot region if needed.
     for _ in range(4):
