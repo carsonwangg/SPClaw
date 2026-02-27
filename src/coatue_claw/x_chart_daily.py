@@ -625,6 +625,8 @@ class StyleDraft:
     score: float
     copy_rewrite_applied: bool = False
     copy_rewrite_reason: str | None = None
+    llm_copy_status: str = "ok"
+    llm_warning_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1397,7 +1399,7 @@ def _title_takeaway_role_ok(*, headline: str, takeaway: str) -> bool:
     t = _normalize_render_text(takeaway)
     if not h or not t:
         return False
-    return len(h) < len(t)
+    return h.lower() != t.lower()
 
 
 def _compact_headline_sentence(text: str, *, source_sentence: str) -> str:
@@ -2308,67 +2310,26 @@ def _sanitize_style_copy(
     chart_label: str,
     takeaway: str,
 ) -> tuple[str, str, str, bool, str | None, bool]:
-    override = _keyword_style_override(candidate)
-    rewrite_applied = False
-    rewrite_reason: str | None = None
-    if override is not None:
-        headline, chart_label, takeaway = override
-
-    title_takeaway_role_swapped = False
-    headline = _normalize_headline_seed(headline)
-    # chart_label is synchronized to headline later; keep local variable for interface stability.
-    chart_label = _normalize_headline_seed(chart_label)
-    takeaway = _normalize_takeaway_seed(takeaway)
-
     source_text = _normalize_render_text(candidate.text or candidate.title)
     source_text = re.sub(r"^@\w+:\s*", "", _strip_news_prefix(source_text), flags=re.IGNORECASE).strip()
-    source_sentence = _extract_first_sentence(source_text or candidate.title)
-    need_hint = _is_low_signal_phrase(headline) or _is_low_signal_phrase(takeaway)
-    chart_hint = _extract_chart_title_hint_via_vision(candidate) if need_hint else None
-    merged_hint = _normalize_render_text(f"{chart_hint or ''} {source_text}").lower()
+    source_title = _normalize_render_text(candidate.title)
+    source_title = re.sub(r"^@\w+:\s*", "", _strip_news_prefix(source_title), flags=re.IGNORECASE).strip()
 
-    if _is_low_signal_phrase(takeaway):
-        merged_context = _normalize_render_text(f"{headline} {merged_hint}").lower()
-        if "tariff" in merged_context or "customs" in merged_context or "duties" in merged_context:
-            takeaway = "US customs-duty collections just hit a new high."
-        elif chart_hint:
-            takeaway = _normalize_takeaway_seed(_strip_news_prefix(chart_hint))
-        else:
-            core = _normalize_takeaway_seed(source_text)
-            takeaway = core or "US data trend moved sharply higher."
-        takeaway = _normalize_takeaway_seed(takeaway)
-    subject, verb = _extract_subject_and_verb(_extract_first_sentence(source_text or candidate.title))
-    mode_hint = _mode_hint_from_text(candidate)
-    takeaway_tail_fragment = not _tail_complete(takeaway)
-    takeaway_clause_fragment = _has_unjoined_clause_boundary(takeaway)
+    normalized_headline = _normalize_render_text(headline)
+    if not normalized_headline:
+        normalized_headline = source_title or source_text
+    normalized_headline = _shorten_without_ellipsis(normalized_headline, max_chars=160) or "US chart context"
 
-    if not headline:
-        headline = _normalize_headline_seed(source_sentence or source_text or candidate.title)
+    normalized_takeaway = _normalize_render_text(takeaway)
+    if not normalized_takeaway:
+        normalized_takeaway = source_text or source_title or normalized_headline
+    normalized_takeaway = _shorten_without_ellipsis(normalized_takeaway, max_chars=240) or normalized_headline
+    if normalized_takeaway[-1] not in ".!?":
+        normalized_takeaway = f"{normalized_takeaway}."
 
-    finalized_takeaway = _finalize_takeaway_sentence(takeaway)
-    if not finalized_takeaway:
-        rewrite_applied = True
-        rewritten_takeaway, reason = _rewrite_takeaway_from_candidate(candidate)
-        finalized_takeaway = _finalize_takeaway_sentence(rewritten_takeaway)
-        if finalized_takeaway:
-            if rewrite_reason is None:
-                if takeaway_tail_fragment:
-                    rewrite_reason = "takeaway_tail_fragment_rewritten"
-                else:
-                    rewrite_reason = reason
-        else:
-            finalized_takeaway = "US trend is shifting quickly."
-            if rewrite_reason is None:
-                rewrite_reason = "safe_fallback"
-    elif takeaway_clause_fragment and rewrite_reason is None:
-        rewrite_applied = True
-        rewrite_reason = "takeaway_clause_rewritten"
-    takeaway = finalized_takeaway
-    title_takeaway_role_swapped = False
-    chart_label = headline
-    if rewrite_applied and rewrite_reason is None:
-        rewrite_reason = "copy_rewrite"
-    return headline, chart_label, takeaway, rewrite_applied, rewrite_reason, title_takeaway_role_swapped
+    # chart_label is synchronized to headline by design.
+    normalized_chart_label = normalized_headline
+    return normalized_headline, normalized_chart_label, normalized_takeaway, False, None, False
 
 
 def _employees_robots_takeaway(sentence: str) -> str:
@@ -2395,51 +2356,79 @@ def _require_reconstruction() -> bool:
     return raw not in {"0", "false", "off", "no"}
 
 
-def _synthesize_style_via_llm(candidate: Candidate) -> dict[str, str] | None:
+def _raw_tweet_copy_from_candidate(candidate: Candidate) -> tuple[str, str]:
+    source_text = _normalize_render_text(candidate.text or candidate.title)
+    source_text = re.sub(r"^@\w+:\s*", "", _strip_news_prefix(source_text), flags=re.IGNORECASE).strip()
+    source_title = _normalize_render_text(candidate.title)
+    source_title = re.sub(r"^@\w+:\s*", "", _strip_news_prefix(source_title), flags=re.IGNORECASE).strip()
+    headline = _shorten_without_ellipsis(source_text or source_title, max_chars=160) or "US chart context"
+    takeaway = _shorten_without_ellipsis(source_text or source_title or headline, max_chars=240) or headline
+    if takeaway[-1] not in ".!?":
+        takeaway = f"{takeaway}."
+    return headline, takeaway
+
+
+def _synthesize_style_via_llm(candidate: Candidate) -> tuple[dict[str, str] | None, str | None]:
     if not _llm_title_enabled():
-        return None
+        return None, None
     if OpenAI is None:
-        return None
+        return None, None
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
-        return None
+        return None, None
     text = _normalize_render_text(candidate.text)
-    if not text:
-        return None
+    title = _normalize_render_text(candidate.title)
+    if not text and not title:
+        return None, "missing_fields"
     model = os.environ.get("COATUE_CLAW_X_CHART_TITLE_MODEL", "gpt-5.2-chat-latest").strip() or "gpt-5.2-chat-latest"
-    prompt = (
-        "Create Coatue Chart of the Day copy from this tweet.\n"
-        "Return strict JSON with keys: headline, chart_label, takeaway.\n"
-        "Use the tweet text as your source context.\n"
-        f"Tweet text: {text}\n"
-    )
+    chart_hint = _extract_chart_title_hint_via_vision(candidate)
+    prompt = [
+        "Using the tweet and chart context, generate an encompassing Coatue Chart of the Day style title.",
+        "Using the same context, generate a key takeaway sentence.",
+        "Avoid copying the tweet wording verbatim; synthesize the message.",
+        "Return strict JSON with keys: headline, chart_label, takeaway.",
+        f"Tweet title context: {title or 'n/a'}",
+        f"Tweet text context: {text or 'n/a'}",
+        f"Chart hint context: {chart_hint or 'n/a'}",
+    ]
+    image_block: dict[str, Any] | None = None
+    image_payload, image_ctype = _fetch_image_bytes(candidate.image_url)
+    if image_payload:
+        image_data_url = f"data:{image_ctype};base64,{base64.b64encode(image_payload).decode('ascii')}"
+        image_block = {"type": "image_url", "image_url": {"url": image_data_url}}
     try:
         client = OpenAI(api_key=api_key)
+        user_content: list[dict[str, Any]] = [{"type": "text", "text": "\n".join(prompt)}]
+        if image_block is not None:
+            user_content.append(image_block)
         response = client.chat.completions.create(
             model=model,
             temperature=0.2,
             response_format={"type": "json_object"},
             messages=[
-                {"role": "system", "content": "You write concise institutional chart titles."},
-                {"role": "user", "content": prompt},
+                {"role": "system", "content": "You write concise buy-side chart titles and takeaways."},
+                {"role": "user", "content": user_content},
             ],
         )
         raw = ""
         if response.choices and response.choices[0].message:
             raw = str(response.choices[0].message.content or "").strip()
         if not raw:
-            return None
-        payload = json.loads(raw)
+            return None, "missing_fields"
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return None, "invalid_json"
     except Exception as exc:
         logger.debug("LLM style synthesis failed: %s", exc)
-        return None
+        return None, "api_error"
 
     headline = _normalize_render_text(str(payload.get("headline") or ""))
-    chart_label = _shorten_without_ellipsis(str(payload.get("chart_label") or ""), max_chars=62)
+    chart_label = _normalize_render_text(str(payload.get("chart_label") or ""))
     takeaway = _normalize_render_text(str(payload.get("takeaway") or ""))
     if not headline or not chart_label or not takeaway:
-        return None
-    return {"headline": headline, "chart_label": chart_label, "takeaway": takeaway}
+        return None, "missing_fields"
+    return {"headline": headline, "chart_label": chart_label, "takeaway": takeaway}, None
 
 
 def _is_us_relevant_post(text: str) -> bool:
@@ -3840,6 +3829,48 @@ def _post_no_candidate_message_to_slack(
     raise XChartError(f"Slack notice post failed for all available tokens: {last_error or 'unknown_error'}")
 
 
+def _post_llm_copy_warning_to_slack(
+    *,
+    channel: str,
+    convention_name: str,
+    slot_key: str,
+    candidate: Candidate,
+    reason: str,
+) -> dict[str, Any]:
+    from slack_sdk import WebClient
+    from slack_sdk.errors import SlackApiError
+
+    tokens = _slack_tokens()
+    reason_label = _normalize_render_text(reason) or "api_error"
+    text = "\n".join(
+        [
+            f"*{_normalize_render_text(convention_name)}*",
+            f"Warning: LLM copy generation error (`{reason_label}`); using raw tweet fallback copy.",
+            f"Slot: `{slot_key}`",
+            f"Source: {candidate.url}",
+        ]
+    )
+    last_error: str | None = None
+    for token in tokens:
+        client = WebClient(token=token)
+        try:
+            response = client.chat_postMessage(channel=channel, text=text)
+            return {
+                "ok": bool(response.get("ok")),
+                "channel": channel,
+                "ts": response.get("ts"),
+                "reason": reason_label,
+            }
+        except SlackApiError as exc:
+            err = str(exc.response.get("error", "")) if exc.response is not None else str(exc)
+            last_error = err or str(exc)
+            if err in {"account_inactive", "invalid_auth", "token_revoked"}:
+                logger.warning("x-chart slack token rejected (%s), trying next token if available", err)
+                continue
+            raise
+    raise XChartError(f"Slack warning post failed for all available tokens: {last_error or 'unknown_error'}")
+
+
 def _was_candidate_posted_ever(*, store: Any, candidate_key: str) -> bool:
     posted_ever = getattr(store, "was_item_posted", None)
     if callable(posted_ever):
@@ -3941,36 +3972,31 @@ def _build_style_draft(candidate: Candidate, *, iteration: int) -> StyleDraft:
     first_sentence = _extract_first_sentence(body_text or title_text)
     title_core = re.sub(r"^@\w+:\s*", "", title_text).strip()
     first_core = re.sub(r"^@\w+:\s*", "", first_sentence).strip()
-    mode_hint = _mode_hint_from_text(candidate)
-    subject, verb = _extract_subject_and_verb(first_core or title_core or title_text)
-    chart_label = _synthesize_chart_label(subject=subject, sentence=first_core or title_core or title_text, mode_hint=mode_hint)
-    narrative = _synthesize_narrative_title(subject=subject, verb=verb, sentence=first_core or title_core or title_text)
-    is_employee_robot = _is_employees_robots_chart(candidate)
+    llm_copy_status = "ok"
+    llm_warning_reason: str | None = None
 
-    llm_style = _synthesize_style_via_llm(candidate) if iteration == 1 else None
+    llm_style_obj: Any = _synthesize_style_via_llm(candidate) if iteration == 1 else (None, None)
+    llm_style: dict[str, str] | None = None
+    if isinstance(llm_style_obj, tuple):
+        llm_style, llm_warning_reason = llm_style_obj
+    elif isinstance(llm_style_obj, dict):
+        llm_style = llm_style_obj
+        llm_warning_reason = None
 
-    if iteration == 1 and llm_style:
-        headline = _normalize_headline_seed(llm_style["headline"])
-        takeaway = _employees_robots_takeaway(first_core or body_text or title_text) if is_employee_robot else _normalize_takeaway_seed(llm_style["takeaway"])
-        why_now = "Narrative + technical label generated for feed readability."
-    elif iteration == 1:
-        headline = _normalize_headline_seed(narrative)
-        takeaway = _employees_robots_takeaway(first_core or body_text or title_text) if is_employee_robot else _normalize_takeaway_seed(first_core or body_text or title_core or title_text)
-        why_now = "Clear US trend; chart carries the story."
-    elif iteration == 2:
-        headline = _normalize_headline_seed(_synthesize_narrative_title(subject=subject, verb="", sentence=title_core or first_core or title_text))
-        takeaway = _normalize_takeaway_seed(first_core or body_text or title_core or title_text)
-        why_now = "Fast read in a feed."
+    if llm_style:
+        headline = _normalize_render_text(llm_style.get("headline") or "")
+        takeaway = _normalize_render_text(llm_style.get("takeaway") or "")
+        why_now = "LLM-generated title and takeaway from tweet + chart context."
     else:
-        anchor = _normalize_headline_seed(subject or first_core or title_core or title_text)
-        headline = anchor or "US trend is shifting."
-        takeaway = _normalize_takeaway_seed(first_core or body_text or title_core or title_text)
-        why_now = "Simple trend read."
+        headline, takeaway = _raw_tweet_copy_from_candidate(candidate)
+        if llm_warning_reason:
+            llm_copy_status = "warning_fallback"
+        why_now = "LLM copy unavailable; using raw tweet fallback."
 
     headline, chart_label, takeaway, rewrite_applied, rewrite_reason, role_swapped = _sanitize_style_copy(
         candidate=candidate,
         headline=headline or "US Trend Snapshot",
-        chart_label=chart_label or "Chart Context",
+        chart_label=headline or "Chart Context",
         takeaway=takeaway or "New US-facing data point with clear directional movement.",
     )
     chart_label = _normalize_render_text(headline)
@@ -3999,6 +4025,12 @@ def _build_style_draft(candidate: Candidate, *, iteration: int) -> StyleDraft:
         "graph_first_copy": len(combined.split()) <= 30,
     }
     score = float(sum(1.0 for passed in checks.values() if passed))
+    effective_rewrite_reason = rewrite_reason
+    effective_rewrite_applied = bool(rewrite_applied)
+    if llm_copy_status == "warning_fallback" and llm_warning_reason:
+        effective_rewrite_applied = True
+        if not effective_rewrite_reason:
+            effective_rewrite_reason = f"llm_{llm_warning_reason}_fallback"
     return StyleDraft(
         headline=_normalize_render_text(headline or "US trend is shifting."),
         chart_label=_normalize_render_text(chart_label or headline or "US trend is shifting."),
@@ -4007,39 +4039,25 @@ def _build_style_draft(candidate: Candidate, *, iteration: int) -> StyleDraft:
         iteration=iteration,
         checks=checks,
         score=score,
-        copy_rewrite_applied=rewrite_applied,
-        copy_rewrite_reason=rewrite_reason,
+        copy_rewrite_applied=effective_rewrite_applied,
+        copy_rewrite_reason=effective_rewrite_reason,
+        llm_copy_status=llm_copy_status,
+        llm_warning_reason=llm_warning_reason,
     )
 
 
 def _select_style_draft(candidate: Candidate, *, max_iterations: int = 3) -> StyleDraft:
-    best = _build_style_draft(candidate, iteration=1)
-    target_score = 6.0
-    if best.score >= target_score and best.checks.get("us_relevant", False):
-        return best
-    for iteration in range(2, max_iterations + 1):
-        draft = _build_style_draft(candidate, iteration=iteration)
-        if draft.score > best.score:
-            best = draft
-        if draft.score >= target_score and draft.checks.get("us_relevant", False):
-            return draft
-    return best
+    return _build_style_draft(candidate, iteration=1)
 
 
 def _style_copy_publish_issues(style_draft: StyleDraft) -> list[str]:
     issues: list[str] = []
-    if not _is_complete_sentence(style_draft.takeaway):
-        issues.append("takeaway_incomplete_sentence")
-    if not _is_single_sentence_takeaway(style_draft.takeaway):
-        issues.append("takeaway_not_single_sentence")
-    if _has_unjoined_clause_boundary(style_draft.takeaway):
-        issues.append("takeaway_clause_boundary_invalid")
-    if not _tail_complete(style_draft.takeaway):
-        issues.append("takeaway_tail_fragment")
-    if _is_degenerate_copy_value(style_draft.headline):
-        issues.append("headline_degenerate")
-    if _is_degenerate_copy_value(style_draft.chart_label):
-        issues.append("chart_label_degenerate")
+    if not _normalize_render_text(style_draft.headline):
+        issues.append("headline_empty")
+    if not _normalize_render_text(style_draft.takeaway):
+        issues.append("takeaway_empty")
+    if not _matplotlib_safe_text(style_draft.takeaway):
+        issues.append("takeaway_unrenderable")
     return issues
 
 
@@ -5150,6 +5168,8 @@ def _post_winner_to_slack(
                     "checks": style_draft.checks,
                     "copy_rewrite_applied": bool(style_draft.copy_rewrite_applied),
                     "copy_rewrite_reason": style_draft.copy_rewrite_reason,
+                    "llm_copy_status": style_draft.llm_copy_status,
+                    "llm_warning_reason": style_draft.llm_warning_reason,
                     "title_takeaway_role_swapped": bool(style_draft.checks.get("title_takeaway_role_swapped", False)),
                 },
                 "post_publish_review": review,
@@ -5252,6 +5272,9 @@ def run_chart_scout_once(
             "copy_rewrite_reason": None,
             "candidate_fallback_used": False,
             "title_takeaway_role_swapped": False,
+            "llm_copy_status": "ok",
+            "llm_warning_posted": False,
+            "llm_warning_reason": None,
             "now_local": now_local.isoformat(),
             "windows": windows_text,
             "candidates_scanned": len(all_candidates),
@@ -5288,6 +5311,9 @@ def run_chart_scout_once(
             "copy_rewrite_reason": None,
             "candidate_fallback_used": False,
             "title_takeaway_role_swapped": False,
+            "llm_copy_status": "ok",
+            "llm_warning_posted": False,
+            "llm_warning_reason": None,
             "candidates_scanned": len(all_candidates),
             "seed_candidates_count": seed_candidates_count,
             "open_search_candidates_count": open_search_candidates_count,
@@ -5328,6 +5354,9 @@ def run_chart_scout_once(
             "copy_rewrite_reason": None,
             "candidate_fallback_used": False,
             "title_takeaway_role_swapped": False,
+            "llm_copy_status": "ok",
+            "llm_warning_posted": False,
+            "llm_warning_reason": None,
             "candidates_scanned": len(all_candidates),
             "seed_candidates_count": seed_candidates_count,
             "open_search_candidates_count": open_search_candidates_count,
@@ -5395,6 +5424,9 @@ def run_chart_scout_once(
             "copy_rewrite_reason": None,
             "candidate_fallback_used": False,
             "title_takeaway_role_swapped": False,
+            "llm_copy_status": "ok",
+            "llm_warning_posted": False,
+            "llm_warning_reason": None,
             "candidates_scanned": len(all_candidates),
             "seed_candidates_count": seed_candidates_count,
             "open_search_candidates_count": open_search_candidates_count,
@@ -5412,16 +5444,16 @@ def run_chart_scout_once(
     copy_rewrite_applied = False
     copy_rewrite_reason: str | None = None
     title_takeaway_role_swapped = False
+    llm_copy_status = "ok"
+    llm_warning_posted = False
+    llm_warning_reason: str | None = None
     new_source_auto_added = False
     new_source_handle: str | None = None
 
     for idx, candidate in enumerate(candidate_order):
         draft = _select_style_draft(candidate)
         issues = _style_copy_publish_issues(draft)
-        low_signal_rewrite = draft.copy_rewrite_reason == "safe_fallback"
         if issues:
-            continue
-        if idx == 0 and low_signal_rewrite and len(candidate_order) > 1:
             continue
         winner = candidate
         style_draft = draft
@@ -5429,6 +5461,8 @@ def run_chart_scout_once(
         copy_rewrite_applied = bool(draft.copy_rewrite_applied)
         copy_rewrite_reason = draft.copy_rewrite_reason
         title_takeaway_role_swapped = bool(draft.checks.get("title_takeaway_role_swapped", False))
+        llm_copy_status = draft.llm_copy_status
+        llm_warning_reason = draft.llm_warning_reason
         break
 
     if winner is None or style_draft is None:
@@ -5464,6 +5498,9 @@ def run_chart_scout_once(
             "copy_rewrite_reason": top_draft.copy_rewrite_reason or "headline_unrecoverable",
             "candidate_fallback_used": False,
             "title_takeaway_role_swapped": bool(top_draft.checks.get("title_takeaway_role_swapped", False)),
+            "llm_copy_status": top_draft.llm_copy_status,
+            "llm_warning_posted": False,
+            "llm_warning_reason": top_draft.llm_warning_reason,
             "publish_issues": top_issues,
             "top_candidate": {
                 "source": f"{top_choice.source_type}:{top_choice.source_id}",
@@ -5517,6 +5554,8 @@ def run_chart_scout_once(
                 f"- copy_rewrite_applied: `{copy_rewrite_applied}`",
                 f"- copy_rewrite_reason: `{copy_rewrite_reason or 'none'}`",
                 f"- title_takeaway_role_swapped: `{title_takeaway_role_swapped}`",
+                f"- llm_copy_status: `{llm_copy_status}`",
+                f"- llm_warning_reason: `{llm_warning_reason or 'none'}`",
                 "",
                 "## Notes",
                 _normalize_render_text(winner.text),
@@ -5567,6 +5606,9 @@ def run_chart_scout_once(
             "copy_rewrite_reason": copy_rewrite_reason,
             "candidate_fallback_used": candidate_fallback_used,
             "title_takeaway_role_swapped": title_takeaway_role_swapped,
+            "llm_copy_status": llm_copy_status,
+            "llm_warning_posted": False,
+            "llm_warning_reason": llm_warning_reason,
             "winner": {
                 "source": f"{winner.source_type}:{winner.source_id}",
                 "author": winner.author,
@@ -5586,6 +5628,18 @@ def run_chart_scout_once(
         }
 
     channel = (channel_override or "").strip() or _slack_channel()
+    if llm_copy_status == "warning_fallback" and llm_warning_reason:
+        try:
+            warning = _post_llm_copy_warning_to_slack(
+                channel=channel,
+                convention_name=convention_name,
+                slot_key=slot_key,
+                candidate=winner,
+                reason=llm_warning_reason,
+            )
+            llm_warning_posted = bool(warning.get("ok"))
+        except Exception as exc:
+            logger.warning("llm-copy warning post failed (continuing with fallback copy): %s", exc)
     post = _post_winner_to_slack(
         candidate=winner,
         channel=channel,
@@ -5630,6 +5684,9 @@ def run_chart_scout_once(
         "copy_rewrite_reason": copy_rewrite_reason,
         "candidate_fallback_used": candidate_fallback_used,
         "title_takeaway_role_swapped": title_takeaway_role_swapped,
+        "llm_copy_status": llm_copy_status,
+        "llm_warning_posted": llm_warning_posted,
+        "llm_warning_reason": llm_warning_reason,
         "post": post,
         "winner": {
             "source": f"{winner.source_type}:{winner.source_id}",
@@ -5718,6 +5775,9 @@ def run_chart_for_post_url(
     copy_rewrite_applied = bool(style_draft.copy_rewrite_applied)
     copy_rewrite_reason = style_draft.copy_rewrite_reason
     title_takeaway_role_swapped = bool(style_draft.checks.get("title_takeaway_role_swapped", False))
+    llm_copy_status = style_draft.llm_copy_status
+    llm_warning_reason = style_draft.llm_warning_reason
+    llm_warning_posted = False
     copy_issues = _style_copy_publish_issues(style_draft)
     if copy_issues:
         raise XChartError(
@@ -5762,8 +5822,23 @@ def run_chart_for_post_url(
             "copy_rewrite_reason": copy_rewrite_reason,
             "candidate_fallback_used": False,
             "title_takeaway_role_swapped": title_takeaway_role_swapped,
+            "llm_copy_status": llm_copy_status,
+            "llm_warning_posted": False,
+            "llm_warning_reason": llm_warning_reason,
             "pull_log_path": str(pull_log_path),
         }
+    if llm_copy_status == "warning_fallback" and llm_warning_reason:
+        try:
+            warning = _post_llm_copy_warning_to_slack(
+                channel=channel,
+                convention_name=convention_name,
+                slot_key=slot_key,
+                candidate=winner,
+                reason=llm_warning_reason,
+            )
+            llm_warning_posted = bool(warning.get("ok"))
+        except Exception as exc:
+            logger.warning("llm-copy warning post failed (continuing with fallback copy): %s", exc)
     post = _post_winner_to_slack(
         candidate=winner,
         channel=channel,
@@ -5802,6 +5877,9 @@ def run_chart_for_post_url(
         "copy_rewrite_reason": copy_rewrite_reason,
         "candidate_fallback_used": False,
         "title_takeaway_role_swapped": title_takeaway_role_swapped,
+        "llm_copy_status": llm_copy_status,
+        "llm_warning_posted": llm_warning_posted,
+        "llm_warning_reason": llm_warning_reason,
         "post": post,
         "winner": {
             "source": f"{winner.source_type}:{winner.source_id}",

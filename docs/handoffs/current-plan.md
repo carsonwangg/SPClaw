@@ -1457,3 +1457,27 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
     - still emits pull-log artifact for auditability.
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `90 passed`.
+
+## Chart Day - LLM-First Copy + Error Warning Fallback (2026-02-27)
+- Status: implemented on `codex/agent-chart-day`, validated.
+- Completed in this update:
+  - `_synthesize_style_via_llm` now consumes richer context:
+    - tweet title + tweet text + chart hint + chart image (when fetchable).
+  - LLM prompt revised to broad context-driven instructions for title/takeaway generation.
+  - Removed style guardrail enforcement from publish gating:
+    - no length-based role block,
+    - no rewrite-driven rejection for copy quality.
+  - Minimal publish checks now enforce only technical viability:
+    - non-empty headline,
+    - non-empty takeaway,
+    - render-safe takeaway text.
+  - `_title_takeaway_role_ok` changed to telemetry-only semantic:
+    - true when normalized headline/takeaway are both present and not identical.
+  - Added warning + fallback flow for technical LLM failures:
+    - posts channel warning with reason + slot/source context,
+    - continues posting with raw tweet fallback copy.
+    - warning post failure is logged but non-fatal.
+  - Added runtime response telemetry:
+    - `llm_copy_status`, `llm_warning_posted`, `llm_warning_reason`.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `95 passed`.
