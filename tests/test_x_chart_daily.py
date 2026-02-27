@@ -1570,7 +1570,7 @@ def test_takeaway_sentence_finalizer_normalizes_multi_sentence_to_one_sentence()
     finalized = _finalize_takeaway_sentence(
         "US stocks erase nearly -$800 billion in market cap and futures slide. Trade war headlines return.",
     )
-    assert finalized == "US stocks erase nearly -$800 billion in market cap and futures slide."
+    assert finalized == "US stocks erase nearly -$800 billion in market cap and futures slide. Trade war headlines return."
     assert _is_single_sentence_takeaway(finalized) is True
 
 

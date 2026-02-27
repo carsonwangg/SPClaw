@@ -3,6 +3,14 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-27, removed sentence splitter in chart-day title extraction)
+- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/src/coatue_claw/x_chart_daily.py`:
+  - `_extract_first_sentence(...)` no longer splits on punctuation.
+  - this prevents abbreviation-driven truncation like `U.S.` -> `Number of U.S.` in generated title/takeaway inputs.
+- Updated regression expectation in `/Users/carsonwang/worktrees/coatue-claw/chart-day/tests/test_x_chart_daily.py` for takeaway finalization behavior after splitter removal.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `85 passed`
+
 ## Update (2026-02-27, MD richer article-context grounding for LLM relevance + one-liner)
 - Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
   - added article-body context extraction + cache for catalyst evidence URLs.
