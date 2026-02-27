@@ -415,10 +415,12 @@ def _model_draft(
     market_lines: list[str],
     web_lines: list[str],
     source_summary: list[str],
-) -> PromptDraft | None:
+) -> tuple[PromptDraft | None, str | None]:
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if OpenAI is None or (not api_key):
-        return None
+        if OpenAI is None:
+            return (None, "openai_client_unavailable")
+        return (None, "openai_api_key_missing")
     model = _hfa_model()
     client = OpenAI(api_key=api_key)
 
@@ -457,14 +459,17 @@ def _model_draft(
                 {"role": "user", "content": prompt},
             ],
         )
-    except Exception:
-        return None
+    except Exception as exc:
+        return (None, f"openai_completion_failed:{type(exc).__name__}")
     text = ""
     if response and response.choices:
         text = str(response.choices[0].message.content or "").strip()
     if not text:
-        return None
-    return parse_model_json(text)
+        return (None, "model_response_empty")
+    parsed = parse_model_json(text)
+    if parsed is None:
+        return (None, "model_json_parse_failed")
+    return (parsed, None)
 
 
 def _artifact_path(*, channel: str, thread_ts: str, now: datetime, prefix: str = "hfa") -> Path:
@@ -631,7 +636,7 @@ def analyze_thread(
         warnings.extend(web_warnings)
         source_summary = _doc_source_summary(usable_docs) + market_sources + web_sources
 
-        draft = _model_draft(
+        draft, model_failure_reason = _model_draft(
             docs=usable_docs,
             question=question,
             market_lines=market_lines,
@@ -639,17 +644,11 @@ def analyze_thread(
             source_summary=source_summary,
         )
         if draft is None:
-            draft = _fallback_draft(
-                docs=usable_docs,
-                question=question,
-                market_lines=market_lines,
-                web_lines=web_lines,
-                source_summary=source_summary,
-                generated_at_utc=generated_at_utc,
+            raise HFAError(
+                "analysis_generation_failed:"
+                + str(model_failure_reason or "unknown_model_failure")
             )
-            warnings.append("used_fallback_draft")
-        else:
-            warnings.extend(list(draft.warnings))
+        warnings.extend(list(draft.warnings))
 
         title = f"HFA Decision Memo — {channel} / {thread_ts}"
         markdown = render_markdown(

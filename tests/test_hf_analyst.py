@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from coatue_claw.hf_analyst import (
+    HFAError,
     analyze_podcast_url,
     analyze_thread,
     extract_youtube_urls,
@@ -71,7 +74,7 @@ def test_extract_youtube_urls() -> None:
     assert len(urls) == 2
 
 
-def test_analyze_thread_fallback_mode(tmp_path: Path, monkeypatch) -> None:
+def test_analyze_thread_model_failure_returns_reason(tmp_path: Path, monkeypatch) -> None:
     doc_path = tmp_path / "memo.txt"
     doc_path.write_text("SNOW demand commentary and product execution notes.", encoding="utf-8")
     db_path = tmp_path / "hfa.sqlite"
@@ -93,7 +96,7 @@ def test_analyze_thread_fallback_mode(tmp_path: Path, monkeypatch) -> None:
             }
         ],
     )
-    monkeypatch.setattr("coatue_claw.hf_analyst._model_draft", lambda **kwargs: None)
+    monkeypatch.setattr("coatue_claw.hf_analyst._model_draft", lambda **kwargs: (None, "forced_model_failure"))
     monkeypatch.setattr(
         "coatue_claw.hf_analyst._market_context",
         lambda tickers, as_of_utc: (["SNOW market context"], [f"market source (timestamp_utc: `{as_of_utc}`)"]),
@@ -104,23 +107,18 @@ def test_analyze_thread_fallback_mode(tmp_path: Path, monkeypatch) -> None:
     )
 
     memory = _FakeMemoryRuntime()
-    result = analyze_thread(
-        channel="D123",
-        thread_ts="1700000000.100",
-        question="focus on asymmetric setup",
-        requested_by="U123",
-        trigger_mode="test",
-        dry_run=False,
-        slack_client=object(),
-        memory_runtime=memory,
-    )
-
-    assert result.files_analyzed == 1
-    assert result.artifact_path is not None
-    assert Path(result.artifact_path).exists()
-    assert "## 1. AAA Snapshot" in result.markdown
-    assert "## 7. Sources" in result.markdown
-    assert memory.calls == 1
+    with pytest.raises(HFAError, match="analysis_generation_failed:forced_model_failure"):
+        analyze_thread(
+            channel="D123",
+            thread_ts="1700000000.100",
+            question="focus on asymmetric setup",
+            requested_by="U123",
+            trigger_mode="test",
+            dry_run=False,
+            slack_client=object(),
+            memory_runtime=memory,
+        )
+    assert memory.calls == 0
 
 
 def test_analyze_podcast_url(tmp_path: Path, monkeypatch) -> None:

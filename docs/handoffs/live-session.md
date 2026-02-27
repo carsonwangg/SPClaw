@@ -2936,3 +2936,21 @@ Then confirm bot returns:
 - market_daily status confirms article_context_enabled/article_context_timeout_ms/article_context_max_chars/article_context_limit plus relevance_mode=llm_first.
 - Dry-run artifact: /opt/coatue-claw-data/artifacts/market-daily/md-open-20260227-174225.md.
 - Smoke: md now force posted via run-once; debug-catalyst NFLX close shows richer context fields but anchor still selected from web explainer set (TipRanks/247/Invezz), so article-context quality tuning remains follow-up.
+
+## Update (2026-02-27, HFA analyze fail-closed on model generation failure)
+- Updated `src/coatue_claw/hf_analyst.py` to remove fallback memo generation from `analyze_thread`.
+- New behavior:
+  - if model generation/parsing fails, HFA run fails with explicit reason string:
+    - `analysis_generation_failed:<reason>`
+  - Slack shows `HFA analyze failed: <reason>` instead of fallback memo text.
+- Added model-failure reason propagation cases:
+  - `openai_client_unavailable`
+  - `openai_api_key_missing`
+  - `openai_completion_failed:<ExceptionType>`
+  - `model_response_empty`
+  - `model_json_parse_failed`
+- Test updates:
+  - `tests/test_hf_analyst.py` now asserts fail-closed behavior when model output is unavailable.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_hf_document_extract.py tests/test_slack_routing.py tests/test_hf_youtube_transcript.py` -> `23 passed`
+  - `PYTHONPATH=src python3 -m compileall -q src` -> pass

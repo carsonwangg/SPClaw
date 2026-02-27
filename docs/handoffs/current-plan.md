@@ -1428,3 +1428,12 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Status keys present: article_context_enabled, article_context_timeout_ms, article_context_max_chars, article_context_limit; relevance_mode remains llm_first.
 - Dry-run + live smoke executed; artifact generated and posted.
 - NFLX debug close shows contextual synthesis fields active, with remaining improvement opportunity in source-anchor quality selection.
+
+## HFA Update (2026-02-27)
+- `hfa analyze` is now fail-closed when model output cannot be produced/parsed.
+- Removed fallback-draft rendering path from `analyze_thread` in `src/coatue_claw/hf_analyst.py`.
+- Operator-visible behavior:
+  - returns explicit failure reasons (`analysis_generation_failed:<reason>`) instead of fallback memo content.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_hf_document_extract.py tests/test_slack_routing.py tests/test_hf_youtube_transcript.py` -> `23 passed`
+  - `PYTHONPATH=src python3 -m compileall -q src` -> pass

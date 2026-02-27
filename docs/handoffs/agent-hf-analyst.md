@@ -70,3 +70,8 @@
   - fixes production failure mode on mini where ASR model rejects verbose response format.
 - Regression coverage:
   - `tests/test_hf_youtube_transcript.py::test_asr_transcript_retries_without_response_format_on_incompatible_model`
+
+## Patch Status (2026-02-27)
+- HFA thread-doc mode now fails closed when model output is unavailable/unparseable.
+- `src/coatue_claw/hf_analyst.py` no longer falls back to `_fallback_draft` in `analyze_thread`.
+- Failure reason is propagated as `analysis_generation_failed:<reason>` to Slack/CLI paths.
