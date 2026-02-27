@@ -243,6 +243,7 @@ MD (Market Daily) environment controls:
 - `COATUE_CLAW_MD_SYNTH_DOMAIN_GATE`: synthesis domain filter (`soft` default, `quality_only`, `off`)
 - `COATUE_CLAW_MD_SYNTH_SUPPORT_COUNT`: max support links passed alongside the anchor evidence in simple synthesis (default `2`)
 - `COATUE_CLAW_MD_SYNTH_FORCE_BEST_GUESS`: legacy compatibility toggle from earlier phrase-based path (`1` default)
+- `COATUE_CLAW_MD_RELEVANCE_MODE`: anchor/support selection mode (`llm_first` default, `deterministic` fallback mode)
 - `COATUE_CLAW_MD_REASON_OUTPUT_MODE`: simple reason rendering mode (`free_sentence` default, `wrapper` optional rollback)
 - `COATUE_CLAW_MD_POST_AS_IS`: in simple mode, accept non-empty LLM sentence with minimal normalization (`1` default)
 - `COATUE_CLAW_MD_RECAP_SUPPORT_COUNT`: earnings recap support evidence count (defaults to `COATUE_CLAW_MD_SYNTH_SUPPORT_COUNT`; default effective value `2`)
@@ -277,7 +278,9 @@ MD (Market Daily) environment controls:
   - rejects quote-directory/generic wrapper items before synthesis
   - enforces strict time-integrity filtering for candidate links and catalyst selection
   - applies soft penalties to technical-analysis and multi-ticker roundup headlines
-  - chooses one anchor evidence candidate plus up to `COATUE_CLAW_MD_SYNTH_SUPPORT_COUNT` support candidates for synthesis context
+  - chooses one anchor evidence candidate plus supports using `COATUE_CLAW_MD_RELEVANCE_MODE`:
+    - `llm_first`: LLM selects anchor/support from ranked candidates
+    - `deterministic`: code-only anchor/support selector
   - synthesizes one free-sentence catalyst line (not forced `Shares rose/fell after ...` wrapper)
   - aligns `[News]/[Web]` links to the anchor/support evidence used for that generated sentence
   - with LLM unavailable/error, uses deterministic anchor-based sentence backup before generic fallback

@@ -40,6 +40,14 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Market Daily LLM-first relevance mode shipped on role branch:
+  - new `COATUE_CLAW_MD_RELEVANCE_MODE` control (`llm_first` default, `deterministic` fallback).
+  - in simple-synthesis mode, model now selects anchor/support evidence IDs before writing the catalyst sentence.
+  - deterministic consensus/anchor logic remains as automatic fallback if relevance selection fails.
+  - regression coverage:
+    - `tests/test_market_daily.py::test_relevance_mode_defaults_to_llm_first`
+    - `tests/test_market_daily.py::test_select_anchor_support_llm_parses_json`
+    - `tests/test_market_daily.py::test_llm_first_relevance_anchor_is_used`
 - Market Daily catalyst ranking quality hardening shipped on role branch:
   - added price-action-only text detector to penalize non-causal “intraday momentum/trading” blurbs.
   - anchor chooser now prefers true causal explainers, including analyst upgrade/downgrade narratives.

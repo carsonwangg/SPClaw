@@ -3,6 +3,21 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-26, MD LLM-first relevance mode for catalyst anchor/support selection)
+- Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
+  - added `COATUE_CLAW_MD_RELEVANCE_MODE` (`llm_first` default, `deterministic` fallback mode).
+  - simple-synthesis now asks the model to pick anchor/support evidence IDs from ranked candidates (`_select_anchor_support_llm(...)`) before sentence generation.
+  - if relevance selection fails/LLM unavailable, path falls back automatically to existing deterministic consensus+anchor logic.
+  - when LLM relevance selection succeeds:
+    - selected anchor/support are used directly for sentence generation and link alignment.
+    - `synth_generation_mode` emits `simple_synthesis_llm_first`.
+- Added tests in `/Users/carsonwang/worktrees/coatue-claw/market-daily/tests/test_market_daily.py`:
+  - `test_relevance_mode_defaults_to_llm_first`
+  - `test_select_anchor_support_llm_parses_json`
+  - `test_llm_first_relevance_anchor_is_used`
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_market_daily.py tests/test_launchd_runtime.py` -> `89 passed`
+
 ## Update (2026-02-26, MD catalyst anchor quality improvement for price-action vs true cause)
 - Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
   - added deterministic `_is_price_action_only_text(...)` detector to down-rank non-causal “how it traded” blurbs.
