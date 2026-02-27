@@ -3,6 +3,21 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-27, enforce `chart_label == title` across chart-day)
+- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/src/coatue_claw/x_chart_daily.py`:
+  - `chart_label` is now synchronized to final `headline` in style draft generation.
+  - manual `run-post-url --title` override now updates both `headline` and `chart_label`.
+  - renderer no longer truncates chart label text independently; it preserves exact label text and fails closed on overflow (`Chart label layout overflow without truncation.`).
+  - removed independent chart-label rewrite behavior in `_sanitize_style_copy(...)` so label cannot diverge from title path.
+- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/tests/test_x_chart_daily.py`:
+  - added regression tests:
+    - `test_style_draft_chart_label_matches_headline_llm_path`
+    - `test_style_draft_chart_label_matches_headline_fallback_path`
+    - `test_run_post_url_title_override_syncs_chart_label`
+  - updated prior assertions that expected chart-label-specific text.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `88 passed`
+
 ## Update (2026-02-27, removed sentence splitter in chart-day title extraction)
 - Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/src/coatue_claw/x_chart_daily.py`:
   - `_extract_first_sentence(...)` no longer splits on punctuation.

@@ -1370,10 +1370,57 @@ def test_style_draft_prefers_simple_feed_like_copy() -> None:
     assert draft.checks["trend_explicit"] is True
     assert draft.checks["graph_first_copy"] is True
     assert "breaking" not in draft.headline.lower()
-    assert draft.chart_label
+    assert draft.chart_label == draft.headline
     assert _is_complete_headline_sentence(draft.headline) is True
     assert _is_single_sentence_takeaway(draft.takeaway) is True
     assert draft.score >= 6.0
+
+
+def test_style_draft_chart_label_matches_headline_llm_path(monkeypatch) -> None:
+    candidate = Candidate(
+        candidate_key="x:llm-sync",
+        source_type="x",
+        source_id="fiscal_AI",
+        author="@fiscal_AI",
+        title="@fiscal_AI: US software growth re-accelerates to 29% YoY.",
+        text="US software growth re-accelerates to 29% YoY while enterprise spending remains resilient.",
+        url="https://x.com/fiscal_AI/status/llm-sync",
+        image_url="https://example.com/chart.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=450,
+        source_priority=1.6,
+        score=98.0,
+    )
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._synthesize_style_via_llm",
+        lambda _candidate: {
+            "headline": "US software demand is re-accelerating.",
+            "chart_label": "Different label that should be ignored",
+            "takeaway": "US software demand is re-accelerating while enterprise spending stays resilient.",
+        },
+    )
+    draft = _select_style_draft(candidate)
+    assert draft.chart_label == draft.headline
+
+
+def test_style_draft_chart_label_matches_headline_fallback_path(monkeypatch) -> None:
+    candidate = Candidate(
+        candidate_key="x:fallback-sync",
+        source_type="x",
+        source_id="KobeissiLetter",
+        author="@KobeissiLetter",
+        title="US credit conditions are tightening as risk appetite cools.",
+        text="US credit conditions are tightening as risk appetite cools.",
+        url="https://x.com/KobeissiLetter/status/fallback-sync",
+        image_url="https://example.com/chart.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=200,
+        source_priority=1.3,
+        score=88.0,
+    )
+    monkeypatch.setattr("coatue_claw.x_chart_daily._synthesize_style_via_llm", lambda _candidate: None)
+    draft = _select_style_draft(candidate)
+    assert draft.chart_label == draft.headline
 
 
 def test_post_winner_uploads_file_in_initial_message(monkeypatch, tmp_path: Path) -> None:
@@ -2197,6 +2244,49 @@ def test_run_chart_for_post_url_applies_title_override(monkeypatch, tmp_path: Pa
     assert captured["candidate_url"] == "https://x.com/KobeissiLetter/status/2026040229535047769"
 
 
+def test_run_post_url_title_override_syncs_chart_label(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
+    monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
+
+    payload = {
+        "data": [
+            {
+                "id": "2026040229535047769",
+                "author_id": "u1",
+                "text": "US stocks erase nearly $800 billion in market cap as futures slide.",
+                "created_at": "2026-02-23T00:00:00Z",
+                "public_metrics": {"like_count": 10, "retweet_count": 5, "reply_count": 2, "quote_count": 1},
+                "attachments": {"media_keys": ["m1"]},
+            }
+        ],
+        "includes": {
+            "users": [{"id": "u1", "username": "KobeissiLetter"}],
+            "media": [{"media_key": "m1", "type": "photo", "url": "https://example.com/chart.png"}],
+        },
+    }
+    monkeypatch.setattr("coatue_claw.x_chart_daily._http_json", lambda **kwargs: payload)
+    captured: dict[str, object] = {"called": False}
+
+    def _fake_post(**kwargs):
+        captured["called"] = True
+        captured["headline"] = kwargs["style_draft"].headline
+        captured["chart_label"] = kwargs["style_draft"].chart_label
+        return {"ok": True, "channel": kwargs["channel"], "styled_artifact": str(tmp_path / "styled.png")}
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
+    result = run_chart_for_post_url(
+        post_url="https://x.com/KobeissiLetter/status/2026040229535047769",
+        channel_override="C123",
+        title_override="US stocks erase nearly $800 billion in market cap.",
+    )
+    assert result["ok"] is True
+    assert captured["called"] is True
+    assert captured["headline"] == "US stocks erase nearly $800 billion in market cap."
+    assert captured["chart_label"] == "US stocks erase nearly $800 billion in market cap."
+
+
 def test_run_chart_for_post_url_title_override_allows_freeform_text(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
@@ -2528,7 +2618,7 @@ def test_style_draft_generates_narrative_title_and_small_label_for_etf_flow() ->
     )
     draft = _select_style_draft(candidate)
     assert "breaking" not in draft.headline.lower()
-    assert "etf" in draft.chart_label.lower()
+    assert draft.chart_label == draft.headline
     assert "..." not in draft.headline
 
 
@@ -2552,7 +2642,7 @@ def test_style_draft_employees_vs_robots_titles_are_narrative() -> None:
     )
     draft = _select_style_draft(candidate)
     assert "robots" in draft.headline.lower() or "automation" in draft.headline.lower()
-    assert "employees vs robots" in draft.chart_label.lower()
+    assert draft.chart_label == draft.headline
     assert "robots deployed" in draft.takeaway.lower()
     assert "..." not in draft.headline
 
@@ -2604,7 +2694,7 @@ def test_style_draft_uses_chart_hint_for_low_signal_copy(monkeypatch) -> None:
     )
     draft = _select_style_draft(candidate)
     assert draft.headline == "It's official: In one"
-    assert draft.chart_label == "Monthly US customs duties (US$B)"
+    assert draft.chart_label == draft.headline
     assert draft.takeaway == "US customs-duty collections just hit a new high."
 
 
@@ -2758,13 +2848,13 @@ def test_style_draft_rewrites_degenerate_fields_and_fragment_takeaway(monkeypatc
     )
     draft = _select_style_draft(candidate)
     assert draft.headline == "U.S"
-    assert draft.chart_label != "U.S"
+    assert draft.chart_label == draft.headline
     assert _is_complete_sentence(draft.takeaway) is True
     assert draft.takeaway == "New US-facing data point with clear directional movement."
     assert draft.checks["headline_non_degenerate"] is False
-    assert draft.checks["chart_label_non_degenerate"] is True
+    assert draft.checks["chart_label_non_degenerate"] is False
     assert draft.checks["takeaway_complete_sentence"] is True
-    assert draft.copy_rewrite_applied is True
+    assert draft.copy_rewrite_applied is False
 
 
 def test_style_draft_rewrites_fragmented_kobeissi_copy(monkeypatch) -> None:
