@@ -10,6 +10,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/tests/test_x_chart_daily.py`:
   - added `test_candidate_pool_excludes_non_chart_images_even_if_score_is_higher`.
   - added default autouse test fixture to keep reconstructability deterministic in tests; non-chart behavior is still covered by explicit monkeypatches in targeted tests.
+  - added default autouse test fixture to clear `OPENAI_API_KEY` for deterministic test behavior on hosts where live LLM env vars are present.
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `96 passed`
 
