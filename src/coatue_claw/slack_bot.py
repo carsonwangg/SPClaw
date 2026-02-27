@@ -229,7 +229,10 @@ def _format_chart_usage() -> str:
     return (
         "Usage:\n"
         "- `diligence TICKER`\n"
-        "- `hfa analyze [optional question]` / `hfa podcast <youtube-url> [optional question]` / `hfa status`\n"
+        "- `hfa analyze [optional question]` / `analyze [optional question]`\n"
+        "- `hfa podcast <youtube-url> [optional question]` / `podcast <youtube-url> [optional question]`\n"
+        "- `quotes <youtube-url>` or `analyze <youtube-url>` for podcast quote mode\n"
+        "- `hfa status` / `status`\n"
         "- `md now` / `md status` / `md holdings refresh`\n"
         "- `x digest <topic|ticker|handle> [last 24h] [limit 50]`\n"
         "- `x chart now` (run chart-scout winner now)\n"
@@ -387,6 +390,26 @@ def _handle_hfa_command(
         return True
 
     if kind == "analyze":
+        analyze_urls = extract_youtube_urls(tail or "")
+        if analyze_urls:
+            url = analyze_urls[0]
+            question = (tail or "").replace(url, "").strip() or None
+            try:
+                result = run_hfa_podcast(
+                    url=url,
+                    question=question,
+                    requested_by=user_id,
+                    channel=channel,
+                    thread_ts=thread_ts,
+                    trigger_mode="slack_podcast_alias_from_analyze",
+                    dry_run=False,
+                    memory_runtime=_memory_runtime(),
+                )
+            except HFAError as exc:
+                say(text=f"HFA podcast failed: `{exc}`", thread_ts=thread_ts)
+                return True
+            say(text=format_hfa_slack_summary(result), thread_ts=thread_ts)
+            return True
         try:
             result = run_hfa_thread(
                 channel=channel,
@@ -406,6 +429,15 @@ def _handle_hfa_command(
 
     if kind == "podcast":
         urls = extract_youtube_urls(tail or "")
+        if (not urls) and channel:
+            # Conversational commands like "hfa quotes for this podcast" may rely on
+            # a prior YouTube URL in the same thread; resolve from thread history.
+            try:
+                messages = _thread_messages(slack_client=app.client, channel=channel, thread_ts=thread_ts)
+            except Exception:
+                messages = []
+            blob = " ".join(str(item.get("text") or "") for item in messages if isinstance(item, dict))
+            urls = extract_youtube_urls(blob)
         if not urls:
             say(text="HFA podcast command requires a valid YouTube URL.", thread_ts=thread_ts)
             return True

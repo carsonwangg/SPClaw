@@ -3,114 +3,60 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
-## Update (2026-02-26, board-seat cooldown default change)
-- Board Seat default cooldown updated from 14 days to 20 days:
-  - `COATUE_CLAW_BOARD_SEAT_TARGET_LOCK_DAYS` default in code now `20`.
-  - `.env.example` updated to `COATUE_CLAW_BOARD_SEAT_TARGET_LOCK_DAYS=20`.
-- Note: explicit env values in `/opt/coatue-claw/.env.prod` still take precedence.
+## Update (2026-02-27, MD richer article-context grounding for LLM relevance + one-liner)
+- Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
+  - added article-body context extraction + cache for catalyst evidence URLs.
+  - LLM relevance selection (`_select_anchor_support_llm`) and one-line synthesis (`_synthesize_catalyst_sentence_simple`) now receive enriched article context for top candidates, not only headline/snippet text.
+  - new controls:
+    - `COATUE_CLAW_MD_ARTICLE_CONTEXT_ENABLED` (default `1`)
+    - `COATUE_CLAW_MD_ARTICLE_CONTEXT_TIMEOUT_MS` (default `3500`)
+    - `COATUE_CLAW_MD_ARTICLE_CONTEXT_MAX_CHARS` (default `6000`)
+    - `COATUE_CLAW_MD_ARTICLE_CONTEXT_LIMIT` (default `4`)
+  - status payload now exposes these context-enrichment settings.
+- Added tests in `/Users/carsonwang/worktrees/coatue-claw/market-daily/tests/test_market_daily.py`:
+  - `test_extract_article_context_from_html_prefers_body_text`
+  - `test_evidence_context_for_llm_includes_article_body`
 
-## Update (2026-02-26, board-seat v1 rebuild: noon PT + natural synthesis + memory fallback)
-- Rebuilt `src/coatue_claw/board_seat_daily.py` from reset scaffold to production v1 pipeline:
-  - weekday noon schedule posture with `COATUE_CLAW_BOARD_SEAT_TIME=12:00` and `COATUE_CLAW_BOARD_SEAT_WEEKDAYS_ONLY=1`.
-  - auto channel discovery for portco channels via Slack (`company_match`, public+private), with static fallback.
-  - web-first candidate discovery (`brave -> serp`), anti-noise target extraction, deterministic scoring, and high-confidence new-target gate.
-  - hard 14-day no-repeat lock and strict repitch significance gating after cooldown.
-  - concise 5-section Board Seat message contract.
-  - funding extraction (web-only), confidence tiering (`verified|partial|weak`), and low-confidence warning line.
-  - thread citation delivery (`Publisher — title: url`) and memory-only rewrite fallback warning thread.
-  - persisted audit tables for runs/candidates/events/funding cache/channel discovery.
-- Scheduler update in `src/coatue_claw/launchd_runtime.py`:
-  - board-seat default `StartCalendarInterval` now weekdays at 12:00.
-- Docs/env updates:
-  - `.env.example` now documents Board Seat v1 env contract.
-  - `AGENTS.md` Board Seat rule updated to v1 5-section structure and thread-source policy.
-  - `docs/handoffs/current-plan.md` updated with v1 status.
-- Validation run:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `15 passed`
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `10 passed`
-  - `PYTHONPATH=src python3 -m pytest -q` currently blocked in this environment by missing optional deps (`yfinance`, `matplotlib`) during collection.
-
-## Update (2026-02-26, board-seat schema auto-migration fix)
-- Fixed DB schema evolution bug in `src/coatue_claw/board_seat_daily.py` that caused live runs to fail on legacy DBs (notably missing `board_seat_target_events.source_url`).
-- Added additive, idempotent migrations in `BoardSeatStore._migrate_legacy_schema(...)`:
-  - `board_seat_target_events`: adds missing `source_url` and other event fields.
-  - `board_seat_runs`: adds v1 run-audit columns (`generation_mode`, `sources_thread_ts`, `warning_message_ts`, etc.).
-  - `board_seat_funding_cache`: adds v1 funding-confidence columns where absent.
-- Added regression tests in `tests/test_board_seat_daily.py`:
-  - `test_schema_migration_adds_missing_source_url`
-  - `test_schema_migration_adds_missing_board_seat_runs_columns`
+## Update (2026-02-26, MD LLM-first relevance mode for catalyst anchor/support selection)
+- Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
+  - added `COATUE_CLAW_MD_RELEVANCE_MODE` (`llm_first` default, `deterministic` fallback mode).
+  - simple-synthesis now asks the model to pick anchor/support evidence IDs from ranked candidates (`_select_anchor_support_llm(...)`) before sentence generation.
+  - if relevance selection fails/LLM unavailable, path falls back automatically to existing deterministic consensus+anchor logic.
+  - when LLM relevance selection succeeds:
+    - selected anchor/support are used directly for sentence generation and link alignment.
+    - `synth_generation_mode` emits `simple_synthesis_llm_first`.
+- Added tests in `/Users/carsonwang/worktrees/coatue-claw/market-daily/tests/test_market_daily.py`:
+  - `test_relevance_mode_defaults_to_llm_first`
+  - `test_select_anchor_support_llm_parses_json`
+  - `test_llm_first_relevance_anchor_is_used`
 - Validation:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `17 passed`
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `10 passed`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_market_daily.py tests/test_launchd_runtime.py` -> `89 passed`
 
-## Update (2026-02-26, board-seat output-quality hardening)
-- Fixed three production output issues in `src/coatue_claw/board_seat_daily.py`:
-  - already-acquired targets are now blocked with `gate_reason=target_already_acquired` (prevents re-pitching a completed acquisition).
-  - funding parser hardened to avoid unrealistic totals:
-    - ignores tiny/plain numeric tokens and outlier amounts
-    - requires funding-context terms near currency amount (reduces valuation/noise capture)
-  - backer extraction tightened and rendered compactly:
-    - strips clause fragments like “with participation from...”
-    - caps display list and adds `(+N more)` suffix instead of long/truncated lines.
-- Added tests in `tests/test_board_seat_daily.py`:
-  - `test_pick_target_blocks_already_acquired`
-  - `test_money_parser_rejects_unbounded_plain_numbers`
-  - `test_extract_backers_filters_clause_fragments`
+## Update (2026-02-26, MD catalyst anchor quality improvement for price-action vs true cause)
+- Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
+  - added deterministic `_is_price_action_only_text(...)` detector to down-rank non-causal “how it traded” blurbs.
+  - evidence scoring now applies a price-action-only penalty so causal explainers win ranking.
+  - deterministic candidate gate now rejects price-action-only text for fallback-specific line generation.
+  - anchor selection now:
+    - penalizes price-action-only candidates,
+    - boosts analyst-action causals (`upgrade`/`downgrade`/`price target`/`rating`).
+- Added regression tests in `/Users/carsonwang/worktrees/coatue-claw/market-daily/tests/test_market_daily.py`:
+  - `test_price_action_only_penalty_lowers_rank_vs_causal_upgrade`
+  - `test_anchor_picker_prefers_upgrade_explainer_over_price_action`
 - Validation:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py tests/test_launchd_runtime.py` -> `30 passed`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_market_daily.py tests/test_launchd_runtime.py` -> `86 passed`
 
-## Update (2026-02-26, board-seat source-thread posting fix)
-- Fixed Slack thread behavior in `src/coatue_claw/board_seat_daily.py`:
-  - `_post_to_slack(...)` now reads `ts` from SlackResponse-like objects (not only raw dict), so follow-up source posts use a real `thread_ts`.
-  - resolves issue where `Sources` appeared as a separate channel message instead of a threaded reply.
-- Added regression in `tests/test_board_seat_daily.py`:
-  - `test_post_to_slack_reads_ts_from_slackresponse_like_object`
+## Update (2026-02-26, earnings recap manual-vs-scheduled slot isolation)
+- Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
+  - `run_earnings_recap(...)` now records daytime manual runs under `slot_name=earnings_recap_manual` when run outside the scheduled recap window.
+  - scheduled run keeps `slot_name=earnings_recap`.
+  - this prevents a daytime manual/test recap from consuming the nightly 7:00 PM PT scheduled slot.
+- Added regression test in `/Users/carsonwang/worktrees/coatue-claw/market-daily/tests/test_market_daily.py`:
+  - `test_run_earnings_recap_manual_daytime_does_not_block_scheduled_slot`
+  - validates same-day manual daytime run no longer blocks scheduled recap.
 - Validation:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py tests/test_launchd_runtime.py` -> `31 passed`
-
-## Update (2026-02-26, board-seat anti-stupid-pitch target guard)
-- Added explicit product-name rejection in `src/coatue_claw/board_seat_daily.py` so Board Seat cannot pitch product/self targets as acquisition companies.
-  - generic product blocklist examples: `claude`, `chatgpt`, `gemini`, `copilot`, `sora`.
-  - company-specific product alias guard (for example: `Anthropic -> Claude`, `OpenAI -> ChatGPT/Sora/Codex`).
-- This directly blocks bad outputs like “Anthropic should acquire Claude.”
-- Added tests in `tests/test_board_seat_daily.py`:
-  - `test_target_validation_rejects_company_product_names`
-  - `test_candidate_extraction_rejects_company_product_targets`
-- Validation:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py tests/test_launchd_runtime.py` -> `33 passed`
-
-## Update (2026-02-26, board-seat two-stage targeting hardening)
-- Reworked targeting behavior in `src/coatue_claw/board_seat_daily.py` to reduce fake/ambiguous leads:
-  - Stage A: LLM proposes candidate acquisition targets (excluding previously used targets when possible).
-  - Stage B: deterministic entity verification gate must pass before drafting/posting.
-- New verifier behavior:
-  - rejects low-signal/source-noise domains for target identity (`greenhouse`, `zoominfo`, etc.).
-  - requires target-entity mention consistency across multiple domains.
-  - blocks target if entity remains unverified (`gate_reason=entity_unverified`).
-  - maintains already-acquired hard block (`target_already_acquired`).
-- Additional target hygiene:
-  - blocks ambiguous common target terms (example: `Lead`) via validation.
-  - keeps product-name blocks (`Claude`, `ChatGPT`, etc.) to prevent self/product pitches.
-- Funding extraction now also uses target-specific high-signal filtering before computing totals/backers.
-- Validation:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py tests/test_launchd_runtime.py` -> `34 passed`
-
-## Update (2026-02-26, board-seat continue-search behavior)
-- Updated candidate selection loop so a skipped target does not terminate the run for that company:
-  - if a candidate fails validation/gates (`entity_unverified`, `target_already_acquired`, confidence gate), Board Seat excludes it and tries the next candidate.
-  - run only skips after exhausting viable candidate pool.
-- Added regression test:
-  - `test_run_once_retries_next_target_when_first_skipped`
-- Validation:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py tests/test_launchd_runtime.py` -> `35 passed`
-
-## Update (2026-02-26, board-seat job/role phrase hard filter)
-- Added hard rejection for job/career/role phrases so non-company targets cannot be pitched (example blocked: `Corporate Development Integration`).
-- Filtering now applies in two places:
-  - target-name validation (`role_phrase_not_company`)
-  - candidate extraction row screening for job-intent text (`job`, `careers`, `hiring`, `application`, etc.).
-- Validation:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py tests/test_launchd_runtime.py` -> `36 passed`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_market_daily.py` -> `76 passed`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
 
 ## Update (2026-02-26, board-seat hard reset scaffold)
 - Board Seat was intentionally scrapped to start fresh after repeated output quality failures.
@@ -2967,44 +2913,18 @@ Then confirm bot returns:
 - Operational note:
   - Posted a manual real-research board-seat message to `#openai` at Slack ts `1772060668.808919` while extractor hardening is being stabilized for fully automated target selection.
 
-## Update (2026-02-26, board-seat llm-first exhaustive search + rejection telemetry)
-- Implemented LLM-first targeting with replenishing candidate batches in `src/coatue_claw/board_seat_daily.py`.
-- New run behavior:
-  - candidates are seeded by LLM first (`COATUE_CLAW_BOARD_SEAT_LLM_FIRST_MODE=1`) with optional web enrichment.
-  - each candidate is evaluated one-by-one through all hard gates (validity, acquired, cooldown, repitch significance, verification, high-confidence).
-  - on rejection, the loop continues to the next candidate; when a batch is exhausted it requests another batch until configured caps are reached.
-- New defaults/env controls:
-  - `COATUE_CLAW_BOARD_SEAT_LLM_BATCH_SIZE=8`
-  - `COATUE_CLAW_BOARD_SEAT_MAX_LLM_BATCHES=4`
-  - `COATUE_CLAW_BOARD_SEAT_MAX_CANDIDATE_EVALS=40`
-  - `COATUE_CLAW_BOARD_SEAT_WEB_CANDIDATE_ENRICHMENT=1`
-- Added explicit run telemetry fields:
-  - `candidates_scanned_total`
-  - `candidates_evaluated_total`
-  - `llm_batches_used`
-  - `rejections_by_reason`
-  - `top_rejected_targets`
-  - `final_decision_path`
-- Added audit table:
-  - `board_seat_candidate_decisions` (accepted/rejected decision rows with reason and batch/eval indexes).
-- Added schema migrations for legacy DBs to include new `board_seat_runs` telemetry columns.
+## Update (2026-02-26, market-daily recap manual-slot dedupe verification)
+- Integrator verification run completed on /opt/coatue-claw main.
+- Cherry-pick 95ddd47 resolved as empty on this host, indicating behavior already present in main.
+- Tests: test_market_daily.py 79 passed; test_launchd_runtime.py 10 passed.
+- Runtime: openclaw restart and slack status probe healthy; 24x7 status shows com.coatueclaw.market-daily-earnings-recap loaded.
+- Slot check: outside-window manual run wrote slot earnings_recap_manual.
+- Scheduled-path run used slot earnings_recap and result was no_reporters, not blocked by manual-slot reuse.
 
-## Update (2026-02-27, board-seat simplified llm-first mode)
-- Added optional simplified pipeline behind `COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE`.
-- Simple mode behavior:
-  - target selection is LLM-generated in batches (`_llm_generate_candidate_batch`) with strict JSON schema.
-  - only two hard gates enforced: real company sanity via lightweight web check + 20-day no-repeat lock.
-  - regeneration continues until configured caps, then channel is skipped.
-- New simple-mode env knobs:
-  - `COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE`
-  - `COATUE_CLAW_BOARD_SEAT_SIMPLE_BATCH_SIZE`
-  - `COATUE_CLAW_BOARD_SEAT_SIMPLE_MAX_REGEN_BATCHES`
-  - `COATUE_CLAW_BOARD_SEAT_SIMPLE_MAX_EVALS`
-- Run payload now includes simple-mode fields when active:
-  - `selection_mode=simple_llm`
-  - `regen_batches_used`
-  - `candidates_evaluated_total`
-  - `candidate_rejections`
-  - `final_decision_path`
-- Follow-up change:
-  - legacy board-seat candidate pipeline is now disabled in runtime; simple mode is the only active path.
+## Update (2026-02-27, MD article-context grounding deploy)
+- Integrated commit d817abc on main as d0b440f.
+- Validation: tests/test_market_daily.py 81 passed; tests/test_launchd_runtime.py 10 passed (venv python).
+- Runtime restarted; Slack status probe healthy after restart transient.
+- market_daily status confirms article_context_enabled/article_context_timeout_ms/article_context_max_chars/article_context_limit plus relevance_mode=llm_first.
+- Dry-run artifact: /opt/coatue-claw-data/artifacts/market-daily/md-open-20260227-174225.md.
+- Smoke: md now force posted via run-once; debug-catalyst NFLX close shows richer context fields but anchor still selected from web explainer set (TipRanks/247/Invezz), so article-context quality tuning remains follow-up.

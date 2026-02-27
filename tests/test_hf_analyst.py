@@ -27,9 +27,18 @@ class _FakeMemoryRuntime:
 
 def test_parse_hfa_intent() -> None:
     assert parse_hfa_intent("hfa status") == ("status", None)
+    assert parse_hfa_intent("status") == ("status", None)
     assert parse_hfa_intent("hfa analyze") == ("analyze", None)
+    assert parse_hfa_intent("analyze") == ("analyze", None)
     assert parse_hfa_intent("hfa analyze focus on valuation") == ("analyze", "focus on valuation")
+    assert parse_hfa_intent("analyze focus on valuation") == ("analyze", "focus on valuation")
     assert parse_hfa_intent("hfa podcast https://youtu.be/abcDEF12345 macro focus")[0] == "podcast"
+    assert parse_hfa_intent("podcast https://youtu.be/abcDEF12345 macro focus")[0] == "podcast"
+    assert parse_hfa_intent("quotes https://youtu.be/abcDEF12345")[0] == "podcast"
+    assert parse_hfa_intent("analyze https://youtu.be/abcDEF12345")[0] == "podcast"
+    assert parse_hfa_intent("hfa analyze this podcast https://youtu.be/abcDEF12345")[0] == "podcast"
+    assert parse_hfa_intent("hfa quotes for this podcast")[0] == "podcast"
+    assert parse_hfa_intent("hfa summarize this youtube interview https://youtu.be/abcDEF12345")[0] == "podcast"
     assert parse_hfa_intent("diligence SNOW")[0] is None
 
 
