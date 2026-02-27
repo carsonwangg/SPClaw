@@ -2976,3 +2976,22 @@ Then confirm bot returns:
   - `test_run_chart_for_post_url_uses_window_slot_and_blocks_duplicate_slot`
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `90 passed`.
+
+## Update (2026-02-27, chart-day LLM-first copy + warning fallback flow)
+- Shifted chart-day copy generation to LLM-first with full context:
+  - tweet title + tweet text + chart hint + chart image (multimodal when available).
+  - prompt now uses broad contextual instructions for title/takeaway, no tweet-only restatement framing.
+- Removed style-guardrail publish blocking:
+  - no length-based role gate, no rewrite-driven rejection path for title/takeaway quality.
+  - publish checks now only enforce minimal technical viability (non-empty headline/takeaway and render-safe takeaway).
+- Updated role telemetry semantics:
+  - `_title_takeaway_role_ok` now checks non-empty + non-identical normalized strings.
+- Added LLM error warning flow:
+  - on technical LLM copy failure (`api_error`/`invalid_json`/`missing_fields`), bot posts warning in chart channel and continues with raw tweet fallback copy.
+  - warning post failures are non-fatal (logs warning and continues posting fallback chart).
+- Runtime payload additions in scheduled + manual flows:
+  - `llm_copy_status`
+  - `llm_warning_posted`
+  - `llm_warning_reason`
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `95 passed`.

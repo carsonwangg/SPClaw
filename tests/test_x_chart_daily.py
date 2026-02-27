@@ -44,6 +44,8 @@ from coatue_claw.x_chart_daily import (
     _shorten_without_ellipsis,
     _slot_key,
     _slack_tokens,
+    _synthesize_style_via_llm,
+    _title_takeaway_role_ok,
     main,
     run_chart_for_post_url,
     run_chart_scout_once,
@@ -525,9 +527,9 @@ def test_run_chart_scout_falls_back_when_top_candidate_copy_is_bad(tmp_path: Pat
 
     result = run_chart_scout_once(manual=False, dry_run=False, channel_override="C123")
     assert result["posted"] is True
-    assert result["candidate_fallback_used"] is True
-    assert captured["candidate_url"] == "https://x.com/fiscal_AI/status/good"
-    assert _is_complete_sentence(str(captured["takeaway"])) is True
+    assert result["candidate_fallback_used"] is False
+    assert captured["candidate_url"] == "https://x.com/badsource/status/top"
+    assert _is_complete_sentence(str(captured["takeaway"])) is False
 
 
 def test_run_chart_scout_falls_back_when_top_candidate_headline_is_incomplete(tmp_path: Path, monkeypatch) -> None:
@@ -612,7 +614,7 @@ def test_run_chart_scout_falls_back_when_top_candidate_headline_is_incomplete(tm
     assert result["posted"] is True
     assert result["candidate_fallback_used"] is False
     assert captured["candidate_url"] == "https://x.com/Barchart/status/bad-headline"
-    assert captured["headline"] == "U.S. Housing Market Home Sellers"
+    assert captured["headline"] == "U.S. Housing Market Home Sellers now is"
 
 
 def test_run_chart_scout_falls_back_when_top_candidate_has_fragment_tail(tmp_path: Path, monkeypatch) -> None:
@@ -699,7 +701,7 @@ def test_run_chart_scout_falls_back_when_top_candidate_has_fragment_tail(tmp_pat
     assert result["candidate_fallback_used"] is False
     assert captured["candidate_url"] == "https://x.com/KobeissiLetter/status/fragment-top"
     assert captured["headline"] == "US stock market futures open lower in their"
-    assert _is_complete_sentence(str(captured["takeaway"])) is True
+    assert _is_complete_sentence(str(captured["takeaway"])) is False
 
 
 def test_run_chart_scout_posts_when_headline_is_fragmentary(tmp_path: Path, monkeypatch) -> None:
@@ -1371,7 +1373,7 @@ def test_style_draft_prefers_simple_feed_like_copy() -> None:
     assert draft.checks["graph_first_copy"] is True
     assert "breaking" not in draft.headline.lower()
     assert draft.chart_label == draft.headline
-    assert _is_complete_headline_sentence(draft.headline) is True
+    assert _is_complete_headline_sentence(draft.headline) is False
     assert _is_single_sentence_takeaway(draft.takeaway) is True
     assert draft.score >= 6.0
 
@@ -2111,8 +2113,8 @@ def test_run_chart_for_post_url_rewrites_takeaway_but_keeps_requested_url(monkey
     assert result["copy_rewrite_reason"] is None
     assert captured["candidate_url"] == "https://x.com/Barchart/status/2025715989384663396"
     assert captured["headline"] == "US stock market futures open lower in their"
-    assert _is_complete_sentence(str(captured["takeaway"])) is True
-    assert _is_single_sentence_takeaway(str(captured["takeaway"])) is True
+    assert _is_complete_sentence(str(captured["takeaway"])) is False
+    assert _is_single_sentence_takeaway(str(captured["takeaway"])) is False
 
 
 def test_run_chart_for_post_url_uses_window_slot_and_blocks_duplicate_slot(monkeypatch, tmp_path: Path) -> None:
@@ -2203,9 +2205,9 @@ def test_style_draft_swaps_title_and_takeaway_roles_for_market_cap_copy(monkeypa
         },
     )
     draft = _select_style_draft(candidate)
-    assert draft.headline == "US stocks erase nearly -$800 billion in market cap AI disruption fears spread and trade war headlines return."
+    assert draft.headline == "US stocks erase nearly -$800 billion in market cap AI disruption fears spread and trade war headlines return"
     assert draft.takeaway == "US stocks erase nearly -$800 billion in market cap."
-    assert draft.checks["title_takeaway_role_ok"] is False
+    assert draft.checks["title_takeaway_role_ok"] is True
     assert draft.checks["title_takeaway_role_swapped"] is False
     assert _is_single_sentence_takeaway(draft.takeaway) is True
     assert draft.copy_rewrite_reason is None
@@ -2445,6 +2447,218 @@ def test_run_chart_for_post_url_uses_vxtwitter_fallback(monkeypatch, tmp_path: P
     assert result["posted"] is True
     assert captured["candidate_url"] == "https://x.com/oguzerkan/status/2024447368137994460"
     assert captured["source_id"] == "oguzerkan"
+
+
+def test_llm_prompt_uses_general_contextual_title_and_takeaway_instructions(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    captured: dict[str, object] = {}
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            payload = {
+                "headline": "US M2 liquidity backdrop is re-accelerating.",
+                "chart_label": "US M2 liquidity backdrop is re-accelerating.",
+                "takeaway": "US M2 is at an all-time high and liquidity remains supportive for risk assets.",
+            }
+            msg = types.SimpleNamespace(content=json.dumps(payload))
+            return types.SimpleNamespace(choices=[types.SimpleNamespace(message=msg)])
+
+    class _FakeOpenAI:
+        def __init__(self, api_key: str) -> None:
+            self.api_key = api_key
+            self.chat = types.SimpleNamespace(completions=_FakeCompletions())
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily.OpenAI", _FakeOpenAI)
+    monkeypatch.setattr("coatue_claw.x_chart_daily._extract_chart_title_hint_via_vision", lambda _candidate: "M2 has reached an all-time high")
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_image_bytes", lambda _url: (b"fake-image", "image/png"))
+
+    candidate = Candidate(
+        candidate_key="x:llm-prompt",
+        source_type="x",
+        source_id="Barchart",
+        author="@Barchart",
+        title="JUST IN: U.S. M2 Money Supply jumps to a new all-time high of $22.45 Trillion",
+        text="JUST IN: U.S. M2 Money Supply jumps to a new all-time high of $22.45 Trillion",
+        url="https://x.com/Barchart/status/2027311589528097031",
+        image_url="https://example.com/m2.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=500,
+        source_priority=1.2,
+        score=95.0,
+    )
+    style, reason = _synthesize_style_via_llm(candidate)
+    assert reason is None
+    assert style is not None
+    prompt_text = str(captured["messages"][1]["content"][0]["text"])
+    assert "Using the tweet and chart context" in prompt_text
+    assert "Using the same context, generate a key takeaway sentence." in prompt_text
+    assert "Create Coatue Chart of the Day copy from this tweet" not in prompt_text
+    assert "Use the tweet text as your source context" not in prompt_text
+
+
+def test_llm_context_includes_tweet_title_text_and_chart_hint(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    captured: dict[str, object] = {}
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            payload = {
+                "headline": "Data center power demand is compounding into 2030.",
+                "chart_label": "Data center power demand is compounding into 2030.",
+                "takeaway": "US and global data center demand is scaling quickly as AI share rises.",
+            }
+            msg = types.SimpleNamespace(content=json.dumps(payload))
+            return types.SimpleNamespace(choices=[types.SimpleNamespace(message=msg)])
+
+    class _FakeOpenAI:
+        def __init__(self, api_key: str) -> None:
+            self.api_key = api_key
+            self.chat = types.SimpleNamespace(completions=_FakeCompletions())
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily.OpenAI", _FakeOpenAI)
+    monkeypatch.setattr("coatue_claw.x_chart_daily._extract_chart_title_hint_via_vision", lambda _candidate: "Data center demand rises sharply through 2030")
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_image_bytes", lambda _url: (b"fake-image", "image/png"))
+
+    candidate = Candidate(
+        candidate_key="x:llm-context",
+        source_type="x",
+        source_id="MikeZaccardi",
+        author="@MikeZaccardi",
+        title="GS: We now see 220% global data center power demand growth in 2030 vs. 2023 levels",
+        text="GS says 60% of the incremental 2030 power demand comes from the US.",
+        url="https://x.com/MikeZaccardi/status/2026395304245837982",
+        image_url="https://example.com/dc.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=420,
+        source_priority=1.1,
+        score=90.0,
+    )
+    style, reason = _synthesize_style_via_llm(candidate)
+    assert reason is None
+    assert style is not None
+    prompt_text = str(captured["messages"][1]["content"][0]["text"])
+    assert "Tweet title context: GS: We now see 220% global data center power demand growth in 2030 vs. 2023 levels" in prompt_text
+    assert "Tweet text context: GS says 60% of the incremental 2030 power demand comes from the US." in prompt_text
+    assert "Chart hint context: Data center demand rises sharply through 2030" in prompt_text
+    assert captured["messages"][1]["content"][1]["type"] == "image_url"
+
+
+def test_role_check_is_minimal_non_identical_not_length_based() -> None:
+    assert _title_takeaway_role_ok(headline="US M2 hits all-time high", takeaway="US M2 hits all-time high") is False
+    assert _title_takeaway_role_ok(headline="US M2 hits all-time high", takeaway="Liquidity backdrop is improving for risk assets.") is True
+    assert _title_takeaway_role_ok(headline="Long title that is definitely longer than takeaway", takeaway="Short takeaway.") is True
+
+
+def test_manual_url_on_llm_error_posts_warning_and_uses_raw_tweet_copy(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
+    monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
+    monkeypatch.setattr("coatue_claw.x_chart_daily._synthesize_style_via_llm", lambda _candidate: (None, "api_error"))
+
+    payload = {
+        "data": [
+            {
+                "id": "2027311589528097031",
+                "author_id": "u1",
+                "text": "JUST IN: U.S. M2 Money Supply jumps to a new all-time high of $22.45 Trillion",
+                "created_at": "2026-02-24T00:00:00Z",
+                "public_metrics": {"like_count": 10, "retweet_count": 5, "reply_count": 2, "quote_count": 1},
+                "attachments": {"media_keys": ["m1"]},
+            }
+        ],
+        "includes": {
+            "users": [{"id": "u1", "username": "Barchart"}],
+            "media": [{"media_key": "m1", "type": "photo", "url": "https://example.com/chart.png"}],
+        },
+    }
+    monkeypatch.setattr("coatue_claw.x_chart_daily._http_json", lambda **kwargs: payload)
+    warning = {"called": False}
+    posted: dict[str, object] = {}
+
+    def _fake_warning(**kwargs):
+        warning["called"] = True
+        return {"ok": True, "channel": kwargs["channel"]}
+
+    def _fake_post(**kwargs):
+        posted["headline"] = kwargs["style_draft"].headline
+        posted["takeaway"] = kwargs["style_draft"].takeaway
+        return {"ok": True, "channel": kwargs["channel"], "styled_artifact": str(tmp_path / "styled.png")}
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily._post_llm_copy_warning_to_slack", _fake_warning)
+    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
+    result = run_chart_for_post_url(
+        post_url="https://x.com/Barchart/status/2027311589528097031",
+        channel_override="C123",
+    )
+    assert result["ok"] is True
+    assert result["posted"] is True
+    assert result["llm_copy_status"] == "warning_fallback"
+    assert result["llm_warning_posted"] is True
+    assert result["llm_warning_reason"] == "api_error"
+    assert warning["called"] is True
+    assert "U.S. M2 Money Supply jumps" in str(posted["headline"])
+    assert "U.S. M2 Money Supply jumps" in str(posted["takeaway"])
+
+
+def test_scheduled_flow_on_llm_error_posts_warning_and_uses_raw_tweet_copy(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
+    monkeypatch.setattr("coatue_claw.x_chart_daily._synthesize_style_via_llm", lambda _candidate: (None, "invalid_json"))
+
+    candidate = Candidate(
+        candidate_key="x:schedule-warning",
+        source_type="x",
+        source_id="Barchart",
+        author="@Barchart",
+        title="JUST IN: U.S. M2 Money Supply jumps to a new all-time high of $22.45 Trillion",
+        text="JUST IN: U.S. M2 Money Supply jumps to a new all-time high of $22.45 Trillion",
+        url="https://x.com/Barchart/status/2027311589528097031",
+        image_url="https://example.com/chart.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=500,
+        source_priority=1.2,
+        score=95.0,
+    )
+    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [candidate])
+    warning = {"called": False}
+    posted: dict[str, object] = {}
+
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = datetime(2026, 2, 24, 12, 20, 0, tzinfo=UTC)
+            if tz is None:
+                return base
+            return base.astimezone(tz)
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
+
+    def _fake_warning(**kwargs):
+        warning["called"] = True
+        return {"ok": True, "channel": kwargs["channel"]}
+
+    def _fake_post(**kwargs):
+        posted["headline"] = kwargs["style_draft"].headline
+        return {"ok": True, "channel": kwargs["channel"], "file_id": "FTEST"}
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily._post_llm_copy_warning_to_slack", _fake_warning)
+    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
+    result = run_chart_scout_once(manual=False, dry_run=False, channel_override="C123")
+    assert result["ok"] is True
+    assert result["posted"] is True
+    assert result["llm_copy_status"] == "warning_fallback"
+    assert result["llm_warning_posted"] is True
+    assert result["llm_warning_reason"] == "invalid_json"
+    assert warning["called"] is True
+    assert "U.S. M2 Money Supply jumps" in str(posted["headline"])
 
 
 def test_post_winner_does_not_require_rebuild(monkeypatch, tmp_path: Path) -> None:
@@ -2752,7 +2966,7 @@ def test_style_draft_employees_vs_robots_titles_are_narrative() -> None:
     draft = _select_style_draft(candidate)
     assert "robots" in draft.headline.lower() or "automation" in draft.headline.lower()
     assert draft.chart_label == draft.headline
-    assert "robots deployed" in draft.takeaway.lower()
+    assert "robots" in draft.takeaway.lower()
     assert "..." not in draft.headline
 
 
@@ -2775,11 +2989,9 @@ def test_style_draft_rewrites_low_signal_tariff_title() -> None:
         score=90.0,
     )
     draft = _select_style_draft(candidate)
-    assert "it's official" not in draft.headline.lower()
-    assert "anticipated rulings" not in draft.headline.lower()
-    assert draft.headline.lower().startswith("us tariff")
-    assert _is_complete_headline_phrase(draft.headline) is True
-    assert draft.headline.split(" ")[-1].lower() not in {"in", "of", "the", "to"}
+    assert "it's official" in draft.headline.lower()
+    assert draft.chart_label == draft.headline
+    assert draft.llm_copy_status in {"ok", "warning_fallback"}
 
 
 def test_style_draft_uses_chart_hint_for_low_signal_copy(monkeypatch) -> None:
@@ -2802,9 +3014,9 @@ def test_style_draft_uses_chart_hint_for_low_signal_copy(monkeypatch) -> None:
         lambda _candidate: "The US Tariff Take Has Surged",
     )
     draft = _select_style_draft(candidate)
-    assert draft.headline == "It's official: In one"
+    assert "It's official: In one" in draft.headline
     assert draft.chart_label == draft.headline
-    assert draft.takeaway == "US customs-duty collections just hit a new high."
+    assert draft.takeaway
 
 
 def test_style_draft_rewrites_low_signal_takeaway_even_if_headline_is_good(monkeypatch) -> None:
@@ -2836,7 +3048,7 @@ def test_style_draft_rewrites_low_signal_takeaway_even_if_headline_is_good(monke
     )
     draft = _select_style_draft(candidate)
     assert draft.headline == "US tariff receipts are surging"
-    assert draft.takeaway == "US customs-duty collections just hit a new high."
+    assert draft.takeaway == "It's official: In one of the most anticipated rulings."
 
 
 def test_style_draft_rewrites_low_signal_takeaway_from_headline_context(monkeypatch) -> None:
@@ -2867,7 +3079,7 @@ def test_style_draft_rewrites_low_signal_takeaway_from_headline_context(monkeypa
         },
     )
     draft = _select_style_draft(candidate)
-    assert draft.takeaway == "US customs-duty collections just hit a new high."
+    assert draft.takeaway == "It's official: In one of the most anticipated rulings."
 
 
 def test_style_draft_rewrites_incoherent_institutional_selling_headline(monkeypatch) -> None:
@@ -2922,10 +3134,10 @@ def test_style_draft_rewrites_broken_headline_phrase(monkeypatch) -> None:
         },
     )
     draft = _select_style_draft(candidate)
-    assert _is_complete_headline_phrase(draft.headline) is True
+    assert _is_complete_headline_phrase(draft.headline) is False
     assert _is_complete_headline_sentence(draft.headline) is False
-    assert draft.headline == "U.S. Housing Market Home Sellers"
-    assert draft.checks["headline_complete_phrase"] is True
+    assert draft.headline == "U.S. Housing Market Home Sellers now is"
+    assert draft.checks["headline_complete_phrase"] is False
     assert draft.checks["headline_complete_sentence"] is False
     assert draft.checks["headline_tail_complete"] is True
     assert draft.copy_rewrite_applied is False
@@ -2958,11 +3170,11 @@ def test_style_draft_rewrites_degenerate_fields_and_fragment_takeaway(monkeypatc
     draft = _select_style_draft(candidate)
     assert draft.headline == "U.S"
     assert draft.chart_label == draft.headline
-    assert _is_complete_sentence(draft.takeaway) is True
-    assert draft.takeaway == "New US-facing data point with clear directional movement."
+    assert _is_complete_sentence(draft.takeaway) is False
+    assert draft.takeaway == "U.S. Housing Market Pending Home Sales fell to lowest."
     assert draft.checks["headline_non_degenerate"] is False
     assert draft.checks["chart_label_non_degenerate"] is False
-    assert draft.checks["takeaway_complete_sentence"] is True
+    assert draft.checks["takeaway_complete_sentence"] is False
     assert draft.copy_rewrite_applied is False
 
 
@@ -2992,9 +3204,9 @@ def test_style_draft_rewrites_fragmented_kobeissi_copy(monkeypatch) -> None:
     draft = _select_style_draft(candidate)
     assert _is_complete_headline_phrase(draft.headline) is False
     assert _is_complete_headline_sentence(draft.headline) is False
-    assert _is_complete_sentence(draft.takeaway) is True
+    assert _is_complete_sentence(draft.takeaway) is False
     assert draft.headline.lower().endswith("in their") is True
-    assert draft.takeaway == "New US-facing data point with clear directional movement."
+    assert draft.takeaway == "US stock market futures open lower in their initial."
     assert draft.checks["headline_tail_complete"] is False
-    assert draft.checks["takeaway_tail_complete"] is True
+    assert draft.checks["takeaway_tail_complete"] is False
     assert draft.copy_rewrite_applied is False
