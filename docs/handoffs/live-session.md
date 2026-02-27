@@ -3,6 +3,31 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-27, chart-only candidate gate for chart-day selection)
+- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/src/coatue_claw/x_chart_daily.py`:
+  - `_candidate_pool_for_post(...)` now drops candidates that do not pass `_has_reconstructable_chart_data(...)`.
+  - this enforces chart-day selection to prefer posts with parseable chart/graph structure, not generic illustration images.
+- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/tests/test_x_chart_daily.py`:
+  - added `test_candidate_pool_excludes_non_chart_images_even_if_score_is_higher`.
+  - added default autouse test fixture to keep reconstructability deterministic in tests; non-chart behavior is still covered by explicit monkeypatches in targeted tests.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `96 passed`
+
+## Update (2026-02-27, enforce `chart_label == title` across chart-day)
+- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/src/coatue_claw/x_chart_daily.py`:
+  - `chart_label` is now synchronized to final `headline` in style draft generation.
+  - manual `run-post-url --title` override now updates both `headline` and `chart_label`.
+  - renderer no longer truncates chart label text independently; it preserves exact label text and fails closed on overflow (`Chart label layout overflow without truncation.`).
+  - removed independent chart-label rewrite behavior in `_sanitize_style_copy(...)` so label cannot diverge from title path.
+- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/tests/test_x_chart_daily.py`:
+  - added regression tests:
+    - `test_style_draft_chart_label_matches_headline_llm_path`
+    - `test_style_draft_chart_label_matches_headline_fallback_path`
+    - `test_run_post_url_title_override_syncs_chart_label`
+  - updated prior assertions that expected chart-label-specific text.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `88 passed`
+
 ## Update (2026-02-27, removed sentence splitter in chart-day title extraction)
 - Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/src/coatue_claw/x_chart_daily.py`:
   - `_extract_first_sentence(...)` no longer splits on punctuation.
@@ -2937,22 +2962,46 @@ Then confirm bot returns:
 - Dry-run artifact: /opt/coatue-claw-data/artifacts/market-daily/md-open-20260227-174225.md.
 - Smoke: md now force posted via run-once; debug-catalyst NFLX close shows richer context fields but anchor still selected from web explainer set (TipRanks/247/Invezz), so article-context quality tuning remains follow-up.
 
-## Update (2026-02-27, board-seat candidate schema trim)
-- Removed unused `one_line_fit` and `why_now` fields from simple-mode `CandidateIdea`.
-- Simplified LLM candidate JSON schema now requires `name` only.
-- Tests updated to instantiate `CandidateIdea(name=...)` only.
+## Update (2026-02-27, chart-day `$` render hardening)
+- Fixed chart-day render-path crashes caused by cashtags (`$AXP`, `$JPM`, etc.) being interpreted as matplotlib math syntax.
+- Added `_matplotlib_safe_text(...)` and applied it to all headline/chart-label/takeaway/source text writes in both renderers:
+  - `_render_source_snip_card`
+  - `_render_chart_of_day_style`
+  - `_fit_headline_text`, `_fit_chart_label_text`, `_fit_takeaway_text`
+- Kept source URL text intact via `preserve_urls=True` in source footer rendering.
+- Added regression test:
+  - `test_render_source_snip_card_handles_cashtag_copy`
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `89 passed`.
 
-## Update (2026-02-27, simple-mode deeper scraping + source content grounding)
-- Expanded simple-mode research collection to pull broader target/company/funding query sets.
-- Added expanded search collector path that can query both configured backends per query in simple mode.
-- Added page-content extraction for selected sources (`_fetch_page_text` + `_source_content_extracts`) and pass those extracts into simple draft prompt.
-- Added simple-mode knobs:
-  - `COATUE_CLAW_BOARD_SEAT_SIMPLE_USE_ALL_BACKENDS`
-  - `COATUE_CLAW_BOARD_SEAT_SIMPLE_SOURCE_FETCH_PAGES`
-  - `COATUE_CLAW_BOARD_SEAT_SIMPLE_SOURCE_DOC_CHARS`
+## Update (2026-02-27, run-post-url slot behavior aligned to scheduled windows)
+- Changed manual URL posting to use normal scheduled slot keys (e.g., `YYYY-MM-DD-12:00`) instead of ad-hoc `manual-url-<timestamp>` keys.
+- Added deterministic slot helper for manual URL flow:
+  - `_slot_key_for_manual_post_url(...)`
+  - Uses latest elapsed window; if called before first window, maps to that day’s first configured window.
+- Added hard duplicate-slot guard in `run_chart_for_post_url(...)`:
+  - if target slot already posted, return `reason=slot_already_posted` and skip Slack post.
+  - still writes pull log with `mode=manual_url` and `result_reason=slot_already_posted`.
+- Added regression test:
+  - `test_run_chart_for_post_url_uses_window_slot_and_blocks_duplicate_slot`
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `90 passed`.
 
-## Update (2026-02-27, simple-mode prompt/input change per operator request)
-- Removed `claims` from simple-mode draft prompt payload.
-- Funding section in simple mode is now LLM-inferred from fetched `source_extracts` only (no deterministic funding parser in this path).
-- Increased default source breadth to top 15 links.
-- `COATUE_CLAW_BOARD_SEAT_SIMPLE_SOURCE_DOC_CHARS=0` now means no truncation cap (full extracted text passed to prompt).
+## Update (2026-02-27, chart-day LLM-first copy + warning fallback flow)
+- Shifted chart-day copy generation to LLM-first with full context:
+  - tweet title + tweet text + chart hint + chart image (multimodal when available).
+  - prompt now uses broad contextual instructions for title/takeaway, no tweet-only restatement framing.
+- Removed style-guardrail publish blocking:
+  - no length-based role gate, no rewrite-driven rejection path for title/takeaway quality.
+  - publish checks now only enforce minimal technical viability (non-empty headline/takeaway and render-safe takeaway).
+- Updated role telemetry semantics:
+  - `_title_takeaway_role_ok` now checks non-empty + non-identical normalized strings.
+- Added LLM error warning flow:
+  - on technical LLM copy failure (`api_error`/`invalid_json`/`missing_fields`), bot posts warning in chart channel and continues with raw tweet fallback copy.
+  - warning post failures are non-fatal (logs warning and continues posting fallback chart).
+- Runtime payload additions in scheduled + manual flows:
+  - `llm_copy_status`
+  - `llm_warning_posted`
+  - `llm_warning_reason`
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `95 passed`.
