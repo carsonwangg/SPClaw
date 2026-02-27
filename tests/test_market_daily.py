@@ -1510,6 +1510,62 @@ def test_catalyst_mode_defaults_to_simple(monkeypatch) -> None:
     assert md._catalyst_mode() == "simple_synthesis"
 
 
+def test_relevance_mode_defaults_to_llm_first(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    monkeypatch.delenv("COATUE_CLAW_MD_RELEVANCE_MODE", raising=False)
+    assert md._relevance_mode() == "llm_first"
+
+
+def test_select_anchor_support_llm_parses_json() -> None:
+    from coatue_claw import market_daily as md
+
+    class _FakeCompletions:
+        @staticmethod
+        def create(*args, **kwargs):
+            return type(
+                "Resp",
+                (),
+                {
+                    "choices": [
+                        type("Choice", (), {"message": type("Msg", (), {"content": '{"anchor":"C2","supports":["C1"]}'})()})()
+                    ]
+                },
+            )()
+
+    class _FakeChat:
+        completions = _FakeCompletions()
+
+    class _FakeClient:
+        chat = _FakeChat()
+
+    c1 = md._EvidenceCandidate(
+        source_type="web",
+        text="Spotify shares surged in midday trading.",
+        url="https://example.com/spot-price-action",
+        published_at_utc=datetime(2026, 2, 26, 20, 0, 0, tzinfo=UTC),
+        score=0.7,
+    )
+    c2 = md._EvidenceCandidate(
+        source_type="web",
+        text="Spotify jumps as bullish analyst upgrade highlights margin upside.",
+        url="https://www.quiverquant.com/news/Spotify+jumps+as+bullish+analyst+upgrade+highlights+margin+upside",
+        published_at_utc=datetime(2026, 2, 26, 19, 0, 0, tzinfo=UTC),
+        score=0.68,
+    )
+
+    anchor, supports, err = md._select_anchor_support_llm(
+        client=_FakeClient(),
+        ticker="SPOT",
+        pct_move=0.045,
+        candidates=[c1, c2],
+        max_support=2,
+    )
+    assert err is None
+    assert anchor is not None and anchor.url == c2.url
+    assert supports and supports[0].url == c1.url
+
+
 def test_simple_mode_outputs_full_sentence_not_after_wrapper(monkeypatch) -> None:
     from coatue_claw import market_daily as md
 
@@ -1559,6 +1615,60 @@ def test_simple_mode_outputs_full_sentence_not_after_wrapper(monkeypatch) -> Non
     assert evidence.synth_generation_mode == "simple_synthesis"
     assert evidence.generation_format == "free_sentence"
     assert evidence.synth_candidates_used
+
+
+def test_llm_first_relevance_anchor_is_used(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.setenv("COATUE_CLAW_MD_RELEVANCE_MODE", "llm_first")
+    mover = QuoteSnapshot("SPOT", 100.0, 104.5, 100.0, 0.045, "2026-02-26T22:00:00+00:00")
+    price_action = md._EvidenceCandidate(
+        source_type="web",
+        text="Spotify shares surged in midday trading to an intraday high.",
+        context_text="Spotify shares surged in midday trading to an intraday high, reflecting buying momentum.",
+        url="https://example.com/spot-price-action",
+        published_at_utc=datetime(2026, 2, 26, 21, 0, 0, tzinfo=UTC),
+        score=0.9,
+        domain="example.com",
+    )
+    upgrade = md._EvidenceCandidate(
+        source_type="web",
+        text="Spotify jumps as bullish analyst upgrade highlights margin upside.",
+        context_text="Spotify jumped after a bullish analyst upgrade citing margin upside.",
+        url="https://www.quiverquant.com/news/Spotify+jumps+as+bullish+analyst+upgrade+highlights+margin+upside",
+        published_at_utc=datetime(2026, 2, 26, 20, 30, 0, tzinfo=UTC),
+        score=0.78,
+        domain="quiverquant.com",
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._collect_synthesis_candidates",
+        lambda ticker, aliases, since_utc, pct_move=None: (
+            [price_action, upgrade],
+            [price_action, upgrade],
+            [],
+            "google_serp",
+        ),
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._select_anchor_support_llm",
+        lambda client, ticker, pct_move, candidates, max_support: (upgrade, [price_action], None),
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._synthesize_catalyst_sentence_simple",
+        lambda client, ticker, pct_move, anchor, supports: ("Spotify rose after an analyst upgrade highlighted margin upside.", None),
+    )
+    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: object())
+
+    evidence, line = md._build_catalyst_for_mover(
+        mover=mover,
+        slot_name="close",
+        since_utc=datetime(2026, 2, 26, 14, 30, 0, tzinfo=UTC),
+    )
+    assert evidence.cause_anchor_url == upgrade.url
+    assert "anchor_selected_by_llm" in evidence.rejected_reasons
+    assert evidence.synth_generation_mode == "simple_synthesis_llm_first"
+    assert "analyst upgrade" in line.lower()
 
 
 def test_simple_synthesis_soft_domain_gate_prefers_quality(monkeypatch) -> None:

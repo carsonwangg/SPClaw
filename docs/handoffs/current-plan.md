@@ -40,35 +40,28 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
-- Board Seat v1 rebuild is now implemented in `src/coatue_claw/board_seat_daily.py`:
-  - weekday noon PT scheduling posture (`COATUE_CLAW_BOARD_SEAT_TIME=12:00`, `COATUE_CLAW_BOARD_SEAT_WEEKDAYS_ONLY=1`).
-  - auto channel discovery (`company_match`) across public/private Slack channels with static fallback.
-  - web-first target discovery (Brave first, Serp fallback), candidate scoring, high-confidence new-target gate, and 20-day hard no-repeat (default).
-  - repitch requires significance score threshold and emits explicit prior-pitch/new-evidence note when resurfaced.
-  - concise 5-section output contract with source citations moved to thread reply.
-  - funding cache + confidence model (`verified|partial|weak`) with low-confidence warning line.
-  - quality gate + rewrite loop; on persistent failure, memory-only rewrite posts with mandatory warning thread.
-  - persisted audit tables: `board_seat_runs`, `board_seat_candidates`, `board_seat_target_events`, `board_seat_funding_cache`, `board_seat_channel_discovery`.
-  - funding maintenance commands now live:
-    - `board_seat_daily refresh-funding`
-    - `board_seat_daily funding-quality-report`
-  - legacy DB compatibility fix shipped:
-    - additive/idempotent schema migrations now auto-upgrade older SQLite files at startup.
-    - prevents runtime failures on missing legacy columns (for example `board_seat_target_events.source_url`).
-  - output hardening shipped for live quality:
-    - blocks already-acquired targets from being pitched again (`target_already_acquired` gate reason).
-    - blocks product/self targets (for example `Anthropic -> Claude`) via product-alias validation.
-    - blocks ambiguous common-word targets (for example `Lead`) via target validation.
-    - funding amount parser now filters noisy/outlier amounts and enforces funding-context extraction.
-    - backer rendering now suppresses clause fragments and truncates cleanly with `(+N more)`.
-    - Slack source citations now reliably post in-thread (fixed SlackResponse `ts` handling).
-  - targeting flow upgraded to two-stage:
-    - LLM idea generation for candidate targets.
-    - deterministic entity verification (high-signal domains + target-name consistency) before posting.
-    - if a candidate is rejected, system iterates to next candidate instead of stopping at first failure.
-    - hard job/role-phrase rejection prevents non-company targets from posting.
-- Historical context (superseded by v1 rebuild above):
-  - Board Seat was reset to scaffold baseline before the current rebuild.
+- Market Daily LLM-first relevance mode shipped on role branch:
+  - new `COATUE_CLAW_MD_RELEVANCE_MODE` control (`llm_first` default, `deterministic` fallback).
+  - in simple-synthesis mode, model now selects anchor/support evidence IDs before writing the catalyst sentence.
+  - deterministic consensus/anchor logic remains as automatic fallback if relevance selection fails.
+  - regression coverage:
+    - `tests/test_market_daily.py::test_relevance_mode_defaults_to_llm_first`
+    - `tests/test_market_daily.py::test_select_anchor_support_llm_parses_json`
+    - `tests/test_market_daily.py::test_llm_first_relevance_anchor_is_used`
+- Market Daily catalyst ranking quality hardening shipped on role branch:
+  - added price-action-only text detector to penalize non-causal “intraday momentum/trading” blurbs.
+  - anchor chooser now prefers true causal explainers, including analyst upgrade/downgrade narratives.
+  - deterministic fallback gate now excludes price-action-only candidates from specific-line generation.
+  - regression coverage:
+    - `tests/test_market_daily.py::test_price_action_only_penalty_lowers_rank_vs_causal_upgrade`
+    - `tests/test_market_daily.py::test_anchor_picker_prefers_upgrade_explainer_over_price_action`
+- Market Daily earnings recap dedupe fix shipped on role branch:
+  - manual recap runs outside the scheduled window now record under `earnings_recap_manual`.
+  - scheduled nightly recap keeps `earnings_recap`.
+  - this prevents daytime manual/test runs from blocking the 7:00 PM scheduled recap via same-slot dedupe.
+  - regression test:
+    - `tests/test_market_daily.py::test_run_earnings_recap_manual_daytime_does_not_block_scheduled_slot`
+- Board Seat has been reset to a scaffold baseline to restart from scratch:
   - `src/coatue_claw/board_seat_daily.py` no longer runs legacy drafting/quality logic.
   - default behavior is hard skip with `feature_reset_in_progress`.
   - CLI/ops commands are still present so launchd and make targets remain stable.
@@ -1405,24 +1398,3 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `63 passed`.
 - Next:
   - add a post-sanitize target-lock re-check so retargeted outputs cannot bypass cooldown/new-target governance when final target differs from initial extraction.
-
-## Board Seat - LLM-First Exhaustive Target Search (2026-02-26)
-- Status: implemented on `codex/agent-board-seat`, tests updated.
-- Completed scope:
-  - LLM-first candidate seeding with per-batch replenishment until winner or configured exhaustion.
-  - strict continue-on-reject behavior across hard gates (no early stop on first failed finalist).
-  - new per-run transparency fields for candidate scan/evaluation counts and rejection breakdown.
-  - persisted candidate-level decision audit rows in `board_seat_candidate_decisions`.
-  - legacy DB auto-migration for added `board_seat_runs` telemetry columns.
-- Next:
-  - integrator can run dry-run canary on Anthropic/Anduril and confirm rejection telemetry in payload/log output.
-
-## Board Seat - Simplified LLM Pipeline (2026-02-27)
-- Status: implemented on `codex/agent-board-seat`; now set as sole runtime path.
-- Completed scope:
-  - simple selection path (`simple_llm`) using LLM candidate batches + lightweight company existence check.
-  - hard 20-day no-repeat retained; complex repitch significance gate not used in simple mode.
-  - regenerate-until-cap behavior with explicit rejection list in payload.
-  - simple draft builder added while retaining 5-section output contract + threaded sources.
-- Next:
-  - integrator can enable `COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE=1` on mini for dry-run canary.
