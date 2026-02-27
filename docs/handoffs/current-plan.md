@@ -3,30 +3,6 @@
 ## Objective
 Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as the primary runtime and control plane.
 
-## Chart-of-Day Title Policy (2026-02-26)
-- Applied relaxed title policy in `x_chart_daily` for chart-of-the-day styling:
-  - title/headline generation is now primarily LLM-directed from tweet text.
-  - strict deterministic headline completion guardrails are no longer used as publish blockers.
-  - post-url title overrides accept freeform non-empty text (no strict sentence-finalization requirement).
-- Regression coverage aligned in `tests/test_x_chart_daily.py`.
-- Current validation status:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` passes (`82 passed`).
-
-## Chart-of-Day Discovery Expansion (2026-02-26)
-- Shipped hybrid candidate discovery for chart-of-day:
-  - source-list pull is now only one input leg.
-  - open X search is executed each scheduled scout run (configurable, default enabled).
-  - merged pool is deduped and ranked with added “interesting takeaway” bias before final source-variety selection.
-- Source DB is no longer treated as static truth:
-  - unseen winning X accounts are auto-added to `sources` (bounded by daily cap).
-- Pull-log artifact contract now includes discovery and source-building telemetry:
-  - candidate counts by channel (`seed`, `open_search`, `merged`)
-  - scanned accounts list
-  - winner discovery origin
-  - auto-add action metadata
-- Validation status:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` passes (`85 passed`).
-
 ## V1 Scope
 - SEC + transcript + macro ingestion
 - Diligence packets (bull/bear + peer comp + charts)
@@ -64,6 +40,37 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Market Daily LLM grounding upgrade shipped on role branch:
+  - simple-synthesis relevance selection + one-line drafting now use richer article-body context for top candidates (not headline/snippet only).
+  - added per-run controls for context enrichment:
+    - `COATUE_CLAW_MD_ARTICLE_CONTEXT_ENABLED`
+    - `COATUE_CLAW_MD_ARTICLE_CONTEXT_TIMEOUT_MS`
+    - `COATUE_CLAW_MD_ARTICLE_CONTEXT_MAX_CHARS`
+    - `COATUE_CLAW_MD_ARTICLE_CONTEXT_LIMIT`
+  - coverage:
+    - `tests/test_market_daily.py::test_extract_article_context_from_html_prefers_body_text`
+    - `tests/test_market_daily.py::test_evidence_context_for_llm_includes_article_body`
+- Market Daily LLM-first relevance mode shipped on role branch:
+  - new `COATUE_CLAW_MD_RELEVANCE_MODE` control (`llm_first` default, `deterministic` fallback).
+  - in simple-synthesis mode, model now selects anchor/support evidence IDs before writing the catalyst sentence.
+  - deterministic consensus/anchor logic remains as automatic fallback if relevance selection fails.
+  - regression coverage:
+    - `tests/test_market_daily.py::test_relevance_mode_defaults_to_llm_first`
+    - `tests/test_market_daily.py::test_select_anchor_support_llm_parses_json`
+    - `tests/test_market_daily.py::test_llm_first_relevance_anchor_is_used`
+- Market Daily catalyst ranking quality hardening shipped on role branch:
+  - added price-action-only text detector to penalize non-causal “intraday momentum/trading” blurbs.
+  - anchor chooser now prefers true causal explainers, including analyst upgrade/downgrade narratives.
+  - deterministic fallback gate now excludes price-action-only candidates from specific-line generation.
+  - regression coverage:
+    - `tests/test_market_daily.py::test_price_action_only_penalty_lowers_rank_vs_causal_upgrade`
+    - `tests/test_market_daily.py::test_anchor_picker_prefers_upgrade_explainer_over_price_action`
+- Market Daily earnings recap dedupe fix shipped on role branch:
+  - manual recap runs outside the scheduled window now record under `earnings_recap_manual`.
+  - scheduled nightly recap keeps `earnings_recap`.
+  - this prevents daytime manual/test runs from blocking the 7:00 PM scheduled recap via same-slot dedupe.
+  - regression test:
+    - `tests/test_market_daily.py::test_run_earnings_recap_manual_daytime_does_not_block_scheduled_slot`
 - Board Seat has been reset to a scaffold baseline to restart from scratch:
   - `src/coatue_claw/board_seat_daily.py` no longer runs legacy drafting/quality logic.
   - default behavior is hard skip with `feature_reset_in_progress`.
@@ -1402,22 +1409,18 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Next:
   - add a post-sanitize target-lock re-check so retargeted outputs cannot bypass cooldown/new-target governance when final target differs from initial extraction.
 
-## X Chart - Hard Cooldown + Pull Logging (2026-02-26)
-- Status: implemented on `codex/agent-chart-day`, validated.
-- Completed scope in `src/coatue_claw/x_chart_daily.py`:
-  - Hard source cooldown enforcement:
-    - `_pick_winner(...)` now returns `None` when all sources are within `COATUE_CLAW_X_CHART_SOURCE_REPEAT_DAYS` (default 3).
-    - removed starvation fallback that previously allowed recent-source reuse.
-  - Added scheduled cooldown-exhaustion notice:
-    - new helper `_post_no_candidate_message_to_slack(...)`.
-    - `run_chart_scout_once(...)` now returns reason `all_candidates_in_cooldown` and posts explicit channel notice (unless `dry_run`).
-  - Added deterministic per-run pull logs:
-    - new helper `_write_pull_log(...)` writes `*-pull-log.json` under artifacts directory.
-    - wired into all `run_chart_scout_once(...)` return paths (posted and skipped).
-    - wired into `run_chart_for_post_url(...)` with `mode=manual_url` and `manual_override_used=true` (manual URL override policy retained).
-- API/return payload additions:
-  - `pull_log_path` (all scout/manual-url outcomes)
-  - `notice_posted`, `notice_channel`, `notice` (cooldown-exhausted scheduled runs)
-  - new reason: `all_candidates_in_cooldown`
-- Validation:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `82 passed`
+## Market Daily - Earnings Recap Manual Slot Dedupe Verification (2026-02-26)
+- Verified on main in /opt/coatue-claw.
+- Behavior for 95ddd47 is present: daytime manual runs use earnings_recap_manual and do not consume scheduled recap slot.
+- Validation: tests/test_market_daily.py 79 passed; tests/test_launchd_runtime.py 10 passed.
+- Runtime: recap scheduler service com.coatueclaw.market-daily-earnings-recap loaded.
+- DB checks confirmed slot separation between earnings_recap_manual and earnings_recap.
+- Scheduled-path dry-run result in this window was no_reporters.
+
+## Market Daily - Article Context Grounding Deploy (2026-02-27)
+- Deployed commit d817abc (main commit d0b440f) to add richer article context for LLM relevance + drafting.
+- Test results: market_daily 81 passed; launchd_runtime 10 passed (venv).
+- Runtime health: openclaw restart complete; slack probe healthy.
+- Status keys present: article_context_enabled, article_context_timeout_ms, article_context_max_chars, article_context_limit; relevance_mode remains llm_first.
+- Dry-run + live smoke executed; artifact generated and posted.
+- NFLX debug close shows contextual synthesis fields active, with remaining improvement opportunity in source-anchor quality selection.

@@ -1433,11 +1433,172 @@ def test_run_earnings_recap_selects_top4_and_writes_artifact(tmp_path: Path, mon
     assert "X/Yahoo/web evidence" not in content
 
 
+def test_run_earnings_recap_manual_daytime_does_not_block_scheduled_slot(tmp_path: Path, monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_MD_DB_PATH", str(tmp_path / "db/market_daily.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_MD_ARTIFACT_DIR", str(tmp_path / "artifacts/market-daily"))
+    monkeypatch.setenv("COATUE_CLAW_MD_TZ", "UTC")
+    monkeypatch.setenv("COATUE_CLAW_MD_EARNINGS_RECAP_TIME", "19:00")
+    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: None)
+
+    class Frozen(datetime):
+        _calls = [
+            datetime(2026, 2, 25, 10, 0, 0, tzinfo=UTC),  # manual daytime
+            datetime(2026, 2, 25, 19, 0, 0, tzinfo=UTC),  # scheduled window
+        ]
+        _last = _calls[-1]
+
+        @classmethod
+        def now(cls, tz=None):
+            if cls._calls:
+                base = cls._calls.pop(0)
+                cls._last = base
+            else:
+                base = cls._last
+            return base if tz is None else base.astimezone(tz)
+
+    monkeypatch.setattr("coatue_claw.market_daily.datetime", Frozen)
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._build_final_universe",
+        lambda store, refresh_holdings=True: (
+            [QuoteSnapshot("CRM", 100.0, 103.0, 100.0, 0.03, "2026-02-25T19:00:00+00:00")],
+            {"CRM": "top40"},
+            set(),
+            set(),
+            None,
+        ),
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._collect_reported_today_rows",
+        lambda universe, now_utc=None: [
+            EarningsRecapRow("CRM", "Salesforce", "2026-02-25", "after_close", 100.0, 103.0, 100.0, 0.03)
+        ],
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._hydrate_recap_row",
+        lambda row, since_utc, client: replace(
+            row,
+            bullets=("Key catalyst: Demand held up [S1].", "Since regular close, shares traded +3.0% [S1]."),
+            evidence=("yahoo_news: CRM earnings beat",),
+            source_links=("https://example.com/crm-earnings",),
+        ),
+    )
+
+    manual_run = md.run_earnings_recap(manual=True, force=False, dry_run=True)
+    assert manual_run["ok"] is True
+    assert manual_run["slot"] == "earnings_recap_manual"
+    assert manual_run["status"] == "dry_run"
+
+    scheduled_run = md.run_earnings_recap(manual=False, force=False, dry_run=True)
+    assert scheduled_run["ok"] is True
+    assert scheduled_run["slot"] == "earnings_recap"
+    assert scheduled_run["status"] == "dry_run"
+    assert scheduled_run.get("reason") is None
+
+    store = md.MarketDailyStore()
+    slots = {(row["run_date_local"], row["slot_name"]) for row in store.latest_runs(limit=10)}
+    assert ("2026-02-25", "earnings_recap_manual") in slots
+    assert ("2026-02-25", "earnings_recap") in slots
+
+
 def test_catalyst_mode_defaults_to_simple(monkeypatch) -> None:
     from coatue_claw import market_daily as md
 
     monkeypatch.delenv("COATUE_CLAW_MD_CATALYST_MODE", raising=False)
     assert md._catalyst_mode() == "simple_synthesis"
+
+
+def test_relevance_mode_defaults_to_llm_first(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    monkeypatch.delenv("COATUE_CLAW_MD_RELEVANCE_MODE", raising=False)
+    assert md._relevance_mode() == "llm_first"
+
+
+def test_select_anchor_support_llm_parses_json() -> None:
+    from coatue_claw import market_daily as md
+
+    class _FakeCompletions:
+        @staticmethod
+        def create(*args, **kwargs):
+            return type(
+                "Resp",
+                (),
+                {
+                    "choices": [
+                        type("Choice", (), {"message": type("Msg", (), {"content": '{"anchor":"C2","supports":["C1"]}'})()})()
+                    ]
+                },
+            )()
+
+    class _FakeChat:
+        completions = _FakeCompletions()
+
+    class _FakeClient:
+        chat = _FakeChat()
+
+    c1 = md._EvidenceCandidate(
+        source_type="web",
+        text="Spotify shares surged in midday trading.",
+        url="https://example.com/spot-price-action",
+        published_at_utc=datetime(2026, 2, 26, 20, 0, 0, tzinfo=UTC),
+        score=0.7,
+    )
+    c2 = md._EvidenceCandidate(
+        source_type="web",
+        text="Spotify jumps as bullish analyst upgrade highlights margin upside.",
+        url="https://www.quiverquant.com/news/Spotify+jumps+as+bullish+analyst+upgrade+highlights+margin+upside",
+        published_at_utc=datetime(2026, 2, 26, 19, 0, 0, tzinfo=UTC),
+        score=0.68,
+    )
+
+    anchor, supports, err = md._select_anchor_support_llm(
+        client=_FakeClient(),
+        ticker="SPOT",
+        pct_move=0.045,
+        candidates=[c1, c2],
+        max_support=2,
+    )
+    assert err is None
+    assert anchor is not None and anchor.url == c2.url
+    assert supports and supports[0].url == c1.url
+
+
+def test_extract_article_context_from_html_prefers_body_text() -> None:
+    from coatue_claw import market_daily as md
+
+    html = """
+    <html><head><script>var x=1;</script></head>
+    <body>
+      <p>Netflix stock rose after reports said the company dropped its bid for Warner assets.</p>
+      <p>Investors viewed the move as improving capital discipline and reducing deal risk.</p>
+    </body></html>
+    """
+    text = md._extract_article_context_from_html(html)
+    assert "dropped its bid" in text.lower()
+    assert "capital discipline" in text.lower()
+
+
+def test_evidence_context_for_llm_includes_article_body(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    item = md._EvidenceCandidate(
+        source_type="web",
+        text="Why Netflix Stock Climbed Today",
+        context_text="Shares rose as the deal outlook changed.",
+        url="https://example.com/nflx",
+        published_at_utc=datetime(2026, 2, 27, 14, 0, 0, tzinfo=UTC),
+        score=0.8,
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._article_context_from_url",
+        lambda url: "Article body: Netflix walked away from the Paramount path, reducing acquisition risk.",
+    )
+    merged = md._evidence_context_for_llm(item)
+    assert "walked away from the paramount path" in merged.lower()
+    assert "shares rose as the deal outlook changed" in merged.lower()
 
 
 def test_simple_mode_outputs_full_sentence_not_after_wrapper(monkeypatch) -> None:
@@ -1489,6 +1650,60 @@ def test_simple_mode_outputs_full_sentence_not_after_wrapper(monkeypatch) -> Non
     assert evidence.synth_generation_mode == "simple_synthesis"
     assert evidence.generation_format == "free_sentence"
     assert evidence.synth_candidates_used
+
+
+def test_llm_first_relevance_anchor_is_used(monkeypatch) -> None:
+    from coatue_claw import market_daily as md
+
+    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.setenv("COATUE_CLAW_MD_RELEVANCE_MODE", "llm_first")
+    mover = QuoteSnapshot("SPOT", 100.0, 104.5, 100.0, 0.045, "2026-02-26T22:00:00+00:00")
+    price_action = md._EvidenceCandidate(
+        source_type="web",
+        text="Spotify shares surged in midday trading to an intraday high.",
+        context_text="Spotify shares surged in midday trading to an intraday high, reflecting buying momentum.",
+        url="https://example.com/spot-price-action",
+        published_at_utc=datetime(2026, 2, 26, 21, 0, 0, tzinfo=UTC),
+        score=0.9,
+        domain="example.com",
+    )
+    upgrade = md._EvidenceCandidate(
+        source_type="web",
+        text="Spotify jumps as bullish analyst upgrade highlights margin upside.",
+        context_text="Spotify jumped after a bullish analyst upgrade citing margin upside.",
+        url="https://www.quiverquant.com/news/Spotify+jumps+as+bullish+analyst+upgrade+highlights+margin+upside",
+        published_at_utc=datetime(2026, 2, 26, 20, 30, 0, tzinfo=UTC),
+        score=0.78,
+        domain="quiverquant.com",
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._collect_synthesis_candidates",
+        lambda ticker, aliases, since_utc, pct_move=None: (
+            [price_action, upgrade],
+            [price_action, upgrade],
+            [],
+            "google_serp",
+        ),
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._select_anchor_support_llm",
+        lambda client, ticker, pct_move, candidates, max_support: (upgrade, [price_action], None),
+    )
+    monkeypatch.setattr(
+        "coatue_claw.market_daily._synthesize_catalyst_sentence_simple",
+        lambda client, ticker, pct_move, anchor, supports: ("Spotify rose after an analyst upgrade highlighted margin upside.", None),
+    )
+    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: object())
+
+    evidence, line = md._build_catalyst_for_mover(
+        mover=mover,
+        slot_name="close",
+        since_utc=datetime(2026, 2, 26, 14, 30, 0, tzinfo=UTC),
+    )
+    assert evidence.cause_anchor_url == upgrade.url
+    assert "anchor_selected_by_llm" in evidence.rejected_reasons
+    assert evidence.synth_generation_mode == "simple_synthesis_llm_first"
+    assert "analyst upgrade" in line.lower()
 
 
 def test_simple_synthesis_soft_domain_gate_prefers_quality(monkeypatch) -> None:

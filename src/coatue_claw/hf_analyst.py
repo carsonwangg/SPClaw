@@ -12,9 +12,11 @@ from typing import Any
 
 import yfinance as yf
 
-from coatue_claw.hf_document_extract import ExtractedDocument, extract_documents
+from coatue_claw.hf_document_extract import extract_documents
+from coatue_claw.hf_podcast import build_podcast_analysis, render_full_transcript_markdown, render_podcast_summary_markdown
 from coatue_claw.hf_prompt_contract import CitationRef, HFScorecard, PromptDraft, build_scorecard, parse_model_json, render_markdown
 from coatue_claw.hf_store import HFStore
+from coatue_claw.hf_youtube_transcript import fetch_youtube_transcript, is_youtube_url
 from coatue_claw.slack_file_ingest import ingest_slack_files
 
 try:
@@ -465,13 +467,21 @@ def _model_draft(
     return parse_model_json(text)
 
 
-def _artifact_path(*, channel: str, thread_ts: str, now: datetime) -> Path:
+def _artifact_path(*, channel: str, thread_ts: str, now: datetime, prefix: str = "hfa") -> Path:
     out_dir = _artifact_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
     safe_channel = re.sub(r"[^A-Za-z0-9._-]+", "-", channel).strip("-") or "unknown-channel"
     safe_thread = re.sub(r"[^0-9.]+", "-", thread_ts).strip("-") or "unknown-thread"
-    filename = f"hfa-{safe_channel}-{safe_thread}-{now.strftime('%Y%m%d-%H%M%S')}.md"
+    filename = f"{prefix}-{safe_channel}-{safe_thread}-{now.strftime('%Y%m%d-%H%M%S')}.md"
     return out_dir / filename
+
+
+def _podcast_artifact_path(*, video_id: str, now: datetime, transcript: bool) -> Path:
+    out_dir = _artifact_dir()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    safe_video_id = re.sub(r"[^A-Za-z0-9_-]+", "-", video_id).strip("-") or "unknown-video"
+    stem = "hfa-podcast-transcript" if transcript else "hfa-podcast"
+    return out_dir / f"{stem}-{safe_video_id}-{now.strftime('%Y%m%d-%H%M%S')}.md"
 
 
 def _thread_file_rows(*, slack_client: Any, channel: str, thread_ts: str) -> list[dict[str, Any]]:
@@ -494,6 +504,11 @@ def file_set_hash(file_ids: list[str]) -> str:
     return digest
 
 
+def podcast_url_hash(url: str) -> str:
+    normalized = (url or "").strip().lower()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
 def should_run_dm_autorun(*, channel: str, user_id: str, thread_ts: str, file_ids: list[str], store: HFStore | None = None) -> bool:
     current_store = store or HFStore()
     digest = file_set_hash(file_ids)
@@ -507,6 +522,22 @@ def record_dm_autorun(*, channel: str, user_id: str, thread_ts: str, file_ids: l
         user_id=user_id,
         thread_ts=thread_ts,
         file_set_hash=file_set_hash(file_ids),
+    )
+
+
+def should_run_dm_podcast_autorun(*, channel: str, user_id: str, thread_ts: str, url: str, store: HFStore | None = None) -> bool:
+    current_store = store or HFStore()
+    url_digest = podcast_url_hash(url)
+    return not current_store.has_dm_podcast_autorun(channel=channel, user_id=user_id, thread_ts=thread_ts, url_hash=url_digest)
+
+
+def record_dm_podcast_autorun(*, channel: str, user_id: str, thread_ts: str, url: str, store: HFStore | None = None) -> None:
+    current_store = store or HFStore()
+    current_store.record_dm_podcast_autorun(
+        channel=channel,
+        user_id=user_id,
+        thread_ts=thread_ts,
+        url_hash=podcast_url_hash(url),
     )
 
 
@@ -546,6 +577,7 @@ def analyze_thread(
         question=question,
         trigger_mode=trigger_mode,
         model=model_name,
+        run_kind="thread_docs",
     )
     try:
         client = slack_client or _slack_client_from_env()
@@ -710,6 +742,159 @@ def analyze_thread(
         raise HFAError(str(exc)) from exc
 
 
+def analyze_podcast_url(
+    *,
+    url: str,
+    question: str | None = None,
+    requested_by: str | None = None,
+    channel: str = "cli",
+    thread_ts: str = "podcast",
+    trigger_mode: str = "manual",
+    dry_run: bool = False,
+    memory_runtime: Any | None = None,
+    store: HFStore | None = None,
+) -> HFAnalysisResult:
+    raw_url = (url or "").strip()
+    if not raw_url:
+        raise HFAError("Podcast URL is required.")
+    if not is_youtube_url(raw_url):
+        raise HFAError("Invalid YouTube URL.")
+
+    current_store = store or HFStore()
+    model_name = _hfa_model()
+    run_id = current_store.start_run(
+        channel=channel,
+        thread_ts=thread_ts,
+        requested_by=requested_by,
+        question=question,
+        trigger_mode=trigger_mode,
+        model=model_name,
+        run_kind="podcast_youtube",
+    )
+    try:
+        transcript = fetch_youtube_transcript(raw_url)
+        analysis = build_podcast_analysis(transcript, question=question)
+        generated_at_utc = _utc_now_iso()
+
+        source_lines = (
+            f"YouTube URL: {transcript.url} (timestamp_utc: `{generated_at_utc}`)",
+            f"Transcript source: `{transcript.transcript_source}`",
+        )
+        summary_markdown = render_podcast_summary_markdown(
+            transcript=transcript,
+            analysis=analysis,
+            generated_at_utc=generated_at_utc,
+            source_lines=source_lines,
+        )
+        transcript_markdown = render_full_transcript_markdown(
+            transcript=transcript,
+            generated_at_utc=generated_at_utc,
+        )
+
+        summary_path: str | None = None
+        transcript_path: str | None = None
+        now = datetime.now(UTC)
+        if not dry_run:
+            summary_file = _podcast_artifact_path(video_id=transcript.video_id, now=now, transcript=False)
+            transcript_file = _podcast_artifact_path(video_id=transcript.video_id, now=now, transcript=True)
+            summary_file.write_text(summary_markdown, encoding="utf-8")
+            transcript_file.write_text(transcript_markdown, encoding="utf-8")
+            summary_path = str(summary_file)
+            transcript_path = str(transcript_file)
+
+        current_store.add_podcast_input(
+            run_id=run_id,
+            url=transcript.url,
+            video_id=transcript.video_id,
+            title=transcript.title,
+            channel_name=transcript.channel_name,
+            duration_sec=transcript.duration_sec,
+            transcript_source=transcript.transcript_source,
+        )
+        current_store.add_section(
+            run_id=run_id,
+            section_key="podcast_summary",
+            section_title="Podcast Executive Summary",
+            section_text="\n".join(analysis.executive_summary),
+            citations=[{"source_ref": transcript.url, "source_ts_utc": generated_at_utc}],
+            confidence=(0.4 if analysis.confidence_label.lower() == "low" else 0.7 if analysis.confidence_label.lower() == "medium" else 0.9),
+        )
+        current_store.add_section(
+            run_id=run_id,
+            section_key="podcast_quotes",
+            section_title="Top Quotes",
+            section_text="\n".join(
+                f"[{q.timestamp_sec:.1f}] {q.quote} :: {q.why_it_matters}" for q in analysis.quotes
+            ),
+            citations=[{"source_ref": transcript.url, "source_ts_utc": generated_at_utc}],
+            confidence=(0.4 if analysis.confidence_label.lower() == "low" else 0.7 if analysis.confidence_label.lower() == "medium" else 0.9),
+        )
+
+        scorecard = build_scorecard(
+            growth=3,
+            quality=3,
+            valuation=3,
+            catalyst=3,
+            risk=3,
+            confidence_label=analysis.confidence_label,
+        )
+        warnings = list(analysis.warnings)
+        if len(analysis.quotes) < 5:
+            warnings.append("fewer_than_5_quotes")
+        summary_text = (
+            f"HFA podcast complete: quotes={len(analysis.quotes)} confidence={analysis.confidence_label}"
+        )
+        artifact_summary = summary_path or "dry-run"
+        artifact_line = f"{artifact_summary}"
+        if transcript_path:
+            artifact_line += f" | transcript: {transcript_path}"
+
+        if (not dry_run) and memory_runtime is not None:
+            try:
+                memory_runtime.ingest_hfa_facts(
+                    requested_by=(requested_by or "hfa-user"),
+                    artifact_path=artifact_line,
+                    generated_at_utc=generated_at_utc,
+                    thesis=(analysis.executive_summary[0] if analysis.executive_summary else ""),
+                    catalysts=[quote.quote for quote in analysis.quotes[:2]],
+                    risks=list(analysis.warnings[:2]),
+                    weighted_total=scorecard.weighted_total,
+                    confidence_label=analysis.confidence_label,
+                    source="hfa-podcast-analysis",
+                )
+            except Exception:
+                warnings.append("memory_writeback_failed")
+
+        current_store.complete_run(
+            run_id=run_id,
+            summary_text=summary_text,
+            artifact_path=summary_path,
+            warnings=warnings,
+        )
+        return HFAnalysisResult(
+            run_id=run_id,
+            markdown=summary_markdown,
+            summary_text=summary_text,
+            artifact_path=summary_path,
+            scorecard=scorecard,
+            memory_facts=tuple(
+                [
+                    f"podcast:{transcript.video_id}",
+                    f"quotes:{len(analysis.quotes)}",
+                    f"confidence:{analysis.confidence_label}",
+                    f"transcript_source:{transcript.transcript_source}",
+                ]
+            ),
+            warnings=tuple(warnings),
+            files_analyzed=1,
+        )
+    except Exception as exc:
+        current_store.fail_run(run_id=run_id, reason=f"{type(exc).__name__}: {exc}")
+        if isinstance(exc, HFAError):
+            raise
+        raise HFAError(str(exc)) from exc
+
+
 def hfa_status(*, channel: str | None = None, thread_ts: str | None = None, limit: int = 20, store: HFStore | None = None) -> dict[str, Any]:
     current_store = store or HFStore()
     return {
@@ -718,15 +903,82 @@ def hfa_status(*, channel: str | None = None, thread_ts: str | None = None, limi
     }
 
 
+def extract_youtube_urls(text: str) -> list[str]:
+    blob = str(text or "")
+    candidates = re.findall(r"https?://[^\s>]+", blob)
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in candidates:
+        cleaned = raw.strip().rstrip(").,!?\"'")
+        if not cleaned:
+            continue
+        if not is_youtube_url(cleaned):
+            continue
+        if cleaned in seen:
+            continue
+        seen.add(cleaned)
+        out.append(cleaned)
+    return out
+
+
 def parse_hfa_intent(text: str) -> tuple[str | None, str | None]:
     stripped = re.sub(r"<@[^>]+>", " ", text or "").strip()
     lower = stripped.lower()
-    if re.search(r"^\s*hfa\s+status\b", lower):
+    has_hfa_prefix = re.search(r"^\s*hfa\b", lower) is not None
+    body = re.sub(r"^\s*hfa\b", "", stripped, flags=re.IGNORECASE).strip() if has_hfa_prefix else stripped
+    body_lower = body.lower()
+
+    # Support both prefixed and bare commands:
+    # - hfa analyze ...
+    # - analyze ...
+    # - quotes <youtube-url>
+    # - podcast <youtube-url>
+    # - status
+    if re.search(r"^\s*status\b", body_lower):
         return ("status", None)
-    match = re.search(r"^\s*hfa\s+analyze\b(.*)$", stripped, re.IGNORECASE)
+
+    match = re.search(r"^\s*podcast\s+(\S+)(.*)$", body, re.IGNORECASE)
+    if match:
+        url = str(match.group(1) or "").strip()
+        tail = str(match.group(2) or "").strip()
+        if is_youtube_url(url):
+            payload = url if not tail else f"{url} {tail}"
+            return ("podcast", payload if not has_hfa_prefix else payload)
+        return ("podcast", body if not has_hfa_prefix else stripped)
+
+    match = re.search(r"^\s*quotes?\b(.*)$", body, re.IGNORECASE)
+    if match:
+        tail = str(match.group(1) or "").strip()
+        payload = tail if tail else body
+        return ("podcast", payload if not has_hfa_prefix else payload)
+
+    # Conversational podcast intents:
+    # - "hfa analyze this podcast <url>"
+    # - "hfa quotes for this podcast"
+    # - "hfa summarize this youtube interview <url>"
+    urls = extract_youtube_urls(body)
+    if urls:
+        url = urls[0]
+        tail = body.replace(url, "").strip()
+        if re.search(r"\b(podcast|youtube|transcript|quote|quotes|summary|summarize)\b", body_lower):
+            payload = url if not tail else f"{url} {tail}"
+            return ("podcast", payload)
+        if re.search(r"^\s*analyze\b", body_lower):
+            payload = url if not tail else f"{url} {tail}"
+            return ("podcast", payload)
+
+    if has_hfa_prefix and re.search(r"\b(podcast|youtube|transcript|quote|quotes)\b", body_lower):
+        # Allow Slack-side thread URL resolution when URL isn't explicitly included.
+        return ("podcast", body)
+
+    match = re.search(r"^\s*analyze\b(.*)$", body, re.IGNORECASE)
     if match:
         tail = str(match.group(1) or "").strip()
         return ("analyze", tail or None)
+
+    if has_hfa_prefix and re.search(r"\b(summarize|summary|readout|memo|packet|analyze|analysis)\b", body_lower):
+        return ("analyze", body)
+
     return (None, None)
 
 
@@ -737,6 +989,7 @@ def format_hfa_slack_summary(result: HFAnalysisResult) -> str:
         f"- files_analyzed: `{result.files_analyzed}`",
         f"- score: `{result.scorecard.weighted_total:.2f}/100`",
         f"- confidence: `{result.scorecard.confidence_label}`",
+        f"- summary: `{result.summary_text}`",
     ]
     if result.artifact_path:
         lines.append(f"- artifact: `{result.artifact_path}`")

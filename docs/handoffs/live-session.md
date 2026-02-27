@@ -3,40 +3,60 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
-## Update (2026-02-26, chart title prompt relaxation for Chart of the Day)
-- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/src/coatue_claw/x_chart_daily.py` to remove strict deterministic title guardrails in style synthesis:
-  - LLM title prompt now uses tweet text as the direct source context.
-  - removed strict headline sentence/tail enforcement from publish issue gating.
-  - removed headline auto-rewrite fallback path in source-card render and post-url flow.
-  - title override validation now only requires non-empty normalized text (no strict completion checks).
-- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/tests/test_x_chart_daily.py` expectations to match relaxed title policy (LLM-controlled headline allowed, no forced fallback for fragmentary title text).
-- Validation:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `82 passed`
+## Update (2026-02-27, MD richer article-context grounding for LLM relevance + one-liner)
+- Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
+  - added article-body context extraction + cache for catalyst evidence URLs.
+  - LLM relevance selection (`_select_anchor_support_llm`) and one-line synthesis (`_synthesize_catalyst_sentence_simple`) now receive enriched article context for top candidates, not only headline/snippet text.
+  - new controls:
+    - `COATUE_CLAW_MD_ARTICLE_CONTEXT_ENABLED` (default `1`)
+    - `COATUE_CLAW_MD_ARTICLE_CONTEXT_TIMEOUT_MS` (default `3500`)
+    - `COATUE_CLAW_MD_ARTICLE_CONTEXT_MAX_CHARS` (default `6000`)
+    - `COATUE_CLAW_MD_ARTICLE_CONTEXT_LIMIT` (default `4`)
+  - status payload now exposes these context-enrichment settings.
+- Added tests in `/Users/carsonwang/worktrees/coatue-claw/market-daily/tests/test_market_daily.py`:
+  - `test_extract_article_context_from_html_prefers_body_text`
+  - `test_evidence_context_for_llm_includes_article_body`
 
-## Update (2026-02-26, chart-day hybrid discovery + auto-source buildout)
-- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/src/coatue_claw/x_chart_daily.py` to treat source DB as a seed, not a hard boundary:
-  - added hybrid discovery mode (`seed_only|open_only|hybrid`, default `hybrid`).
-  - added per-run open X search fetch path (`_fetch_x_candidates_open_search`) and merged it into candidate selection.
-  - winner selection now applies an “interesting takeaway” bonus (novelty/specificity/theme/move signal) before source-variety tie-breaking.
-- Added account auto-enrollment behavior for winning new X sources:
-  - if winner account was not in pre-run source DB snapshot, it is auto-added (`manual=0`) with daily cap control.
-  - new env knobs:
-    - `COATUE_CLAW_X_CHART_OPEN_SEARCH_ENABLED`
-    - `COATUE_CLAW_X_CHART_DISCOVERY_MODE`
-    - `COATUE_CLAW_X_CHART_OPEN_SEARCH_QUERIES`
-    - `COATUE_CLAW_X_CHART_AUTO_ADD_SOURCES`
-    - `COATUE_CLAW_X_CHART_AUTO_ADD_DAILY_CAP`
-- Pull-log schema expanded for auditability:
-  - `seed_candidates_count`, `open_search_candidates_count`, `merged_candidates_count`
-  - `scanned_accounts`
-  - `winner_discovered_via`
-  - `new_source_auto_added`, `new_source_handle`
-- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/tests/test_x_chart_daily.py` with new coverage:
-  - hybrid flow can pick open-search candidate
-  - winner source auto-add for unseen account
-  - pull-log includes discovery metadata
+## Update (2026-02-26, MD LLM-first relevance mode for catalyst anchor/support selection)
+- Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
+  - added `COATUE_CLAW_MD_RELEVANCE_MODE` (`llm_first` default, `deterministic` fallback mode).
+  - simple-synthesis now asks the model to pick anchor/support evidence IDs from ranked candidates (`_select_anchor_support_llm(...)`) before sentence generation.
+  - if relevance selection fails/LLM unavailable, path falls back automatically to existing deterministic consensus+anchor logic.
+  - when LLM relevance selection succeeds:
+    - selected anchor/support are used directly for sentence generation and link alignment.
+    - `synth_generation_mode` emits `simple_synthesis_llm_first`.
+- Added tests in `/Users/carsonwang/worktrees/coatue-claw/market-daily/tests/test_market_daily.py`:
+  - `test_relevance_mode_defaults_to_llm_first`
+  - `test_select_anchor_support_llm_parses_json`
+  - `test_llm_first_relevance_anchor_is_used`
 - Validation:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `85 passed`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_market_daily.py tests/test_launchd_runtime.py` -> `89 passed`
+
+## Update (2026-02-26, MD catalyst anchor quality improvement for price-action vs true cause)
+- Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
+  - added deterministic `_is_price_action_only_text(...)` detector to down-rank non-causal “how it traded” blurbs.
+  - evidence scoring now applies a price-action-only penalty so causal explainers win ranking.
+  - deterministic candidate gate now rejects price-action-only text for fallback-specific line generation.
+  - anchor selection now:
+    - penalizes price-action-only candidates,
+    - boosts analyst-action causals (`upgrade`/`downgrade`/`price target`/`rating`).
+- Added regression tests in `/Users/carsonwang/worktrees/coatue-claw/market-daily/tests/test_market_daily.py`:
+  - `test_price_action_only_penalty_lowers_rank_vs_causal_upgrade`
+  - `test_anchor_picker_prefers_upgrade_explainer_over_price_action`
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_market_daily.py tests/test_launchd_runtime.py` -> `86 passed`
+
+## Update (2026-02-26, earnings recap manual-vs-scheduled slot isolation)
+- Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
+  - `run_earnings_recap(...)` now records daytime manual runs under `slot_name=earnings_recap_manual` when run outside the scheduled recap window.
+  - scheduled run keeps `slot_name=earnings_recap`.
+  - this prevents a daytime manual/test recap from consuming the nightly 7:00 PM PT scheduled slot.
+- Added regression test in `/Users/carsonwang/worktrees/coatue-claw/market-daily/tests/test_market_daily.py`:
+  - `test_run_earnings_recap_manual_daytime_does_not_block_scheduled_slot`
+  - validates same-day manual daytime run no longer blocks scheduled recap.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_market_daily.py` -> `76 passed`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
 
 ## Update (2026-02-26, board-seat hard reset scaffold)
 - Board Seat was intentionally scrapped to start fresh after repeated output quality failures.
@@ -2893,18 +2913,18 @@ Then confirm bot returns:
 - Operational note:
   - Posted a manual real-research board-seat message to `#openai` at Slack ts `1772060668.808919` while extractor hardening is being stabilized for fully automated target selection.
 
-## Update (2026-02-26, x-chart hard cooldown + cooldown-exhaustion notice + pull logs)
-- Implemented strict no-repeat source cooldown semantics for scheduled chart selection:
-  - `_pick_winner(...)` no longer falls back to recent-source reuse when all candidates are in cooldown.
-  - if all candidates are blocked by source cooldown, selection returns `None`.
-- Added explicit scheduled no-post notice:
-  - new `_post_no_candidate_message_to_slack(...)` posts: all candidate accounts are within cooldown window.
-  - `run_chart_scout_once(...)` now returns `reason=\"all_candidates_in_cooldown\"`.
-  - dry-run behavior: no notice posted.
-- Added deterministic pull logs for every skill invocation:
-  - new `_write_pull_log(...)` artifact output: `*-pull-log.json`.
-  - includes scanned candidates, source last-posted map, eligibility after item filter, eligibility after cooldown, selected candidate key, and result reason.
-  - scheduled run paths all emit pull logs (posted and skipped).
-  - manual URL flow (`run_chart_for_post_url`) emits pull logs with `mode=\"manual_url\"` and `manual_override_used=true` (manual override policy retained).
-- Validation:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `82 passed`
+## Update (2026-02-26, market-daily recap manual-slot dedupe verification)
+- Integrator verification run completed on /opt/coatue-claw main.
+- Cherry-pick 95ddd47 resolved as empty on this host, indicating behavior already present in main.
+- Tests: test_market_daily.py 79 passed; test_launchd_runtime.py 10 passed.
+- Runtime: openclaw restart and slack status probe healthy; 24x7 status shows com.coatueclaw.market-daily-earnings-recap loaded.
+- Slot check: outside-window manual run wrote slot earnings_recap_manual.
+- Scheduled-path run used slot earnings_recap and result was no_reporters, not blocked by manual-slot reuse.
+
+## Update (2026-02-27, MD article-context grounding deploy)
+- Integrated commit d817abc on main as d0b440f.
+- Validation: tests/test_market_daily.py 81 passed; tests/test_launchd_runtime.py 10 passed (venv python).
+- Runtime restarted; Slack status probe healthy after restart transient.
+- market_daily status confirms article_context_enabled/article_context_timeout_ms/article_context_max_chars/article_context_limit plus relevance_mode=llm_first.
+- Dry-run artifact: /opt/coatue-claw-data/artifacts/market-daily/md-open-20260227-174225.md.
+- Smoke: md now force posted via run-once; debug-catalyst NFLX close shows richer context fields but anchor still selected from web explainer set (TipRanks/247/Invezz), so article-context quality tuning remains follow-up.

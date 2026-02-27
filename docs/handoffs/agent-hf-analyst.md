@@ -42,3 +42,31 @@
    - `hfa analyze` in a thread with uploaded docs.
 3. Verify DM auto-run dedupe:
    - first upload auto-runs once; repeated events for same file set do not rerun.
+
+## Current Ship Status (2026-02-26)
+- HFA Podcast V1 is implemented on this branch:
+  - Added `src/coatue_claw/hf_youtube_transcript.py` (YouTube parsing, captions-first transcript, ASR fallback orchestration).
+  - Added `src/coatue_claw/hf_podcast.py` (summary + top-quote extraction/validation + markdown renderers).
+  - Extended `src/coatue_claw/hf_store.py`:
+    - `hf_runs.run_kind` (`thread_docs` / `podcast_youtube`)
+    - `hf_podcast_inputs`
+    - `hf_dm_podcast_autoruns` dedupe table.
+  - Extended `src/coatue_claw/hf_analyst.py` with `analyze_podcast_url(...)`, YouTube URL extraction, and podcast DM dedupe helpers.
+  - Extended `src/coatue_claw/cli.py` with `claw hfa podcast --url ... [--question ...] [--dry-run]`.
+  - Extended `src/coatue_claw/slack_bot.py` with:
+    - `hfa podcast <url> [question]` command path
+    - DM YouTube auto-run + dedupe.
+  - Extended `src/coatue_claw/memory_runtime.py` HFA writeback to accept source tags (podcast uses `hfa-podcast-analysis`).
+- Tests added:
+  - `tests/test_hf_podcast.py`
+  - `tests/test_hf_youtube_transcript.py`
+- Validation run:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_hf_podcast.py tests/test_hf_youtube_transcript.py tests/test_hf_document_extract.py tests/test_slack_routing.py` -> `26 passed`
+  - `PYTHONPATH=src python3 -m compileall -q src` -> pass
+
+## Patch Status (2026-02-26)
+- ASR fallback compatibility patch added for podcast transcription:
+  - `src/coatue_claw/hf_youtube_transcript.py` retries transcription without `response_format` when model/API rejects `verbose_json`.
+  - fixes production failure mode on mini where ASR model rejects verbose response format.
+- Regression coverage:
+  - `tests/test_hf_youtube_transcript.py::test_asr_transcript_retries_without_response_format_on_incompatible_model`

@@ -261,6 +261,13 @@ def _md_post_as_is() -> bool:
     return raw in {"1", "true", "yes", "on"}
 
 
+def _relevance_mode() -> str:
+    raw = (os.environ.get("COATUE_CLAW_MD_RELEVANCE_MODE", "llm_first") or "llm_first").strip().lower()
+    if raw in {"deterministic", "code", "heuristic"}:
+        return "deterministic"
+    return "llm_first"
+
+
 def _recap_support_count() -> int:
     raw = (os.environ.get("COATUE_CLAW_MD_RECAP_SUPPORT_COUNT", "") or "").strip()
     if not raw:
@@ -345,6 +352,38 @@ def _publish_time_enrich_timeout_ms() -> int:
     except Exception:
         val = 1200
     return max(200, min(10000, val))
+
+
+def _article_context_enabled() -> bool:
+    raw = (os.environ.get("COATUE_CLAW_MD_ARTICLE_CONTEXT_ENABLED", "1") or "1").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _article_context_timeout_ms() -> int:
+    raw = (os.environ.get("COATUE_CLAW_MD_ARTICLE_CONTEXT_TIMEOUT_MS", "3500") or "3500").strip()
+    try:
+        val = int(raw)
+    except Exception:
+        val = 3500
+    return max(500, min(10000, val))
+
+
+def _article_context_max_chars() -> int:
+    raw = (os.environ.get("COATUE_CLAW_MD_ARTICLE_CONTEXT_MAX_CHARS", "6000") or "6000").strip()
+    try:
+        val = int(raw)
+    except Exception:
+        val = 6000
+    return max(1200, min(12000, val))
+
+
+def _article_context_limit() -> int:
+    raw = (os.environ.get("COATUE_CLAW_MD_ARTICLE_CONTEXT_LIMIT", "4") or "4").strip()
+    try:
+        val = int(raw)
+    except Exception:
+        val = 4
+    return max(1, min(8, val))
 
 
 def _top_n() -> int:
@@ -1589,6 +1628,7 @@ _MONTH_NAME_TO_NUM: dict[str, int] = {
     "december": 12,
 }
 _PUBLISH_TIME_CACHE: dict[str, tuple[datetime | None, str]] = {}
+_ARTICLE_CONTEXT_CACHE: dict[str, str | None] = {}
 
 
 def _parse_relative_time_utc(raw: str, *, now_utc: datetime) -> datetime | None:
@@ -1734,6 +1774,83 @@ def _parse_published_at_from_article_html(url: str | None) -> tuple[datetime | N
         return out
     _PUBLISH_TIME_CACHE[canonical] = (None, "none")
     return None, "none"
+
+
+def _strip_html_for_article_context(html: str) -> str:
+    text = re.sub(r"(?is)<script[^>]*>.*?</script>", " ", html)
+    text = re.sub(r"(?is)<style[^>]*>.*?</style>", " ", text)
+    text = re.sub(r"(?is)<noscript[^>]*>.*?</noscript>", " ", text)
+    text = re.sub(r"(?is)<[^>]+>", " ", text)
+    text = unescape(text)
+    text = _normalize_whitespace(text)
+    return text
+
+
+def _extract_article_context_from_html(html: str) -> str:
+    if not html:
+        return ""
+    chunks: list[str] = []
+
+    for pattern in (
+        re.compile(r'"articleBody"\s*:\s*"([^"]+)"', flags=re.IGNORECASE),
+        re.compile(r'"description"\s*:\s*"([^"]+)"', flags=re.IGNORECASE),
+    ):
+        m = pattern.search(html)
+        if not m:
+            continue
+        candidate = _normalize_whitespace(unescape(m.group(1)).replace("\\n", " ").replace("\\\"", "\""))
+        if len(candidate) >= 120:
+            chunks.append(candidate)
+
+    for m in re.finditer(r"(?is)<p[^>]*>(.*?)</p>", html):
+        p = _strip_html_for_article_context(m.group(1))
+        if len(p) < 60:
+            continue
+        low = p.lower()
+        if any(x in low for x in ("cookie", "privacy policy", "all rights reserved", "advertisement", "subscribe")):
+            continue
+        chunks.append(p)
+        if len(chunks) >= 20:
+            break
+
+    if not chunks:
+        return ""
+    merged = _normalize_whitespace(" ".join(chunks))
+    return _shorten(merged, _article_context_max_chars())
+
+
+def _article_context_from_url(url: str | None) -> str | None:
+    canonical = _canonicalize_url(url) or (url or "")
+    if not canonical:
+        return None
+    cached = _ARTICLE_CONTEXT_CACHE.get(canonical)
+    if cached is not None:
+        return cached
+    if not _article_context_enabled():
+        _ARTICLE_CONTEXT_CACHE[canonical] = None
+        return None
+    headers = {"User-Agent": "Mozilla/5.0", "Accept": "text/html,application/xhtml+xml"}
+    timeout_sec = _article_context_timeout_ms() / 1000.0
+    try:
+        html = _fetch_text_with_timeout(canonical, headers=headers, timeout_sec=timeout_sec)
+    except Exception:
+        _ARTICLE_CONTEXT_CACHE[canonical] = None
+        return None
+    context = _extract_article_context_from_html(html)
+    _ARTICLE_CONTEXT_CACHE[canonical] = context or None
+    return context or None
+
+
+def _evidence_context_for_llm(item: _EvidenceCandidate) -> str:
+    base = _normalize_whitespace(item.context_text or item.text)
+    article = _article_context_from_url(item.url)
+    if article:
+        if base and article.startswith(base):
+            return article
+        if base:
+            return _shorten(_normalize_whitespace(f"{base} {article}"), _article_context_max_chars())
+        return article
+    return base
 
 
 def _is_in_session_window(*, published_at_utc: datetime | None, since_utc: datetime, now_utc: datetime) -> bool:
@@ -3839,9 +3956,13 @@ def _synthesize_catalyst_sentence_simple(
 
     pack: list[_EvidenceCandidate] = [anchor] + supports
     evidence_lines: list[str] = []
+    context_limit = _article_context_limit()
     for idx, item in enumerate(pack, start=1):
         tag = "A1" if idx == 1 else f"S{idx}"
-        context = _shorten(_normalize_whitespace(item.context_text or item.text), 360)
+        if idx <= context_limit:
+            context = _shorten(_normalize_whitespace(_evidence_context_for_llm(item)), _article_context_max_chars())
+        else:
+            context = _shorten(_normalize_whitespace(item.context_text or item.text), 700)
         ts = item.published_at_utc.isoformat() if item.published_at_utc else "unknown"
         evidence_lines.append(
             f"[{tag}] src={item.source_type} ts={ts} score={_effective_candidate_score(candidate=item, pct_move=pct_move):.2f} text={context} url={item.url or 'n/a'}"
@@ -3877,6 +3998,99 @@ def _synthesize_catalyst_sentence_simple(
         return _normalize_generated_sentence(raw, max_chars=220), None
     cleaned = _normalize_generated_sentence(raw, max_chars=220)
     return (cleaned if cleaned else None), ("llm_empty_after_normalize" if not cleaned else None)
+
+
+def _extract_json_object(text: str) -> str | None:
+    if not text:
+        return None
+    start = text.find("{")
+    end = text.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    return text[start : end + 1]
+
+
+def _select_anchor_support_llm(
+    *,
+    client: Any | None,
+    ticker: str,
+    pct_move: float | None,
+    candidates: list[_EvidenceCandidate],
+    max_support: int,
+) -> tuple[_EvidenceCandidate | None, list[_EvidenceCandidate], str | None]:
+    if client is None:
+        return None, [], "llm_unavailable"
+    if not candidates:
+        return None, [], "no_candidates"
+
+    evidence_lines: list[str] = []
+    context_limit = _article_context_limit()
+    for idx, item in enumerate(candidates[:8], start=1):
+        if idx <= context_limit:
+            context = _shorten(_normalize_whitespace(_evidence_context_for_llm(item)), _article_context_max_chars())
+        else:
+            context = _shorten(_normalize_whitespace(item.context_text or item.text), 700)
+        ts = item.published_at_utc.isoformat() if item.published_at_utc else "unknown"
+        evidence_lines.append(
+            f"[C{idx}] src={item.source_type} score={_effective_candidate_score(candidate=item, pct_move=pct_move):.2f} ts={ts} text={context} url={item.url or 'n/a'}"
+        )
+    evidence_block = "\n".join(evidence_lines)
+    prompt = (
+        "Pick the best primary catalyst source and up to support sources for this stock move.\n"
+        "Prioritize source relevance to WHY the stock moved (not generic price-action description).\n"
+        "Prefer concrete causal explainers (earnings/guidance/analyst upgrade-downgrade/deal/product/regulatory) over intraday momentum phrasing.\n"
+        "Use only candidate IDs that exist.\n"
+        "Return strict JSON only with this shape:\n"
+        '{"anchor":"C1","supports":["C2","C3"]}\n'
+        f"Ticker: {ticker}\n"
+        f"Move: {_format_pct(pct_move)}\n"
+        f"Candidates:\n{evidence_block}\n"
+    )
+    try:
+        response = client.chat.completions.create(
+            model=_reason_polish_model(),
+            messages=[
+                {"role": "system", "content": "You select the most causally relevant source for market-move attribution."},
+                {"role": "user", "content": prompt},
+            ],
+        )
+        raw = str(response.choices[0].message.content or "").strip()  # type: ignore[index]
+    except Exception:
+        logger.exception("llm relevance selection failed for %s", ticker)
+        return None, [], "llm_relevance_exception"
+
+    obj_text = _extract_json_object(raw)
+    if not obj_text:
+        return None, [], "llm_relevance_invalid_json"
+    try:
+        payload = json.loads(obj_text)
+    except Exception:
+        return None, [], "llm_relevance_invalid_json"
+    if not isinstance(payload, dict):
+        return None, [], "llm_relevance_invalid_shape"
+
+    index: dict[str, _EvidenceCandidate] = {f"C{i}": c for i, c in enumerate(candidates[:8], start=1)}
+    anchor_key = str(payload.get("anchor") or "").strip().upper()
+    anchor = index.get(anchor_key)
+    if anchor is None:
+        return None, [], "llm_relevance_missing_anchor"
+
+    raw_supports = payload.get("supports")
+    supports: list[_EvidenceCandidate] = []
+    seen: set[str] = {anchor_key}
+    if isinstance(raw_supports, list):
+        for val in raw_supports:
+            key = str(val or "").strip().upper()
+            if key in seen:
+                continue
+            item = index.get(key)
+            if item is None:
+                continue
+            seen.add(key)
+            supports.append(item)
+            if len(supports) >= max(0, max_support):
+                break
+    return anchor, supports, None
 
 
 def _preferred_evidence_text(evidence: CatalystEvidence) -> str:
@@ -4288,6 +4502,21 @@ def _build_catalyst_for_mover_simple(*, mover: QuoteSnapshot, slot_name: str, si
         )
         return evidence, FALLBACK_CAUSE_LINE
 
+    client = _openai_client()
+    relevance_mode = _relevance_mode()
+    llm_anchor: _EvidenceCandidate | None = None
+    llm_supports: list[_EvidenceCandidate] = []
+    if relevance_mode == "llm_first":
+        llm_anchor, llm_supports, relevance_error = _select_anchor_support_llm(
+            client=client,
+            ticker=mover.ticker,
+            pct_move=mover.pct_move,
+            candidates=selected,
+            max_support=_synth_support_count(),
+        )
+        if relevance_error:
+            rejected.append(relevance_error)
+
     consensus_top_k = max(3, 1 + _synth_support_count())
     consensus_anchor, consensus_family = _pick_consensus_winner(
         candidates=selected,
@@ -4295,21 +4524,25 @@ def _build_catalyst_for_mover_simple(*, mover: QuoteSnapshot, slot_name: str, si
         pct_move=mover.pct_move,
         top_k=consensus_top_k,
     )
-    anchor = consensus_anchor or _pick_anchor_candidate(candidates=selected, ticker=mover.ticker, pct_move=mover.pct_move) or selected[0]
-    if consensus_anchor is None:
-        rejected.append("consensus_not_established")
-    consensus_family = consensus_family or _candidate_event_family(anchor)
-
-    supports = _pick_support_candidates(
-        candidates=selected,
-        anchor=anchor,
-        max_support=_synth_support_count(),
-        pct_move=mover.pct_move,
-    )
-    supports = _filter_support_candidates_by_family(supports=supports, family=consensus_family)
+    if llm_anchor is not None:
+        anchor = llm_anchor
+        supports = llm_supports
+        consensus_family = _candidate_event_family(anchor)
+        rejected.append("anchor_selected_by_llm")
+    else:
+        anchor = consensus_anchor or _pick_anchor_candidate(candidates=selected, ticker=mover.ticker, pct_move=mover.pct_move) or selected[0]
+        if consensus_anchor is None:
+            rejected.append("consensus_not_established")
+        consensus_family = consensus_family or _candidate_event_family(anchor)
+        supports = _pick_support_candidates(
+            candidates=selected,
+            anchor=anchor,
+            max_support=_synth_support_count(),
+            pct_move=mover.pct_move,
+        )
+        supports = _filter_support_candidates_by_family(supports=supports, family=consensus_family)
     used = [anchor] + supports
 
-    client = _openai_client()
     sentence, llm_error = _synthesize_catalyst_sentence_simple(
         client=client,
         ticker=mover.ticker,
@@ -4331,7 +4564,7 @@ def _build_catalyst_for_mover_simple(*, mover: QuoteSnapshot, slot_name: str, si
             attribution_stripped = True
         sentence = stripped_sentence or None
 
-    if sentence and consensus_family and consensus_family != "other":
+    if sentence and consensus_family and consensus_family != "other" and llm_anchor is None:
         sentence_family = _sentence_family(sentence)
         if sentence_family not in {consensus_family, "other"}:
             rejected.append(f"consensus_family_mismatch:{sentence_family}->{consensus_family}")
@@ -4395,7 +4628,7 @@ def _build_catalyst_for_mover_simple(*, mover: QuoteSnapshot, slot_name: str, si
         generation_policy=("post_as_is" if _md_post_as_is() else "normalized"),
         confirmed_cause_phrase=(line if line != FALLBACK_CAUSE_LINE else None),
         quality_rejections=tuple(quality_rejections),
-        synth_generation_mode="simple_synthesis",
+        synth_generation_mode=("simple_synthesis_llm_first" if llm_anchor is not None else "simple_synthesis"),
         synth_model_used=(_reason_polish_model() if client is not None else None),
         synth_candidates_considered=tuple(_candidate_debug_entry(item=c, pct_move=mover.pct_move) for c in considered[:5]),
         synth_candidates_used=tuple(_candidate_debug_entry(item=c, pct_move=mover.pct_move) for c in used[: 1 + _synth_support_count()]),
@@ -5503,9 +5736,10 @@ def run_earnings_recap(
     now_utc = datetime.now(UTC)
     now_local = now_utc.astimezone(_timezone())
     recap_hh, recap_mm = _earnings_recap_time()
+    target = now_local.replace(hour=recap_hh, minute=recap_mm, second=0, microsecond=0)
+    within_scheduled_window = abs((now_local - target).total_seconds()) <= (20 * 60)
     if not manual:
-        target = now_local.replace(hour=recap_hh, minute=recap_mm, second=0, microsecond=0)
-        if abs((now_local - target).total_seconds()) > (20 * 60):
+        if not within_scheduled_window:
             return {
                 "ok": True,
                 "posted": False,
@@ -5514,7 +5748,10 @@ def run_earnings_recap(
                 "recap_time": f"{recap_hh:02d}:{recap_mm:02d}",
             }
 
+    # Keep daytime manual test runs from consuming the nightly scheduled slot.
     slot = "earnings_recap"
+    if manual and (not within_scheduled_window):
+        slot = "earnings_recap_manual"
     date_key = now_local.strftime("%Y-%m-%d")
     if (not force) and store.slot_already_recorded(run_date_local=date_key, slot_name=slot):
         return {
@@ -5623,6 +5860,7 @@ def status() -> dict[str, Any]:
         "synth_domain_gate": _synth_domain_gate(),
         "synth_support_count": _synth_support_count(),
         "synth_force_best_guess": _synth_force_best_guess(),
+        "relevance_mode": _relevance_mode(),
         "reason_output_mode": _reason_output_mode(),
         "post_as_is": _md_post_as_is(),
         "recap_support_count": _recap_support_count(),
@@ -5632,6 +5870,10 @@ def status() -> dict[str, Any]:
         "reject_historical_callback": _reject_historical_callback(),
         "publish_time_enrich_enabled": _publish_time_enrich_enabled(),
         "publish_time_enrich_timeout_ms": _publish_time_enrich_timeout_ms(),
+        "article_context_enabled": _article_context_enabled(),
+        "article_context_timeout_ms": _article_context_timeout_ms(),
+        "article_context_max_chars": _article_context_max_chars(),
+        "article_context_limit": _article_context_limit(),
         "reason_quality_mode": _reason_quality_mode(),
         "reason_polish_enabled": _reason_polish_enabled(),
         "reason_polish_model": _reason_polish_model(),

@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from coatue_claw.hf_analyst import analyze_thread, file_set_hash, parse_hfa_intent, record_dm_autorun, should_run_dm_autorun
+from coatue_claw.hf_analyst import (
+    analyze_podcast_url,
+    analyze_thread,
+    extract_youtube_urls,
+    file_set_hash,
+    parse_hfa_intent,
+    record_dm_autorun,
+    record_dm_podcast_autorun,
+    should_run_dm_autorun,
+    should_run_dm_podcast_autorun,
+)
 from coatue_claw.hf_store import HFStore
 
 
@@ -17,8 +27,18 @@ class _FakeMemoryRuntime:
 
 def test_parse_hfa_intent() -> None:
     assert parse_hfa_intent("hfa status") == ("status", None)
+    assert parse_hfa_intent("status") == ("status", None)
     assert parse_hfa_intent("hfa analyze") == ("analyze", None)
+    assert parse_hfa_intent("analyze") == ("analyze", None)
     assert parse_hfa_intent("hfa analyze focus on valuation") == ("analyze", "focus on valuation")
+    assert parse_hfa_intent("analyze focus on valuation") == ("analyze", "focus on valuation")
+    assert parse_hfa_intent("hfa podcast https://youtu.be/abcDEF12345 macro focus")[0] == "podcast"
+    assert parse_hfa_intent("podcast https://youtu.be/abcDEF12345 macro focus")[0] == "podcast"
+    assert parse_hfa_intent("quotes https://youtu.be/abcDEF12345")[0] == "podcast"
+    assert parse_hfa_intent("analyze https://youtu.be/abcDEF12345")[0] == "podcast"
+    assert parse_hfa_intent("hfa analyze this podcast https://youtu.be/abcDEF12345")[0] == "podcast"
+    assert parse_hfa_intent("hfa quotes for this podcast")[0] == "podcast"
+    assert parse_hfa_intent("hfa summarize this youtube interview https://youtu.be/abcDEF12345")[0] == "podcast"
     assert parse_hfa_intent("diligence SNOW")[0] is None
 
 
@@ -35,6 +55,20 @@ def test_dm_autorun_guard(tmp_path: Path) -> None:
     assert should_run_dm_autorun(channel="D1", user_id="U1", thread_ts="1.1", file_ids=file_ids, store=store)
     record_dm_autorun(channel="D1", user_id="U1", thread_ts="1.1", file_ids=file_ids, store=store)
     assert not should_run_dm_autorun(channel="D1", user_id="U1", thread_ts="1.1", file_ids=file_ids, store=store)
+
+
+def test_dm_podcast_autorun_guard(tmp_path: Path) -> None:
+    store = HFStore(db_path=tmp_path / "hfa.sqlite")
+    url = "https://youtu.be/abcDEF12345"
+    assert should_run_dm_podcast_autorun(channel="D1", user_id="U1", thread_ts="2.2", url=url, store=store)
+    record_dm_podcast_autorun(channel="D1", user_id="U1", thread_ts="2.2", url=url, store=store)
+    assert not should_run_dm_podcast_autorun(channel="D1", user_id="U1", thread_ts="2.2", url=url, store=store)
+
+
+def test_extract_youtube_urls() -> None:
+    text = "check this https://youtu.be/abcDEF12345 and https://youtube.com/watch?v=ZYX98765432"
+    urls = extract_youtube_urls(text)
+    assert len(urls) == 2
 
 
 def test_analyze_thread_fallback_mode(tmp_path: Path, monkeypatch) -> None:
@@ -87,3 +121,44 @@ def test_analyze_thread_fallback_mode(tmp_path: Path, monkeypatch) -> None:
     assert "## 1. AAA Snapshot" in result.markdown
     assert "## 7. Sources" in result.markdown
     assert memory.calls == 1
+
+
+def test_analyze_podcast_url(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COATUE_CLAW_HFA_DB_PATH", str(tmp_path / "hfa.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_HFA_ARTIFACT_DIR", str(tmp_path / "artifacts"))
+
+    class _Transcript:
+        url = "https://youtu.be/abcDEF12345"
+        video_id = "abcDEF12345"
+        title = "Test Podcast"
+        channel_name = "Test Channel"
+        duration_sec = 3600
+        transcript_source = "captions"
+        segments = ()
+        full_text = "sample full text"
+
+    class _Analysis:
+        executive_summary = ("Point one", "Point two", "Point three")
+        key_themes = ("Theme 1", "Theme 2", "Theme 3")
+        quotes = ()
+        confidence_label = "Medium"
+        warnings = ()
+
+    monkeypatch.setattr("coatue_claw.hf_analyst.fetch_youtube_transcript", lambda url: _Transcript())
+    monkeypatch.setattr("coatue_claw.hf_analyst.build_podcast_analysis", lambda transcript, question=None: _Analysis())
+
+    memory = _FakeMemoryRuntime()
+    result = analyze_podcast_url(
+        url="https://youtu.be/abcDEF12345",
+        question="focus on moat",
+        requested_by="U1",
+        channel="D1",
+        thread_ts="3.3",
+        trigger_mode="test",
+        dry_run=False,
+        memory_runtime=memory,
+    )
+    assert result.run_id > 0
+    assert result.artifact_path is not None
+    assert Path(result.artifact_path).exists()
+    assert "HFA podcast complete" in result.summary_text
