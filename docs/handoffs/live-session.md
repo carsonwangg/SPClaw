@@ -3,6 +3,20 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-26, MD catalyst anchor quality improvement for price-action vs true cause)
+- Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
+  - added deterministic `_is_price_action_only_text(...)` detector to down-rank non-causal “how it traded” blurbs.
+  - evidence scoring now applies a price-action-only penalty so causal explainers win ranking.
+  - deterministic candidate gate now rejects price-action-only text for fallback-specific line generation.
+  - anchor selection now:
+    - penalizes price-action-only candidates,
+    - boosts analyst-action causals (`upgrade`/`downgrade`/`price target`/`rating`).
+- Added regression tests in `/Users/carsonwang/worktrees/coatue-claw/market-daily/tests/test_market_daily.py`:
+  - `test_price_action_only_penalty_lowers_rank_vs_causal_upgrade`
+  - `test_anchor_picker_prefers_upgrade_explainer_over_price_action`
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_market_daily.py tests/test_launchd_runtime.py` -> `86 passed`
+
 ## Update (2026-02-26, earnings recap manual-vs-scheduled slot isolation)
 - Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
   - `run_earnings_recap(...)` now records daytime manual runs under `slot_name=earnings_recap_manual` when run outside the scheduled recap window.

@@ -40,6 +40,13 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Market Daily catalyst ranking quality hardening shipped on role branch:
+  - added price-action-only text detector to penalize non-causal “intraday momentum/trading” blurbs.
+  - anchor chooser now prefers true causal explainers, including analyst upgrade/downgrade narratives.
+  - deterministic fallback gate now excludes price-action-only candidates from specific-line generation.
+  - regression coverage:
+    - `tests/test_market_daily.py::test_price_action_only_penalty_lowers_rank_vs_causal_upgrade`
+    - `tests/test_market_daily.py::test_anchor_picker_prefers_upgrade_explainer_over_price_action`
 - Market Daily earnings recap dedupe fix shipped on role branch:
   - manual recap runs outside the scheduled window now record under `earnings_recap_manual`.
   - scheduled nightly recap keeps `earnings_recap`.

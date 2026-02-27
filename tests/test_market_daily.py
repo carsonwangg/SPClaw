@@ -2347,3 +2347,62 @@ def test_sanitize_phrase_removes_aggregator_prefix() -> None:
 
     cleaned = md._sanitize_synth_phrase("FinancialContent - Why Is Intel (INTC) Stock Soaring Today")
     assert cleaned == "Why Is Intel (INTC) Stock Soaring Today"
+
+
+def test_price_action_only_penalty_lowers_rank_vs_causal_upgrade() -> None:
+    from coatue_claw import market_daily as md
+
+    now_utc = datetime.now(UTC)
+    since = now_utc - timedelta(hours=6)
+    published = now_utc - timedelta(minutes=20)
+    price_action = md._compute_evidence_score(
+        source_type="web",
+        text="Spotify shares surged in midday trading to an intraday high, reflecting strong buying momentum.",
+        url="https://example.com/spotify-price-action",
+        published_at_utc=published,
+        since_utc=since,
+        ticker="SPOT",
+        aliases=["Spotify", "Spotify Technology"],
+    )
+    causal_upgrade = md._compute_evidence_score(
+        source_type="web",
+        text="Spotify jumps as bullish analyst upgrade highlights margin upside.",
+        url="https://www.quiverquant.com/news/Spotify+jumps+as+bullish+analyst+upgrade+highlights+margin+upside",
+        published_at_utc=published,
+        since_utc=since,
+        ticker="SPOT",
+        aliases=["Spotify", "Spotify Technology"],
+    )
+    assert causal_upgrade > price_action
+
+
+def test_anchor_picker_prefers_upgrade_explainer_over_price_action() -> None:
+    from coatue_claw import market_daily as md
+
+    now_utc = datetime.now(UTC)
+    price_action = md._EvidenceCandidate(
+        source_type="web",
+        text="Spotify shares surged in midday trading to an intraday high, reflecting strong buying momentum.",
+        context_text="Spotify shares surged in midday trading to an intraday high, reflecting strong buying momentum.",
+        url="https://example.com/spotify-price-action",
+        published_at_utc=now_utc - timedelta(minutes=5),
+        score=0.9,
+        domain="example.com",
+    )
+    upgrade = md._EvidenceCandidate(
+        source_type="web",
+        text="Spotify jumps as bullish analyst upgrade highlights margin upside",
+        context_text="Spotify jumped after a bullish analyst upgrade that cited margin upside and estimate revisions.",
+        url="https://www.quiverquant.com/news/Spotify+jumps+as+bullish+analyst+upgrade+highlights+margin+upside",
+        published_at_utc=now_utc - timedelta(minutes=15),
+        score=0.82,
+        domain="quiverquant.com",
+    )
+
+    anchor = md._pick_anchor_candidate(
+        candidates=[price_action, upgrade],
+        ticker="SPOT",
+        pct_move=0.045,
+    )
+    assert anchor is not None
+    assert anchor.url == upgrade.url

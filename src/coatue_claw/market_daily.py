@@ -2047,6 +2047,7 @@ def _compute_evidence_score(
         causal_bonus += 0.06
     generic_penalty = -0.18 if _is_generic_headline_wrapper(text=text, ticker=ticker, aliases=aliases) else 0.0
     ta_penalty = -0.16 if _is_technical_analysis_style(text) else 0.0
+    price_action_penalty = -0.22 if _is_price_action_only_text(text) else 0.0
     roundup_penalty = -0.08 if _is_multi_ticker_roundup(text=text, ticker=ticker, aliases=aliases) else 0.0
     source_bonus = {"yahoo_news": 0.18, "x": 0.12, "web": 0.1}.get(source_type, 0.0)
     score = (
@@ -2058,6 +2059,7 @@ def _compute_evidence_score(
         + causal_bonus
         + generic_penalty
         + ta_penalty
+        + price_action_penalty
         + roundup_penalty
     )
     return max(0.0, min(1.0, score))
@@ -3402,6 +3404,32 @@ def _is_technical_analysis_style(text: str) -> bool:
     return any(term in lower for term in ta_terms)
 
 
+def _is_price_action_only_text(text: str) -> bool:
+    lower = _normalize_whitespace(text).lower()
+    if not lower:
+        return False
+    price_terms = (
+        "intraday high",
+        "intraday low",
+        "midday trading",
+        "buying momentum",
+        "selling pressure",
+        "traded higher",
+        "traded lower",
+        "surging in midday",
+        "gained in the session",
+        "fell in the session",
+    )
+    if not any(term in lower for term in price_terms):
+        return False
+    # If we also have a clear event catalyst, do not classify as price-action-only.
+    if _has_strict_causal_marker(lower) or _has_event_vocab(lower):
+        return False
+    if any(term in lower for term in ("upgrade", "downgrade", "price target", "guidance", "earnings", "deal")):
+        return False
+    return True
+
+
 def _is_multi_ticker_roundup(*, text: str, ticker: str, aliases: list[str]) -> bool:
     lower = _normalize_whitespace(text).lower()
     if not lower:
@@ -3456,6 +3484,8 @@ def _is_deterministic_causal_candidate(item: _EvidenceCandidate, *, pct_move: fl
     if _contains_disallowed_reason_phrasing(text):
         return False
     if _is_technical_analysis_style(text):
+        return False
+    if _is_price_action_only_text(text):
         return False
     if _effective_candidate_score(candidate=item, pct_move=pct_move) < _min_evidence_confidence():
         return False
@@ -3563,8 +3593,12 @@ def _pick_anchor_candidate(*, candidates: list[_EvidenceCandidate], ticker: str,
         score = _effective_candidate_score(candidate=item, pct_move=pct_move)
         headline = _normalize_whitespace(item.text)
         context = _normalize_whitespace(f"{headline}. {item.context_text}") if item.context_text else headline
+        if _is_price_action_only_text(context):
+            score -= 0.28
         if _is_explainer_headline_for_ticker(text=headline, ticker=ticker) or _is_explainer_headline_for_ticker(text=context, ticker=ticker):
             score += 0.24
+        if any(term in context.lower() for term in ("upgrade", "downgrade", "price target", "rating")):
+            score += 0.14
         if _has_strict_causal_marker(context):
             score += 0.12
         if _has_event_vocab(context):
