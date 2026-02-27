@@ -1418,7 +1418,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - integrator can run dry-run canary on Anthropic/Anduril and confirm rejection telemetry in payload/log output.
 
 ## Board Seat - Simplified LLM Pipeline (2026-02-27)
-- Status: implemented on `codex/agent-board-seat`, gated behind env toggle.
+- Status: implemented on `codex/agent-board-seat`; now set as sole runtime path.
 - Completed scope:
   - simple selection path (`simple_llm`) using LLM candidate batches + lightweight company existence check.
   - hard 20-day no-repeat retained; complex repitch significance gate not used in simple mode.

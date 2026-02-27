@@ -492,7 +492,8 @@ def _llm_candidate_generation_enabled() -> bool:
 
 
 def _simple_mode_enabled() -> bool:
-    return _env_flag("COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE", False)
+    # Legacy board-seat pipeline is disabled; simple mode is the only runtime path.
+    return True
 
 
 def _simple_batch_size() -> int:

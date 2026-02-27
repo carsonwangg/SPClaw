@@ -3006,3 +3006,5 @@ Then confirm bot returns:
   - `candidates_evaluated_total`
   - `candidate_rejections`
   - `final_decision_path`
+- Follow-up change:
+  - legacy board-seat candidate pipeline is now disabled in runtime; simple mode is the only active path.

@@ -147,7 +147,7 @@ Detailed runbook for humans and Codex:
   - `Publisher/Source — Article title: <url>`
 - Citations are posted in thread reply (not main message).
 - Numeric labels like `Source 1/2/3` are disallowed.
-- Simplified targeting mode (`COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE=1`) guardrails:
+- Simplified targeting mode (now default runtime path; legacy disabled) guardrails:
   - target must pass basic web existence sanity as a real company
   - same `{company,target}` cannot be repitched within 20 days
   - if no candidate passes within configured regen/eval caps, skip posting for that channel
