@@ -62,6 +62,12 @@ def _default_chart_reconstructable(monkeypatch) -> None:
     )
 
 
+@pytest.fixture(autouse=True)
+def _default_disable_live_llm(monkeypatch) -> None:
+    # Keep tests deterministic regardless of host env vars on mini/prod.
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+
 def test_parse_windows_defaults_and_custom() -> None:
     assert _parse_windows("09:00,12:00,18:00") == [(9, 0), (12, 0), (18, 0)]
     assert _parse_windows("bad") == [(7, 0), (12, 0), (18, 0)]
