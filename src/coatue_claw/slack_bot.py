@@ -18,6 +18,7 @@ from slack_sdk.errors import SlackApiError
 from coatue_claw.chart_intent import parse_chart_intent
 from coatue_claw.chart_metrics import METRIC_SPECS, metric_label
 from coatue_claw.chart_title_context import infer_chart_title_context
+from coatue_claw import board_seat_daily
 from coatue_claw.cli import run_diligence
 from coatue_claw.hf_analyst import HFAError, analyze_podcast_url as run_hfa_podcast
 from coatue_claw.hf_analyst import analyze_thread as run_hfa_thread
@@ -234,6 +235,7 @@ def _format_chart_usage() -> str:
         "- `quotes <youtube-url>` or `analyze <youtube-url>` for podcast quote mode\n"
         "- `hfa status` / `status`\n"
         "- `md now` / `md status` / `md holdings refresh`\n"
+        "- `bs now` / `bs status`\n"
         "- `x digest <topic|ticker|handle> [last 24h] [limit 50]`\n"
         "- `x chart now` (run chart-scout winner now)\n"
         "- `x chart sources` / `x chart add @handle priority 1.2`\n"
@@ -1533,6 +1535,148 @@ def _handle_market_daily_command(*, text: str, channel: str | None, thread_ts: s
     return True
 
 
+def _resolve_channel_name(channel_id: str | None) -> str | None:
+    if not channel_id:
+        return None
+    try:
+        payload = app.client.conversations_info(channel=channel_id)
+    except Exception:
+        logger.exception("Failed to resolve channel name for channel_id=%s", channel_id)
+        return None
+    channel = payload.get("channel") if isinstance(payload, dict) else None
+    if not isinstance(channel, dict):
+        return None
+    name = str(channel.get("name") or "").strip().lstrip("#")
+    return name or None
+
+
+def _company_for_channel_name(channel_name: str | None) -> str | None:
+    name = str(channel_name or "").strip().lstrip("#").lower()
+    if not name:
+        return None
+    for company, channel_ref in board_seat_daily._parse_portcos():
+        if name == str(channel_ref).strip().lstrip("#").lower():
+            return company
+    return None
+
+
+def _with_env_overrides(overrides: dict[str, str]):
+    class _EnvGuard:
+        def __enter__(self_inner):
+            self_inner.previous: dict[str, str | None] = {}
+            for key, value in overrides.items():
+                self_inner.previous[key] = os.environ.get(key)
+                os.environ[key] = value
+            return self_inner
+
+        def __exit__(self_inner, exc_type, exc, tb):
+            for key, old in self_inner.previous.items():
+                if old is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = old
+            return False
+
+    return _EnvGuard()
+
+
+def _handle_board_seat_command(*, text: str, channel: str | None, thread_ts: str, say) -> bool:
+    stripped = _strip_slack_mentions(text).strip()
+    lower = stripped.lower()
+    if not re.match(r"^(bs|board seat)\b", lower):
+        return False
+
+    if re.fullmatch(r"(bs|board seat)(\s+help)?", lower):
+        say(
+            text=(
+                "Board Seat commands:\n"
+                "- `bs now`\n"
+                "- `bs status`"
+            ),
+            thread_ts=thread_ts,
+        )
+        return True
+
+    if re.fullmatch(r"(bs|board seat)\s+status", lower):
+        payload = board_seat_daily.status()
+        say(
+            text=(
+                "Board Seat status:\n"
+                f"- mode: `{'simple_llm' if payload.get('simple_mode') else 'legacy'}`\n"
+                f"- target_lock_days: `{payload.get('target_lock_days')}`\n"
+                f"- recent_sent_count: `{payload.get('recent_sent_count')}`\n"
+                f"- recent_skipped_count: `{payload.get('recent_skipped_count')}`"
+            ),
+            thread_ts=thread_ts,
+        )
+        return True
+
+    if re.fullmatch(r"(bs|board seat)\s+now", lower):
+        channel_name = _resolve_channel_name(channel)
+        company = _company_for_channel_name(channel_name)
+        if not channel_name or not company:
+            say(
+                text=(
+                    "This command only works in a mapped portfolio channel "
+                    "(e.g., `#anduril`, `#anthropic`, `#openai`)."
+                ),
+                thread_ts=thread_ts,
+            )
+            return True
+
+        say(text=f"Running Board Seat now for `{company}`...", thread_ts=thread_ts)
+        env_portcos = f"{company}:{channel_name}"
+        try:
+            with _with_env_overrides({"COATUE_CLAW_BOARD_SEAT_PORTCOS": env_portcos}):
+                payload = board_seat_daily.run_once(force=True, dry_run=False)
+        except Exception:
+            logger.exception("Board Seat run failed for company=%s channel=%s", company, channel_name)
+            say(text="Board Seat run failed unexpectedly. Check logs.", thread_ts=thread_ts)
+            return True
+
+        sent = payload.get("sent") if isinstance(payload, dict) else None
+        if isinstance(sent, list) and sent:
+            row = sent[0] if isinstance(sent[0], dict) else {}
+            target = str(row.get("target") or "").strip() or "unknown"
+            confidence = str(row.get("target_confidence") or "").strip() or "unknown"
+            funding_conf = str(row.get("funding_confidence") or "").strip() or "unknown"
+            message_ts = str(row.get("message_ts") or "").strip() or "unknown"
+            say(
+                text=(
+                    "Board Seat posted.\n"
+                    f"- target: `{target}`\n"
+                    f"- target_confidence: `{confidence}`\n"
+                    f"- funding_confidence: `{funding_conf}`\n"
+                    f"- message_ts: `{message_ts}`"
+                ),
+                thread_ts=thread_ts,
+            )
+            return True
+
+        skipped = payload.get("skipped") if isinstance(payload, dict) else None
+        if isinstance(skipped, list) and skipped:
+            row = skipped[0] if isinstance(skipped[0], dict) else {}
+            reason = str(row.get("reason") or "no_high_confidence_new_target")
+            gate = str(row.get("gate_reason") or "unknown")
+            evals = int(row.get("candidates_evaluated_total") or 0)
+            say(
+                text=(
+                    "Board Seat did not post.\n"
+                    f"- reason: `{reason}`\n"
+                    f"- gate: `{gate}`\n"
+                    f"- candidates_evaluated_total: `{evals}`"
+                ),
+                thread_ts=thread_ts,
+            )
+            return True
+
+        say(text="Board Seat run finished but no output was generated.", thread_ts=thread_ts)
+        return True
+
+    say(text="Try `bs help` for board-seat commands.", thread_ts=thread_ts)
+    return True
+
+
 def _handle_x_chart_command(*, text: str, channel: str | None, thread_ts: str, say) -> bool:
     stripped = _strip_slack_mentions(text).strip()
     lower = stripped.lower()
@@ -2167,6 +2311,10 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
 
     if _handle_market_daily_command(text=text, channel=channel, thread_ts=thread_ts, say=say):
         _mark_spencer_change(change_id, status="implemented", note="Handled by market daily workflow.")
+        return
+
+    if _handle_board_seat_command(text=text, channel=channel, thread_ts=thread_ts, say=say):
+        _mark_spencer_change(change_id, status="implemented", note="Handled by board seat workflow.")
         return
 
     try:
