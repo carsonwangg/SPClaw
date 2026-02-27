@@ -2898,3 +2898,11 @@ Then confirm bot returns:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `63 passed`.
 - Operational note:
   - Posted a manual real-research board-seat message to `#openai` at Slack ts `1772060668.808919` while extractor hardening is being stabilized for fully automated target selection.
+
+## Update (2026-02-26, market-daily recap manual-slot dedupe verification)
+- Integrator verification run completed on /opt/coatue-claw main.
+- Cherry-pick 95ddd47 resolved as empty on this host, indicating behavior already present in main.
+- Tests: test_market_daily.py 79 passed; test_launchd_runtime.py 10 passed.
+- Runtime: openclaw restart and slack status probe healthy; 24x7 status shows com.coatueclaw.market-daily-earnings-recap loaded.
+- Slot check: outside-window manual run wrote slot earnings_recap_manual.
+- Scheduled-path run used slot earnings_recap and result was no_reporters, not blocked by manual-slot reuse.
