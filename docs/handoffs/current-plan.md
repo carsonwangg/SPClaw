@@ -40,6 +40,11 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Chart-day label/title sync update shipped on role branch:
+  - `chart_label` now mirrors final `headline` in all chart-day flows.
+  - manual post-url title override now syncs label to override text.
+  - renderer no longer truncates chart label independently; overflow is fail-closed.
+  - validation: `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `88 passed`.
 - Chart-day splitter fix shipped on role branch:
   - removed sentence-splitting behavior from `_extract_first_sentence` in `src/coatue_claw/x_chart_daily.py`.
   - goal: avoid abbreviation truncation (`U.S.`) that produced fragment headlines/takeaways.

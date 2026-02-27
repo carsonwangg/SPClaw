@@ -2299,24 +2299,19 @@ def _sanitize_style_copy(
 
     title_takeaway_role_swapped = False
     headline = _normalize_headline_seed(headline)
-    chart_label = _trim_trailing_stopwords(_shorten_without_ellipsis(chart_label, max_chars=56))
+    # chart_label is synchronized to headline later; keep local variable for interface stability.
+    chart_label = _normalize_headline_seed(chart_label)
     takeaway = _normalize_takeaway_seed(takeaway)
 
     source_text = _normalize_render_text(candidate.text or candidate.title)
     source_text = re.sub(r"^@\w+:\s*", "", _strip_news_prefix(source_text), flags=re.IGNORECASE).strip()
     source_sentence = _extract_first_sentence(source_text or candidate.title)
-    need_hint = _is_low_signal_phrase(headline) or _is_low_signal_phrase(chart_label) or _is_low_signal_phrase(takeaway)
+    need_hint = _is_low_signal_phrase(headline) or _is_low_signal_phrase(takeaway)
     chart_hint = _extract_chart_title_hint_via_vision(candidate) if need_hint else None
     merged_hint = _normalize_render_text(f"{chart_hint or ''} {source_text}").lower()
 
-    if _is_low_signal_phrase(chart_label):
-        if "tariff" in merged_hint or "customs" in merged_hint or "duties" in merged_hint:
-            chart_label = "Monthly US customs duties (US$B)"
-        elif chart_hint:
-            chart_label = _trim_trailing_stopwords(_shorten_without_ellipsis(_strip_news_prefix(chart_hint), max_chars=56))
-
     if _is_low_signal_phrase(takeaway):
-        merged_context = _normalize_render_text(f"{headline} {chart_label} {merged_hint}").lower()
+        merged_context = _normalize_render_text(f"{headline} {merged_hint}").lower()
         if "tariff" in merged_context or "customs" in merged_context or "duties" in merged_context:
             takeaway = "US customs-duty collections just hit a new high."
         elif chart_hint:
@@ -2332,14 +2327,6 @@ def _sanitize_style_copy(
 
     if not headline:
         headline = _normalize_headline_seed(source_sentence or source_text or candidate.title)
-
-    if _is_degenerate_copy_value(chart_label):
-        rewrite_applied = True
-        rewrite_reason = rewrite_reason or "chart_label_rewritten"
-        rebuilt_label = _synthesize_chart_label(subject=subject, sentence=source_text or candidate.title, mode_hint=mode_hint)
-        chart_label = _trim_trailing_stopwords(_shorten_without_ellipsis(rebuilt_label, max_chars=56))
-        if _is_degenerate_copy_value(chart_label):
-            chart_label = "US trend metric over time"
 
     finalized_takeaway = _finalize_takeaway_sentence(takeaway)
     if not finalized_takeaway:
@@ -2361,6 +2348,7 @@ def _sanitize_style_copy(
         rewrite_reason = "takeaway_clause_rewritten"
     takeaway = finalized_takeaway
     title_takeaway_role_swapped = False
+    chart_label = headline
     if rewrite_applied and rewrite_reason is None:
         rewrite_reason = "copy_rewrite"
     return headline, chart_label, takeaway, rewrite_applied, rewrite_reason, title_takeaway_role_swapped
@@ -3937,7 +3925,6 @@ def _build_style_draft(candidate: Candidate, *, iteration: int) -> StyleDraft:
 
     if iteration == 1 and llm_style:
         headline = _normalize_headline_seed(llm_style["headline"])
-        chart_label = _shorten_without_ellipsis(llm_style["chart_label"], max_chars=62)
         takeaway = _employees_robots_takeaway(first_core or body_text or title_text) if is_employee_robot else _normalize_takeaway_seed(llm_style["takeaway"])
         why_now = "Narrative + technical label generated for feed readability."
     elif iteration == 1:
@@ -3960,6 +3947,7 @@ def _build_style_draft(candidate: Candidate, *, iteration: int) -> StyleDraft:
         chart_label=chart_label or "Chart Context",
         takeaway=takeaway or "New US-facing data point with clear directional movement.",
     )
+    chart_label = _normalize_render_text(headline)
 
     combined = " ".join([headline, takeaway, why_now]).strip()
     checks = {
@@ -3987,7 +3975,7 @@ def _build_style_draft(candidate: Candidate, *, iteration: int) -> StyleDraft:
     score = float(sum(1.0 for passed in checks.values() if passed))
     return StyleDraft(
         headline=_normalize_render_text(headline or "US trend is shifting."),
-        chart_label=_shorten_without_ellipsis(chart_label or "Chart Context", max_chars=62),
+        chart_label=_normalize_render_text(chart_label or headline or "US trend is shifting."),
         takeaway=takeaway or "New US-facing data point with clear directional movement.",
         why_now=why_now,
         iteration=iteration,
@@ -4210,6 +4198,41 @@ def _fit_takeaway_text(
     max_x = fig_bbox.x0 + (fig_bbox.width * max_width_ratio)
     bb = takeaway_obj.get_window_extent(renderer=renderer)
     return wrapped, line_count, (bb.x1 <= max_x)
+
+
+def _fit_chart_label_text(
+    *,
+    fig,
+    chart_label_obj,
+    chart_label_text: str,
+    min_font_size: float = 8.0,
+    max_width_ratio: float = 0.95,
+) -> tuple[float, bool]:
+    normalized = _normalize_render_text(chart_label_text)
+    if not normalized:
+        chart_label_obj.set_text("")
+        return float(chart_label_obj.get_fontsize()), False
+    start_size = float(chart_label_obj.get_fontsize())
+    if start_size < min_font_size:
+        start_size = min_font_size
+    font_steps = max(0, int(round(start_size - min_font_size)))
+    font_sizes = [start_size - float(step) for step in range(font_steps + 1)]
+    if not font_sizes or abs(font_sizes[-1] - min_font_size) > 0.001:
+        font_sizes.append(min_font_size)
+
+    for font_size in font_sizes:
+        chart_label_obj.set_fontsize(float(font_size))
+        chart_label_obj.set_text(normalized)
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        fig_bbox = fig.bbox
+        max_x = fig_bbox.x0 + (fig_bbox.width * max_width_ratio)
+        bb = chart_label_obj.get_window_extent(renderer=renderer)
+        if bb.x1 <= max_x:
+            return float(font_size), True
+    chart_label_obj.set_fontsize(float(min_font_size))
+    chart_label_obj.set_text(normalized)
+    return float(min_font_size), False
 
 
 def _render_source_snip_card(
@@ -4729,7 +4752,7 @@ def _render_chart_of_day_style(
     divider_y = max(0.80, ((h_bb.y0 - fig_bbox.y0) / fig_bbox.height) - 0.012)
     fig.add_artist(Line2D([0.05, 0.95], [divider_y, divider_y], transform=fig.transFigure, color="#2F3745", linewidth=1.1))
 
-    chart_label_text = _shorten_without_ellipsis(_normalize_render_text(style_draft.chart_label), max_chars=62)
+    chart_label_text = _normalize_render_text(style_draft.chart_label)
     chart_label_y = max(0.74, divider_y - 0.028)
     chart_label_obj = fig.text(
         0.05,
@@ -4741,6 +4764,15 @@ def _render_chart_of_day_style(
         color="#2F3745",
         family=COATUE_FONT_FAMILY,
     )
+    _, chart_label_fits = _fit_chart_label_text(
+        fig=fig,
+        chart_label_obj=chart_label_obj,
+        chart_label_text=chart_label_text,
+        min_font_size=8.0,
+        max_width_ratio=0.95,
+    )
+    if not chart_label_fits:
+        raise XChartError("Chart label layout overflow without truncation.")
 
     chart_bottom = 0.20
     chart_top = max(0.62, min(0.84, chart_label_y - 0.020))
@@ -4905,11 +4937,6 @@ def _render_chart_of_day_style(
     for _ in range(4):
         fig.canvas.draw()
         renderer = fig.canvas.get_renderer()
-        fig_bbox = fig.bbox
-        if chart_label_obj.get_window_extent(renderer=renderer).x1 > fig_bbox.x0 + (fig_bbox.width * 0.95):
-            chart_label_text = _shorten_without_ellipsis(chart_label_text, max_chars=max(28, len(chart_label_text) - 8))
-            chart_label_obj.set_text(chart_label_text)
-            continue
         chart_bb = chart_ax.get_tightbbox(renderer=renderer)
         take_bb = takeaway_obj.get_window_extent(renderer=renderer)
         src_bb = source_obj.get_window_extent(renderer=renderer)
@@ -4989,6 +5016,7 @@ def _post_winner_to_slack(
                 style_draft = replace(
                     style_draft,
                     headline=rendered_headline,
+                    chart_label=rendered_headline,
                     checks=updated_checks,
                     score=float(sum(1.0 for passed in updated_checks.values() if passed)),
                 )
@@ -5639,6 +5667,7 @@ def run_chart_for_post_url(
         style_draft = replace(
             style_draft,
             headline=overridden_headline,
+            chart_label=overridden_headline,
             checks=checks,
             score=float(sum(1.0 for passed in checks.values() if passed)),
             copy_rewrite_applied=True,
