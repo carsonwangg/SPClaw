@@ -292,8 +292,6 @@ class CandidateDecision:
 @dataclass(frozen=True)
 class CandidateIdea:
     name: str
-    one_line_fit: str
-    why_now: str
 
 
 @dataclass(frozen=True)
@@ -998,8 +996,6 @@ def _llm_generate_candidate_batch(*, company: str, exclude_keys: set[str], batch
                 "targets": [
                     {
                         "name": "Company Name",
-                        "one_line_fit": "Why this fits",
-                        "why_now": "Why now",
                     }
                 ]
             },
@@ -1037,8 +1033,6 @@ def _llm_generate_candidate_batch(*, company: str, exclude_keys: set[str], batch
             out.append(
                 CandidateIdea(
                     name=name,
-                    one_line_fit=_normalize_whitespace(str(row.get("one_line_fit") or "")),
-                    why_now=_normalize_whitespace(str(row.get("why_now") or "")),
                 )
             )
             if len(out) >= batch_size:

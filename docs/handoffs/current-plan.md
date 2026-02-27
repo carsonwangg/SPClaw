@@ -1428,3 +1428,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Status keys present: article_context_enabled, article_context_timeout_ms, article_context_max_chars, article_context_limit; relevance_mode remains llm_first.
 - Dry-run + live smoke executed; artifact generated and posted.
 - NFLX debug close shows contextual synthesis fields active, with remaining improvement opportunity in source-anchor quality selection.
+
+## Board Seat - Candidate Schema Trim (2026-02-27)
+- Simplified candidate generation payload now uses company `name` only.
+- Removed stale candidate metadata fields (`one_line_fit`, `why_now`) from simple-mode data model and tests.

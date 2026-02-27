@@ -597,7 +597,7 @@ def test_run_once_simple_mode_sends_valid_target(board_seat_env: Path, monkeypat
     monkeypatch.setattr(
         board_seat_daily,
         "_llm_generate_candidate_batch",
-        lambda **kwargs: [board_seat_daily.CandidateIdea(name="Saronic", one_line_fit="maritime autonomy", why_now="navy demand")],
+        lambda **kwargs: [board_seat_daily.CandidateIdea(name="Saronic")],
     )
 
     def _collect(queries):
@@ -643,7 +643,7 @@ def test_run_once_simple_mode_respects_cooldown(board_seat_env: Path, monkeypatc
     monkeypatch.setattr(
         board_seat_daily,
         "_llm_generate_candidate_batch",
-        lambda **kwargs: [board_seat_daily.CandidateIdea(name="Saronic", one_line_fit="fit", why_now="now")],
+        lambda **kwargs: [board_seat_daily.CandidateIdea(name="Saronic")],
     )
     monkeypatch.setattr(
         board_seat_daily,
@@ -675,8 +675,8 @@ def test_run_once_simple_mode_regenerates_batches(board_seat_env: Path, monkeypa
     def _batch(**kwargs):
         calls["n"] += 1
         if calls["n"] == 1:
-            return [board_seat_daily.CandidateIdea(name="NonRealCo", one_line_fit="", why_now="")]
-        return [board_seat_daily.CandidateIdea(name="Databento", one_line_fit="", why_now="")]
+            return [board_seat_daily.CandidateIdea(name="NonRealCo")]
+        return [board_seat_daily.CandidateIdea(name="Databento")]
 
     monkeypatch.setattr(board_seat_daily, "_llm_generate_candidate_batch", _batch)
 

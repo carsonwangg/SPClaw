@@ -2936,3 +2936,8 @@ Then confirm bot returns:
 - market_daily status confirms article_context_enabled/article_context_timeout_ms/article_context_max_chars/article_context_limit plus relevance_mode=llm_first.
 - Dry-run artifact: /opt/coatue-claw-data/artifacts/market-daily/md-open-20260227-174225.md.
 - Smoke: md now force posted via run-once; debug-catalyst NFLX close shows richer context fields but anchor still selected from web explainer set (TipRanks/247/Invezz), so article-context quality tuning remains follow-up.
+
+## Update (2026-02-27, board-seat candidate schema trim)
+- Removed unused `one_line_fit` and `why_now` fields from simple-mode `CandidateIdea`.
+- Simplified LLM candidate JSON schema now requires `name` only.
+- Tests updated to instantiate `CandidateIdea(name=...)` only.

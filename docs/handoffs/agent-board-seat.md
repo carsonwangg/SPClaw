@@ -28,6 +28,7 @@
   - funding confidence model + cache
   - memory-only rewrite fallback with warning thread
   - exhaustive candidate loop with rejection telemetry + candidate decision audit table
+  - simple-mode candidate schema trimmed to `name` only (no `one_line_fit` / `why_now`)
 - Funding commands are live:
   - `refresh-funding`
   - `funding-quality-report`
