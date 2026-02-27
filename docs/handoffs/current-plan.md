@@ -1432,3 +1432,8 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 ## Board Seat - Candidate Schema Trim (2026-02-27)
 - Simplified candidate generation payload now uses company `name` only.
 - Removed stale candidate metadata fields (`one_line_fit`, `why_now`) from simple-mode data model and tests.
+
+## Board Seat - Simple Mode Richer Research Grounding (2026-02-27)
+- Expanded simple-mode target/company/funding query coverage and optional all-backend collection.
+- Added page text extraction from source URLs and feed extracted source content into the simple-mode draft prompt.
+- Added new env controls for source-fetch breadth and content length budget.

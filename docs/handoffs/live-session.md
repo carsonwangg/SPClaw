@@ -2941,3 +2941,12 @@ Then confirm bot returns:
 - Removed unused `one_line_fit` and `why_now` fields from simple-mode `CandidateIdea`.
 - Simplified LLM candidate JSON schema now requires `name` only.
 - Tests updated to instantiate `CandidateIdea(name=...)` only.
+
+## Update (2026-02-27, simple-mode deeper scraping + source content grounding)
+- Expanded simple-mode research collection to pull broader target/company/funding query sets.
+- Added expanded search collector path that can query both configured backends per query in simple mode.
+- Added page-content extraction for selected sources (`_fetch_page_text` + `_source_content_extracts`) and pass those extracts into simple draft prompt.
+- Added simple-mode knobs:
+  - `COATUE_CLAW_BOARD_SEAT_SIMPLE_USE_ALL_BACKENDS`
+  - `COATUE_CLAW_BOARD_SEAT_SIMPLE_SOURCE_FETCH_PAGES`
+  - `COATUE_CLAW_BOARD_SEAT_SIMPLE_SOURCE_DOC_CHARS`

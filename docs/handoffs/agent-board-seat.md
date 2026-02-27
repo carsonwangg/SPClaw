@@ -22,6 +22,7 @@
   - simplified LLM pipeline (active runtime path) with only two hard guards:
     - real company sanity check on web
     - 20-day no-repeat target lock
+  - deeper simple-mode scraping with source page-content extraction for richer LLM grounding
   - high-confidence new-target gate + 20-day cooldown (default)
   - repitch significance checks
   - concise 5-section output

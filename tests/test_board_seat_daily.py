@@ -43,6 +43,7 @@ def board_seat_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_CHANNEL_DISCOVERY", "static")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_MEMORY_REWRITE_ON_FAIL", "1")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SOURCES_IN_THREAD", "1")
+    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SIMPLE_USE_ALL_BACKENDS", "0")
     monkeypatch.delenv("COATUE_CLAW_BOARD_SEAT_PORTCOS", raising=False)
     # Keep legacy-path unit tests deterministic; simple-mode tests override this.
     monkeypatch.setattr(board_seat_daily, "_simple_mode_enabled", lambda: False)
