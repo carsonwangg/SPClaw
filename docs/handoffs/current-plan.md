@@ -40,6 +40,11 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Board-seat conversational command routing updated on role branch:
+  - `bs now` in Slack channel messages now executes `board_seat_daily.run_once(force=True, dry_run=False)` scoped to that channel/company mapping.
+  - removes legacy-format mismatch between conversational trigger and scheduled board-seat formatter.
+  - `bs status` and `bs help` added for operator diagnostics.
+  - success/skip summaries are posted in-thread with target/confidence or skip reason/gate/eval counts.
 - Chart-day selection now enforces chart-only candidate pooling on role branch:
   - `_candidate_pool_for_post` filters out candidates that fail `_has_reconstructable_chart_data`.
   - goal: prevent chart-day from selecting non-graph image posts even when text/engagement scores are high.

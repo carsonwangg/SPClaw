@@ -3,6 +3,18 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-27, board-seat `bs now` routed to `board_seat_daily`)
+- Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/slack_bot.py`:
+  - added `bs` command handling in conversational Slack path:
+    - `bs help`
+    - `bs status`
+    - `bs now`
+  - `bs now` now runs the real board-seat pipeline (`board_seat_daily.run_once(force=True, dry_run=False)`) scoped to the current mapped channel/company via temporary `COATUE_CLAW_BOARD_SEAT_PORTCOS`.
+  - this removes mismatch with legacy conversational copy paths and ensures `bs now` uses the same formatter/output contract as scheduled board-seat runs.
+  - successful runs now reply in-thread with target/confidence/message metadata; skipped runs return reason/gate/evaluation counts.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py tests/test_launchd_runtime.py tests/test_slack_routing.py tests/test_slack_pipeline_intent.py` -> `52 passed`
+
 ## Update (2026-02-27, chart-only candidate gate for chart-day selection)
 - Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/src/coatue_claw/x_chart_daily.py`:
   - `_candidate_pool_for_post(...)` now drops candidates that do not pass `_has_reconstructable_chart_data(...)`.

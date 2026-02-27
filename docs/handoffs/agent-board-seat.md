@@ -39,6 +39,12 @@
 - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py`
 - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py`
 
+## Latest Update (2026-02-27)
+- Conversational Slack command path now routes board-seat runs to `board_seat_daily`:
+  - implemented `bs help`, `bs status`, `bs now` in `src/coatue_claw/slack_bot.py`.
+  - `bs now` runs `board_seat_daily.run_once(force=True, dry_run=False)` scoped to current channel/company mapping.
+  - this ensures on-demand posts use the same 5-section board-seat formatter and thread-source behavior as scheduler runs.
+
 ## Merge Notes
 - Rebase onto `origin/main` before merge.
 - Role branch should not restart runtime directly; integrator handles deploy on `main`.
