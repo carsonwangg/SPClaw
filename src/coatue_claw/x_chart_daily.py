@@ -4066,6 +4066,8 @@ def _candidate_pool_for_post(*, store: XChartStore, candidates: list[Candidate])
     for item in sorted(candidates, key=lambda c: float(c.score), reverse=True):
         if _was_candidate_posted_ever(store=store, candidate_key=item.candidate_key):
             continue
+        if not _has_reconstructable_chart_data(item):
+            continue
         pool.append(item)
     return pool
 

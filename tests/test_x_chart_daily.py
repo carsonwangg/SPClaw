@@ -6,6 +6,8 @@ from pathlib import Path
 import sys
 import types
 
+import pytest
+
 from coatue_claw.x_chart_daily import (
     Candidate,
     RebuiltBars,
@@ -50,6 +52,14 @@ from coatue_claw.x_chart_daily import (
     run_chart_for_post_url,
     run_chart_scout_once,
 )
+
+
+@pytest.fixture(autouse=True)
+def _default_chart_reconstructable(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._has_reconstructable_chart_data",
+        lambda _candidate: True,
+    )
 
 
 def test_parse_windows_defaults_and_custom() -> None:
@@ -972,8 +982,54 @@ def test_candidate_pool_permanently_excludes_posted_candidate(tmp_path: Path, mo
     )
 
     store.record_post(slot_key="manual-20260224-120000", channel="C123", candidate=already_posted)
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._has_reconstructable_chart_data",
+        lambda candidate: candidate.candidate_key == "x:fresh-candidate",
+    )
     pool = _candidate_pool_for_post(store=store, candidates=[already_posted, fresh])
     assert [item.candidate_key for item in pool] == ["x:fresh-candidate"]
+
+
+def test_candidate_pool_excludes_non_chart_images_even_if_score_is_higher(tmp_path: Path, monkeypatch) -> None:
+    db = tmp_path / "x_chart.sqlite"
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(db))
+    store = XChartStore()
+
+    non_chart_high = Candidate(
+        candidate_key="x:illustration",
+        source_type="x",
+        source_id="RetailKingsETF",
+        author="@RetailKingsETF",
+        title="TransMedics Accelerates Growth as OCS Adoption and Margins Scale",
+        text="TransMedics accelerates growth and margin expansion.",
+        url="https://x.com/RetailKingsETF/status/2027118796071403918",
+        image_url="https://example.com/non-chart.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=1000,
+        source_priority=1.4,
+        score=99.0,
+    )
+    chart_lower = Candidate(
+        candidate_key="x:actual-chart",
+        source_type="x",
+        source_id="Barchart",
+        author="@Barchart",
+        title="U.S. M2 Money Supply jumps to a new all-time high",
+        text="U.S. M2 Money Supply jumps to a new all-time high of $22.45T.",
+        url="https://x.com/Barchart/status/2027311589528097031",
+        image_url="https://example.com/chart.png",
+        created_at=datetime.now(UTC).isoformat(),
+        engagement=200,
+        source_priority=1.2,
+        score=90.0,
+    )
+
+    monkeypatch.setattr(
+        "coatue_claw.x_chart_daily._has_reconstructable_chart_data",
+        lambda candidate: candidate.candidate_key == "x:actual-chart",
+    )
+    pool = _candidate_pool_for_post(store=store, candidates=[non_chart_high, chart_lower])
+    assert [item.candidate_key for item in pool] == ["x:actual-chart"]
 
 
 def test_run_chart_scout_posts_cooldown_exhaustion_notice(tmp_path: Path, monkeypatch) -> None:

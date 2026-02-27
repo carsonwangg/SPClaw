@@ -3,6 +3,16 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-27, chart-only candidate gate for chart-day selection)
+- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/src/coatue_claw/x_chart_daily.py`:
+  - `_candidate_pool_for_post(...)` now drops candidates that do not pass `_has_reconstructable_chart_data(...)`.
+  - this enforces chart-day selection to prefer posts with parseable chart/graph structure, not generic illustration images.
+- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/tests/test_x_chart_daily.py`:
+  - added `test_candidate_pool_excludes_non_chart_images_even_if_score_is_higher`.
+  - added default autouse test fixture to keep reconstructability deterministic in tests; non-chart behavior is still covered by explicit monkeypatches in targeted tests.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `96 passed`
+
 ## Update (2026-02-27, enforce `chart_label == title` across chart-day)
 - Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/src/coatue_claw/x_chart_daily.py`:
   - `chart_label` is now synchronized to final `headline` in style draft generation.

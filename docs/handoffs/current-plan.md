@@ -40,6 +40,11 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Chart-day selection now enforces chart-only candidate pooling on role branch:
+  - `_candidate_pool_for_post` filters out candidates that fail `_has_reconstructable_chart_data`.
+  - goal: prevent chart-day from selecting non-graph image posts even when text/engagement scores are high.
+  - regression coverage added for non-chart exclusion (`test_candidate_pool_excludes_non_chart_images_even_if_score_is_higher`).
+  - validation: `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `96 passed`.
 - Chart-day label/title sync update shipped on role branch:
   - `chart_label` now mirrors final `headline` in all chart-day flows.
   - manual post-url title override now syncs label to override text.
