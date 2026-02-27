@@ -1443,3 +1443,17 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - Added regression test for multi-cashtag copy (`$AXP`, `$JPM`) to ensure render no longer falls back/crashes.
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `89 passed`.
+
+## Chart Day - Manual URL Slot Governance Alignment (2026-02-27)
+- Status: implemented on `codex/agent-chart-day`, validated.
+- Completed in this update:
+  - `run_chart_for_post_url` now uses standard scheduled slot keys instead of `manual-url-<timestamp>`.
+  - Added `_slot_key_for_manual_post_url` helper:
+    - maps to latest elapsed configured window for current day,
+    - falls back to same-day first window if invoked before first window.
+  - Added duplicate-slot guard for manual URL posting:
+    - returns `reason=slot_already_posted`,
+    - does not post to Slack for that second attempt,
+    - still emits pull-log artifact for auditability.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `90 passed`.

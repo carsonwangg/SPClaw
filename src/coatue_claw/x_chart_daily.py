@@ -3557,6 +3557,15 @@ def _slot_key(*, now_local: datetime, windows: list[tuple[int, int]], manual: bo
     return f"{now_local.strftime('%Y-%m-%d')}-{hour:02d}:{minute:02d}"
 
 
+def _slot_key_for_manual_post_url(*, now_local: datetime, windows: list[tuple[int, int]]) -> str:
+    """Use the standard window slot key for manual URL posts (no ad-hoc timestamp slots)."""
+    slot = _slot_key(now_local=now_local, windows=windows, manual=False)
+    if slot:
+        return slot
+    first_hour, first_minute = sorted(windows)[0]
+    return f"{now_local.strftime('%Y-%m-%d')}-{first_hour:02d}:{first_minute:02d}"
+
+
 def _dedupe_candidates(candidates: list[Candidate]) -> list[Candidate]:
     seen: set[str] = set()
     out: list[Candidate] = []
@@ -5717,11 +5726,44 @@ def run_chart_for_post_url(
         )
     channel = (channel_override or "").strip() or _slack_channel()
     now_local = datetime.now(UTC).astimezone(_timezone())
-    slot_key = f"manual-url-{now_local.strftime('%Y%m%d-%H%M%S')}"
     repeat_days = _source_repeat_days()
     windows = _parse_windows()
+    slot_key = _slot_key_for_manual_post_url(now_local=now_local, windows=windows)
     windows_text = ",".join(f"{h:02d}:{m:02d}" for h, m in windows)
     convention_name = _convention_name(slot_key=slot_key, now_local=now_local, windows=windows)
+    source_last_posted = _collect_source_last_posted(store=store, limit=400)
+    if store.was_slot_posted(slot_key):
+        pull_log_path = _write_pull_log(
+            slot_key=slot_key,
+            mode="manual_url",
+            channel=channel,
+            windows_text=windows_text,
+            repeat_days=repeat_days,
+            scanned_candidates=candidates or [winner],
+            source_last_posted=source_last_posted,
+            eligible_after_item_filter=candidates or [winner],
+            eligible_after_cooldown=candidates or [winner],
+            selected_candidate_key=None,
+            result_reason="slot_already_posted",
+            manual_override_used=True,
+            seed_candidates_count=len(candidates or [winner]),
+            open_search_candidates_count=0,
+            merged_candidates_count=len(candidates or [winner]),
+            winner_discovered_via=winner.discovered_via,
+        )
+        return {
+            "ok": True,
+            "posted": False,
+            "reason": "slot_already_posted",
+            "slot_key": slot_key,
+            "convention": convention_name,
+            "channel": channel,
+            "copy_rewrite_applied": copy_rewrite_applied,
+            "copy_rewrite_reason": copy_rewrite_reason,
+            "candidate_fallback_used": False,
+            "title_takeaway_role_swapped": title_takeaway_role_swapped,
+            "pull_log_path": str(pull_log_path),
+        }
     post = _post_winner_to_slack(
         candidate=winner,
         channel=channel,
@@ -5732,7 +5774,6 @@ def run_chart_for_post_url(
         store=store,
     )
     store.record_post(slot_key=slot_key, channel=channel, candidate=winner)
-    source_last_posted = _collect_source_last_posted(store=store, limit=400)
     pull_log_path = _write_pull_log(
         slot_key=slot_key,
         mode="manual_url",

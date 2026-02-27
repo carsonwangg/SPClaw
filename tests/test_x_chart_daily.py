@@ -2115,6 +2115,70 @@ def test_run_chart_for_post_url_rewrites_takeaway_but_keeps_requested_url(monkey
     assert _is_single_sentence_takeaway(str(captured["takeaway"])) is True
 
 
+def test_run_chart_for_post_url_uses_window_slot_and_blocks_duplicate_slot(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
+    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
+
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = datetime(2026, 2, 24, 12, 34, 0, tzinfo=UTC)
+            if tz is None:
+                return base
+            return base.astimezone(tz)
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
+    payload = {
+        "data": [
+            {
+                "id": "2026395304245837982",
+                "author_id": "u1",
+                "text": "More than 60% of S&P 500 stocks are beating the index in 2026.",
+                "created_at": "2026-02-24T12:00:00Z",
+                "public_metrics": {"like_count": 10, "retweet_count": 5, "reply_count": 2, "quote_count": 1},
+                "attachments": {"media_keys": ["m1"]},
+            }
+        ],
+        "includes": {
+            "users": [{"id": "u1", "username": "MikeZaccardi"}],
+            "media": [{"media_key": "m1", "type": "photo", "url": "https://example.com/chart.png"}],
+        },
+    }
+    monkeypatch.setattr("coatue_claw.x_chart_daily._http_json", lambda **kwargs: payload)
+
+    posted = {"count": 0}
+
+    def _fake_post(**kwargs):
+        posted["count"] = int(posted["count"]) + 1
+        return {"ok": True, "channel": kwargs["channel"], "styled_artifact": str(tmp_path / "styled.png")}
+
+    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
+
+    first = run_chart_for_post_url(
+        post_url="https://x.com/MikeZaccardi/status/2026395304245837982",
+        channel_override="C123",
+    )
+    second = run_chart_for_post_url(
+        post_url="https://x.com/MikeZaccardi/status/2026395304245837982",
+        channel_override="C123",
+    )
+
+    assert first["ok"] is True
+    assert first["posted"] is True
+    assert first["slot_key"] == "2026-02-24-12:00"
+    assert second["ok"] is True
+    assert second["posted"] is False
+    assert second["reason"] == "slot_already_posted"
+    assert second["slot_key"] == "2026-02-24-12:00"
+    assert int(posted["count"]) == 1
+    assert Path(first["pull_log_path"]).exists()
+    assert Path(second["pull_log_path"]).exists()
+
+
 def test_style_draft_swaps_title_and_takeaway_roles_for_market_cap_copy(monkeypatch) -> None:
     candidate = Candidate(
         candidate_key="x:role-swap-market-cap",
