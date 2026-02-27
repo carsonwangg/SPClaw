@@ -292,8 +292,6 @@ class CandidateDecision:
 @dataclass(frozen=True)
 class CandidateIdea:
     name: str
-    one_line_fit: str
-    why_now: str
 
 
 @dataclass(frozen=True)
@@ -521,6 +519,28 @@ def _simple_max_evals() -> int:
     except Exception:
         val = 40
     return max(1, min(200, val))
+
+
+def _simple_source_fetch_pages() -> int:
+    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_SIMPLE_SOURCE_FETCH_PAGES", "15") or "15").strip()
+    try:
+        val = int(raw)
+    except Exception:
+        val = 15
+    return max(1, min(20, val))
+
+
+def _simple_source_doc_chars() -> int:
+    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_SIMPLE_SOURCE_DOC_CHARS", "0") or "0").strip()
+    try:
+        val = int(raw)
+    except Exception:
+        val = 0
+    return max(0, min(100000, val))
+
+
+def _simple_use_all_backends() -> bool:
+    return _env_flag("COATUE_CLAW_BOARD_SEAT_SIMPLE_USE_ALL_BACKENDS", True)
 
 
 def _llm_first_mode_enabled() -> bool:
@@ -880,6 +900,28 @@ def _search_queries_for_funding(target: str) -> list[str]:
     ]
 
 
+def _simple_target_queries(target: str) -> list[str]:
+    return [
+        f"\"{target}\" company",
+        f"\"{target}\" startup",
+        f"\"{target}\" products",
+        f"\"{target}\" customers",
+        f"\"{target}\" revenue growth",
+        f"\"{target}\" latest news",
+        f"\"{target}\" funding investors",
+        f"\"{target}\" valuation",
+    ]
+
+
+def _simple_company_target_queries(company: str, target: str) -> list[str]:
+    return [
+        f"{company} acquire {target}",
+        f"{company} acquisition strategy {target}",
+        f"{company} partnership with {target}",
+        f"{company} product overlap {target}",
+    ]
+
+
 def _domain_is_low_signal(domain: str) -> bool:
     d = str(domain or "").lower().strip()
     if not d:
@@ -923,6 +965,69 @@ def _filter_rows_for_target(*, target: str, rows: list[EvidenceRow]) -> list[Evi
             continue
         out.append(row)
     return out
+
+
+def _fetch_page_text(url: str, *, max_chars: int) -> str:
+    raw_url = _normalize_whitespace(url)
+    if not raw_url:
+        return ""
+    try:
+        req = Request(
+            raw_url,
+            headers={
+                "User-Agent": "CoatueClaw/1.0 (+board-seat-simple-research)",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            },
+            method="GET",
+        )
+        with urlopen(req, timeout=10) as resp:
+            ctype = str(resp.headers.get("Content-Type", "")).lower()
+            body = resp.read(2_000_000)
+    except Exception:
+        return ""
+    if "text/html" not in ctype and "text/plain" not in ctype and "application/xhtml+xml" not in ctype:
+        return ""
+    text = body.decode("utf-8", errors="replace")
+    text = re.sub(r"(?is)<script[^>]*>.*?</script>", " ", text)
+    text = re.sub(r"(?is)<style[^>]*>.*?</style>", " ", text)
+    text = re.sub(r"(?is)<noscript[^>]*>.*?</noscript>", " ", text)
+    text = re.sub(r"(?is)<[^>]+>", " ", text)
+    text = re.sub(r"&nbsp;|&#160;", " ", text)
+    text = re.sub(r"&amp;", "&", text)
+    text = re.sub(r"&quot;|&#34;", "\"", text)
+    text = _normalize_whitespace(text)
+    if not text:
+        return ""
+    if max_chars <= 0:
+        return text
+    return text[: max(400, max_chars)]
+
+
+def _source_content_extracts(rows: list[EvidenceRow]) -> list[dict[str, str]]:
+    extracts: list[dict[str, str]] = []
+    if not rows:
+        return extracts
+    seen: set[str] = set()
+    for row in rows:
+        key = row.canonical_url or row.url
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        text = _fetch_page_text(row.url, max_chars=_simple_source_doc_chars())
+        if not text:
+            continue
+        extracts.append(
+            {
+                "url": row.url,
+                "publisher": row.publisher,
+                "title": row.title,
+                "snippet": row.snippet,
+                "content": text,
+            }
+        )
+        if len(extracts) >= _simple_source_fetch_pages():
+            break
+    return extracts
 
 
 def _llm_candidate_ideas(*, company: str, used_target_keys: set[str], batch_size: int | None = None) -> list[str]:
@@ -998,8 +1103,6 @@ def _llm_generate_candidate_batch(*, company: str, exclude_keys: set[str], batch
                 "targets": [
                     {
                         "name": "Company Name",
-                        "one_line_fit": "Why this fits",
-                        "why_now": "Why now",
                     }
                 ]
             },
@@ -1037,8 +1140,6 @@ def _llm_generate_candidate_batch(*, company: str, exclude_keys: set[str], batch
             out.append(
                 CandidateIdea(
                     name=name,
-                    one_line_fit=_normalize_whitespace(str(row.get("one_line_fit") or "")),
-                    why_now=_normalize_whitespace(str(row.get("why_now") or "")),
                 )
             )
             if len(out) >= batch_size:
@@ -1065,8 +1166,12 @@ def _llm_generate_candidate_batch(*, company: str, exclude_keys: set[str], batch
     return _parse(raw_retry or "")
 
 
-def _candidate_exists_on_web(target: str) -> tuple[bool, list[EvidenceRow], str]:
-    rows, _ = _collect_web_rows([f"\"{target}\" company", f"\"{target}\" funding"])
+def _candidate_exists_on_web(*, company: str, target: str) -> tuple[bool, list[EvidenceRow], str]:
+    queries = _simple_target_queries(target) + _simple_company_target_queries(company, target)
+    if _simple_use_all_backends():
+        rows, _ = _collect_web_rows_expanded(queries)
+    else:
+        rows, _ = _collect_web_rows(queries)
     filtered = _filter_rows_for_target(target=target, rows=rows)
     if not filtered:
         return False, [], "entity_unverified"
@@ -1118,7 +1223,7 @@ def _select_target_simple(
             if target_key in excluded_keys:
                 rejected.append({"target": target, "reason": "target_not_new"})
                 continue
-            ok, rows, reason = _candidate_exists_on_web(target)
+            ok, rows, reason = _candidate_exists_on_web(company=company, target=target)
             source_rows.extend(rows[:3])
             if not ok:
                 excluded_keys.add(target_key)
@@ -1154,20 +1259,18 @@ def _build_draft_simple(
     evidence_rows: list[EvidenceRow],
     funding_rows: list[EvidenceRow],
 ) -> DraftResult:
-    funding = _funding_from_rows(target, _filter_rows_for_target(target=target, rows=funding_rows))
-    claims = _claims_from_rows(_dedupe_rows(evidence_rows), limit=8)
+    filtered_funding_rows = _filter_rows_for_target(target=target, rows=funding_rows)
+    merged_rows = _dedupe_rows(evidence_rows + filtered_funding_rows)
+    source_extracts = _source_content_extracts(merged_rows)
     prompt = json.dumps(
         {
             "company": company,
             "target": target,
-            "claims": claims,
-            "funding": {
-                "total_raised": funding.total_raised,
-                "latest_round": funding.latest_round,
-                "latest_round_date": funding.latest_round_date,
-                "backers": list(funding.backers),
-                "warning": LOW_CONF_WARNING if funding.verification_status == "weak" else "",
-            },
+            "source_extracts": source_extracts,
+            "funding_instruction": (
+                "Infer total raised, latest round/date, and notable backers using only source_extracts. "
+                "If uncertain, explicitly write unknown. Do not invent."
+            ),
             "output_sections": [
                 "Thesis",
                 "What the target does",
@@ -1180,12 +1283,29 @@ def _build_draft_simple(
     )
     generated = _chat_completion(
         prompt=prompt,
-        system="Write concise natural markdown with exactly the required five sections and short bullets.",
+        system=(
+            "Write a specific board-style acquisition pitch. "
+            "Use concrete facts from source_extracts (products, customers, contracts, launches, funding dates/amounts). "
+            "Avoid generic filler language. Output markdown with exactly the five required sections and short bullets."
+        ),
         temperature=0.2,
-        max_tokens=700,
+        max_tokens=900,
     )
-    text = generated or _deterministic_draft(company=company, target=target, funding=funding, repitch_note=None)
-    ok, reasons = _quality_gate(text, source_rows=evidence_rows)
+    fallback_funding = FundingSnapshot(
+        target=target,
+        target_key=_target_key(target),
+        total_raised="unknown",
+        latest_round="unknown",
+        latest_round_date="unknown",
+        backers=(),
+        evidence_count=len(filtered_funding_rows),
+        distinct_domains=len({r.domain for r in filtered_funding_rows if r.domain}),
+        conflict_flags=(),
+        verification_status="weak",
+        source_rows=tuple(filtered_funding_rows),
+    )
+    text = generated or _deterministic_draft(company=company, target=target, funding=fallback_funding, repitch_note=None)
+    ok, reasons = _quality_gate(text, source_rows=merged_rows)
     if ok:
         return DraftResult(
             text=text,
@@ -1194,7 +1314,7 @@ def _build_draft_simple(
             memory_rewrite_used=False,
         )
     return DraftResult(
-        text=_deterministic_draft(company=company, target=target, funding=funding, repitch_note=None),
+        text=_deterministic_draft(company=company, target=target, funding=fallback_funding, repitch_note=None),
         generation_mode="memory_rewrite",
         quality_fail_codes=tuple(reasons),
         memory_rewrite_used=True,
@@ -1232,6 +1352,21 @@ def _collect_web_rows(queries: list[str]) -> tuple[list[EvidenceRow], list[str]]
             else:
                 notes.append(f"search:{backend}:no_signal")
         out.extend(q_rows)
+    return _dedupe_rows(out), notes
+
+
+def _collect_web_rows_expanded(queries: list[str]) -> tuple[list[EvidenceRow], list[str]]:
+    notes: list[str] = []
+    out: list[EvidenceRow] = []
+    order = _search_order()
+    for q in queries:
+        for backend in order:
+            rows = _brave_search_rows(q) if backend == "brave" else _google_serp_rows(q)
+            if rows:
+                out.extend(rows)
+                notes.append(f"search:{backend}:ok")
+            else:
+                notes.append(f"search:{backend}:no_signal")
     return _dedupe_rows(out), notes
 
 
@@ -2889,7 +3024,15 @@ def _process_company(
             store.record_run(payload)
             return "skipped", payload
 
-        funding_rows, search_notes = _collect_web_rows(_search_queries_for_funding(selection.target))
+        simple_queries = (
+            _simple_target_queries(selection.target)
+            + _simple_company_target_queries(company, selection.target)
+            + _search_queries_for_funding(selection.target)
+        )
+        if _simple_use_all_backends():
+            funding_rows, search_notes = _collect_web_rows_expanded(simple_queries)
+        else:
+            funding_rows, search_notes = _collect_web_rows(simple_queries)
         draft = _build_draft_simple(
             company=company,
             target=selection.target,
@@ -3274,6 +3417,9 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
         "simple_batch_size": _simple_batch_size(),
         "simple_max_regen_batches": _simple_max_regen_batches(),
         "simple_max_evals": _simple_max_evals(),
+        "simple_use_all_backends": _simple_use_all_backends(),
+        "simple_source_fetch_pages": _simple_source_fetch_pages(),
+        "simple_source_doc_chars": _simple_source_doc_chars(),
         "llm_first_mode": _llm_first_mode_enabled(),
         "web_candidate_enrichment": _web_candidate_enrichment_enabled(),
         "llm_batch_size": _llm_batch_size(),
@@ -3427,6 +3573,9 @@ def status() -> dict[str, Any]:
         "simple_batch_size": _simple_batch_size(),
         "simple_max_regen_batches": _simple_max_regen_batches(),
         "simple_max_evals": _simple_max_evals(),
+        "simple_use_all_backends": _simple_use_all_backends(),
+        "simple_source_fetch_pages": _simple_source_fetch_pages(),
+        "simple_source_doc_chars": _simple_source_doc_chars(),
         "llm_first_mode": _llm_first_mode_enabled(),
         "web_candidate_enrichment": _web_candidate_enrichment_enabled(),
         "llm_batch_size": _llm_batch_size(),

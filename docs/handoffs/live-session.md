@@ -3,14 +3,6 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
-## Update (2026-02-27, x-chart LLM copy fallback fix for gpt-5.2 temperature API errors)
-- Updated `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/x_chart_daily.py`:
-  - removed explicit `temperature` in `_synthesize_style_via_llm(...)` OpenAI call.
-  - removed explicit `temperature` in `_extract_chart_title_hint_via_vision(...)` OpenAI call.
-  - reason: `gpt-5.2-chat-latest` rejects non-default temperature values and was triggering `api_error` fallback copy warnings.
-- Validation:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `85 passed`
-
 ## Update (2026-02-27, removed sentence splitter in chart-day title extraction)
 - Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/src/coatue_claw/x_chart_daily.py`:
   - `_extract_first_sentence(...)` no longer splits on punctuation.
@@ -2944,3 +2936,23 @@ Then confirm bot returns:
 - market_daily status confirms article_context_enabled/article_context_timeout_ms/article_context_max_chars/article_context_limit plus relevance_mode=llm_first.
 - Dry-run artifact: /opt/coatue-claw-data/artifacts/market-daily/md-open-20260227-174225.md.
 - Smoke: md now force posted via run-once; debug-catalyst NFLX close shows richer context fields but anchor still selected from web explainer set (TipRanks/247/Invezz), so article-context quality tuning remains follow-up.
+
+## Update (2026-02-27, board-seat candidate schema trim)
+- Removed unused `one_line_fit` and `why_now` fields from simple-mode `CandidateIdea`.
+- Simplified LLM candidate JSON schema now requires `name` only.
+- Tests updated to instantiate `CandidateIdea(name=...)` only.
+
+## Update (2026-02-27, simple-mode deeper scraping + source content grounding)
+- Expanded simple-mode research collection to pull broader target/company/funding query sets.
+- Added expanded search collector path that can query both configured backends per query in simple mode.
+- Added page-content extraction for selected sources (`_fetch_page_text` + `_source_content_extracts`) and pass those extracts into simple draft prompt.
+- Added simple-mode knobs:
+  - `COATUE_CLAW_BOARD_SEAT_SIMPLE_USE_ALL_BACKENDS`
+  - `COATUE_CLAW_BOARD_SEAT_SIMPLE_SOURCE_FETCH_PAGES`
+  - `COATUE_CLAW_BOARD_SEAT_SIMPLE_SOURCE_DOC_CHARS`
+
+## Update (2026-02-27, simple-mode prompt/input change per operator request)
+- Removed `claims` from simple-mode draft prompt payload.
+- Funding section in simple mode is now LLM-inferred from fetched `source_extracts` only (no deterministic funding parser in this path).
+- Increased default source breadth to top 15 links.
+- `COATUE_CLAW_BOARD_SEAT_SIMPLE_SOURCE_DOC_CHARS=0` now means no truncation cap (full extracted text passed to prompt).

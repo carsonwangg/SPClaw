@@ -22,12 +22,15 @@
   - simplified LLM pipeline (active runtime path) with only two hard guards:
     - real company sanity check on web
     - 20-day no-repeat target lock
+  - deeper simple-mode scraping with source page-content extraction for richer LLM grounding
   - high-confidence new-target gate + 20-day cooldown (default)
   - repitch significance checks
   - concise 5-section output
   - funding confidence model + cache
   - memory-only rewrite fallback with warning thread
   - exhaustive candidate loop with rejection telemetry + candidate decision audit table
+  - simple-mode candidate schema trimmed to `name` only (no `one_line_fit` / `why_now`)
+  - simple-mode draft prompt uses fetched source text only (no snippet claims), with funding inferred by LLM from those sources
 - Funding commands are live:
   - `refresh-funding`
   - `funding-quality-report`
