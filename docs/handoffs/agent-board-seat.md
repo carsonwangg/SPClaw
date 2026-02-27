@@ -19,7 +19,7 @@
   - weekday-noon schedule gating
   - channel auto-discovery (`company_match`)
   - LLM-first target seeding + web verification/enrichment (`brave,serp`)
-  - optional simplified LLM pipeline (`COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE=1`) with only two hard guards:
+  - simplified LLM pipeline (active runtime path) with only two hard guards:
     - real company sanity check on web
     - 20-day no-repeat target lock
   - high-confidence new-target gate + 20-day cooldown (default)

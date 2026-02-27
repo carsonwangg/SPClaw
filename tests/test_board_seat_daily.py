@@ -44,6 +44,8 @@ def board_seat_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_MEMORY_REWRITE_ON_FAIL", "1")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SOURCES_IN_THREAD", "1")
     monkeypatch.delenv("COATUE_CLAW_BOARD_SEAT_PORTCOS", raising=False)
+    # Keep legacy-path unit tests deterministic; simple-mode tests override this.
+    monkeypatch.setattr(board_seat_daily, "_simple_mode_enabled", lambda: False)
     return data_root
 
 
@@ -584,6 +586,7 @@ def test_run_once_replenishes_batches_until_winner(board_seat_env: Path, monkeyp
 
 
 def test_run_once_simple_mode_sends_valid_target(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(board_seat_daily, "_simple_mode_enabled", lambda: True)
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE", "1")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_LLM_CANDIDATE_GEN_ENABLED", "1")
     monkeypatch.setattr(
@@ -617,6 +620,7 @@ def test_run_once_simple_mode_sends_valid_target(board_seat_env: Path, monkeypat
 
 
 def test_run_once_simple_mode_respects_cooldown(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(board_seat_daily, "_simple_mode_enabled", lambda: True)
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE", "1")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_LLM_CANDIDATE_GEN_ENABLED", "1")
     store = board_seat_daily.BoardSeatStore()
@@ -657,6 +661,7 @@ def test_run_once_simple_mode_respects_cooldown(board_seat_env: Path, monkeypatc
 
 
 def test_run_once_simple_mode_regenerates_batches(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(board_seat_daily, "_simple_mode_enabled", lambda: True)
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE", "1")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_LLM_CANDIDATE_GEN_ENABLED", "1")
     monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SIMPLE_MAX_REGEN_BATCHES", "2")
