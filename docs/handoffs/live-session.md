@@ -2954,3 +2954,29 @@ Then confirm bot returns:
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_hf_document_extract.py tests/test_slack_routing.py tests/test_hf_youtube_transcript.py` -> `23 passed`
   - `PYTHONPATH=src python3 -m compileall -q src` -> pass
+
+## Update (2026-02-27, Slack-driven HFA output control via memory)
+- Implemented runtime HFA output control in memory so operators can tune output via Slack without code changes.
+- New Slack command family (parsed in `src/coatue_claw/slack_bot.py`):
+  - `hfa control show`
+  - `hfa control mode strict|freeform`
+  - `hfa control instruction <text>`
+  - `hfa control clear`
+- Persistence/runtime wiring:
+  - `src/coatue_claw/memory_store.py`
+    - `latest_fact_value(...)`
+    - `expire_facts(...)`
+  - `src/coatue_claw/memory_runtime.py`
+    - `set_hfa_output_control(...)`
+    - `get_hfa_output_control(...)`
+    - `clear_hfa_output_control(...)`
+- HFA analysis integration:
+  - `src/coatue_claw/hf_analyst.py`
+    - reads memory control at runtime via `_resolve_hfa_output_control(...)`
+    - `strict` mode: existing contract path with operator instruction injected into model prompt
+    - `freeform` mode: operator-controlled markdown generation path (`_model_freeform_markdown(...)`)
+  - `src/coatue_claw/hf_podcast.py`
+    - operator instruction injected into podcast summarization prompt.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_memory_runtime.py tests/test_hf_podcast.py tests/test_slack_routing.py tests/test_hf_youtube_transcript.py` -> `25 passed`
+  - `PYTHONPATH=src python3 -m compileall -q src` -> pass

@@ -415,6 +415,7 @@ def _model_draft(
     market_lines: list[str],
     web_lines: list[str],
     source_summary: list[str],
+    output_instruction: str | None = None,
 ) -> tuple[PromptDraft | None, str | None]:
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if OpenAI is None or (not api_key):
@@ -429,7 +430,7 @@ def _model_draft(
         text = doc.extracted_text.replace("\n", " ").strip()
         excerpt = text[:850]
         doc_excerpt_lines.append(f"- doc={doc.name} excerpt={excerpt}")
-    prompt = (
+    prompt_parts: list[str] = [
         "You are generating a hedge-fund decision memo for crossover TMT.\n"
         "Return strict JSON only with keys:\n"
         "at_a_glance (array 3-5), actionable (string), asymmetric_insight (string),\n"
@@ -439,17 +440,24 @@ def _model_draft(
         "section_citations (object keys aaa_snapshot, variant_view, scorecard, catalysts, risks, verify_next;\n"
         "each value is array of {source_ref, source_ts_utc}).\n"
         "Use explicit uncertainty if evidence is weak or conflicting.\n"
-        "Question context:\n"
-        f"{(question or 'none')}\n\n"
-        "Document excerpts:\n"
-        f"{chr(10).join(doc_excerpt_lines)}\n\n"
-        "Market context lines:\n"
-        f"{chr(10).join('- ' + item for item in market_lines[:8])}\n\n"
-        "Web context lines:\n"
-        f"{chr(10).join('- ' + item for item in web_lines[:8])}\n\n"
-        "Available source refs:\n"
-        f"{chr(10).join('- ' + item for item in source_summary[:12])}\n"
+    ]
+    if output_instruction and output_instruction.strip():
+        prompt_parts.append(f"Operator output instruction (highest priority):\n{output_instruction.strip()}\n\n")
+    prompt_parts.extend(
+        [
+            "Question context:\n",
+            f"{(question or 'none')}\n\n",
+            "Document excerpts:\n",
+            f"{chr(10).join(doc_excerpt_lines)}\n\n",
+            "Market context lines:\n",
+            f"{chr(10).join('- ' + item for item in market_lines[:8])}\n\n",
+            "Web context lines:\n",
+            f"{chr(10).join('- ' + item for item in web_lines[:8])}\n\n",
+            "Available source refs:\n",
+            f"{chr(10).join('- ' + item for item in source_summary[:12])}\n",
+        ]
     )
+    prompt = "".join(prompt_parts)
     try:
         response = client.chat.completions.create(
             model=model,
@@ -470,6 +478,70 @@ def _model_draft(
     if parsed is None:
         return (None, "model_json_parse_failed")
     return (parsed, None)
+
+
+def _model_freeform_markdown(
+    *,
+    docs: list[HFInputDocument],
+    question: str | None,
+    market_lines: list[str],
+    web_lines: list[str],
+    source_summary: list[str],
+    output_instruction: str | None = None,
+) -> tuple[str | None, str | None]:
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if OpenAI is None or (not api_key):
+        if OpenAI is None:
+            return (None, "openai_client_unavailable")
+        return (None, "openai_api_key_missing")
+    model = _hfa_model()
+    client = OpenAI(api_key=api_key)
+
+    doc_excerpt_lines: list[str] = []
+    for doc in docs[:8]:
+        text = doc.extracted_text.replace("\n", " ").strip()
+        excerpt = text[:1200]
+        doc_excerpt_lines.append(f"- doc={doc.name} excerpt={excerpt}")
+
+    prompt = (
+        "You are generating a hedge-fund analysis output.\n"
+        "Return markdown only.\n"
+        "Honor operator instruction with highest priority, while staying grounded in provided evidence.\n"
+        + (
+            f"Operator output instruction:\n{output_instruction.strip()}\n\n"
+            if output_instruction and output_instruction.strip()
+            else ""
+        )
+        + (
+            "Question context:\n"
+            f"{(question or 'none')}\n\n"
+            "Document excerpts:\n"
+            f"{chr(10).join(doc_excerpt_lines)}\n\n"
+            "Market context lines:\n"
+            f"{chr(10).join('- ' + item for item in market_lines[:10])}\n\n"
+            "Web context lines:\n"
+            f"{chr(10).join('- ' + item for item in web_lines[:10])}\n\n"
+            "Available source refs:\n"
+            f"{chr(10).join('- ' + item for item in source_summary[:16])}\n"
+        )
+    )
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            temperature=0.2,
+            messages=[
+                {"role": "system", "content": "Return markdown only."},
+                {"role": "user", "content": prompt},
+            ],
+        )
+    except Exception as exc:
+        return (None, f"openai_completion_failed:{type(exc).__name__}")
+    text = ""
+    if response and response.choices:
+        text = str(response.choices[0].message.content or "").strip()
+    if not text:
+        return (None, "model_response_empty")
+    return (text, None)
 
 
 def _artifact_path(*, channel: str, thread_ts: str, now: datetime, prefix: str = "hfa") -> Path:
@@ -561,6 +633,22 @@ def _memory_fact_lines(*, draft: PromptDraft, artifact_path: str | None, generat
     return lines
 
 
+def _resolve_hfa_output_control(memory_runtime: Any | None) -> tuple[str, str | None]:
+    if memory_runtime is None or (not hasattr(memory_runtime, "get_hfa_output_control")):
+        return ("strict", None)
+    try:
+        payload = memory_runtime.get_hfa_output_control()
+    except Exception:
+        return ("strict", None)
+    if not isinstance(payload, dict):
+        return ("strict", None)
+    mode = str(payload.get("mode") or "strict").strip().lower()
+    if mode not in {"strict", "freeform"}:
+        mode = "strict"
+    instruction = str(payload.get("instruction") or "").strip() or None
+    return (mode, instruction)
+
+
 def analyze_thread(
     *,
     channel: str,
@@ -636,57 +724,95 @@ def analyze_thread(
         warnings.extend(web_warnings)
         source_summary = _doc_source_summary(usable_docs) + market_sources + web_sources
 
-        draft, model_failure_reason = _model_draft(
-            docs=usable_docs,
-            question=question,
-            market_lines=market_lines,
-            web_lines=web_lines,
-            source_summary=source_summary,
-        )
-        if draft is None:
-            raise HFAError(
-                "analysis_generation_failed:"
-                + str(model_failure_reason or "unknown_model_failure")
+        output_mode, output_instruction = _resolve_hfa_output_control(memory_runtime)
+        markdown = ""
+        draft: PromptDraft | None = None
+        scorecard: HFScorecard
+        if output_mode == "freeform":
+            freeform_markdown, freeform_reason = _model_freeform_markdown(
+                docs=usable_docs,
+                question=question,
+                market_lines=market_lines,
+                web_lines=web_lines,
+                source_summary=source_summary,
+                output_instruction=output_instruction,
             )
-        warnings.extend(list(draft.warnings))
-
-        title = f"HFA Decision Memo — {channel} / {thread_ts}"
-        markdown = render_markdown(
-            title=title,
-            generated_at_utc=generated_at_utc,
-            draft=draft,
-            source_summary=tuple(source_summary),
-        )
-
-        section_text_map: dict[str, str] = {
-            "aaa_snapshot": "\n".join(draft.at_a_glance) + f"\nActionable: {draft.actionable}\nAsymmetric Insight: {draft.asymmetric_insight}",
-            "variant_view": "\n".join(draft.variant_view),
-            "scorecard": f"weighted_total={draft.scorecard.weighted_total:.2f}; confidence={draft.scorecard.confidence_label}",
-            "catalysts": "\n".join(draft.catalysts_timeline),
-            "risks": "\n".join(draft.key_risks),
-            "verify_next": "\n".join(draft.verify_next),
-        }
-        section_title_map = {
-            "aaa_snapshot": "AAA Snapshot",
-            "variant_view": "Variant View",
-            "scorecard": "5-Factor Scorecard",
-            "catalysts": "Catalysts & Timeline",
-            "risks": "Key Risks / Break Conditions",
-            "verify_next": "What To Verify Next",
-        }
-        for key in ("aaa_snapshot", "variant_view", "scorecard", "catalysts", "risks", "verify_next"):
-            citations = [
-                {"source_ref": ref.source_ref, "source_ts_utc": ref.source_ts_utc}
-                for ref in draft.section_citations.get(key, ())
-            ]
+            if freeform_markdown is None:
+                raise HFAError(
+                    "analysis_generation_failed:"
+                    + str(freeform_reason or "unknown_model_failure")
+                )
+            markdown = freeform_markdown
+            scorecard = build_scorecard(
+                growth=3,
+                quality=3,
+                valuation=3,
+                catalyst=3,
+                risk=3,
+                confidence_label="medium",
+            )
             current_store.add_section(
                 run_id=run_id,
-                section_key=key,
-                section_title=section_title_map[key],
-                section_text=section_text_map.get(key, ""),
-                citations=citations,
-                confidence=(0.4 if draft.scorecard.confidence_label == "Low" else 0.7 if draft.scorecard.confidence_label == "Medium" else 0.9),
+                section_key="freeform_output",
+                section_title="Operator Controlled Output",
+                section_text=markdown[:12000],
+                citations=[{"source_ref": row, "source_ts_utc": generated_at_utc} for row in source_summary[:12]],
+                confidence=0.6,
             )
+        else:
+            draft, model_failure_reason = _model_draft(
+                docs=usable_docs,
+                question=question,
+                market_lines=market_lines,
+                web_lines=web_lines,
+                source_summary=source_summary,
+                output_instruction=output_instruction,
+            )
+            if draft is None:
+                raise HFAError(
+                    "analysis_generation_failed:"
+                    + str(model_failure_reason or "unknown_model_failure")
+                )
+            warnings.extend(list(draft.warnings))
+
+            title = f"HFA Decision Memo — {channel} / {thread_ts}"
+            markdown = render_markdown(
+                title=title,
+                generated_at_utc=generated_at_utc,
+                draft=draft,
+                source_summary=tuple(source_summary),
+            )
+
+            section_text_map: dict[str, str] = {
+                "aaa_snapshot": "\n".join(draft.at_a_glance) + f"\nActionable: {draft.actionable}\nAsymmetric Insight: {draft.asymmetric_insight}",
+                "variant_view": "\n".join(draft.variant_view),
+                "scorecard": f"weighted_total={draft.scorecard.weighted_total:.2f}; confidence={draft.scorecard.confidence_label}",
+                "catalysts": "\n".join(draft.catalysts_timeline),
+                "risks": "\n".join(draft.key_risks),
+                "verify_next": "\n".join(draft.verify_next),
+            }
+            section_title_map = {
+                "aaa_snapshot": "AAA Snapshot",
+                "variant_view": "Variant View",
+                "scorecard": "5-Factor Scorecard",
+                "catalysts": "Catalysts & Timeline",
+                "risks": "Key Risks / Break Conditions",
+                "verify_next": "What To Verify Next",
+            }
+            for key in ("aaa_snapshot", "variant_view", "scorecard", "catalysts", "risks", "verify_next"):
+                citations = [
+                    {"source_ref": ref.source_ref, "source_ts_utc": ref.source_ts_utc}
+                    for ref in draft.section_citations.get(key, ())
+                ]
+                current_store.add_section(
+                    run_id=run_id,
+                    section_key=key,
+                    section_title=section_title_map[key],
+                    section_text=section_text_map.get(key, ""),
+                    citations=citations,
+                    confidence=(0.4 if draft.scorecard.confidence_label == "Low" else 0.7 if draft.scorecard.confidence_label == "Medium" else 0.9),
+                )
+            scorecard = draft.scorecard
 
         artifact_path: str | None = None
         now = datetime.now(UTC)
@@ -695,24 +821,29 @@ def analyze_thread(
             path.write_text(markdown, encoding="utf-8")
             artifact_path = str(path)
 
-        summary_text = (
-            f"HFA complete: files={len(usable_docs)} score={draft.scorecard.weighted_total:.2f}/100 "
-            f"confidence={draft.scorecard.confidence_label} "
-            f"{'(low-evidence mode)' if 'low_evidence_mode_enabled' in warnings else ''}".strip()
-        )
+        summary_text = f"HFA complete: files={len(usable_docs)} mode={output_mode} score={scorecard.weighted_total:.2f}/100 confidence={scorecard.confidence_label}"
 
-        memory_facts = tuple(_memory_fact_lines(draft=draft, artifact_path=artifact_path, generated_at_utc=generated_at_utc))
+        if draft is not None:
+            memory_facts = tuple(_memory_fact_lines(draft=draft, artifact_path=artifact_path, generated_at_utc=generated_at_utc))
+        else:
+            memory_facts = tuple(
+                [
+                    f"mode:{output_mode}",
+                    f"scorecard: total={scorecard.weighted_total:.2f}/100 confidence={scorecard.confidence_label}",
+                    f"artifact: {artifact_path or 'dry-run'} generated_at_utc={generated_at_utc}",
+                ]
+            )
         if (not dry_run) and memory_runtime is not None:
             try:
                 memory_runtime.ingest_hfa_facts(
                     requested_by=(requested_by or "hfa-user"),
                     artifact_path=(artifact_path or ""),
                     generated_at_utc=generated_at_utc,
-                    thesis=(draft.at_a_glance[0] if draft.at_a_glance else ""),
-                    catalysts=list(draft.catalysts_timeline[:2]),
-                    risks=list(draft.key_risks[:2]),
-                    weighted_total=draft.scorecard.weighted_total,
-                    confidence_label=draft.scorecard.confidence_label,
+                    thesis=((draft.at_a_glance[0] if draft.at_a_glance else "") if draft is not None else f"operator_mode:{output_mode}"),
+                    catalysts=(list(draft.catalysts_timeline[:2]) if draft is not None else []),
+                    risks=(list(draft.key_risks[:2]) if draft is not None else warnings[:2]),
+                    weighted_total=scorecard.weighted_total,
+                    confidence_label=scorecard.confidence_label,
                 )
             except Exception:
                 warnings.append("memory_writeback_failed")
@@ -729,7 +860,7 @@ def analyze_thread(
             markdown=markdown,
             summary_text=summary_text,
             artifact_path=artifact_path,
-            scorecard=draft.scorecard,
+            scorecard=scorecard,
             memory_facts=memory_facts,
             warnings=tuple(warnings),
             files_analyzed=len(usable_docs),
@@ -772,7 +903,12 @@ def analyze_podcast_url(
     )
     try:
         transcript = fetch_youtube_transcript(raw_url)
-        analysis = build_podcast_analysis(transcript, question=question)
+        _, output_instruction = _resolve_hfa_output_control(memory_runtime)
+        analysis = build_podcast_analysis(
+            transcript,
+            question=question,
+            output_instruction=output_instruction,
+        )
         generated_at_utc = _utc_now_iso()
 
         source_lines = (

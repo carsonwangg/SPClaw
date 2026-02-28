@@ -27,6 +27,9 @@ class _FakeMemoryRuntime:
         self.calls += 1
         return [1, 2, 3]
 
+    def get_hfa_output_control(self) -> dict[str, str]:
+        return {}
+
 
 def test_parse_hfa_intent() -> None:
     assert parse_hfa_intent("hfa status") == ("status", None)
@@ -143,7 +146,7 @@ def test_analyze_podcast_url(tmp_path: Path, monkeypatch) -> None:
         warnings = ()
 
     monkeypatch.setattr("coatue_claw.hf_analyst.fetch_youtube_transcript", lambda url: _Transcript())
-    monkeypatch.setattr("coatue_claw.hf_analyst.build_podcast_analysis", lambda transcript, question=None: _Analysis())
+    monkeypatch.setattr("coatue_claw.hf_analyst.build_podcast_analysis", lambda transcript, question=None, output_instruction=None: _Analysis())
 
     memory = _FakeMemoryRuntime()
     result = analyze_podcast_url(
@@ -160,3 +163,53 @@ def test_analyze_podcast_url(tmp_path: Path, monkeypatch) -> None:
     assert result.artifact_path is not None
     assert Path(result.artifact_path).exists()
     assert "HFA podcast complete" in result.summary_text
+
+
+def test_analyze_thread_freeform_mode(tmp_path: Path, monkeypatch) -> None:
+    doc_path = tmp_path / "memo.txt"
+    doc_path.write_text("AI demand appears resilient with mixed macro.", encoding="utf-8")
+    monkeypatch.setenv("COATUE_CLAW_HFA_DB_PATH", str(tmp_path / "hfa.sqlite"))
+    monkeypatch.setenv("COATUE_CLAW_HFA_ARTIFACT_DIR", str(tmp_path / "artifacts"))
+    monkeypatch.setattr(
+        "coatue_claw.hf_analyst._thread_file_rows",
+        lambda **kwargs: [
+            {
+                "slack_file_id": "F123",
+                "original_name": "memo.txt",
+                "mimetype": "text/plain",
+                "local_path": str(doc_path),
+                "sha256": "abc123",
+                "ingested_at_utc": "2026-02-24T00:00:00+00:00",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "coatue_claw.hf_analyst._model_freeform_markdown",
+        lambda **kwargs: ("# Freeform\n\nCustom output from operator mode.", None),
+    )
+    monkeypatch.setattr(
+        "coatue_claw.hf_analyst._market_context",
+        lambda tickers, as_of_utc: (["MKT"], [f"market source (timestamp_utc: `{as_of_utc}`)"]),
+    )
+    monkeypatch.setattr(
+        "coatue_claw.hf_analyst._web_context",
+        lambda tickers, as_of_utc: (["WEB"], [f"web source (timestamp_utc: `{as_of_utc}`)"], []),
+    )
+
+    class _FreeformMemory(_FakeMemoryRuntime):
+        def get_hfa_output_control(self) -> dict[str, str]:
+            return {"mode": "freeform", "instruction": "Use short bullets."}
+
+    memory = _FreeformMemory()
+    result = analyze_thread(
+        channel="D123",
+        thread_ts="1700000000.100",
+        question="focus",
+        requested_by="U123",
+        trigger_mode="test",
+        dry_run=False,
+        slack_client=object(),
+        memory_runtime=memory,
+    )
+    assert "Freeform" in result.markdown
+    assert result.scorecard.confidence_label == "Medium"

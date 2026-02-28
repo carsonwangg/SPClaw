@@ -182,7 +182,7 @@ def _parse_model_quotes(rows: Any) -> list[PodcastQuote]:
     return out
 
 
-def _model_analysis(transcript: PodcastTranscript, *, question: str | None) -> PodcastAnalysis | None:
+def _model_analysis(transcript: PodcastTranscript, *, question: str | None, output_instruction: str | None = None) -> PodcastAnalysis | None:
     if OpenAI is None:
         return None
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
@@ -191,7 +191,7 @@ def _model_analysis(transcript: PodcastTranscript, *, question: str | None) -> P
     model = (os.environ.get("COATUE_CLAW_HFA_MODEL", "gpt-5.2-chat-latest") or "gpt-5.2-chat-latest").strip()
     client = OpenAI(api_key=api_key)
     text = transcript_excerpt(transcript, max_chars=90_000)
-    prompt = (
+    prompt_parts: list[str] = [
         "You are summarizing a podcast transcript for a hedge-fund analyst.\n"
         "Return strict JSON with keys:\n"
         "executive_summary (array of 3 short bullets),\n"
@@ -202,9 +202,16 @@ def _model_analysis(transcript: PodcastTranscript, *, question: str | None) -> P
         "- Quotes must be verbatim from transcript text.\n"
         "- Prefer most interesting/decision-relevant statements.\n"
         "- If evidence is weak, be explicit in summary and lower confidence.\n"
-        f"Focus question: {question or 'none'}\n\n"
-        f"Transcript:\n{text}\n"
+    ]
+    if output_instruction and output_instruction.strip():
+        prompt_parts.append(f"Operator output instruction (highest priority): {output_instruction.strip()}\n")
+    prompt_parts.extend(
+        [
+            f"Focus question: {question or 'none'}\n\n",
+            f"Transcript:\n{text}\n",
+        ]
     )
+    prompt = "".join(prompt_parts)
     try:
         response = client.chat.completions.create(
             model=model,
@@ -258,8 +265,13 @@ def _model_analysis(transcript: PodcastTranscript, *, question: str | None) -> P
     )
 
 
-def build_podcast_analysis(transcript: PodcastTranscript, *, question: str | None = None) -> PodcastAnalysis:
-    modeled = _model_analysis(transcript, question=question)
+def build_podcast_analysis(
+    transcript: PodcastTranscript,
+    *,
+    question: str | None = None,
+    output_instruction: str | None = None,
+) -> PodcastAnalysis:
+    modeled = _model_analysis(transcript, question=question, output_instruction=output_instruction)
     if modeled is not None:
         return modeled
     return _fallback_analysis(transcript, question=question)

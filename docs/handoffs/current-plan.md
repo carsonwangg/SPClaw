@@ -1437,3 +1437,17 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_hf_document_extract.py tests/test_slack_routing.py tests/test_hf_youtube_transcript.py` -> `23 passed`
   - `PYTHONPATH=src python3 -m compileall -q src` -> pass
+
+## HFA Runtime-Control Update (2026-02-27)
+- HFA output style is now controllable from Slack via runtime memory.
+- New commands:
+  - `hfa control show`
+  - `hfa control mode strict|freeform`
+  - `hfa control instruction <text>`
+  - `hfa control clear`
+- Thread-doc analyzer now reads these controls at run time:
+  - `strict` mode preserves structured HFA contract.
+  - `freeform` mode allows operator-instructed markdown output.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_memory_runtime.py tests/test_hf_podcast.py tests/test_slack_routing.py tests/test_hf_youtube_transcript.py` -> `25 passed`
+  - `PYTHONPATH=src python3 -m compileall -q src` -> pass

@@ -233,6 +233,7 @@ def _format_chart_usage() -> str:
         "- `hfa podcast <youtube-url> [optional question]` / `podcast <youtube-url> [optional question]`\n"
         "- `quotes <youtube-url>` or `analyze <youtube-url>` for podcast quote mode\n"
         "- `hfa status` / `status`\n"
+        "- `hfa control show|clear|mode strict|mode freeform|instruction <text>`\n"
         "- `md now` / `md status` / `md holdings refresh`\n"
         "- `x digest <topic|ticker|handle> [last 24h] [limit 50]`\n"
         "- `x chart now` (run chart-scout winner now)\n"
@@ -361,6 +362,58 @@ def _handle_hfa_command(
     user_id: str | None,
     say,
 ) -> bool:
+    cleaned = _strip_slack_mentions(text).strip()
+    control = re.search(r"^\s*hfa\s+control\s+(show|clear|mode|instruction)\b(.*)$", cleaned, re.IGNORECASE)
+    if control:
+        action = str(control.group(1) or "").strip().lower()
+        tail = str(control.group(2) or "").strip()
+        memory = _memory_runtime()
+        if memory is None:
+            say(text="HFA control failed: memory runtime unavailable.", thread_ts=thread_ts)
+            return True
+        if action == "show":
+            payload = memory.get_hfa_output_control()
+            mode = str(payload.get("mode") or "strict")
+            instruction = str(payload.get("instruction") or "")
+            lines = ["HFA output control:", f"- mode: `{mode}`"]
+            lines.append(f"- instruction: `{instruction}`" if instruction else "- instruction: `<none>`")
+            say(text="\n".join(lines), thread_ts=thread_ts)
+            return True
+        if action == "clear":
+            expired = memory.clear_hfa_output_control()
+            say(
+                text=(
+                    "HFA output control cleared.\n"
+                    f"- mode_expired: `{expired.get('mode_expired', 0)}`\n"
+                    f"- instruction_expired: `{expired.get('instruction_expired', 0)}`"
+                ),
+                thread_ts=thread_ts,
+            )
+            return True
+        if action == "mode":
+            mode = tail.lower()
+            if mode not in {"strict", "freeform"}:
+                say(text="Usage: `hfa control mode strict|freeform`", thread_ts=thread_ts)
+                return True
+            try:
+                memory.set_hfa_output_control(requested_by=user_id, mode=mode)
+            except Exception as exc:
+                say(text=f"HFA control failed: `{exc}`", thread_ts=thread_ts)
+                return True
+            say(text=f"HFA output mode set to `{mode}`.", thread_ts=thread_ts)
+            return True
+        if action == "instruction":
+            if not tail:
+                say(text="Usage: `hfa control instruction <text>`", thread_ts=thread_ts)
+                return True
+            try:
+                memory.set_hfa_output_control(requested_by=user_id, instruction=tail)
+            except Exception as exc:
+                say(text=f"HFA control failed: `{exc}`", thread_ts=thread_ts)
+                return True
+            say(text="HFA output instruction updated.", thread_ts=thread_ts)
+            return True
+
     kind, tail = parse_hfa_intent(text)
     if kind is None:
         return False
