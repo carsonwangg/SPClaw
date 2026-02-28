@@ -79,3 +79,7 @@
 ## Patch Status (2026-02-27)
 - Added memory-backed runtime HFA output controls (Slack configurable): strict/freeform mode + instruction text.
 - Control commands are handled in `src/coatue_claw/slack_bot.py` via `hfa control ...`.
+
+## Patch Status (2026-02-27)
+- Simplified HFA output controls to one mode (`freeform`) with memory-backed instruction tuning.
+- Strict mode is no longer an operator path.

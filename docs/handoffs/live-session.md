@@ -2980,3 +2980,14 @@ Then confirm bot returns:
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_memory_runtime.py tests/test_hf_podcast.py tests/test_slack_routing.py tests/test_hf_youtube_transcript.py` -> `25 passed`
   - `PYTHONPATH=src python3 -m compileall -q src` -> pass
+
+## Update (2026-02-27, HFA output mode simplified to single freeform)
+- Removed dual-mode operator behavior; HFA now runs in one mode only: `freeform`.
+- Runtime control remains instruction-based via Slack memory (`hfa control instruction <text>`), with no strict-mode toggle.
+- Behavior changes:
+  - `hfa control mode strict` now rejected with explicit message.
+  - `hfa control show` reports mode as `freeform`.
+  - `analyze_thread` always uses freeform generation path.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_memory_runtime.py tests/test_hf_podcast.py tests/test_slack_routing.py tests/test_hf_youtube_transcript.py` -> `26 passed`
+  - `PYTHONPATH=src python3 -m compileall -q src` -> pass

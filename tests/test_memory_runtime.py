@@ -78,3 +78,14 @@ def test_hfa_output_control_set_get_clear(tmp_path: Path, monkeypatch):
     assert (cleared.get("mode_expired") or 0) >= 1
     assert (cleared.get("instruction_expired") or 0) >= 1
     assert runtime.get_hfa_output_control() == {}
+
+
+def test_hfa_output_control_rejects_non_freeform_mode(tmp_path: Path, monkeypatch):
+    db_path = tmp_path / "memory.sqlite"
+    monkeypatch.setenv("COATUE_CLAW_MEMORY_DB_PATH", str(db_path))
+    runtime = MemoryRuntime(store=MemoryStore(), semantic=_NoSemantic())
+    try:
+        runtime.set_hfa_output_control(requested_by="U123", mode="strict")
+        assert False, "expected ValueError for strict mode"
+    except ValueError as exc:
+        assert "freeform" in str(exc)

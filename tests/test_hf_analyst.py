@@ -99,7 +99,7 @@ def test_analyze_thread_model_failure_returns_reason(tmp_path: Path, monkeypatch
             }
         ],
     )
-    monkeypatch.setattr("coatue_claw.hf_analyst._model_draft", lambda **kwargs: (None, "forced_model_failure"))
+    monkeypatch.setattr("coatue_claw.hf_analyst._model_freeform_markdown", lambda **kwargs: (None, "forced_model_failure"))
     monkeypatch.setattr(
         "coatue_claw.hf_analyst._market_context",
         lambda tickers, as_of_utc: (["SNOW market context"], [f"market source (timestamp_utc: `{as_of_utc}`)"]),

@@ -419,14 +419,14 @@ class MemoryRuntime:
 
         if mode is not None:
             normalized = mode.strip().lower()
-            if normalized not in {"strict", "freeform"}:
-                raise ValueError("mode must be one of: strict, freeform")
+            if normalized != "freeform":
+                raise ValueError("mode must be: freeform")
             facts.append(
                 FactCandidate(
                     category="runtime_control",
                     entity="hfa",
                     fact_key="output_mode",
-                    fact_value=normalized,
+                    fact_value="freeform",
                     rationale=f"set_by:{owner}",
                     source=source,
                     source_ts_utc=ts,

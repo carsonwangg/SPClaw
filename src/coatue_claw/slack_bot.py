@@ -233,7 +233,7 @@ def _format_chart_usage() -> str:
         "- `hfa podcast <youtube-url> [optional question]` / `podcast <youtube-url> [optional question]`\n"
         "- `quotes <youtube-url>` or `analyze <youtube-url>` for podcast quote mode\n"
         "- `hfa status` / `status`\n"
-        "- `hfa control show|clear|mode strict|mode freeform|instruction <text>`\n"
+        "- `hfa control show|clear|mode freeform|instruction <text>`\n"
         "- `md now` / `md status` / `md holdings refresh`\n"
         "- `x digest <topic|ticker|handle> [last 24h] [limit 50]`\n"
         "- `x chart now` (run chart-scout winner now)\n"
@@ -373,7 +373,7 @@ def _handle_hfa_command(
             return True
         if action == "show":
             payload = memory.get_hfa_output_control()
-            mode = str(payload.get("mode") or "strict")
+            mode = "freeform"
             instruction = str(payload.get("instruction") or "")
             lines = ["HFA output control:", f"- mode: `{mode}`"]
             lines.append(f"- instruction: `{instruction}`" if instruction else "- instruction: `<none>`")
@@ -392,15 +392,15 @@ def _handle_hfa_command(
             return True
         if action == "mode":
             mode = tail.lower()
-            if mode not in {"strict", "freeform"}:
-                say(text="Usage: `hfa control mode strict|freeform`", thread_ts=thread_ts)
+            if mode != "freeform":
+                say(text="HFA now uses a single mode: `freeform`.", thread_ts=thread_ts)
                 return True
             try:
                 memory.set_hfa_output_control(requested_by=user_id, mode=mode)
             except Exception as exc:
                 say(text=f"HFA control failed: `{exc}`", thread_ts=thread_ts)
                 return True
-            say(text=f"HFA output mode set to `{mode}`.", thread_ts=thread_ts)
+            say(text="HFA output mode is `freeform`.", thread_ts=thread_ts)
             return True
         if action == "instruction":
             if not tail:

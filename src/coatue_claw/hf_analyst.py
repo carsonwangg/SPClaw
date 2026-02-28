@@ -635,16 +635,15 @@ def _memory_fact_lines(*, draft: PromptDraft, artifact_path: str | None, generat
 
 def _resolve_hfa_output_control(memory_runtime: Any | None) -> tuple[str, str | None]:
     if memory_runtime is None or (not hasattr(memory_runtime, "get_hfa_output_control")):
-        return ("strict", None)
+        return ("freeform", None)
     try:
         payload = memory_runtime.get_hfa_output_control()
     except Exception:
-        return ("strict", None)
+        return ("freeform", None)
     if not isinstance(payload, dict):
-        return ("strict", None)
-    mode = str(payload.get("mode") or "strict").strip().lower()
-    if mode not in {"strict", "freeform"}:
-        mode = "strict"
+        return ("freeform", None)
+    # Single-mode contract: HFA output is always freeform and operator instruction-driven.
+    mode = "freeform"
     instruction = str(payload.get("instruction") or "").strip() or None
     return (mode, instruction)
 
