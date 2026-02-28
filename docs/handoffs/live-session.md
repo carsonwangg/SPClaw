@@ -3087,3 +3087,14 @@ Then confirm bot returns:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_slack_routing.py` -> `8 passed`
   - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py` -> `7 passed`
   - `PYTHONPATH=src python3 -m pytest -q tests/test_slack_pipeline_intent.py` -> `6 passed`
+
+## Update (2026-02-27, HFA KB source persistence on mini)
+- Deployed `main` commit `bd93330` (from `origin/codex/agent-hf-analyst`) with source-file persistence to KB directories.
+- Runtime reinstall/restart complete; Slack status probe is healthy.
+- Data checks:
+  - `/opt/coatue-claw-data/artifacts/hf-analyst/` is present with expected artifacts.
+  - `/opt/coatue-claw-data/kb/sources/pdf` and `/opt/coatue-claw-data/kb/sources/docs` are not present yet.
+  - `hf_runs` currently contains only legacy CLI podcast rows; no Slack `hfa analyze` file-thread runs yet.
+- Manual validation still required:
+  - run `@SPClaw hfa analyze` in a Slack thread containing a PDF,
+  - then verify `hf_run_inputs.local_path` points under `/opt/coatue-claw-data/kb/sources/...`.

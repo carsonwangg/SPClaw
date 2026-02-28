@@ -1542,3 +1542,16 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - `tests/test_slack_pipeline_intent.py` -> pass
 - Operational next step on mini:
   - pull/restart and verify `hf_runs` row creation immediately after `@SPClaw hfa analyze`.
+
+## HFA KB Source Persistence (2026-02-27)
+- Status: deployed on mini at `bd93330`.
+- Merge source: `origin/codex/agent-hf-analyst`.
+- Runtime reinstall and restart completed.
+- Slack status probe is healthy.
+- Artifacts path verified:
+  - `/opt/coatue-claw-data/artifacts/hf-analyst/`
+- Pending manual acceptance:
+  - run `@SPClaw hfa analyze` in a PDF thread,
+  - verify KB source copies under
+    `/opt/coatue-claw-data/kb/sources/{pdf,docs}`,
+  - verify `hf_run_inputs.local_path` uses KB paths.
