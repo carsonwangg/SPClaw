@@ -48,7 +48,7 @@ DEFAULT_PORTCOS: list[tuple[str, str]] = [
     ("Sunday Robotics", "sunday-robotics"),
 ]
 
-BOARD_SEAT_FORMAT_VERSION = "v6_legacy_default"
+BOARD_SEAT_FORMAT_VERSION = "v7_legacy_with_target_line"
 RESET_REASON = "feature_reset_in_progress"
 LOW_CONF_WARNING = "Funding data is low-confidence; verify before action."
 MEMORY_FALLBACK_WARNING = (
@@ -1274,7 +1274,7 @@ def _build_draft_simple(
             "output_sections": [
                 "Thesis",
                 "Idea",
-                "Target does",
+                "What target does",
                 "Why now",
                 "What's different",
                 "MOS/risks",
@@ -1294,7 +1294,7 @@ def _build_draft_simple(
         system=(
             "Write a specific board-style acquisition pitch. "
             "Use concrete facts from source_extracts (products, customers, contracts, launches, funding dates/amounts). "
-            "Avoid generic filler language. Output markdown in legacy v6 labeled-line format with the required headers and labels."
+            "Avoid generic filler language. Output markdown in legacy v7 labeled-line format with the required headers and labels."
         ),
         temperature=0.2,
         max_tokens=900,
@@ -1815,7 +1815,7 @@ def _deterministic_draft(*, company: str, target: str, funding: FundingSnapshot,
         f"*Board Seat as a Service — {company}*",
         "*Thesis*",
         f"*Idea:* {idea}",
-        f"*Target does:* {target} builds core technology and workflows that can be integrated quickly into {company}'s existing stack.",
+        f"*What target does:* {target} builds core technology and workflows that can be integrated quickly into {company}'s existing stack.",
         "*Why now:* Program buyers are rewarding faster deployment and integrated workflows, which favors targeted M&A over slower internal build cycles.",
         "*What's different:* This target adds immediate product surface area and distribution leverage without forcing a full platform reset.",
         "*MOS/risks:* MOS is faster time-to-value and cross-sell expansion; risks are integration complexity and valuation discipline in a competitive process.",
@@ -1850,9 +1850,9 @@ def _web_synth_prompt(company: str, target: str, claims: list[str], funding: Fun
 
 def _web_synth_system() -> str:
     return (
-        "You write concise board-style acquisition pitches in legacy v6 format. "
+        "You write concise board-style acquisition pitches in legacy v7 format. "
         "Output markdown only with exactly this structure and labels: "
-        "*Thesis*; *Idea:*; *Target does:*; *Why now:*; *What's different:*; *MOS/risks:*; *Bottom line:*; "
+        "*Thesis*; *Idea:*; *What target does:*; *Why now:*; *What's different:*; *MOS/risks:*; *Bottom line:*; "
         "*{Company} context*; *Current efforts:*; *Domain fit/gaps:*; *Funding snapshot*; *History:*; *Latest round/backers:*. "
         "Do not include a Sources section in main output. Do not quote sources verbatim."
     )
@@ -1867,7 +1867,7 @@ def _quality_gate(text: str, *, source_rows: list[EvidenceRow]) -> tuple[bool, l
     required = [
         "*thesis*",
         "*idea:*",
-        "*target does:*",
+        "*what target does:*",
         "*why now:*",
         "*what's different:*",
         "*mos/risks:*",
@@ -2016,7 +2016,7 @@ def _build_draft(
                 "template": [
                     "Thesis",
                     "Idea",
-                    "Target does",
+                    "What target does",
                     "Why now",
                     "What's different",
                     "MOS/risks",

@@ -130,7 +130,7 @@ Detailed runbook for humans and Codex:
 - Final chart artifact should be the source chart image snip from the X post (no Coatue-style redraw/reconstruction required).
 - If source image is unavailable, return the explicit error to Slack.
 
-## Board Seat V6 Rule (Acquisition/Acquihire)
+## Board Seat V7 Rule (Acquisition/Acquihire)
 - Applies to both:
   - scheduled board-seat runs (`board_seat_daily`)
   - conversational board-seat replies in Slack portco channels.
@@ -138,7 +138,7 @@ Detailed runbook for humans and Codex:
   - `Board Seat as a Service — {Company}`
   - `Thesis`
   - `Idea`
-  - `Target does`
+  - `What target does`
   - `Why now`
   - `What's different`
   - `MOS/risks`

@@ -45,13 +45,13 @@
   - `bs now` runs `board_seat_daily.run_once(force=True, dry_run=False)` scoped to current channel/company mapping.
   - this ensures on-demand posts use the same board-seat formatter and thread-source behavior as scheduler runs.
 
-## Latest Update (2026-02-27, legacy v6 default restored)
-- `src/coatue_claw/board_seat_daily.py` now defaults to legacy v6 formatter contract:
-  - `BOARD_SEAT_FORMAT_VERSION=v6_legacy_default`
-  - simple mode path is disabled; legacy v6 is the only active runtime path.
-  - deterministic/LLM draft contract and quality gate aligned to v6 labeled structure.
+## Latest Update (2026-02-27, legacy v7 default restored)
+- `src/coatue_claw/board_seat_daily.py` now defaults to legacy v7 formatter contract:
+  - `BOARD_SEAT_FORMAT_VERSION=v7_legacy_with_target_line`
+  - simple mode path is disabled; legacy v7 is the only active runtime path.
+  - deterministic/LLM draft contract and quality gate aligned to v7 labeled structure with explicit `What target does` line under `Thesis`.
 - `.env.example` updated to document `COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE` as deprecated/no-op.
-- `AGENTS.md` board-seat section updated from v1 5-section contract to v6 labeled-line contract.
+- `AGENTS.md` board-seat section updated from v1 5-section contract to v7 labeled-line contract.
 
 ## Merge Notes
 - Rebase onto `origin/main` before merge.

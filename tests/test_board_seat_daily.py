@@ -97,6 +97,24 @@ def test_quality_gate_detects_artifacts() -> None:
     assert "artifact_term" in reasons
 
 
+def test_deterministic_draft_includes_what_target_does_line() -> None:
+    funding = board_seat_daily.FundingSnapshot(
+        target="Databento",
+        target_key="databento",
+        total_raised="unknown",
+        latest_round="unknown",
+        latest_round_date="unknown",
+        backers=(),
+        evidence_count=0,
+        distinct_domains=0,
+        conflict_flags=(),
+        verification_status="weak",
+        source_rows=(),
+    )
+    draft = board_seat_daily._deterministic_draft(company="OpenAI", target="Databento", funding=funding, repitch_note=None)
+    assert "*What target does:*" in draft
+
+
 def test_candidate_extraction_rejects_concepts() -> None:
     rows = [
         _row(title="OpenAI acquisition target: AI platform", url="https://example.com/a", snippet="OpenAI may acquire an AI platform"),
