@@ -68,7 +68,7 @@ from coatue_claw.slack_pipeline import (
     undo_last_deploy,
 )
 from coatue_claw.slack_pipeline_intent import parse_pipeline_intent
-from coatue_claw.slack_routing import is_explicit_hfa_command, should_default_route_message, should_route_message_event
+from coatue_claw.slack_routing import is_explicit_board_seat_command, is_explicit_hfa_command, should_default_route_message, should_route_message_event
 from coatue_claw.slack_x_chart_intent import parse_x_chart_post_intent
 from coatue_claw.slack_x_intent import parse_x_digest_intent
 from coatue_claw.universe_store import (
@@ -2377,6 +2377,29 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
         event_ts=event_ts,
         say=say,
     ):
+        return
+
+    bs_command_requested = is_explicit_board_seat_command(text)
+    if bs_command_requested:
+        if _handle_board_seat_command(text=text, channel=channel, thread_ts=thread_ts, say=say):
+            return
+        logger.error(
+            "Board Seat command routing failed channel=%s thread_ts=%s text=%r",
+            channel,
+            thread_ts,
+            text,
+        )
+        say(
+            text=(
+                "Board Seat command routing failed.\n"
+                "Valid commands:\n"
+                "- `bs now`\n"
+                "- `bs now dry`\n"
+                "- `bs now for <Company>`\n"
+                "- `bs status`"
+            ),
+            thread_ts=thread_ts,
+        )
         return
 
     git_memory_text = _parse_git_memory_request_text(text)

@@ -40,6 +40,11 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Board-seat Slack command routing is now fail-closed for explicit board-seat commands:
+  - `is_explicit_board_seat_command` detects `bs ...` and `board seat ...` after mention stripping.
+  - explicit `bs` command miss returns deterministic routing failure and exits early (no conversational fallback).
+  - `bs status` renders canonical structured fields: `format_version`, `status`, `enabled`, `schedule_time`, `target_lock_days`, `portcos`.
+  - validation: `PYTHONPATH=src python3 -m pytest -q tests/test_slack_routing.py tests/test_slack_pipeline_intent.py tests/test_slack_bot_board_seat_routing.py` -> `13 passed, 1 skipped`.
 - Board-seat candidate source selection config updated on role branch:
   - `COATUE_CLAW_BOARD_SEAT_LLM_CANDIDATE_GEN_ENABLED=1`
   - `COATUE_CLAW_BOARD_SEAT_LLM_FIRST_MODE=1`

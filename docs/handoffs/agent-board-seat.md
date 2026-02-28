@@ -39,6 +39,19 @@
 - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py`
 - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py`
 
+## Latest Update (2026-02-28, fail-closed board-seat command routing)
+- Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/slack_routing.py`:
+  - added `is_explicit_board_seat_command(text)` to detect explicit `bs ...` / `board seat ...` commands after Slack mention stripping.
+- Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/slack_bot.py`:
+  - explicit board-seat commands are now fail-closed near the HFA fast-path:
+    - if `_handle_board_seat_command` handles it, return immediately.
+    - if not handled, post a deterministic routing error with valid `bs` commands and return immediately (no conversational fallthrough).
+  - `bs status` response now emits canonical structured fields:
+    - `format_version`, `status`, `enabled`, `schedule_time`, `target_lock_days`, `portcos`.
+- Updated tests:
+  - `/Users/carsonwang/worktrees/coatue-claw/board-seat/tests/test_slack_routing.py` adds explicit board-seat command detector coverage.
+  - `/Users/carsonwang/worktrees/coatue-claw/board-seat/tests/test_slack_bot_board_seat_routing.py` adds fail-closed routing regression test (auto-skips when `slack_bolt` is unavailable in local interpreter).
+
 ## Latest Update (2026-02-27)
 - Conversational Slack command path now routes board-seat runs to `board_seat_daily`:
   - implemented `bs help`, `bs status`, `bs now` in `src/coatue_claw/slack_bot.py`.
