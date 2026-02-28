@@ -10,6 +10,7 @@ from coatue_claw.hf_analyst import (
     analyze_thread,
     extract_youtube_urls,
     file_set_hash,
+    parse_hfa_control_instruction,
     parse_hfa_intent,
     record_dm_autorun,
     record_dm_podcast_autorun,
@@ -75,6 +76,13 @@ def test_extract_youtube_urls() -> None:
     text = "check this https://youtu.be/abcDEF12345 and https://youtube.com/watch?v=ZYX98765432"
     urls = extract_youtube_urls(text)
     assert len(urls) == 2
+
+
+def test_parse_hfa_control_instruction() -> None:
+    assert parse_hfa_control_instruction("hfa control instruction Use format A/B/C") is None
+    assert parse_hfa_control_instruction("for hfa analyze, use this format: Thesis / Signal / Risks / Trade") is not None
+    assert parse_hfa_control_instruction("going forward format as: bullets only with sources") is not None
+    assert parse_hfa_control_instruction("random chat without format change") is None
 
 
 def test_analyze_thread_model_failure_returns_reason(tmp_path: Path, monkeypatch) -> None:

@@ -1055,6 +1055,38 @@ def extract_youtube_urls(text: str) -> list[str]:
     return out
 
 
+def parse_hfa_control_instruction(text: str) -> str | None:
+    raw = re.sub(r"<@[^>]+>", " ", str(text or "")).strip()
+    if not raw:
+        return None
+    lower = raw.lower()
+    if lower.startswith("hfa control "):
+        return None
+
+    format_related = any(token in lower for token in ("format", "structure", "style", "template", "output"))
+    change_related = any(token in lower for token in ("use", "follow", "set", "change", "update", "going forward", "from now on", "should"))
+    if not format_related or not change_related:
+        return None
+
+    patterns = [
+        r"(?:format|structure|style|template|output)\s*(?:to|as|:)\s*(.+)$",
+        r"(?:use|follow)\s+(?:this\s+)?(?:format|structure|style|template)\s*[:\-]?\s*(.+)$",
+        r"(?:going forward|from now on)\s*[:\-]?\s*(.+)$",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, raw, re.IGNORECASE)
+        if not match:
+            continue
+        candidate = str(match.group(1) or "").strip().strip("\"'")
+        if len(candidate) >= 8:
+            return candidate
+
+    # If caller explicitly mentions "hfa analyze" and asks for format, keep whole text as instruction.
+    if re.search(r"\bhfa\s+analyze\b", lower):
+        return raw
+    return None
+
+
 def parse_hfa_intent(text: str) -> tuple[str | None, str | None]:
     stripped = re.sub(r"<@[^>]+>", " ", text or "").strip()
     lower = stripped.lower()

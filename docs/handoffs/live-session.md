@@ -2991,3 +2991,16 @@ Then confirm bot returns:
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_memory_runtime.py tests/test_hf_podcast.py tests/test_slack_routing.py tests/test_hf_youtube_transcript.py` -> `26 passed`
   - `PYTHONPATH=src python3 -m compileall -q src` -> pass
+
+## Update (2026-02-27, implicit Slack format updates now write to memory.sqlite)
+- Added implicit HFA format-control capture so operator messages in Slack can update HFA output instruction without explicit `hfa control instruction ...` syntax.
+- Behavior:
+  - Messages like `for hfa analyze, use this format: ...` are parsed and stored as runtime control in memory.
+  - Thread-context path also applies: if message references format change in a thread that already has HFA runs, instruction is saved.
+  - These updates are written to memory facts (`runtime_control/hfa/output_instruction`) and apply to future `hfa analyze` runs.
+- Implementation:
+  - `src/coatue_claw/hf_analyst.py`: `parse_hfa_control_instruction(...)`
+  - `src/coatue_claw/slack_bot.py`: `_handle_hfa_implicit_instruction_update(...)` + analyze-branch inline implicit control handling
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_memory_runtime.py tests/test_hf_podcast.py tests/test_slack_routing.py tests/test_hf_youtube_transcript.py` -> `27 passed`
+  - `PYTHONPATH=src python3 -m compileall -q src` -> pass

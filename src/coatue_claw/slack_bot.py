@@ -23,7 +23,7 @@ from coatue_claw.hf_analyst import HFAError, analyze_podcast_url as run_hfa_podc
 from coatue_claw.hf_analyst import analyze_thread as run_hfa_thread
 from coatue_claw.hf_analyst import extract_youtube_urls
 from coatue_claw.hf_analyst import format_hfa_slack_summary, hfa_status as hfa_status_lookup
-from coatue_claw.hf_analyst import parse_hfa_intent, record_dm_autorun, record_dm_podcast_autorun, should_run_dm_autorun, should_run_dm_podcast_autorun
+from coatue_claw.hf_analyst import parse_hfa_control_instruction, parse_hfa_intent, record_dm_autorun, record_dm_podcast_autorun, should_run_dm_autorun, should_run_dm_podcast_autorun
 from coatue_claw.memory_extraction import parse_memory_lookup_query
 from coatue_claw.memory_runtime import MemoryRuntime
 from coatue_claw.market_daily import MarketDailyError
@@ -443,6 +443,29 @@ def _handle_hfa_command(
         return True
 
     if kind == "analyze":
+        implicit_instruction = parse_hfa_control_instruction(text)
+        if implicit_instruction:
+            memory = _memory_runtime()
+            if memory is None:
+                say(text="HFA control failed: memory runtime unavailable.", thread_ts=thread_ts)
+                return True
+            try:
+                memory.set_hfa_output_control(
+                    requested_by=user_id,
+                    instruction=implicit_instruction,
+                    source="slack-hfa-implicit-control",
+                )
+            except Exception as exc:
+                say(text=f"HFA control failed: `{exc}`", thread_ts=thread_ts)
+                return True
+            say(
+                text=(
+                    "Updated HFA output instruction from your message.\n"
+                    "Next `hfa analyze` calls will follow it."
+                ),
+                thread_ts=thread_ts,
+            )
+            return True
         analyze_urls = extract_youtube_urls(tail or "")
         if analyze_urls:
             url = analyze_urls[0]
@@ -514,6 +537,49 @@ def _handle_hfa_command(
         return True
 
     return False
+
+
+def _handle_hfa_implicit_instruction_update(
+    *,
+    text: str,
+    channel: str | None,
+    thread_ts: str,
+    user_id: str | None,
+    event_ts: str | None,
+    say,
+) -> bool:
+    instruction = parse_hfa_control_instruction(text)
+    if not instruction:
+        return False
+    lower = _strip_slack_mentions(text).lower()
+    in_hfa_context = bool(re.search(r"\bhfa\s+analyze\b", lower))
+    if (not in_hfa_context) and channel:
+        runs = list(hfa_status_lookup(channel=channel, thread_ts=thread_ts, limit=1).get("runs") or [])
+        in_hfa_context = bool(runs)
+    if not in_hfa_context:
+        return False
+    memory = _memory_runtime()
+    if memory is None:
+        say(text="HFA control failed: memory runtime unavailable.", thread_ts=thread_ts)
+        return True
+    try:
+        memory.set_hfa_output_control(
+            requested_by=user_id,
+            instruction=instruction,
+            source="slack-hfa-implicit-control",
+            source_ts_utc=event_ts,
+        )
+    except Exception as exc:
+        say(text=f"HFA control failed: `{exc}`", thread_ts=thread_ts)
+        return True
+    say(
+        text=(
+            "Got it. I saved this as the HFA output format instruction.\n"
+            "It will apply to future `hfa analyze` runs."
+        ),
+        thread_ts=thread_ts,
+    )
+    return True
 
 
 def _maybe_auto_run_hfa_dm(
@@ -2081,6 +2147,16 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
     # Fast-path HFA commands before change-request heuristics/conversational fallbacks.
     # This avoids ambiguous generic responses when users explicitly invoke `hfa ...`.
     if _handle_hfa_command(text=text, channel=channel, thread_ts=thread_ts, user_id=user_id, say=say):
+        return
+
+    if _handle_hfa_implicit_instruction_update(
+        text=text,
+        channel=channel,
+        thread_ts=thread_ts,
+        user_id=user_id,
+        event_ts=event_ts,
+        say=say,
+    ):
         return
 
     git_memory_text = _parse_git_memory_request_text(text)
