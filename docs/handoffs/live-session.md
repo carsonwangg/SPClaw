@@ -3,6 +3,13 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-28, board-seat candidate source config: LLM-first only)
+- Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/.env.example`:
+  - `COATUE_CLAW_BOARD_SEAT_LLM_CANDIDATE_GEN_ENABLED=1`
+  - `COATUE_CLAW_BOARD_SEAT_LLM_FIRST_MODE=1`
+  - `COATUE_CLAW_BOARD_SEAT_WEB_CANDIDATE_ENRICHMENT=0`
+- Purpose: immediately stop web-headline candidate enrichment from introducing non-company targets; keep target generation LLM-first only.
+
 ## Update (2026-02-27, board-seat v8 guardrails relaxed for output continuity)
 - Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/board_seat_daily.py`:
   - v8 quality gate now treats format constraints as guidance:
