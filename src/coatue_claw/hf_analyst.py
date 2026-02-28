@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import sqlite3
 from typing import Any
 
@@ -82,6 +83,15 @@ def _artifact_dir() -> Path:
         os.environ.get(
             "COATUE_CLAW_HFA_ARTIFACT_DIR",
             str(_data_root() / "artifacts/hf-analyst"),
+        )
+    )
+
+
+def _kb_sources_dir() -> Path:
+    return Path(
+        os.environ.get(
+            "COATUE_CLAW_HFA_KB_SOURCES_DIR",
+            str(_data_root() / "kb/sources"),
         )
     )
 
@@ -228,6 +238,35 @@ def _safe_sha256(path: str) -> str | None:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             hasher.update(chunk)
     return hasher.hexdigest()
+
+
+def _sanitize_filename(name: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", (name or "").strip())
+    safe = safe.strip(".-")
+    return safe or "source.bin"
+
+
+def _persist_source_file_copy(
+    *,
+    local_path: str,
+    original_name: str,
+    sha256: str | None = None,
+) -> str | None:
+    source = Path(local_path)
+    if not source.exists() or (not source.is_file()):
+        return None
+    ext = source.suffix.lower()
+    bucket = "pdf" if ext == ".pdf" else "docs"
+    out_dir = _kb_sources_dir() / bucket
+    out_dir.mkdir(parents=True, exist_ok=True)
+    base = _sanitize_filename(original_name or source.name)
+    prefix = (sha256 or _safe_sha256(str(source)) or "")
+    filename = f"{prefix[:16]}-{base}" if prefix else base
+    target = out_dir / filename
+    if target.exists():
+        return str(target)
+    shutil.copy2(source, target)
+    return str(target)
 
 
 def _infer_tickers(text: str) -> list[str]:
@@ -681,12 +720,22 @@ def analyze_thread(
         docs: list[HFInputDocument] = []
         warnings: list[str] = []
         for row, doc in zip(rows, extracted):
-            sha = str(row.get("sha256") or "") or _safe_sha256(str(row.get("local_path") or ""))
+            original_local_path = str(row.get("local_path") or "")
+            sha = str(row.get("sha256") or "") or _safe_sha256(original_local_path)
+            kb_local_path = None
+            try:
+                kb_local_path = _persist_source_file_copy(
+                    local_path=original_local_path,
+                    original_name=str(doc.name or row.get("original_name") or "source.bin"),
+                    sha256=(sha or None),
+                )
+            except Exception as exc:
+                warnings.append(f"{doc.name}:kb_source_copy_failed:{type(exc).__name__}")
             wrapped = HFInputDocument(
                 file_id=doc.file_id,
                 name=doc.name,
                 mime_type=doc.mime_type,
-                local_path=doc.local_path,
+                local_path=(kb_local_path or doc.local_path),
                 source_ts_utc=doc.source_ts_utc,
                 extracted_text=doc.extracted_text,
                 page_count=doc.page_count,

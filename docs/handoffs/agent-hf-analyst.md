@@ -86,3 +86,6 @@
 
 ## Patch Status (2026-02-27)
 - Added implicit Slack parsing for HFA output-format change requests, with runtime memory writeback.
+
+## Patch Status (2026-02-27)
+- Added durable KB source-file copying for `hfa analyze` inputs.
