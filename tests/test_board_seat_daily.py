@@ -112,7 +112,7 @@ def test_deterministic_draft_includes_what_target_does_line() -> None:
         source_rows=(),
     )
     draft = board_seat_daily._deterministic_draft(company="OpenAI", target="Databento", funding=funding, repitch_note=None)
-    assert "*What target does:*" in draft
+    assert "*What target does*" in draft
 
 
 def test_candidate_extraction_rejects_concepts() -> None:
@@ -276,7 +276,8 @@ def test_build_draft_warning_only_when_quality_fails(monkeypatch: pytest.MonkeyP
         funding=funding,
         repitch_note=None,
     )
-    assert draft.generation_mode == "web_synth"
+    assert draft.generation_mode == "web_synth_failed"
+    assert draft.text == ""
     assert draft.memory_rewrite_used is False
     assert draft.quality_fail_codes
 
@@ -300,7 +301,7 @@ def test_run_once_skips_when_no_high_conf_target(board_seat_env: Path, monkeypat
     assert payload["skipped"][0]["reason"] == "no_high_confidence_new_target"
 
 
-def test_run_once_quality_warning_posts_thread_notice(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_once_quality_failure_posts_diagnostic_and_skips(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, str | None]] = []
 
     monkeypatch.setattr(
@@ -360,15 +361,8 @@ def test_run_once_quality_warning_posts_thread_notice(board_seat_env: Path, monk
         board_seat_daily,
         "_build_draft",
         lambda **kwargs: board_seat_daily.DraftResult(
-            text=(
-                "*Board Seat as a Service — OpenAI*\n"
-                "*Thesis*\n- Acquire Databento.\n"
-                "*What the target does*\n- Market data APIs.\n"
-                "*Why it’s a fit for portfolio company*\n- Product leverage.\n"
-                "*Risks*\n- Integration risk.\n"
-                "*Funding history and backers*\n- Total raised: $40M"
-            ),
-            generation_mode="web_synth",
+            text="",
+            generation_mode="web_synth_failed",
             quality_fail_codes=("artifact_term",),
             memory_rewrite_used=False,
         ),
@@ -382,11 +376,14 @@ def test_run_once_quality_warning_posts_thread_notice(board_seat_env: Path, monk
     monkeypatch.setattr(board_seat_daily, "_post_to_slack", _fake_post)
 
     payload = board_seat_daily.run_once(force=True, dry_run=False)
-    assert len(payload["sent"]) == 1
-    row = payload["sent"][0]
-    assert row["generation_mode"] == "web_synth"
-    assert row["warning_thread_posted"] is True
-    assert len(calls) >= 3
+    assert payload["sent"] == []
+    assert len(payload["skipped"]) == 1
+    row = payload["skipped"][0]
+    assert row["reason"] == "draft_quality_failed"
+    assert row["generation_mode"] == "web_synth_failed"
+    assert "artifact_term" in row["quality_fail_codes"]
+    assert len(calls) >= 1
+    assert "failed quality checks" in str(calls[0].get("text") or "").lower()
 
 
 def test_run_once_retries_next_target_when_first_skipped(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -620,6 +617,24 @@ def test_run_once_simple_mode_sends_valid_target(board_seat_env: Path, monkeypat
         return ([_row(title="Anduril acquisition context", url="https://example.com/anduril", snippet="strategy")], [])
 
     monkeypatch.setattr(board_seat_daily, "_collect_web_rows", _collect)
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_build_draft_simple",
+        lambda **kwargs: board_seat_daily.DraftResult(
+            text=(
+                "*Board Seat as a Service — Anduril*\n"
+                "*Thesis*\n- Idea: Acquire/Acquihire Saronic.\n"
+                "*What target does*\n- Builds autonomous vessel workflows.\n"
+                "*Why now*\n- 2026 procurement momentum and budget visibility.\n"
+                "*Fit + value creation*\n- Faster deployment and program attach.\n"
+                "*Risks / kill criteria*\n- Integration and valuation risk.\n"
+                "*Funding snapshot*\n- History: $600M disclosed.\n- Latest round/backers: Series C (2025), led by investor group."
+            ),
+            generation_mode="web_synth",
+            quality_fail_codes=tuple(),
+            memory_rewrite_used=False,
+        ),
+    )
     monkeypatch.setattr(board_seat_daily, "_post_to_slack", lambda **kwargs: ("C123", "100.3", None))
 
     payload = board_seat_daily.run_once(force=True, dry_run=False)
@@ -700,6 +715,24 @@ def test_run_once_simple_mode_regenerates_batches(board_seat_env: Path, monkeypa
         return ([_row(title="Databento raises funding", url="https://techcrunch.com/d", snippet="funding")], [])
 
     monkeypatch.setattr(board_seat_daily, "_collect_web_rows", _collect)
+    monkeypatch.setattr(
+        board_seat_daily,
+        "_build_draft_simple",
+        lambda **kwargs: board_seat_daily.DraftResult(
+            text=(
+                "*Board Seat as a Service — OpenAI*\n"
+                "*Thesis*\n- Idea: Acquire/Acquihire Databento.\n"
+                "*What target does*\n- Delivers market data workflows.\n"
+                "*Why now*\n- 2026 API demand and contract velocity.\n"
+                "*Fit + value creation*\n- Better attach and faster execution.\n"
+                "*Risks / kill criteria*\n- Integration complexity.\n"
+                "*Funding snapshot*\n- History: unknown.\n- Latest round/backers: unknown (unknown)."
+            ),
+            generation_mode="web_synth",
+            quality_fail_codes=tuple(),
+            memory_rewrite_used=False,
+        ),
+    )
 
     payload = board_seat_daily.run_once(force=True, dry_run=True)
     assert len(payload["sent"]) == 1

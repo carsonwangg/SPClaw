@@ -3,6 +3,23 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-27, board-seat v8 full-context concise + no-fallback diagnostics)
+- Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/board_seat_daily.py`:
+  - format version moved to `v8_full_context_concise`.
+  - draft contract changed to concise full-context sections:
+    - `Thesis`
+    - `What target does`
+    - `Why now`
+    - `Fit + value creation`
+    - `Risks / kill criteria`
+    - `Funding snapshot`
+  - prompt now uses full `source_extracts` content for grounding (not snippet-claims-only).
+  - quality gate now enforces concrete detail density and concise bullet count.
+  - all pitch fallbacks removed:
+    - no deterministic fallback post on draft failure
+    - no memory rewrite fallback
+    - quality failure now posts diagnostic warning and marks run `draft_quality_failed`.
+
 ## Update (2026-02-27, board-seat warning-only mode; rewrite fallback removed)
 - Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/board_seat_daily.py`:
   - removed memory-rewrite fallback path from draft generation.
