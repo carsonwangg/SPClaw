@@ -4,7 +4,6 @@ import argparse
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -48,10 +47,10 @@ DEFAULT_PORTCOS: list[tuple[str, str]] = [
     ("Sunday Robotics", "sunday-robotics"),
 ]
 
-BOARD_SEAT_FORMAT_VERSION = "v7_legacy_with_target_line"
+BOARD_SEAT_FORMAT_VERSION = "v8_full_context_concise"
 RESET_REASON = "feature_reset_in_progress"
 LOW_CONF_WARNING = "Funding data is low-confidence; verify before action."
-QUALITY_WARNING = "⚠️ Quality warning: verify key claims before action."
+DRAFT_FAILURE_WARNING = "⚠️ Board Seat generation failed quality checks; no pitch posted."
 
 CONCEPT_BLOCKLIST = {
     "ai",
@@ -117,6 +116,15 @@ ARTIFACT_TERMS = {
     "click here",
     "sign up",
     "try for free",
+}
+
+GENERIC_VAGUE_TERMS = {
+    "strategic wedge",
+    "integrated quickly into",
+    "improves speed-to-market",
+    "product defensibility",
+    "cross-sell paths",
+    "core technology and workflows",
 }
 
 MAJOR_EVENT_TERMS = {
@@ -450,10 +458,6 @@ def _memory_rewrite_on_fail() -> bool:
 
 def _memory_rewrite_max_retries() -> int:
     return 0
-
-
-def _memory_rewrite_thread_warning() -> bool:
-    return _env_flag("COATUE_CLAW_BOARD_SEAT_MEMORY_REWRITE_THREAD_WARNING", True)
 
 
 def _no_quotes() -> bool:
@@ -1266,18 +1270,11 @@ def _build_draft_simple(
             ),
             "output_sections": [
                 "Thesis",
-                "Idea",
                 "What target does",
                 "Why now",
-                "What's different",
-                "MOS/risks",
-                "Bottom line",
-                f"{company} context",
-                "Current efforts",
-                "Domain fit/gaps",
+                "Fit + value creation",
+                "Risks / kill criteria",
                 "Funding snapshot",
-                "History",
-                "Latest round/backers",
             ],
         },
         indent=2,
@@ -1287,25 +1284,12 @@ def _build_draft_simple(
         system=(
             "Write a specific board-style acquisition pitch. "
             "Use concrete facts from source_extracts (products, customers, contracts, launches, funding dates/amounts). "
-            "Avoid generic filler language. Output markdown in legacy v7 labeled-line format with the required headers and labels."
+            "Avoid generic filler language. Output markdown in v8 concise board brief format with required headers."
         ),
         temperature=0.2,
         max_tokens=900,
     )
-    fallback_funding = FundingSnapshot(
-        target=target,
-        target_key=_target_key(target),
-        total_raised="unknown",
-        latest_round="unknown",
-        latest_round_date="unknown",
-        backers=(),
-        evidence_count=len(filtered_funding_rows),
-        distinct_domains=len({r.domain for r in filtered_funding_rows if r.domain}),
-        conflict_flags=(),
-        verification_status="weak",
-        source_rows=tuple(filtered_funding_rows),
-    )
-    text = generated or _deterministic_draft(company=company, target=target, funding=fallback_funding, repitch_note=None)
+    text = generated or ""
     ok, reasons = _quality_gate(text, source_rows=merged_rows)
     if ok:
         return DraftResult(
@@ -1315,8 +1299,8 @@ def _build_draft_simple(
             memory_rewrite_used=False,
         )
     return DraftResult(
-        text=_deterministic_draft(company=company, target=target, funding=fallback_funding, repitch_note=None),
-        generation_mode="web_synth",
+        text="",
+        generation_mode="web_synth_failed",
         quality_fail_codes=tuple(reasons),
         memory_rewrite_used=False,
     )
@@ -1807,28 +1791,34 @@ def _deterministic_draft(*, company: str, target: str, funding: FundingSnapshot,
     lines = [
         f"*Board Seat as a Service — {company}*",
         "*Thesis*",
-        f"*Idea:* {idea}",
-        f"*What target does:* {target} builds core technology and workflows that can be integrated quickly into {company}'s existing stack.",
-        "*Why now:* Program buyers are rewarding faster deployment and integrated workflows, which favors targeted M&A over slower internal build cycles.",
-        "*What's different:* This target adds immediate product surface area and distribution leverage without forcing a full platform reset.",
-        "*MOS/risks:* MOS is faster time-to-value and cross-sell expansion; risks are integration complexity and valuation discipline in a competitive process.",
-        f"*Bottom line:* High-leverage acquihire/acquisition candidate if {company} wants faster execution in this wedge.",
-        f"*{company} context*",
-        f"*Current efforts:* {company} is already scaling product and distribution paths where this target can be integrated now.",
-        "*Domain fit/gaps:* Strong core platform fit; gap is execution speed in adjacent capability layers where this target can compress time-to-value.",
+        f"- Idea: {idea}",
+        "*What target does*",
+        f"- {target} offers production workflows that can slot into {company}'s deployment stack.",
+        "*Why now*",
+        "- Budget owners are prioritizing deployable capability gains over long internal build cycles.",
+        "*Fit + value creation*",
+        f"- Increases {company}'s program velocity and improves attach probability on adjacent workflows.",
+        "*Risks / kill criteria*",
+        "- Main risks are integration drag, valuation stretch, and unclear 12-month execution impact.",
         "*Funding snapshot*",
-        f"*History:* {history}",
-        f"*Latest round/backers:* {latest}",
+        f"- History: {history}",
+        f"- Latest round/backers: {latest}",
     ]
     return "\n".join(lines)
 
 
-def _web_synth_prompt(company: str, target: str, claims: list[str], funding: FundingSnapshot, repitch_note: str | None) -> str:
+def _web_synth_prompt(
+    company: str,
+    target: str,
+    source_extracts: list[dict[str, str]],
+    funding: FundingSnapshot,
+    repitch_note: str | None,
+) -> str:
     payload = {
         "company": company,
         "target": target,
         "repitch_note": repitch_note,
-        "claims": claims[:8],
+        "source_extracts": source_extracts,
         "funding": {
             "total_raised": funding.total_raised,
             "latest_round": funding.latest_round,
@@ -1843,10 +1833,10 @@ def _web_synth_prompt(company: str, target: str, claims: list[str], funding: Fun
 
 def _web_synth_system() -> str:
     return (
-        "You write concise board-style acquisition pitches in legacy v7 format. "
-        "Output markdown only with exactly this structure and labels: "
-        "*Thesis*; *Idea:*; *What target does:*; *Why now:*; *What's different:*; *MOS/risks:*; *Bottom line:*; "
-        "*{Company} context*; *Current efforts:*; *Domain fit/gaps:*; *Funding snapshot*; *History:*; *Latest round/backers:*. "
+        "You write concise, concrete board acquisition briefs in v8 format. "
+        "Output markdown only with exactly these headers and bullet sections: "
+        "*Thesis*, *What target does*, *Why now*, *Fit + value creation*, *Risks / kill criteria*, *Funding snapshot*. "
+        "Use 8-12 bullets total. Each section must contain concrete facts when available (numbers, dates, contracts, customers, programs). "
         "Do not include a Sources section in main output. Do not quote sources verbatim."
     )
 
@@ -1859,18 +1849,11 @@ def _quality_gate(text: str, *, source_rows: list[EvidenceRow]) -> tuple[bool, l
 
     required = [
         "*thesis*",
-        "*idea:*",
-        "*what target does:*",
-        "*why now:*",
-        "*what's different:*",
-        "*mos/risks:*",
-        "*bottom line:*",
-        " context*",
-        "*current efforts:*",
-        "*domain fit/gaps:*",
+        "*what target does*",
+        "*why now*",
+        "*fit + value creation*",
+        "*risks / kill criteria*",
         "*funding snapshot*",
-        "*history:*",
-        "*latest round/backers:*",
     ]
     lower = raw.lower()
     for needle in required:
@@ -1883,6 +1866,12 @@ def _quality_gate(text: str, *, source_rows: list[EvidenceRow]) -> tuple[bool, l
 
     if any(term in lower for term in ARTIFACT_TERMS):
         reasons.append("artifact_term")
+    if any(term in lower for term in GENERIC_VAGUE_TERMS):
+        reasons.append("too_generic")
+    if "sources" in lower:
+        reasons.append("sources_in_main")
+
+    bullets = 0
 
     for line in raw.splitlines():
         stripped = _normalize_whitespace(line)
@@ -1891,6 +1880,21 @@ def _quality_gate(text: str, *, source_rows: list[EvidenceRow]) -> tuple[bool, l
         if stripped.startswith("-") and len(stripped.split()) < 3:
             reasons.append("fragment_line")
             break
+        if stripped.startswith("-"):
+            bullets += 1
+
+    if bullets < 8 or bullets > 12:
+        reasons.append("bullet_count_out_of_range")
+
+    concrete_hits = len(
+        re.findall(
+            r"\$[\d,.]+(?:\s?[MBK]|B)?|\b20\d{2}\b|\b\d+(?:\.\d+)?%\b|\b(?:contract|award|valuation|series)\b",
+            raw,
+            flags=re.IGNORECASE,
+        )
+    )
+    if concrete_hits < 2:
+        reasons.append("insufficient_concrete_detail")
 
     # lexical overlap against source snippets
     source_texts = [
@@ -1922,23 +1926,6 @@ def _token_overlap_ratio(a: str, b: str) -> float:
     return len(sa & sb) / denom
 
 
-def _claims_from_rows(rows: list[EvidenceRow], *, limit: int = 8) -> list[str]:
-    out: list[str] = []
-    seen: set[str] = set()
-    for row in rows:
-        claim = _normalize_whitespace(f"{row.title}. {row.snippet}").strip(" .")
-        if not claim:
-            continue
-        key = hashlib.sha1(claim.lower().encode("utf-8")).hexdigest()[:16]
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(claim)
-        if len(out) >= limit:
-            break
-    return out
-
-
 def _build_draft(
     *,
     company: str,
@@ -1947,16 +1934,16 @@ def _build_draft(
     funding: FundingSnapshot,
     repitch_note: str | None,
 ) -> DraftResult:
-    claims = _claims_from_rows(evidence_rows, limit=8)
+    source_extracts = _source_content_extracts(evidence_rows)
     quality_fail_codes: list[str] = []
 
     # web-grounded loop
     draft = ""
     for attempt in range(_max_web_rewrites() + 1):
         if attempt == 0:
-            prompt = _web_synth_prompt(company, target, claims, funding, repitch_note)
+            prompt = _web_synth_prompt(company, target, source_extracts, funding, repitch_note)
             generated = _chat_completion(prompt=prompt, system=_web_synth_system(), temperature=0.2, max_tokens=700)
-            draft = generated or _deterministic_draft(company=company, target=target, funding=funding, repitch_note=repitch_note)
+            draft = generated or ""
         else:
             rewrite_prompt = json.dumps(
                 {
@@ -1964,6 +1951,7 @@ def _build_draft(
                     "target": target,
                     "feedback": quality_fail_codes,
                     "draft": draft,
+                    "source_extracts": source_extracts,
                     "constraints": [
                         "natural concise writing",
                         "no source quotes",
@@ -1981,6 +1969,9 @@ def _build_draft(
             )
             if generated:
                 draft = generated
+        if not _normalize_whitespace(draft):
+            quality_fail_codes = ["empty_draft"]
+            continue
         ok, reasons = _quality_gate(draft, source_rows=evidence_rows)
         if ok:
             return DraftResult(
@@ -1991,11 +1982,10 @@ def _build_draft(
             )
         quality_fail_codes = reasons
 
-    # Warning-only policy: do not switch to memory rewrite mode. Keep web synthesis mode and
-    # post with warning when quality gates could not be fully satisfied.
+    # No fallback policy: return explicit failure so caller can post warning/diagnostic.
     return DraftResult(
-        text=_deterministic_draft(company=company, target=target, funding=funding, repitch_note=repitch_note),
-        generation_mode="web_synth",
+        text="",
+        generation_mode="web_synth_failed",
         quality_fail_codes=tuple(quality_fail_codes),
         memory_rewrite_used=False,
     )
@@ -3031,6 +3021,27 @@ def _process_company(
             funding_rows=funding_rows,
         )
         funding = _funding_from_rows(selection.target, _filter_rows_for_target(target=selection.target, rows=funding_rows))
+        if not _normalize_whitespace(draft.text):
+            payload = {
+                **result_base,
+                "status": "skipped",
+                "reason": "draft_quality_failed",
+                "gate_reason": "quality_failed",
+                "target": selection.target,
+                "target_key": selection.target_key,
+                "generation_mode": draft.generation_mode,
+                "quality_fail_codes": list(draft.quality_fail_codes),
+                "memory_rewrite_used": False,
+                "selection_mode": "simple_llm",
+                "regen_batches_used": selection.regen_batches_used,
+                "candidates_evaluated_total": selection.candidates_evaluated_total,
+                "candidate_rejections": list(selection.candidate_rejections),
+                "final_decision_path": "exhausted_no_valid_target",
+                "delivery_mode_applied": "skip",
+                "search_notes": search_notes,
+            }
+            store.record_run(payload)
+            return "skipped", payload
         posted_at_utc = _utc_now_iso()
         message_ts: str | None = None
         sources_thread_ts: str | None = None
@@ -3270,13 +3281,23 @@ def _process_company(
         return "skipped", payload
 
     funding = _funding_snapshot_for_target(store=store, target=chosen.target)
+    draft_queries = (
+        _simple_target_queries(chosen.target)
+        + _simple_company_target_queries(company, chosen.target)
+        + _search_queries_for_funding(chosen.target)
+    )
+    draft_rows, draft_search_notes = _collect_web_rows_expanded(draft_queries)
+    draft_rows = _filter_rows_for_target(target=chosen.target, rows=draft_rows)
+    if not draft_rows:
+        draft_rows = _dedupe_rows(chosen_rows + list(funding.source_rows))
+    search_notes = [*search_notes, *draft_search_notes]
     last_post = store.latest_target_post(company=company, target_key=chosen.target_key)
     repitch_note = _repitch_note(last_post=last_post, events=repitch_events) if last_post else None
 
     draft = _build_draft(
         company=company,
         target=chosen.target,
-        evidence_rows=chosen_rows,
+        evidence_rows=draft_rows,
         funding=funding,
         repitch_note=repitch_note,
     )
@@ -3288,6 +3309,61 @@ def _process_company(
     post_error: str | None = None
     effective_channel_ref = channel.channel_id or channel.channel_ref
     posted_channel_id = channel.channel_id
+
+    if not _normalize_whitespace(draft.text):
+        diagnostic = (
+            f"{DRAFT_FAILURE_WARNING}\n"
+            f"- company: `{company}`\n"
+            f"- target: `{chosen.target}`\n"
+            f"- generation_mode: `{draft.generation_mode}`\n"
+            f"- quality_fail_codes: `{','.join(draft.quality_fail_codes) or 'unknown'}`"
+        )
+        if dry_run:
+            warning_ts = None
+        else:
+            channel_id, ts, err = _post_to_slack(channel_ref=effective_channel_ref, text=diagnostic)
+            if err:
+                post_error = err
+            else:
+                warning_ts = ts
+                posted_channel_id = channel_id or posted_channel_id
+                effective_channel_ref = posted_channel_id or channel.channel_ref
+                if _sources_in_thread() and warning_ts:
+                    _, src_ts, _ = _post_to_slack(
+                        channel_ref=effective_channel_ref,
+                        text=_render_sources_thread(draft_rows + list(funding.source_rows)),
+                        thread_ts=warning_ts,
+                    )
+                    sources_thread_ts = src_ts
+
+        payload = {
+            **result_base,
+            "status": "skipped",
+            "reason": "draft_quality_failed" if post_error is None else post_error,
+            "gate_reason": "quality_failed",
+            "target": chosen.target,
+            "target_key": chosen.target_key,
+            "target_confidence": effective_confidence,
+            "funding_confidence": funding.verification_status,
+            "generation_mode": draft.generation_mode,
+            "quality_fail_codes": list(draft.quality_fail_codes),
+            "memory_rewrite_used": False,
+            "candidates_considered": candidates_scanned_total,
+            "selection_attempts": llm_batches_used,
+            "candidates_scanned_total": candidates_scanned_total,
+            "candidates_evaluated_total": candidates_evaluated_total,
+            "llm_batches_used": llm_batches_used,
+            "rejections_by_reason": rejections_by_reason,
+            "top_rejected_targets": top_rejected_targets,
+            "final_decision_path": "exhausted_no_valid_target",
+            "delivery_mode_applied": "skip",
+            "warning_message_ts": warning_ts,
+            "sources_thread_ts": sources_thread_ts,
+            "search_notes": search_notes,
+        }
+        store.record_candidate_decisions(candidate_decisions)
+        store.record_run(payload)
+        return "skipped", payload
 
     if dry_run:
         text = draft.text
@@ -3302,17 +3378,10 @@ def _process_company(
             if _sources_in_thread():
                 _, src_ts, _ = _post_to_slack(
                     channel_ref=effective_channel_ref,
-                    text=_render_sources_thread(chosen_rows + list(funding.source_rows)),
+                    text=_render_sources_thread(draft_rows + list(funding.source_rows)),
                     thread_ts=message_ts,
                 )
                 sources_thread_ts = src_ts
-            if draft.quality_fail_codes and _memory_rewrite_thread_warning():
-                _, warn_ts, _ = _post_to_slack(
-                    channel_ref=effective_channel_ref,
-                    text=QUALITY_WARNING,
-                    thread_ts=message_ts,
-                )
-                warning_ts = warn_ts
         text = draft.text
 
     if post_error:

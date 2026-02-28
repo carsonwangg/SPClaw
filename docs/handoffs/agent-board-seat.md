@@ -45,20 +45,22 @@
   - `bs now` runs `board_seat_daily.run_once(force=True, dry_run=False)` scoped to current channel/company mapping.
   - this ensures on-demand posts use the same board-seat formatter and thread-source behavior as scheduler runs.
 
-## Latest Update (2026-02-27, legacy v7 default restored)
-- `src/coatue_claw/board_seat_daily.py` now defaults to legacy v7 formatter contract:
-  - `BOARD_SEAT_FORMAT_VERSION=v7_legacy_with_target_line`
-  - simple mode path is disabled; legacy v7 is the only active runtime path.
-  - deterministic/LLM draft contract and quality gate aligned to v7 labeled structure with explicit `What target does` line under `Thesis`.
-- `.env.example` updated to document `COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE` as deprecated/no-op.
-- `AGENTS.md` board-seat section updated from v1 5-section contract to v7 labeled-line contract.
-
 ## Latest Update (2026-02-27, warning-only quality handling)
 - Removed memory rewrite fallback from `src/coatue_claw/board_seat_daily.py`.
 - When quality gates fail after web rewrite attempts:
-  - run stays `generation_mode=web_synth`
-  - deterministic v7 draft is posted
-  - warning is posted in thread using neutral copy (`Quality warning`) without fallback wording.
+  - no fallback pitch is posted
+  - run returns `draft_quality_failed`
+  - diagnostic warning is posted with failure codes for debugging.
+
+## Latest Update (2026-02-27, v8 concise full-context contract)
+- `src/coatue_claw/board_seat_daily.py` now uses `BOARD_SEAT_FORMAT_VERSION=v8_full_context_concise`.
+- Drafting now uses full source extracts for target/company/funding evidence and produces concise sections:
+  - `Thesis`
+  - `What target does`
+  - `Why now`
+  - `Fit + value creation`
+  - `Risks / kill criteria`
+  - `Funding snapshot`
 
 ## Merge Notes
 - Rebase onto `origin/main` before merge.

@@ -40,14 +40,19 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Board-seat moved to v8 full-context concise contract on role branch:
+  - format version is `v8_full_context_concise`.
+  - generation is full-context-first (source extracts) then concise synthesis.
+  - hard no-fallback policy is active:
+    - draft quality failures do not post fallback pitches
+    - run posts diagnostic warning and returns `draft_quality_failed`.
 - Board-seat now runs warning-only quality handling on role branch:
   - rewrite fallback mode has been removed.
-  - quality-failed drafts are posted in `web_synth` mode with warning thread, not memory rewrite.
-  - warning copy is neutral (`Quality warning`) and no longer mentions fallback mode.
-- Board-seat default output contract is legacy v7 style on role branch:
-  - default format version is `v7_legacy_with_target_line`.
-  - simple mode path is disabled in code; legacy v7 is the only active runtime path.
-  - draft + quality contract enforces v7 labeled structure (`Idea/What target does/Why now/What's different/MOS/Bottom line`, context block, funding snapshot block).
+  - quality-failed drafts are skipped and replaced by diagnostic warning posts for easier operator debugging.
+  - warning copy is explicit (`Board Seat generation failed quality checks; no pitch posted.`).
+- Board-seat default output contract is v8 full-context concise:
+  - simple mode path is disabled in code; v8 is the only active runtime path.
+  - concise sections are `Thesis`, `What target does`, `Why now`, `Fit + value creation`, `Risks / kill criteria`, `Funding snapshot`.
 - Board-seat conversational command routing updated on role branch:
   - `bs now` in Slack channel messages now executes `board_seat_daily.run_once(force=True, dry_run=False)` scoped to that channel/company mapping.
   - removes legacy-format mismatch between conversational trigger and scheduled board-seat formatter.
