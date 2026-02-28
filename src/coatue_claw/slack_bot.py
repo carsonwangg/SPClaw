@@ -66,7 +66,7 @@ from coatue_claw.slack_pipeline import (
     undo_last_deploy,
 )
 from coatue_claw.slack_pipeline_intent import parse_pipeline_intent
-from coatue_claw.slack_routing import should_default_route_message, should_route_message_event
+from coatue_claw.slack_routing import is_explicit_board_seat_command, should_default_route_message, should_route_message_event
 from coatue_claw.slack_x_chart_intent import parse_x_chart_post_intent
 from coatue_claw.slack_x_intent import parse_x_digest_intent
 from coatue_claw.universe_store import (
@@ -1599,13 +1599,28 @@ def _handle_board_seat_command(*, text: str, channel: str | None, thread_ts: str
 
     if re.fullmatch(r"(bs|board seat)\s+status", lower):
         payload = board_seat_daily.status()
+        portcos = payload.get("portcos") if isinstance(payload, dict) else None
+        portco_line = "none"
+        if isinstance(portcos, list) and portcos:
+            parts: list[str] = []
+            for row in portcos:
+                if not isinstance(row, dict):
+                    continue
+                company = str(row.get("company") or "").strip()
+                channel_ref = str(row.get("channel_ref") or "").strip()
+                if company and channel_ref:
+                    parts.append(f"{company}:{channel_ref}")
+            if parts:
+                portco_line = ", ".join(parts)
         say(
             text=(
                 "Board Seat status:\n"
-                f"- mode: `{'simple_llm' if payload.get('simple_mode') else 'legacy'}`\n"
+                f"- format_version: `{payload.get('format_version')}`\n"
+                f"- status: `{payload.get('status')}`\n"
+                f"- enabled: `{payload.get('board_seat_enabled')}`\n"
+                f"- schedule_time: `{payload.get('schedule_time')}`\n"
                 f"- target_lock_days: `{payload.get('target_lock_days')}`\n"
-                f"- recent_sent_count: `{payload.get('recent_sent_count')}`\n"
-                f"- recent_skipped_count: `{payload.get('recent_skipped_count')}`"
+                f"- portcos: `{portco_line}`"
             ),
             thread_ts=thread_ts,
         )
@@ -2174,6 +2189,29 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
     if _handle_hfa_command(text=text, channel=channel, thread_ts=thread_ts, user_id=user_id, say=say):
         return
 
+    bs_command_requested = is_explicit_board_seat_command(text)
+    if bs_command_requested:
+        if _handle_board_seat_command(text=text, channel=channel, thread_ts=thread_ts, say=say):
+            return
+        logger.error(
+            "Board Seat command routing failed channel=%s thread_ts=%s text=%r",
+            channel,
+            thread_ts,
+            text,
+        )
+        say(
+            text=(
+                "Board Seat command routing failed.\n"
+                "Valid commands:\n"
+                "- `bs now`\n"
+                "- `bs now dry`\n"
+                "- `bs now for <Company>`\n"
+                "- `bs status`"
+            ),
+            thread_ts=thread_ts,
+        )
+        return
+
     git_memory_text = _parse_git_memory_request_text(text)
     if git_memory_text is not None:
         memory = _memory_runtime()
@@ -2311,10 +2349,6 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
 
     if _handle_market_daily_command(text=text, channel=channel, thread_ts=thread_ts, say=say):
         _mark_spencer_change(change_id, status="implemented", note="Handled by market daily workflow.")
-        return
-
-    if _handle_board_seat_command(text=text, channel=channel, thread_ts=thread_ts, say=say):
-        _mark_spencer_change(change_id, status="implemented", note="Handled by board seat workflow.")
         return
 
     try:

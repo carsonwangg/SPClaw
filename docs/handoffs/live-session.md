@@ -3,6 +3,20 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-28, fail-closed board-seat command routing)
+- Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/slack_routing.py`:
+  - added `is_explicit_board_seat_command(text)` for explicit `bs` / `board seat` command detection with mention stripping.
+- Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/slack_bot.py`:
+  - explicit board-seat commands are handled fail-closed near the HFA fast path:
+    - no fallthrough to memory/pipeline/chart/diligence/fallback handlers on `bs` command miss.
+  - routing miss response is now deterministic:
+    - `Board Seat command routing failed.`
+    - valid commands list included (`bs now`, `bs now dry`, `bs now for <Company>`, `bs status`).
+  - `bs status` now returns canonical fields:
+    - `format_version`, `status`, `enabled`, `schedule_time`, `target_lock_days`, `portcos`.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_slack_routing.py tests/test_slack_pipeline_intent.py tests/test_slack_bot_board_seat_routing.py` -> `13 passed, 1 skipped`
+
 ## Update (2026-02-28, board-seat candidate source config: LLM-first only)
 - Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/.env.example`:
   - `COATUE_CLAW_BOARD_SEAT_LLM_CANDIDATE_GEN_ENABLED=1`

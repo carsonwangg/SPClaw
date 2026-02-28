@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from coatue_claw.slack_routing import (
     extract_user_mentions,
+    is_explicit_board_seat_command,
     should_default_route_message,
     should_route_message_event,
 )
@@ -34,3 +35,16 @@ def test_should_route_message_event_im_always_routes_nonempty() -> None:
 def test_should_route_message_event_non_im_follows_default_rules() -> None:
     assert should_route_message_event(text="run diligence SNOW", channel_type="channel")
     assert not should_route_message_event(text="<@U0AFFR9Q11B> run diligence SNOW", channel_type="channel")
+
+
+def test_is_explicit_board_seat_command_true() -> None:
+    assert is_explicit_board_seat_command("bs status")
+    assert is_explicit_board_seat_command("bs now")
+    assert is_explicit_board_seat_command("board seat status")
+    assert is_explicit_board_seat_command("<@U0AFFR9Q11B> bs now")
+
+
+def test_is_explicit_board_seat_command_false() -> None:
+    assert not is_explicit_board_seat_command("md status")
+    assert not is_explicit_board_seat_command("hfa analyze")
+    assert not is_explicit_board_seat_command("x chart from https://x.com/foo/status/123")
