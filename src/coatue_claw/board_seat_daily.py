@@ -490,7 +490,8 @@ def _llm_candidate_generation_enabled() -> bool:
 
 
 def _simple_mode_enabled() -> bool:
-    return _env_flag("COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE", False)
+    # Light/simple mode is intentionally disabled; legacy v6 path is the only active runtime path.
+    return False
 
 
 def _simple_batch_size() -> int:

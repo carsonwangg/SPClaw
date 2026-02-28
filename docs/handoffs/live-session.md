@@ -6,7 +6,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 ## Update (2026-02-27, board-seat legacy v6 restored as default)
 - Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/board_seat_daily.py`:
   - default board-seat format switched to `v6_legacy_default`.
-  - default runtime path switched away from simple mode (`COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE` now default off).
+  - simple mode path is now disabled; legacy v6 runtime path is forced.
   - legacy v6 draft contract restored in generator/quality gate:
     - `Thesis` with labeled lines: `Idea`, `Target does`, `Why now`, `What's different`, `MOS/risks`, `Bottom line`
     - `{Company} context` with `Current efforts`, `Domain fit/gaps`

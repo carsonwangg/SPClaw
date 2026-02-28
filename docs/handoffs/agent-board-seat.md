@@ -48,9 +48,9 @@
 ## Latest Update (2026-02-27, legacy v6 default restored)
 - `src/coatue_claw/board_seat_daily.py` now defaults to legacy v6 formatter contract:
   - `BOARD_SEAT_FORMAT_VERSION=v6_legacy_default`
-  - simple mode no longer hardcoded default-on (`COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE` default off).
+  - simple mode path is disabled; legacy v6 is the only active runtime path.
   - deterministic/LLM draft contract and quality gate aligned to v6 labeled structure.
-- `.env.example` updated to document `COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE=0` default.
+- `.env.example` updated to document `COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE` as deprecated/no-op.
 - `AGENTS.md` board-seat section updated from v1 5-section contract to v6 labeled-line contract.
 
 ## Merge Notes
