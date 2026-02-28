@@ -3,6 +3,16 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-27, board-seat warning-only mode; rewrite fallback removed)
+- Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/board_seat_daily.py`:
+  - removed memory-rewrite fallback path from draft generation.
+  - quality failures now stay in `web_synth` mode and post deterministic v7 draft with `quality_fail_codes`.
+  - thread warning behavior is now warning-only (`⚠️ Quality warning: verify key claims before action.`), with no “fallback mode used” wording.
+  - warning thread is posted when `quality_fail_codes` are present (not tied to memory-rewrite mode).
+- Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/.env.example`:
+  - marked `COATUE_CLAW_BOARD_SEAT_MEMORY_REWRITE_*` knobs as deprecated/no-op.
+  - clarified `COATUE_CLAW_BOARD_SEAT_MEMORY_REWRITE_THREAD_WARNING` controls warning-thread posting only.
+
 ## Update (2026-02-27, board-seat legacy v7 restored as default)
 - Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/board_seat_daily.py`:
   - default board-seat format switched to `v7_legacy_with_target_line`.

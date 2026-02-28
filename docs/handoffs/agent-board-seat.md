@@ -53,6 +53,13 @@
 - `.env.example` updated to document `COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE` as deprecated/no-op.
 - `AGENTS.md` board-seat section updated from v1 5-section contract to v7 labeled-line contract.
 
+## Latest Update (2026-02-27, warning-only quality handling)
+- Removed memory rewrite fallback from `src/coatue_claw/board_seat_daily.py`.
+- When quality gates fail after web rewrite attempts:
+  - run stays `generation_mode=web_synth`
+  - deterministic v7 draft is posted
+  - warning is posted in thread using neutral copy (`Quality warning`) without fallback wording.
+
 ## Merge Notes
 - Rebase onto `origin/main` before merge.
 - Role branch should not restart runtime directly; integrator handles deploy on `main`.

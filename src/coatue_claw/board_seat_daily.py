@@ -51,10 +51,7 @@ DEFAULT_PORTCOS: list[tuple[str, str]] = [
 BOARD_SEAT_FORMAT_VERSION = "v7_legacy_with_target_line"
 RESET_REASON = "feature_reset_in_progress"
 LOW_CONF_WARNING = "Funding data is low-confidence; verify before action."
-MEMORY_FALLBACK_WARNING = (
-    "⚠️ Fallback mode used: this pitch was rewritten from model memory "
-    "(no live web retrieval in final pass). Verify key claims before action."
-)
+QUALITY_WARNING = "⚠️ Quality warning: verify key claims before action."
 
 CONCEPT_BLOCKLIST = {
     "ai",
@@ -447,16 +444,12 @@ def _max_web_rewrites() -> int:
 
 
 def _memory_rewrite_on_fail() -> bool:
-    return _env_flag("COATUE_CLAW_BOARD_SEAT_MEMORY_REWRITE_ON_FAIL", True)
+    # Rewrite fallback is intentionally disabled; warning-only behavior is enforced.
+    return False
 
 
 def _memory_rewrite_max_retries() -> int:
-    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_MEMORY_REWRITE_MAX_RETRIES", "1") or "1").strip()
-    try:
-        val = int(raw)
-    except Exception:
-        val = 1
-    return max(0, min(3, val))
+    return 0
 
 
 def _memory_rewrite_thread_warning() -> bool:
@@ -1323,9 +1316,9 @@ def _build_draft_simple(
         )
     return DraftResult(
         text=_deterministic_draft(company=company, target=target, funding=fallback_funding, repitch_note=None),
-        generation_mode="memory_rewrite",
+        generation_mode="web_synth",
         quality_fail_codes=tuple(reasons),
-        memory_rewrite_used=True,
+        memory_rewrite_used=False,
     )
 
 
@@ -1975,7 +1968,7 @@ def _build_draft(
                         "natural concise writing",
                         "no source quotes",
                         "no snippet artifacts",
-                        "exact five required sections",
+                        "exact required labeled sections",
                     ],
                 },
                 indent=2,
@@ -1998,61 +1991,13 @@ def _build_draft(
             )
         quality_fail_codes = reasons
 
-    if not _memory_rewrite_on_fail():
-        return DraftResult(
-            text=draft,
-            generation_mode="web_synth",
-            quality_fail_codes=tuple(quality_fail_codes),
-            memory_rewrite_used=False,
-        )
-
-    # memory-only rewrite fallback; no web access here
-    fallback = ""
-    for _ in range(_memory_rewrite_max_retries() + 1):
-        prompt = json.dumps(
-            {
-                "company": company,
-                "target": target,
-                "template": [
-                    "Thesis",
-                    "Idea",
-                    "What target does",
-                    "Why now",
-                    "What's different",
-                    "MOS/risks",
-                    "Bottom line",
-                    f"{company} context",
-                    "Current efforts",
-                    "Domain fit/gaps",
-                    "Funding snapshot",
-                    "History",
-                    "Latest round/backers",
-                ],
-                "style": "very concise, natural, no quotes",
-            },
-            indent=2,
-        )
-        generated = _chat_completion(
-            prompt=prompt,
-            system="Write a concise strategic acquisition pitch from model memory only. Markdown only.",
-            temperature=0.2,
-            max_tokens=550,
-        )
-        fallback = generated or _deterministic_draft(company=company, target=target, funding=funding, repitch_note=repitch_note)
-        ok, _ = _quality_gate(fallback, source_rows=[])
-        if ok:
-            return DraftResult(
-                text=fallback,
-                generation_mode="memory_rewrite",
-                quality_fail_codes=tuple(quality_fail_codes),
-                memory_rewrite_used=True,
-            )
-
+    # Warning-only policy: do not switch to memory rewrite mode. Keep web synthesis mode and
+    # post with warning when quality gates could not be fully satisfied.
     return DraftResult(
         text=_deterministic_draft(company=company, target=target, funding=funding, repitch_note=repitch_note),
-        generation_mode="memory_rewrite",
+        generation_mode="web_synth",
         quality_fail_codes=tuple(quality_fail_codes),
-        memory_rewrite_used=True,
+        memory_rewrite_used=False,
     )
 
 
@@ -3361,10 +3306,10 @@ def _process_company(
                     thread_ts=message_ts,
                 )
                 sources_thread_ts = src_ts
-            if draft.memory_rewrite_used and _memory_rewrite_thread_warning():
+            if draft.quality_fail_codes and _memory_rewrite_thread_warning():
                 _, warn_ts, _ = _post_to_slack(
                     channel_ref=effective_channel_ref,
-                    text=MEMORY_FALLBACK_WARNING,
+                    text=QUALITY_WARNING,
                     thread_ts=message_ts,
                 )
                 warning_ts = warn_ts

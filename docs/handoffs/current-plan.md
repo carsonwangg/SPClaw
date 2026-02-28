@@ -40,6 +40,10 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Board-seat now runs warning-only quality handling on role branch:
+  - rewrite fallback mode has been removed.
+  - quality-failed drafts are posted in `web_synth` mode with warning thread, not memory rewrite.
+  - warning copy is neutral (`Quality warning`) and no longer mentions fallback mode.
 - Board-seat default output contract is legacy v7 style on role branch:
   - default format version is `v7_legacy_with_target_line`.
   - simple mode path is disabled in code; legacy v7 is the only active runtime path.

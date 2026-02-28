@@ -244,17 +244,8 @@ def test_pick_target_blocks_already_acquired(board_seat_env: Path) -> None:
     assert gate_reason == "target_already_acquired"
 
 
-def test_build_draft_memory_fallback_when_quality_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_draft_warning_only_when_quality_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     def _bad_chat(*, prompt: str, system: str, temperature: float = 0.2, max_tokens: int = 700) -> str | None:
-        if "model memory" in system.lower():
-            return (
-                "*Board Seat as a Service — OpenAI*\n"
-                "*Thesis*\n- Acquire Databento to improve market data speed.\n"
-                "*What the target does*\n- Databento provides low-latency market data APIs.\n"
-                "*Why it’s a fit for portfolio company*\n- Strengthens product reliability and developer adoption.\n"
-                "*Risks*\n- Integration and valuation risk.\n"
-                "*Funding history and backers*\n- Total raised: unknown"
-            )
         return (
             "*Thesis*\n- Read more\n*What the target does*\n- x\n"
             "*Why it’s a fit for portfolio company*\n- x\n*Risks*\n- x\n"
@@ -285,8 +276,9 @@ def test_build_draft_memory_fallback_when_quality_fails(monkeypatch: pytest.Monk
         funding=funding,
         repitch_note=None,
     )
-    assert draft.generation_mode == "memory_rewrite"
-    assert draft.memory_rewrite_used is True
+    assert draft.generation_mode == "web_synth"
+    assert draft.memory_rewrite_used is False
+    assert draft.quality_fail_codes
 
 
 def test_run_once_skips_when_no_high_conf_target(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -308,7 +300,7 @@ def test_run_once_skips_when_no_high_conf_target(board_seat_env: Path, monkeypat
     assert payload["skipped"][0]["reason"] == "no_high_confidence_new_target"
 
 
-def test_run_once_memory_fallback_posts_warning(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_once_quality_warning_posts_thread_notice(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, str | None]] = []
 
     monkeypatch.setattr(
@@ -376,9 +368,9 @@ def test_run_once_memory_fallback_posts_warning(board_seat_env: Path, monkeypatc
                 "*Risks*\n- Integration risk.\n"
                 "*Funding history and backers*\n- Total raised: $40M"
             ),
-            generation_mode="memory_rewrite",
+            generation_mode="web_synth",
             quality_fail_codes=("artifact_term",),
-            memory_rewrite_used=True,
+            memory_rewrite_used=False,
         ),
     )
 
@@ -392,7 +384,7 @@ def test_run_once_memory_fallback_posts_warning(board_seat_env: Path, monkeypatc
     payload = board_seat_daily.run_once(force=True, dry_run=False)
     assert len(payload["sent"]) == 1
     row = payload["sent"][0]
-    assert row["generation_mode"] == "memory_rewrite"
+    assert row["generation_mode"] == "web_synth"
     assert row["warning_thread_posted"] is True
     assert len(calls) >= 3
 
