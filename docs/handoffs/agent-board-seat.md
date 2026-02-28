@@ -43,7 +43,15 @@
 - Conversational Slack command path now routes board-seat runs to `board_seat_daily`:
   - implemented `bs help`, `bs status`, `bs now` in `src/coatue_claw/slack_bot.py`.
   - `bs now` runs `board_seat_daily.run_once(force=True, dry_run=False)` scoped to current channel/company mapping.
-  - this ensures on-demand posts use the same 5-section board-seat formatter and thread-source behavior as scheduler runs.
+  - this ensures on-demand posts use the same board-seat formatter and thread-source behavior as scheduler runs.
+
+## Latest Update (2026-02-27, legacy v6 default restored)
+- `src/coatue_claw/board_seat_daily.py` now defaults to legacy v6 formatter contract:
+  - `BOARD_SEAT_FORMAT_VERSION=v6_legacy_default`
+  - simple mode no longer hardcoded default-on (`COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE` default off).
+  - deterministic/LLM draft contract and quality gate aligned to v6 labeled structure.
+- `.env.example` updated to document `COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE=0` default.
+- `AGENTS.md` board-seat section updated from v1 5-section contract to v6 labeled-line contract.
 
 ## Merge Notes
 - Rebase onto `origin/main` before merge.

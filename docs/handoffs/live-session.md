@@ -3,6 +3,18 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-27, board-seat legacy v6 restored as default)
+- Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/board_seat_daily.py`:
+  - default board-seat format switched to `v6_legacy_default`.
+  - default runtime path switched away from simple mode (`COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE` now default off).
+  - legacy v6 draft contract restored in generator/quality gate:
+    - `Thesis` with labeled lines: `Idea`, `Target does`, `Why now`, `What's different`, `MOS/risks`, `Bottom line`
+    - `{Company} context` with `Current efforts`, `Domain fit/gaps`
+    - `Funding snapshot` with `History`, `Latest round/backers`
+- Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/.env.example`:
+  - `COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE=0` as documented default.
+- Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/AGENTS.md` board-seat contract to reflect v6 structure.
+
 ## Update (2026-02-27, board-seat `bs now` routed to `board_seat_daily`)
 - Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/slack_bot.py`:
   - added `bs` command handling in conversational Slack path:

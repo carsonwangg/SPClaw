@@ -48,7 +48,7 @@ DEFAULT_PORTCOS: list[tuple[str, str]] = [
     ("Sunday Robotics", "sunday-robotics"),
 ]
 
-BOARD_SEAT_FORMAT_VERSION = "v1_noon_natural_synth"
+BOARD_SEAT_FORMAT_VERSION = "v6_legacy_default"
 RESET_REASON = "feature_reset_in_progress"
 LOW_CONF_WARNING = "Funding data is low-confidence; verify before action."
 MEMORY_FALLBACK_WARNING = (
@@ -490,8 +490,7 @@ def _llm_candidate_generation_enabled() -> bool:
 
 
 def _simple_mode_enabled() -> bool:
-    # Legacy board-seat pipeline is disabled; simple mode is the only runtime path.
-    return True
+    return _env_flag("COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE", False)
 
 
 def _simple_batch_size() -> int:
@@ -1273,10 +1272,18 @@ def _build_draft_simple(
             ),
             "output_sections": [
                 "Thesis",
-                "What the target does",
-                "Why it’s a fit for portfolio company",
-                "Risks",
-                "Funding history and backers",
+                "Idea",
+                "Target does",
+                "Why now",
+                "What's different",
+                "MOS/risks",
+                "Bottom line",
+                f"{company} context",
+                "Current efforts",
+                "Domain fit/gaps",
+                "Funding snapshot",
+                "History",
+                "Latest round/backers",
             ],
         },
         indent=2,
@@ -1286,7 +1293,7 @@ def _build_draft_simple(
         system=(
             "Write a specific board-style acquisition pitch. "
             "Use concrete facts from source_extracts (products, customers, contracts, launches, funding dates/amounts). "
-            "Avoid generic filler language. Output markdown with exactly the five required sections and short bullets."
+            "Avoid generic filler language. Output markdown in legacy v6 labeled-line format with the required headers and labels."
         ),
         temperature=0.2,
         max_tokens=900,
@@ -1780,24 +1787,45 @@ def _render_funding_lines(snapshot: FundingSnapshot) -> list[str]:
     return lines
 
 
+def _legacy_funding_lines(snapshot: FundingSnapshot) -> tuple[str, str]:
+    if snapshot.total_raised.lower() == "unknown":
+        history = "Total raised is not clearly disclosed in current public sources."
+    else:
+        history = f"Reported total raised is roughly {snapshot.total_raised} across disclosed rounds."
+
+    if snapshot.backers:
+        shown = list(snapshot.backers[:4])
+        suffix = f" (+{len(snapshot.backers) - 4} more)" if len(snapshot.backers) > 4 else ""
+        backers = ", ".join(shown) + suffix
+    else:
+        backers = "not clearly disclosed"
+    latest = f"{snapshot.latest_round} ({snapshot.latest_round_date}); backers include {backers}."
+    if snapshot.verification_status == "weak":
+        latest = f"{latest} {LOW_CONF_WARNING}"
+    return history, latest
+
+
 def _deterministic_draft(*, company: str, target: str, funding: FundingSnapshot, repitch_note: str | None = None) -> str:
-    thesis = f"Acquire/acquihire {target} to accelerate {company}'s product and go-to-market leverage in a strategic wedge."
+    idea = f"Acquire/Acquihire {target} to accelerate {company}'s product and go-to-market leverage in a strategic wedge."
     if repitch_note:
-        thesis = f"{thesis} {repitch_note}"
+        idea = f"{idea} {repitch_note}"
+    history, latest = _legacy_funding_lines(funding)
     lines = [
         f"*Board Seat as a Service — {company}*",
         "*Thesis*",
-        f"- {thesis}",
-        "*What the target does*",
-        f"- {target} builds core technology and workflows that can be integrated quickly into {company}'s existing stack.",
-        "*Why it’s a fit for portfolio company*",
-        f"- Improves speed-to-market, increases product defensibility, and opens cross-sell paths in {company}'s current customer base.",
-        "*Risks*",
-        "- Integration complexity and cultural mismatch could delay value capture.",
-        "- Pricing/valuation discipline is critical if the process turns competitive.",
-        "*Funding history and backers*",
+        f"*Idea:* {idea}",
+        f"*Target does:* {target} builds core technology and workflows that can be integrated quickly into {company}'s existing stack.",
+        "*Why now:* Program buyers are rewarding faster deployment and integrated workflows, which favors targeted M&A over slower internal build cycles.",
+        "*What's different:* This target adds immediate product surface area and distribution leverage without forcing a full platform reset.",
+        "*MOS/risks:* MOS is faster time-to-value and cross-sell expansion; risks are integration complexity and valuation discipline in a competitive process.",
+        f"*Bottom line:* High-leverage acquihire/acquisition candidate if {company} wants faster execution in this wedge.",
+        f"*{company} context*",
+        f"*Current efforts:* {company} is already scaling product and distribution paths where this target can be integrated now.",
+        "*Domain fit/gaps:* Strong core platform fit; gap is execution speed in adjacent capability layers where this target can compress time-to-value.",
+        "*Funding snapshot*",
+        f"*History:* {history}",
+        f"*Latest round/backers:* {latest}",
     ]
-    lines.extend(_render_funding_lines(funding))
     return "\n".join(lines)
 
 
@@ -1821,10 +1849,11 @@ def _web_synth_prompt(company: str, target: str, claims: list[str], funding: Fun
 
 def _web_synth_system() -> str:
     return (
-        "You write concise board-style acquisition pitches. "
-        "Output only markdown with exactly these section headers: "
-        "*Thesis*, *What the target does*, *Why it’s a fit for portfolio company*, *Risks*, *Funding history and backers*. "
-        "Keep bullets short and natural. Do not quote sources. Do not include sources section."
+        "You write concise board-style acquisition pitches in legacy v6 format. "
+        "Output markdown only with exactly this structure and labels: "
+        "*Thesis*; *Idea:*; *Target does:*; *Why now:*; *What's different:*; *MOS/risks:*; *Bottom line:*; "
+        "*{Company} context*; *Current efforts:*; *Domain fit/gaps:*; *Funding snapshot*; *History:*; *Latest round/backers:*. "
+        "Do not include a Sources section in main output. Do not quote sources verbatim."
     )
 
 
@@ -1836,10 +1865,18 @@ def _quality_gate(text: str, *, source_rows: list[EvidenceRow]) -> tuple[bool, l
 
     required = [
         "*thesis*",
-        "*what the target does*",
-        "*why it’s a fit for portfolio company*",
-        "*risks*",
-        "*funding history and backers*",
+        "*idea:*",
+        "*target does:*",
+        "*why now:*",
+        "*what's different:*",
+        "*mos/risks:*",
+        "*bottom line:*",
+        " context*",
+        "*current efforts:*",
+        "*domain fit/gaps:*",
+        "*funding snapshot*",
+        "*history:*",
+        "*latest round/backers:*",
     ]
     lower = raw.lower()
     for needle in required:
@@ -1977,10 +2014,18 @@ def _build_draft(
                 "target": target,
                 "template": [
                     "Thesis",
-                    "What the target does",
-                    "Why it’s a fit for portfolio company",
-                    "Risks",
-                    "Funding history and backers",
+                    "Idea",
+                    "Target does",
+                    "Why now",
+                    "What's different",
+                    "MOS/risks",
+                    "Bottom line",
+                    f"{company} context",
+                    "Current efforts",
+                    "Domain fit/gaps",
+                    "Funding snapshot",
+                    "History",
+                    "Latest round/backers",
                 ],
                 "style": "very concise, natural, no quotes",
             },

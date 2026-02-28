@@ -40,6 +40,10 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Board-seat default output contract has been moved back to legacy v6 style on role branch:
+  - default format version is now `v6_legacy_default`.
+  - default path is no longer simple-mode-only; `COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE` now defaults off.
+  - draft + quality contract now enforces v6 labeled structure (`Idea/Target does/Why now/What's different/MOS/Bottom line`, context block, funding snapshot block).
 - Board-seat conversational command routing updated on role branch:
   - `bs now` in Slack channel messages now executes `board_seat_daily.run_once(force=True, dry_run=False)` scoped to that channel/company mapping.
   - removes legacy-format mismatch between conversational trigger and scheduled board-seat formatter.
