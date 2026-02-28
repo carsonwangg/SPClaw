@@ -403,3 +403,94 @@ class MemoryRuntime:
             self.semantic.upsert(memory_id=memory_id, candidate=candidate)
             ids.append(memory_id)
         return ids
+
+    def set_hfa_output_control(
+        self,
+        *,
+        requested_by: str | None,
+        mode: str | None = None,
+        instruction: str | None = None,
+        source: str = "slack-hfa-control",
+        source_ts_utc: str | None = None,
+    ) -> list[int]:
+        ts = source_ts_utc or datetime.now(UTC).isoformat()
+        facts: list[FactCandidate] = []
+        owner = (requested_by or "unknown-user").strip() or "unknown-user"
+
+        if mode is not None:
+            normalized = mode.strip().lower()
+            if normalized != "freeform":
+                raise ValueError("mode must be: freeform")
+            facts.append(
+                FactCandidate(
+                    category="runtime_control",
+                    entity="hfa",
+                    fact_key="output_mode",
+                    fact_value="freeform",
+                    rationale=f"set_by:{owner}",
+                    source=source,
+                    source_ts_utc=ts,
+                    tier="stable",
+                    confidence=1.0,
+                )
+            )
+        if instruction is not None:
+            cleaned = str(instruction).strip()
+            if not cleaned:
+                raise ValueError("instruction must be non-empty")
+            facts.append(
+                FactCandidate(
+                    category="runtime_control",
+                    entity="hfa",
+                    fact_key="output_instruction",
+                    fact_value=cleaned,
+                    rationale=f"set_by:{owner}",
+                    source=source,
+                    source_ts_utc=ts,
+                    tier="stable",
+                    confidence=1.0,
+                )
+            )
+        if not facts:
+            return []
+
+        ids: list[int] = []
+        for candidate in facts:
+            memory_id = self.store.upsert_fact(candidate)
+            self.semantic.upsert(memory_id=memory_id, candidate=candidate)
+            ids.append(memory_id)
+        return ids
+
+    def get_hfa_output_control(self) -> dict[str, str]:
+        mode = self.store.latest_fact_value(
+            category="runtime_control",
+            entity="hfa",
+            fact_key="output_mode",
+        )
+        instruction = self.store.latest_fact_value(
+            category="runtime_control",
+            entity="hfa",
+            fact_key="output_instruction",
+        )
+        out: dict[str, str] = {}
+        if mode:
+            out["mode"] = mode.strip().lower()
+        if instruction:
+            out["instruction"] = instruction
+        return out
+
+    def clear_hfa_output_control(self) -> dict[str, int]:
+        mode_expired = self.store.expire_facts(
+            category="runtime_control",
+            entity="hfa",
+            fact_key="output_mode",
+        )
+        instruction_expired = self.store.expire_facts(
+            category="runtime_control",
+            entity="hfa",
+            fact_key="output_instruction",
+        )
+        return {
+            "mode_expired": mode_expired,
+            "instruction_expired": instruction_expired,
+        }

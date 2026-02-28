@@ -516,3 +516,61 @@ class MemoryStore:
             checkpoints_total=int(checkpoints_total),
             events_total=int(events_total),
         )
+
+    def latest_fact_value(
+        self,
+        *,
+        category: str,
+        entity: str,
+        fact_key: str,
+        now: datetime | None = None,
+    ) -> str | None:
+        now_iso = _iso_utc(now or _utc_now())
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT fact_value
+                FROM facts
+                WHERE category=? AND entity=? AND fact_key=?
+                  AND (expires_at_utc IS NULL OR expires_at_utc > ?)
+                ORDER BY updated_at_utc DESC
+                LIMIT 1
+                """,
+                (
+                    _normalize_text(category),
+                    _normalize_text(entity),
+                    _normalize_text(fact_key),
+                    now_iso,
+                ),
+            ).fetchone()
+        if not row:
+            return None
+        return str(row["fact_value"])
+
+    def expire_facts(
+        self,
+        *,
+        category: str,
+        entity: str,
+        fact_key: str,
+        now: datetime | None = None,
+    ) -> int:
+        now_iso = _iso_utc(now or _utc_now())
+        with self._connect() as conn:
+            count = conn.execute(
+                """
+                UPDATE facts
+                SET expires_at_utc=?
+                WHERE category=? AND entity=? AND fact_key=?
+                  AND (expires_at_utc IS NULL OR expires_at_utc > ?)
+                """,
+                (
+                    now_iso,
+                    _normalize_text(category),
+                    _normalize_text(entity),
+                    _normalize_text(fact_key),
+                    now_iso,
+                ),
+            ).rowcount
+            conn.commit()
+        return int(count or 0)

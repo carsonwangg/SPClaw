@@ -55,3 +55,37 @@ def test_extract_daily_dry_run_and_insert(tmp_path: Path, monkeypatch):
 
     persisted = runtime.extract_daily(days=30, dry_run=False)
     assert persisted["inserted"] >= 1
+
+
+def test_hfa_output_control_set_get_clear(tmp_path: Path, monkeypatch):
+    db_path = tmp_path / "memory.sqlite"
+    monkeypatch.setenv("COATUE_CLAW_MEMORY_DB_PATH", str(db_path))
+    runtime = MemoryRuntime(store=MemoryStore(), semantic=_NoSemantic())
+
+    inserted = runtime.set_hfa_output_control(
+        requested_by="U123",
+        mode="freeform",
+        instruction="Use a tighter PM memo format.",
+        source_ts_utc="2026-02-28T00:00:00+00:00",
+    )
+    assert inserted
+
+    control = runtime.get_hfa_output_control()
+    assert control.get("mode") == "freeform"
+    assert "tighter PM memo" in str(control.get("instruction") or "")
+
+    cleared = runtime.clear_hfa_output_control()
+    assert (cleared.get("mode_expired") or 0) >= 1
+    assert (cleared.get("instruction_expired") or 0) >= 1
+    assert runtime.get_hfa_output_control() == {}
+
+
+def test_hfa_output_control_rejects_non_freeform_mode(tmp_path: Path, monkeypatch):
+    db_path = tmp_path / "memory.sqlite"
+    monkeypatch.setenv("COATUE_CLAW_MEMORY_DB_PATH", str(db_path))
+    runtime = MemoryRuntime(store=MemoryStore(), semantic=_NoSemantic())
+    try:
+        runtime.set_hfa_output_control(requested_by="U123", mode="strict")
+        assert False, "expected ValueError for strict mode"
+    except ValueError as exc:
+        assert "freeform" in str(exc)
