@@ -3,6 +3,14 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-02-27, board-seat v8 guardrails relaxed for output continuity)
+- Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/board_seat_daily.py`:
+  - v8 quality gate now treats format constraints as guidance:
+    - section coverage and bullet-count are warning-level unless critically incomplete.
+    - only critical failures (empty/artifact/major-structure failure) block posting.
+  - main-message `Sources` sections are auto-stripped before posting (still posted in thread).
+  - quality fail codes still recorded for diagnostics, but no longer over-block otherwise valid drafts.
+
 ## Update (2026-02-27, board-seat v8 full-context concise + no-fallback diagnostics)
 - Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/board_seat_daily.py`:
   - format version moved to `v8_full_context_concise`.

@@ -40,6 +40,10 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Board-seat v8 guardrails were relaxed to improve posting continuity:
+  - section/bullet targets are guidance rather than hard blocks.
+  - `Sources` in main draft are stripped automatically and preserved in thread citations.
+  - critical failures still block (`empty`, artifact-heavy, major section failure).
 - Board-seat moved to v8 full-context concise contract on role branch:
   - format version is `v8_full_context_concise`.
   - generation is full-context-first (source extracts) then concise synthesis.
