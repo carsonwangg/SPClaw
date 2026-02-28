@@ -40,6 +40,11 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Operator workflows for review/approval
 
 ## Current Status
+- Board-seat candidate source selection config updated on role branch:
+  - `COATUE_CLAW_BOARD_SEAT_LLM_CANDIDATE_GEN_ENABLED=1`
+  - `COATUE_CLAW_BOARD_SEAT_LLM_FIRST_MODE=1`
+  - `COATUE_CLAW_BOARD_SEAT_WEB_CANDIDATE_ENRICHMENT=0`
+  - intent: LLM-first candidate generation only; disable web-title enrichment path to reduce non-company target picks.
 - Board-seat v8 guardrails were relaxed to improve posting continuity:
   - section/bullet targets are guidance rather than hard blocks.
   - `Sources` in main draft are stripped automatically and preserved in thread citations.
