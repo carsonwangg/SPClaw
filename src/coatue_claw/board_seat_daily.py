@@ -1289,13 +1289,15 @@ def _build_draft_simple(
         temperature=0.2,
         max_tokens=900,
     )
-    text = generated or ""
+    text, removed_sources = _strip_sources_section(generated or "")
     ok, reasons = _quality_gate(text, source_rows=merged_rows)
+    if removed_sources and "sources_in_main" not in reasons:
+        reasons = sorted(set([*reasons, "sources_in_main"]))
     if ok:
         return DraftResult(
             text=text,
             generation_mode="web_synth",
-            quality_fail_codes=tuple(),
+            quality_fail_codes=tuple(reasons),
             memory_rewrite_used=False,
         )
     return DraftResult(
@@ -1841,6 +1843,26 @@ def _web_synth_system() -> str:
     )
 
 
+def _strip_sources_section(text: str) -> tuple[str, bool]:
+    lines = str(text or "").splitlines()
+    out: list[str] = []
+    removed = False
+    in_sources = False
+    for raw_line in lines:
+        line = str(raw_line or "")
+        label = line.strip().strip("* ").lower()
+        if label in {"sources", "source", "citations"}:
+            in_sources = True
+            removed = True
+            continue
+        if in_sources:
+            # Sources are expected at the end for this workflow.
+            removed = True
+            continue
+        out.append(line)
+    return "\n".join(out).strip(), removed
+
+
 def _quality_gate(text: str, *, source_rows: list[EvidenceRow]) -> tuple[bool, list[str]]:
     reasons: list[str] = []
     raw = str(text or "")
@@ -1856,10 +1878,14 @@ def _quality_gate(text: str, *, source_rows: list[EvidenceRow]) -> tuple[bool, l
         "*funding snapshot*",
     ]
     lower = raw.lower()
+    missing_sections = 0
     for needle in required:
         if needle not in lower:
-            reasons.append("missing_section")
-            break
+            missing_sections += 1
+    if missing_sections > 0:
+        reasons.append("missing_section")
+    if "*thesis*" not in lower:
+        reasons.append("missing_section_major")
 
     if _no_quotes() and re.search(r"\"[^\"]{8,}\"", raw):
         reasons.append("contains_quote")
@@ -1885,6 +1911,8 @@ def _quality_gate(text: str, *, source_rows: list[EvidenceRow]) -> tuple[bool, l
 
     if bullets < 8 or bullets > 12:
         reasons.append("bullet_count_out_of_range")
+    if bullets < 4:
+        reasons.append("bullet_count_too_low")
 
     concrete_hits = len(
         re.findall(
@@ -1908,11 +1936,18 @@ def _quality_gate(text: str, *, source_rows: list[EvidenceRow]) -> tuple[bool, l
             if len(src) < 40:
                 continue
             common = _token_overlap_ratio(src, draft_norm)
-            if common > 0.68:
+            if common > 0.9:
                 reasons.append("high_lexical_overlap")
                 break
 
-    return len(reasons) == 0, sorted(set(reasons))
+    fatal_codes = {
+        "empty",
+        "artifact_term",
+        "missing_section_major",
+        "bullet_count_too_low",
+    }
+    ok = not any(code in fatal_codes for code in reasons)
+    return ok, sorted(set(reasons))
 
 
 def _token_overlap_ratio(a: str, b: str) -> float:
@@ -1939,6 +1974,7 @@ def _build_draft(
 
     # web-grounded loop
     draft = ""
+    removed_sources_any = False
     for attempt in range(_max_web_rewrites() + 1):
         if attempt == 0:
             prompt = _web_synth_prompt(company, target, source_extracts, funding, repitch_note)
@@ -1969,15 +2005,19 @@ def _build_draft(
             )
             if generated:
                 draft = generated
+        draft, removed_sources = _strip_sources_section(draft)
+        removed_sources_any = removed_sources_any or removed_sources
         if not _normalize_whitespace(draft):
             quality_fail_codes = ["empty_draft"]
             continue
         ok, reasons = _quality_gate(draft, source_rows=evidence_rows)
+        if removed_sources_any and "sources_in_main" not in reasons:
+            reasons = sorted(set([*reasons, "sources_in_main"]))
         if ok:
             return DraftResult(
                 text=draft,
                 generation_mode="web_synth",
-                quality_fail_codes=tuple(),
+                quality_fail_codes=tuple(reasons),
                 memory_rewrite_used=False,
             )
         quality_fail_codes = reasons

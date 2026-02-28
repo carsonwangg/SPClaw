@@ -62,6 +62,12 @@
   - `Risks / kill criteria`
   - `Funding snapshot`
 
+## Latest Update (2026-02-27, v8 guardrail relaxation)
+- Quality gate softened to reduce false skips:
+  - section/bullet count mismatches are warning-level unless major structure is missing.
+  - main-draft `Sources` blocks are auto-removed, not hard-failed.
+  - run still preserves quality fail telemetry for operator diagnostics.
+
 ## Merge Notes
 - Rebase onto `origin/main` before merge.
 - Role branch should not restart runtime directly; integrator handles deploy on `main`.
