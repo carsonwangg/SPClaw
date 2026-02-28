@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import sqlite3
 
 from coatue_claw.hf_analyst import (
     HFAError,
@@ -178,6 +179,7 @@ def test_analyze_thread_freeform_mode(tmp_path: Path, monkeypatch) -> None:
     doc_path.write_text("AI demand appears resilient with mixed macro.", encoding="utf-8")
     monkeypatch.setenv("COATUE_CLAW_HFA_DB_PATH", str(tmp_path / "hfa.sqlite"))
     monkeypatch.setenv("COATUE_CLAW_HFA_ARTIFACT_DIR", str(tmp_path / "artifacts"))
+    monkeypatch.setenv("COATUE_CLAW_HFA_KB_SOURCES_DIR", str(tmp_path / "kb/sources"))
     monkeypatch.setattr(
         "coatue_claw.hf_analyst._thread_file_rows",
         lambda **kwargs: [
@@ -221,3 +223,9 @@ def test_analyze_thread_freeform_mode(tmp_path: Path, monkeypatch) -> None:
     )
     assert "Freeform" in result.markdown
     assert result.scorecard.confidence_label == "Medium"
+    with sqlite3.connect(tmp_path / "hfa.sqlite") as conn:
+        row = conn.execute("SELECT local_path FROM hf_run_inputs ORDER BY id DESC LIMIT 1").fetchone()
+    assert row is not None
+    stored_path = str(row[0])
+    assert "/kb/sources/" in stored_path
+    assert Path(stored_path).exists()

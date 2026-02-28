@@ -3004,3 +3004,19 @@ Then confirm bot returns:
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_memory_runtime.py tests/test_hf_podcast.py tests/test_slack_routing.py tests/test_hf_youtube_transcript.py` -> `27 passed`
   - `PYTHONPATH=src python3 -m compileall -q src` -> pass
+
+## Update (2026-02-27, input source files persisted to KB on analyze)
+- `hfa analyze` now copies analyzed input files into durable KB storage on mini.
+- New default location:
+  - `/opt/coatue-claw-data/kb/sources/pdf/` for PDF inputs
+  - `/opt/coatue-claw-data/kb/sources/docs/` for other file types
+- Config override:
+  - `COATUE_CLAW_HFA_KB_SOURCES_DIR`
+- Implementation:
+  - `src/coatue_claw/hf_analyst.py`
+    - `_kb_sources_dir(...)`
+    - `_persist_source_file_copy(...)`
+    - `analyze_thread(...)` now stores `hf_run_inputs.local_path` as KB copy path when available.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_hf_document_extract.py tests/test_hf_youtube_transcript.py tests/test_memory_runtime.py` -> `24 passed`
+  - `PYTHONPATH=src python3 -m compileall -q src` -> pass

@@ -1473,3 +1473,10 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py tests/test_memory_runtime.py tests/test_hf_podcast.py tests/test_slack_routing.py tests/test_hf_youtube_transcript.py` -> `27 passed`
   - `PYTHONPATH=src python3 -m compileall -q src` -> pass
+
+## HFA KB Source-Copy Update (2026-02-27)
+- Input files analyzed by `hfa analyze` are now persisted into KB folders on disk for manual reference.
+- Default paths:
+  - `/opt/coatue-claw-data/kb/sources/pdf/`
+  - `/opt/coatue-claw-data/kb/sources/docs/`
+- `hf_run_inputs.local_path` now points to KB copy when persistence succeeds.
