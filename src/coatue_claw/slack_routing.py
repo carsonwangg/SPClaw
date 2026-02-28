@@ -26,3 +26,15 @@ def should_route_message_event(*, text: str, channel_type: str | None) -> bool:
     if (channel_type or "").strip().lower() == "im":
         return True
     return should_default_route_message(stripped)
+
+
+def is_explicit_hfa_command(text: str) -> bool:
+    stripped = re.sub(r"<@[^>]+>", " ", text or "").strip()
+    if not stripped:
+        return False
+    lower = stripped.lower()
+    if re.search(r"^\s*hfa\b", lower):
+        return True
+    if re.search(r"^\s*(analyze|quotes?|podcast|status)\b", lower):
+        return True
+    return False

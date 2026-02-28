@@ -68,7 +68,7 @@ from coatue_claw.slack_pipeline import (
     undo_last_deploy,
 )
 from coatue_claw.slack_pipeline_intent import parse_pipeline_intent
-from coatue_claw.slack_routing import should_default_route_message, should_route_message_event
+from coatue_claw.slack_routing import is_explicit_hfa_command, should_default_route_message, should_route_message_event
 from coatue_claw.slack_x_chart_intent import parse_x_chart_post_intent
 from coatue_claw.slack_x_intent import parse_x_digest_intent
 from coatue_claw.universe_store import (
@@ -2279,8 +2279,28 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
         return
 
     # Fast-path HFA commands before change-request heuristics/conversational fallbacks.
-    # This avoids ambiguous generic responses when users explicitly invoke `hfa ...`.
+    # This avoids ambiguous generic responses when users explicitly invoke HFA commands.
+    hfa_command_requested = is_explicit_hfa_command(text)
     if _handle_hfa_command(text=text, channel=channel, thread_ts=thread_ts, user_id=user_id, say=say):
+        return
+    if hfa_command_requested:
+        logger.error(
+            "HFA command routing failed channel=%s thread_ts=%s text=%r",
+            channel,
+            thread_ts,
+            text,
+        )
+        say(
+            text=(
+                "HFA command routing failed.\n"
+                "I detected an HFA command but could not route it to the HFA handler.\n"
+                "Try again with one of:\n"
+                "- `hfa analyze`\n"
+                "- `hfa podcast <youtube-url>`\n"
+                "- `hfa status`"
+            ),
+            thread_ts=thread_ts,
+        )
         return
 
     git_memory_text = _parse_git_memory_request_text(text)

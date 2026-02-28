@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from coatue_claw.slack_routing import (
     extract_user_mentions,
+    is_explicit_hfa_command,
     should_default_route_message,
     should_route_message_event,
 )
@@ -34,3 +35,23 @@ def test_should_route_message_event_im_always_routes_nonempty() -> None:
 def test_should_route_message_event_non_im_follows_default_rules() -> None:
     assert should_route_message_event(text="run diligence SNOW", channel_type="channel")
     assert not should_route_message_event(text="<@U0AFFR9Q11B> run diligence SNOW", channel_type="channel")
+
+
+def test_is_explicit_hfa_command_prefixed_and_bare() -> None:
+    assert is_explicit_hfa_command("hfa analyze")
+    assert is_explicit_hfa_command("hfa status")
+    assert is_explicit_hfa_command("analyze https://youtu.be/abcDEF12345")
+    assert is_explicit_hfa_command("quotes https://youtu.be/abcDEF12345")
+    assert is_explicit_hfa_command("podcast https://youtu.be/abcDEF12345")
+    assert is_explicit_hfa_command("status")
+
+
+def test_is_explicit_hfa_command_with_slack_mention_prefix() -> None:
+    assert is_explicit_hfa_command("<@U0AFFR9Q11B> hfa analyze")
+    assert is_explicit_hfa_command("<@U0AFFR9Q11B> analyze https://youtu.be/abcDEF12345")
+
+
+def test_is_explicit_hfa_command_ignores_non_hfa_commands() -> None:
+    assert not is_explicit_hfa_command("md status")
+    assert not is_explicit_hfa_command("bs now")
+    assert not is_explicit_hfa_command("x chart from https://x.com/foo/status/123")

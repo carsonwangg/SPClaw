@@ -1518,3 +1518,22 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Validation:
   - `python3 -m compileall -q src/coatue_claw/slack_bot.py`
   - `PYTHONPATH=src python3 -m pytest -q tests/test_slack_routing.py` -> `5 passed`.
+
+## Slack Routing - HFA Fail-Closed Guard (2026-02-28)
+- Status: implemented on `main` (laptop repo), pending/ready for mini deploy.
+- Change:
+  - Added explicit HFA command detector (`is_explicit_hfa_command`) in `slack_routing`.
+  - Updated Slack command pipeline so explicit HFA commands cannot fall through to generic responders.
+  - On routing miss, bot replies with `HFA command routing failed` and usage hints.
+- Commands covered by fail-closed guard:
+  - `hfa ...`
+  - bare `analyze ...`
+  - bare `quotes ...`
+  - bare `podcast ...`
+  - bare `status`
+- Validation:
+  - `tests/test_slack_routing.py` (updated) -> pass
+  - `tests/test_hf_analyst.py` -> pass
+  - `tests/test_slack_pipeline_intent.py` -> pass
+- Operational next step on mini:
+  - pull/restart and verify `hf_runs` row creation immediately after `@SPClaw hfa analyze`.

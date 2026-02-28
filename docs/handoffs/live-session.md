@@ -3055,3 +3055,18 @@ Then confirm bot returns:
 - Validation:
   - `python3 -m compileall -q src/coatue_claw/slack_bot.py`
   - `PYTHONPATH=src python3 -m pytest -q tests/test_slack_routing.py` -> `5 passed`.
+
+## Update (2026-02-28, HFA fail-closed Slack routing guard)
+- Implemented explicit HFA command fail-closed routing in Slack bot to prevent generic fallback prose for HFA invocations.
+- New routing detector in `src/coatue_claw/slack_routing.py`:
+  - `is_explicit_hfa_command(text)` matches explicit HFA command shapes (`hfa ...`, `analyze`, `quotes`, `podcast`, `status`) after mention stripping.
+- Slack event flow change in `src/coatue_claw/slack_bot.py`:
+  - still attempts normal `_handle_hfa_command(...)` first,
+  - if explicit HFA command is detected but handler does not claim it, bot now returns:
+    - `HFA command routing failed...` guidance message,
+    - and exits early (no downstream conversational/default responder path).
+- Purpose: guarantees HFA command text never silently falls into non-HFA fallback response generation.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_slack_routing.py` -> `8 passed`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_analyst.py` -> `7 passed`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_slack_pipeline_intent.py` -> `6 passed`
