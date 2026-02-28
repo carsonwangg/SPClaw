@@ -48,13 +48,10 @@ DEFAULT_PORTCOS: list[tuple[str, str]] = [
     ("Sunday Robotics", "sunday-robotics"),
 ]
 
-BOARD_SEAT_FORMAT_VERSION = "v1_noon_natural_synth"
+BOARD_SEAT_FORMAT_VERSION = "v7_legacy_with_target_line"
 RESET_REASON = "feature_reset_in_progress"
 LOW_CONF_WARNING = "Funding data is low-confidence; verify before action."
-MEMORY_FALLBACK_WARNING = (
-    "⚠️ Fallback mode used: this pitch was rewritten from model memory "
-    "(no live web retrieval in final pass). Verify key claims before action."
-)
+QUALITY_WARNING = "⚠️ Quality warning: verify key claims before action."
 
 CONCEPT_BLOCKLIST = {
     "ai",
@@ -447,16 +444,12 @@ def _max_web_rewrites() -> int:
 
 
 def _memory_rewrite_on_fail() -> bool:
-    return _env_flag("COATUE_CLAW_BOARD_SEAT_MEMORY_REWRITE_ON_FAIL", True)
+    # Rewrite fallback is intentionally disabled; warning-only behavior is enforced.
+    return False
 
 
 def _memory_rewrite_max_retries() -> int:
-    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_MEMORY_REWRITE_MAX_RETRIES", "1") or "1").strip()
-    try:
-        val = int(raw)
-    except Exception:
-        val = 1
-    return max(0, min(3, val))
+    return 0
 
 
 def _memory_rewrite_thread_warning() -> bool:
@@ -490,8 +483,8 @@ def _llm_candidate_generation_enabled() -> bool:
 
 
 def _simple_mode_enabled() -> bool:
-    # Legacy board-seat pipeline is disabled; simple mode is the only runtime path.
-    return True
+    # Light/simple mode is intentionally disabled; legacy v6 path is the only active runtime path.
+    return False
 
 
 def _simple_batch_size() -> int:
@@ -1273,10 +1266,18 @@ def _build_draft_simple(
             ),
             "output_sections": [
                 "Thesis",
-                "What the target does",
-                "Why it’s a fit for portfolio company",
-                "Risks",
-                "Funding history and backers",
+                "Idea",
+                "What target does",
+                "Why now",
+                "What's different",
+                "MOS/risks",
+                "Bottom line",
+                f"{company} context",
+                "Current efforts",
+                "Domain fit/gaps",
+                "Funding snapshot",
+                "History",
+                "Latest round/backers",
             ],
         },
         indent=2,
@@ -1286,7 +1287,7 @@ def _build_draft_simple(
         system=(
             "Write a specific board-style acquisition pitch. "
             "Use concrete facts from source_extracts (products, customers, contracts, launches, funding dates/amounts). "
-            "Avoid generic filler language. Output markdown with exactly the five required sections and short bullets."
+            "Avoid generic filler language. Output markdown in legacy v7 labeled-line format with the required headers and labels."
         ),
         temperature=0.2,
         max_tokens=900,
@@ -1315,9 +1316,9 @@ def _build_draft_simple(
         )
     return DraftResult(
         text=_deterministic_draft(company=company, target=target, funding=fallback_funding, repitch_note=None),
-        generation_mode="memory_rewrite",
+        generation_mode="web_synth",
         quality_fail_codes=tuple(reasons),
-        memory_rewrite_used=True,
+        memory_rewrite_used=False,
     )
 
 
@@ -1780,24 +1781,45 @@ def _render_funding_lines(snapshot: FundingSnapshot) -> list[str]:
     return lines
 
 
+def _legacy_funding_lines(snapshot: FundingSnapshot) -> tuple[str, str]:
+    if snapshot.total_raised.lower() == "unknown":
+        history = "Total raised is not clearly disclosed in current public sources."
+    else:
+        history = f"Reported total raised is roughly {snapshot.total_raised} across disclosed rounds."
+
+    if snapshot.backers:
+        shown = list(snapshot.backers[:4])
+        suffix = f" (+{len(snapshot.backers) - 4} more)" if len(snapshot.backers) > 4 else ""
+        backers = ", ".join(shown) + suffix
+    else:
+        backers = "not clearly disclosed"
+    latest = f"{snapshot.latest_round} ({snapshot.latest_round_date}); backers include {backers}."
+    if snapshot.verification_status == "weak":
+        latest = f"{latest} {LOW_CONF_WARNING}"
+    return history, latest
+
+
 def _deterministic_draft(*, company: str, target: str, funding: FundingSnapshot, repitch_note: str | None = None) -> str:
-    thesis = f"Acquire/acquihire {target} to accelerate {company}'s product and go-to-market leverage in a strategic wedge."
+    idea = f"Acquire/Acquihire {target} to accelerate {company}'s product and go-to-market leverage in a strategic wedge."
     if repitch_note:
-        thesis = f"{thesis} {repitch_note}"
+        idea = f"{idea} {repitch_note}"
+    history, latest = _legacy_funding_lines(funding)
     lines = [
         f"*Board Seat as a Service — {company}*",
         "*Thesis*",
-        f"- {thesis}",
-        "*What the target does*",
-        f"- {target} builds core technology and workflows that can be integrated quickly into {company}'s existing stack.",
-        "*Why it’s a fit for portfolio company*",
-        f"- Improves speed-to-market, increases product defensibility, and opens cross-sell paths in {company}'s current customer base.",
-        "*Risks*",
-        "- Integration complexity and cultural mismatch could delay value capture.",
-        "- Pricing/valuation discipline is critical if the process turns competitive.",
-        "*Funding history and backers*",
+        f"*Idea:* {idea}",
+        f"*What target does:* {target} builds core technology and workflows that can be integrated quickly into {company}'s existing stack.",
+        "*Why now:* Program buyers are rewarding faster deployment and integrated workflows, which favors targeted M&A over slower internal build cycles.",
+        "*What's different:* This target adds immediate product surface area and distribution leverage without forcing a full platform reset.",
+        "*MOS/risks:* MOS is faster time-to-value and cross-sell expansion; risks are integration complexity and valuation discipline in a competitive process.",
+        f"*Bottom line:* High-leverage acquihire/acquisition candidate if {company} wants faster execution in this wedge.",
+        f"*{company} context*",
+        f"*Current efforts:* {company} is already scaling product and distribution paths where this target can be integrated now.",
+        "*Domain fit/gaps:* Strong core platform fit; gap is execution speed in adjacent capability layers where this target can compress time-to-value.",
+        "*Funding snapshot*",
+        f"*History:* {history}",
+        f"*Latest round/backers:* {latest}",
     ]
-    lines.extend(_render_funding_lines(funding))
     return "\n".join(lines)
 
 
@@ -1821,10 +1843,11 @@ def _web_synth_prompt(company: str, target: str, claims: list[str], funding: Fun
 
 def _web_synth_system() -> str:
     return (
-        "You write concise board-style acquisition pitches. "
-        "Output only markdown with exactly these section headers: "
-        "*Thesis*, *What the target does*, *Why it’s a fit for portfolio company*, *Risks*, *Funding history and backers*. "
-        "Keep bullets short and natural. Do not quote sources. Do not include sources section."
+        "You write concise board-style acquisition pitches in legacy v7 format. "
+        "Output markdown only with exactly this structure and labels: "
+        "*Thesis*; *Idea:*; *What target does:*; *Why now:*; *What's different:*; *MOS/risks:*; *Bottom line:*; "
+        "*{Company} context*; *Current efforts:*; *Domain fit/gaps:*; *Funding snapshot*; *History:*; *Latest round/backers:*. "
+        "Do not include a Sources section in main output. Do not quote sources verbatim."
     )
 
 
@@ -1836,10 +1859,18 @@ def _quality_gate(text: str, *, source_rows: list[EvidenceRow]) -> tuple[bool, l
 
     required = [
         "*thesis*",
-        "*what the target does*",
-        "*why it’s a fit for portfolio company*",
-        "*risks*",
-        "*funding history and backers*",
+        "*idea:*",
+        "*what target does:*",
+        "*why now:*",
+        "*what's different:*",
+        "*mos/risks:*",
+        "*bottom line:*",
+        " context*",
+        "*current efforts:*",
+        "*domain fit/gaps:*",
+        "*funding snapshot*",
+        "*history:*",
+        "*latest round/backers:*",
     ]
     lower = raw.lower()
     for needle in required:
@@ -1937,7 +1968,7 @@ def _build_draft(
                         "natural concise writing",
                         "no source quotes",
                         "no snippet artifacts",
-                        "exact five required sections",
+                        "exact required labeled sections",
                     ],
                 },
                 indent=2,
@@ -1960,53 +1991,13 @@ def _build_draft(
             )
         quality_fail_codes = reasons
 
-    if not _memory_rewrite_on_fail():
-        return DraftResult(
-            text=draft,
-            generation_mode="web_synth",
-            quality_fail_codes=tuple(quality_fail_codes),
-            memory_rewrite_used=False,
-        )
-
-    # memory-only rewrite fallback; no web access here
-    fallback = ""
-    for _ in range(_memory_rewrite_max_retries() + 1):
-        prompt = json.dumps(
-            {
-                "company": company,
-                "target": target,
-                "template": [
-                    "Thesis",
-                    "What the target does",
-                    "Why it’s a fit for portfolio company",
-                    "Risks",
-                    "Funding history and backers",
-                ],
-                "style": "very concise, natural, no quotes",
-            },
-            indent=2,
-        )
-        generated = _chat_completion(
-            prompt=prompt,
-            system="Write a concise strategic acquisition pitch from model memory only. Markdown only.",
-            temperature=0.2,
-            max_tokens=550,
-        )
-        fallback = generated or _deterministic_draft(company=company, target=target, funding=funding, repitch_note=repitch_note)
-        ok, _ = _quality_gate(fallback, source_rows=[])
-        if ok:
-            return DraftResult(
-                text=fallback,
-                generation_mode="memory_rewrite",
-                quality_fail_codes=tuple(quality_fail_codes),
-                memory_rewrite_used=True,
-            )
-
+    # Warning-only policy: do not switch to memory rewrite mode. Keep web synthesis mode and
+    # post with warning when quality gates could not be fully satisfied.
     return DraftResult(
         text=_deterministic_draft(company=company, target=target, funding=funding, repitch_note=repitch_note),
-        generation_mode="memory_rewrite",
+        generation_mode="web_synth",
         quality_fail_codes=tuple(quality_fail_codes),
-        memory_rewrite_used=True,
+        memory_rewrite_used=False,
     )
 
 
@@ -3315,10 +3306,10 @@ def _process_company(
                     thread_ts=message_ts,
                 )
                 sources_thread_ts = src_ts
-            if draft.memory_rewrite_used and _memory_rewrite_thread_warning():
+            if draft.quality_fail_codes and _memory_rewrite_thread_warning():
                 _, warn_ts, _ = _post_to_slack(
                     channel_ref=effective_channel_ref,
-                    text=MEMORY_FALLBACK_WARNING,
+                    text=QUALITY_WARNING,
                     thread_ts=message_ts,
                 )
                 warning_ts = warn_ts
