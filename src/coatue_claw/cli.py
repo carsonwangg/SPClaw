@@ -12,7 +12,6 @@ from coatue_claw.hf_analyst import analyze_podcast_url as hfa_analyze_podcast_ur
 from coatue_claw.hf_analyst import analyze_thread as hfa_analyze_thread
 from coatue_claw.hf_analyst import hfa_status
 from coatue_claw.itar_scope import build_itar_scope_dataset
-from coatue_claw.itar_scope import plot_itar_scope_yearly_changes
 from coatue_claw.memory_runtime import MemoryRuntime
 from coatue_claw.market_daily import debug_catalyst as market_daily_debug_catalyst
 from coatue_claw.market_daily import holdings as market_daily_holdings
@@ -269,53 +268,31 @@ def _run_hfa_command(args) -> None:
 
 
 def _run_itar_scope_command(args) -> None:
-    if args.itar_scope_cmd == "build":
-        result = build_itar_scope_dataset(
-            start_year=int(args.start_year),
-            end_year=int(args.end_year),
-            artifact_dir=(str(args.artifact_dir).strip() or None),
-        )
-        print(
-            json.dumps(
-                {
-                    "artifact_dir": str(result.artifact_dir),
-                    "start_year": result.start_year,
-                    "end_year": result.end_year,
-                    "snapshot_count": result.snapshot_count,
-                    "entries_csv": str(result.entries_csv),
-                    "yearly_panel_csv": str(result.yearly_panel_csv),
-                    "changes_csv": str(result.changes_csv),
-                    "ambiguous_rewrites_csv": str(result.ambiguous_rewrites_csv),
-                    "summary_json": str(result.summary_json),
-                    "summary_markdown": str(result.summary_markdown),
-                    "net_entry_change_chart_png": str(result.net_entry_change_chart_png),
-                },
-                indent=2,
-                sort_keys=True,
-            )
-        )
+    if args.itar_scope_cmd != "build":
         return
-
-    if args.itar_scope_cmd == "plot":
-        metric = str(args.metric).strip().replace("-", "_")
-        result = plot_itar_scope_yearly_changes(
-            panel_csv=args.panel_csv,
-            output_png=args.output,
-            metric=metric,
+    result = build_itar_scope_dataset(
+        start_year=int(args.start_year),
+        end_year=int(args.end_year),
+        artifact_dir=(str(args.artifact_dir).strip() or None),
+    )
+    print(
+        json.dumps(
+            {
+                "artifact_dir": str(result.artifact_dir),
+                "start_year": result.start_year,
+                "end_year": result.end_year,
+                "snapshot_count": result.snapshot_count,
+                "entries_csv": str(result.entries_csv),
+                "yearly_panel_csv": str(result.yearly_panel_csv),
+                "changes_csv": str(result.changes_csv),
+                "ambiguous_rewrites_csv": str(result.ambiguous_rewrites_csv),
+                "summary_json": str(result.summary_json),
+                "summary_markdown": str(result.summary_markdown),
+            },
+            indent=2,
+            sort_keys=True,
         )
-        print(
-            json.dumps(
-                {
-                    "panel_csv": str(result.panel_csv),
-                    "output_png": str(result.output_png),
-                    "metric": result.metric,
-                    "row_count": result.row_count,
-                },
-                indent=2,
-                sort_keys=True,
-            )
-        )
-        return
+    )
 
 
 def main():
@@ -435,11 +412,6 @@ def main():
     itarb.add_argument("--start-year", type=int, default=2010)
     itarb.add_argument("--end-year", type=int, default=datetime.now(UTC).year - 1)
     itarb.add_argument("--artifact-dir", default="")
-
-    itarp = itar_sub.add_parser("plot")
-    itarp.add_argument("--panel-csv", required=True)
-    itarp.add_argument("--output", required=True)
-    itarp.add_argument("--metric", choices=("net-entry-change", "net-scope-change"), default="net-entry-change")
 
     args = parser.parse_args()
 

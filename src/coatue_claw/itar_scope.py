@@ -163,16 +163,7 @@ class ItarScopeBuildResult:
     ambiguous_rewrites_csv: Path
     summary_json: Path
     summary_markdown: Path
-    net_entry_change_chart_png: Path
     snapshot_count: int
-
-
-@dataclass(frozen=True)
-class ItarScopePlotResult:
-    panel_csv: Path
-    output_png: Path
-    metric: str
-    row_count: int
 
 
 def _normalize_space(value: str) -> str:
@@ -646,18 +637,12 @@ def build_itar_scope_dataset(
     ambiguous_rewrites_csv = out_dir / "ambiguous_rewrites.csv"
     summary_json = out_dir / "summary.json"
     summary_markdown = out_dir / "summary.md"
-    net_entry_change_chart_png = out_dir / "net_entry_change.png"
 
     _write_entries_csv(entries_csv, snapshots)
     _write_yearly_panel_csv(yearly_panel_csv, panel_rows)
     _write_changes_csv(changes_csv, changes)
     _write_ambiguous_rewrites_csv(ambiguous_rewrites_csv, ambiguous_rewrites)
     _write_summary_files(summary_json, summary_markdown, snapshots, panel_rows, changes, ambiguous_rewrites)
-    plot_itar_scope_yearly_changes(
-        panel_csv=yearly_panel_csv,
-        output_png=net_entry_change_chart_png,
-        metric="net_entry_change",
-    )
 
     return ItarScopeBuildResult(
         start_year=start_year,
@@ -669,75 +654,7 @@ def build_itar_scope_dataset(
         ambiguous_rewrites_csv=ambiguous_rewrites_csv,
         summary_json=summary_json,
         summary_markdown=summary_markdown,
-        net_entry_change_chart_png=net_entry_change_chart_png,
         snapshot_count=len(snapshots),
-    )
-
-
-def plot_itar_scope_yearly_changes(
-    panel_csv: Path | str,
-    output_png: Path | str,
-    metric: str = "net_entry_change",
-) -> ItarScopePlotResult:
-    panel_path = Path(panel_csv)
-    output_path = Path(output_png)
-    metric_key = str(metric).strip()
-    metric_labels = {
-        "net_entry_change": "Net Entry Change",
-        "net_scope_change": "Net Scope Change",
-    }
-    if metric_key not in metric_labels:
-        raise ValueError(f"Unsupported metric: {metric_key}")
-
-    rows = _read_yearly_panel_csv(panel_path)
-    years = [int(row["year"]) for row in rows]
-    values = [int(row[metric_key]) for row in rows]
-
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    colors = ["#2f6f4f" if value >= 0 else "#8b2e2e" for value in values]
-    fig, ax = plt.subplots(figsize=(12, 6))
-    bars = ax.bar(years, values, color=colors, edgecolor="#1f1f1f", linewidth=0.6)
-    ax.axhline(0, color="#1f1f1f", linewidth=1.0)
-    ax.set_title(f"ITAR USML Year-over-Year {metric_labels[metric_key]}", fontsize=14, pad=12)
-    ax.set_xlabel("Year")
-    ax.set_ylabel(metric_labels[metric_key])
-    ax.set_xticks(years)
-    ax.set_xticklabels([str(year) for year in years], rotation=45, ha="right")
-    ax.grid(axis="y", alpha=0.25, linewidth=0.7)
-
-    value_span = max([abs(value) for value in values] + [1])
-    offset = max(1.0, value_span * 0.03)
-    for bar, value in zip(bars, values):
-        if value >= 0:
-            y_pos = value + offset
-            va = "bottom"
-        else:
-            y_pos = value - offset
-            va = "top"
-        ax.text(
-            bar.get_x() + bar.get_width() / 2,
-            y_pos,
-            f"{value:+d}",
-            ha="center",
-            va=va,
-            fontsize=8,
-            color="#1f1f1f",
-        )
-
-    fig.tight_layout()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path, dpi=180, bbox_inches="tight")
-    plt.close(fig)
-
-    return ItarScopePlotResult(
-        panel_csv=panel_path,
-        output_png=output_path,
-        metric=metric_key,
-        row_count=len(rows),
     )
 
 
@@ -838,8 +755,3 @@ def _write_summary_files(
     for snapshot in snapshots:
         lines.append(f"- {snapshot.year} annual CFR snapshot: {snapshot.source_url}")
     summary_markdown_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def _read_yearly_panel_csv(path: Path) -> list[dict[str, str]]:
-    with path.open("r", encoding="utf-8", newline="") as handle:
-        return list(csv.DictReader(handle))
