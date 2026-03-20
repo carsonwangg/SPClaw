@@ -3,25 +3,6 @@
 ## Objective
 Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as the primary runtime and control plane.
 
-## Research Utility Track
-- ITAR scope dataset pipeline is now in-repo as an analyst CLI utility:
-  - command: `claw itar-scope build --start-year 2010 --end-year 2025 [--artifact-dir PATH]`
-  - output panel tracks:
-    - `entries_total`
-    - `entries_added`
-    - `entries_removed`
-    - `entries_broadened`
-    - `entries_narrowed`
-    - `entries_moved_to_ear`
-    - `entries_moved_from_ear`
-    - `net_entry_change`
-    - `net_scope_change`
-  - normalized yearly entry table uses deepest USML product-control leaves under `22 CFR 121.1`.
-  - current exclusion rules: notes, `[Reserved]`, technical-data/defense-service clauses, EAR-only clauses, and interpretive branches.
-- Short-term follow-up:
-  - manually review 2013-2015 and 2024 diff outputs to calibrate modified-entry classifications against official rule history.
-  - decide whether this utility should stay analyst-facing only or get surfaced into a more formal research/export workflow.
-
 ## V1 Scope
 - SEC + transcript + macro ingestion
 - Diligence packets (bull/bear + peer comp + charts)
@@ -79,15 +60,6 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - hard no-fallback policy is active:
     - draft quality failures do not post fallback pitches
     - run posts diagnostic warning and returns `draft_quality_failed`.
-- ITAR dataset feature shipped on main working tree:
-  - new module: `/Users/carsonwang/CoatueClaw/src/coatue_claw/itar_scope.py`
-  - new tests: `/Users/carsonwang/CoatueClaw/tests/test_itar_scope.py`
-  - new CLI path in `/Users/carsonwang/CoatueClaw/src/coatue_claw/cli.py`
-  - live GovInfo validation succeeded across milestone years `2010, 2014, 2017, 2020, 2022, 2024`
-  - full smoke build succeeded for `2010-2025` to `/tmp/itar-scope-full`
-- Remaining limitation on the ITAR path:
-  - added/removed counts are the primary reliable metric now.
-  - broadened/narrowed and EAR-shift labels are best-effort heuristics and should be reviewed before using them in external-facing analysis.
 - Board-seat now runs warning-only quality handling on role branch:
   - rewrite fallback mode has been removed.
   - quality-failed drafts are skipped and replaced by diagnostic warning posts for easier operator debugging.
