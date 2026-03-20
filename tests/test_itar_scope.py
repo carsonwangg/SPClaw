@@ -277,6 +277,7 @@ def test_build_corrected_scope_dataset_writes_yearly_and_chart_outputs(tmp_path:
 
     assert result.events_csv.exists()
     assert result.yearly_csv.exists()
+    assert result.added_removed_chart_png.exists()
     assert result.net_change_chart_png.exists()
     assert result.cumulative_chart_png.exists()
     assert result.summary_markdown.exists()

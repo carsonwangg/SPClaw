@@ -83,6 +83,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 ## Update (2026-03-20, corrected ITAR scope charts added)
 - Extended `/Users/carsonwang/CoatueClaw/src/coatue_claw/itar_scope.py` with a separate corrected-scope model:
   - uses curated official rule events and effective dates instead of raw USML line-count deltas.
+  - corrected presentation is now centered on annual categories/tranches added vs removed across cited ITAR changes, not the cumulative curve.
   - event model currently includes:
     - 2013-10-15 ECR tranche for Categories VIII and XIX
     - 2014-01-06 ECR tranche for Categories VI, VII, XIII, and XX
@@ -95,6 +96,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - writes:
     - `corrected-scope/official_scope_events.csv`
     - `corrected-scope/corrected_scope_yearly.csv`
+    - `corrected-scope/corrected_added_removed_by_year.png`
     - `corrected-scope/corrected_net_scope_change.png`
     - `corrected-scope/corrected_cumulative_scope_index.png`
     - `corrected-scope/corrected_scope_summary.md`
@@ -107,6 +109,9 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `PYTHONPATH=src python3 -m coatue_claw.cli itar-scope corrected-build --start-year 2010 --end-year 2025 --artifact-dir /tmp/itar-scope-full` -> succeeded
 - Important assumption:
   - 2025 is modeled as `+1` net based on a mixed package with three broadening/retention tranches (VIII, X, XX) and two narrowing/removal tranches (III, XI). This is documented in the corrected-scope summary and should be treated as an event-weighted policy index, not a literal product count.
+- Current user-facing preference:
+  - use `corrected_added_removed_by_year.png` as the primary chart when the question is “what was added vs removed each year?”
+  - treat the cumulative chart as an audit companion, not the default presentation.
 
 ## Update (2026-02-27, board-seat warning-only mode; rewrite fallback removed)
 - Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/board_seat_daily.py`:
