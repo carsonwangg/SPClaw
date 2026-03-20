@@ -80,6 +80,34 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - review `entry_changes.csv` for 2013-2015 and 2024 deltas to tune `broadened/narrowed` heuristics.
   - decide whether to promote this into a documented research workflow or keep it as an analyst CLI utility.
 
+## Update (2026-03-20, corrected ITAR scope charts added)
+- Extended `/Users/carsonwang/CoatueClaw/src/coatue_claw/itar_scope.py` with a separate corrected-scope model:
+  - uses curated official rule events and effective dates instead of raw USML line-count deltas.
+  - event model currently includes:
+    - 2013-10-15 ECR tranche for Categories VIII and XIX
+    - 2014-01-06 ECR tranche for Categories VI, VII, XIII, and XX
+    - 2014-07-01 ECR tranche for Categories IV, V, IX, and X
+    - 2014-11-10 Category XV tranche
+    - 2014-12-30 Category XI tranche
+    - 2016-12-31 Categories XII, XIV, and XVIII tranche
+    - 2020-03-09 firearms Categories I-III transfer tranche
+    - 2025-09-15 targeted revisions package scored as mixed but net-positive
+  - writes:
+    - `corrected-scope/official_scope_events.csv`
+    - `corrected-scope/corrected_scope_yearly.csv`
+    - `corrected-scope/corrected_net_scope_change.png`
+    - `corrected-scope/corrected_cumulative_scope_index.png`
+    - `corrected-scope/corrected_scope_summary.md`
+- Updated `/Users/carsonwang/CoatueClaw/src/coatue_claw/cli.py`:
+  - new command: `claw itar-scope corrected-build --start-year 2010 --end-year 2025 [--artifact-dir PATH]`
+- Updated `/Users/carsonwang/CoatueClaw/tests/test_itar_scope.py`:
+  - added coverage for corrected official-event series and corrected chart outputs.
+- Validation:
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_itar_scope.py` -> `7 passed`
+  - `PYTHONPATH=src python3 -m coatue_claw.cli itar-scope corrected-build --start-year 2010 --end-year 2025 --artifact-dir /tmp/itar-scope-full` -> succeeded
+- Important assumption:
+  - 2025 is modeled as `+1` net based on a mixed package with three broadening/retention tranches (VIII, X, XX) and two narrowing/removal tranches (III, XI). This is documented in the corrected-scope summary and should be treated as an event-weighted policy index, not a literal product count.
+
 ## Update (2026-02-27, board-seat warning-only mode; rewrite fallback removed)
 - Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/board_seat_daily.py`:
   - removed memory-rewrite fallback path from draft generation.

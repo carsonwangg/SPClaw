@@ -4,7 +4,14 @@ import csv
 import json
 from pathlib import Path
 
-from coatue_claw.itar_scope import build_itar_scope_dataset, diff_snapshots, parse_year_snapshot, plot_itar_scope_yearly_changes
+from coatue_claw.itar_scope import (
+    build_corrected_scope_dataset,
+    build_itar_scope_dataset,
+    diff_snapshots,
+    official_scope_events,
+    parse_year_snapshot,
+    plot_itar_scope_yearly_changes,
+)
 
 
 def _wrap_extract(year: int, extract_body: str) -> str:
@@ -255,3 +262,29 @@ def test_plot_itar_scope_yearly_changes_writes_png(tmp_path: Path) -> None:
     assert result.row_count == 2
     assert output_png.exists()
     assert output_png.stat().st_size > 0
+
+
+def test_official_scope_events_include_expected_negative_and_positive_years() -> None:
+    events = official_scope_events()
+
+    assert any(event.year == 2014 and event.net_scope_delta < 0 for event in events)
+    assert any(event.year == 2020 and event.net_scope_delta < 0 for event in events)
+    assert any(event.year == 2025 and event.net_scope_delta > 0 for event in events)
+
+
+def test_build_corrected_scope_dataset_writes_yearly_and_chart_outputs(tmp_path: Path) -> None:
+    result = build_corrected_scope_dataset(start_year=2013, end_year=2025, artifact_dir=tmp_path)
+
+    assert result.events_csv.exists()
+    assert result.yearly_csv.exists()
+    assert result.net_change_chart_png.exists()
+    assert result.cumulative_chart_png.exists()
+    assert result.summary_markdown.exists()
+
+    with result.yearly_csv.open("r", encoding="utf-8", newline="") as handle:
+        rows = {int(row["year"]): row for row in csv.DictReader(handle)}
+
+    assert rows[2013]["net_scope_delta"] == "-2"
+    assert rows[2014]["net_scope_delta"] == "-10"
+    assert rows[2020]["net_scope_delta"] == "-3"
+    assert rows[2025]["net_scope_delta"] == "1"

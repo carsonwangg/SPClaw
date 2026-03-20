@@ -175,8 +175,133 @@ class ItarScopePlotResult:
     row_count: int
 
 
+@dataclass(frozen=True)
+class OfficialScopeEvent:
+    effective_date: str
+    year: int
+    title: str
+    positive_units: int
+    negative_units: int
+    net_scope_delta: int
+    source_label: str
+    source_url: str
+    notes: str
+
+
+@dataclass(frozen=True)
+class CorrectedScopeYearRow:
+    year: int
+    positive_units: int
+    negative_units: int
+    net_scope_delta: int
+    cumulative_scope_index: int
+
+
+@dataclass(frozen=True)
+class CorrectedScopeBuildResult:
+    artifact_dir: Path
+    events_csv: Path
+    yearly_csv: Path
+    net_change_chart_png: Path
+    cumulative_chart_png: Path
+    summary_markdown: Path
+
+
 def _normalize_space(value: str) -> str:
     return WHITESPACE_RE.sub(" ", value).strip()
+
+
+def official_scope_events() -> tuple[OfficialScopeEvent, ...]:
+    return (
+        OfficialScopeEvent(
+            effective_date="2013-10-15",
+            year=2013,
+            title="Export Control Reform tranche for Categories VIII and XIX",
+            positive_units=0,
+            negative_units=2,
+            net_scope_delta=-2,
+            source_label="BIS — 600 Series Items FAQs",
+            source_url="https://www.bis.gov/media/documents/600-series-items-faqs.pdf",
+            notes="Effective date shown for Aircraft (Category VIII) and Gas Turbine Engines (Category XIX) transition-related 600-series controls.",
+        ),
+        OfficialScopeEvent(
+            effective_date="2014-01-06",
+            year=2014,
+            title="Export Control Reform tranche for Categories VI, VII, XIII, and XX",
+            positive_units=0,
+            negative_units=4,
+            net_scope_delta=-4,
+            source_label="BIS — 600 Series Items FAQs",
+            source_url="https://www.bis.gov/media/documents/600-series-items-faqs.pdf",
+            notes="Effective date shown for Vessels/Submersibles (VI/XX), Military Vehicles (VII), and Auxiliary Military Equipment (XIII).",
+        ),
+        OfficialScopeEvent(
+            effective_date="2014-07-01",
+            year=2014,
+            title="Export Control Reform tranche for Categories IV, V, IX, and X",
+            positive_units=0,
+            negative_units=4,
+            net_scope_delta=-4,
+            source_label="BIS — 600 Series Items FAQs",
+            source_url="https://www.bis.gov/media/documents/600-series-items-faqs.pdf",
+            notes="Effective date shown for Rockets/Missiles (IV), Explosives/Energetics (V), Training Equipment (IX), and Personal Protective Equipment (X).",
+        ),
+        OfficialScopeEvent(
+            effective_date="2014-11-10",
+            year=2014,
+            title="Export Control Reform tranche for Category XV spacecraft systems",
+            positive_units=0,
+            negative_units=1,
+            net_scope_delta=-1,
+            source_label="BIS — 600 Series Items FAQs",
+            source_url="https://www.bis.gov/media/documents/600-series-items-faqs.pdf",
+            notes="FAQ table lists November 10, 2014 as the effective date for all other Category XV items beyond the earlier rad-hard tranche.",
+        ),
+        OfficialScopeEvent(
+            effective_date="2014-12-30",
+            year=2014,
+            title="Export Control Reform tranche for Category XI military electronics",
+            positive_units=0,
+            negative_units=1,
+            net_scope_delta=-1,
+            source_label="BIS — 600 Series Items FAQs",
+            source_url="https://www.bis.gov/media/documents/600-series-items-faqs.pdf",
+            notes="FAQ table lists December 30, 2014 as the effective date for Category XI military electronics transition-related controls.",
+        ),
+        OfficialScopeEvent(
+            effective_date="2016-12-31",
+            year=2016,
+            title="Export Control Reform tranche for Categories XII, XIV, and XVIII",
+            positive_units=0,
+            negative_units=3,
+            net_scope_delta=-3,
+            source_label="BIS — 600 Series Items FAQs",
+            source_url="https://www.bis.gov/media/documents/600-series-items-faqs.pdf",
+            notes="FAQ table lists December 31, 2016 as the effective date for Sensors/Night Vision (XII), Toxicological Agents (XIV), and Directed Energy Weapons (XVIII).",
+        ),
+        OfficialScopeEvent(
+            effective_date="2020-03-09",
+            year=2020,
+            title="Firearms rule moving Categories I, II, and III items to Commerce control",
+            positive_units=0,
+            negative_units=3,
+            net_scope_delta=-3,
+            source_label="BIS — Firearms Final Rule Summary",
+            source_url="https://www.bis.gov/86-fr-46590-control-firearms-guns-ammunition-related-articles-president-determines-no-longer-warrant-control-under",
+            notes="BIS states the January 23, 2020 firearms final rule moved items that no longer warranted USML control from Categories I-III to the CCL; the rule became effective March 9, 2020.",
+        ),
+        OfficialScopeEvent(
+            effective_date="2025-09-15",
+            year=2025,
+            title="USML targeted revisions package with mixed but net-positive ITAR effect",
+            positive_units=3,
+            negative_units=2,
+            net_scope_delta=1,
+            source_label="Federal Register — USML Targeted Revisions (2025 final rule)",
+            source_url="https://public-inspection.federalregister.gov/2025-16382.pdf",
+            notes="Final rule states it both removes and adds USML items. This implementation scores the package as net +1 because the rule adds or reinforces ITAR coverage in Categories VIII, X, and XX while removing or narrowing items in Categories III and XI.",
+        ),
+    )
 
 
 def _element_text(element: ET.Element) -> str:
@@ -674,6 +799,51 @@ def build_itar_scope_dataset(
     )
 
 
+def build_corrected_scope_dataset(
+    start_year: int = 2010,
+    end_year: int = 2025,
+    artifact_dir: Path | str | None = None,
+) -> CorrectedScopeBuildResult:
+    if end_year < start_year:
+        raise ValueError("end_year must be greater than or equal to start_year")
+
+    base_dir = Path(artifact_dir) if artifact_dir is not None else DEFAULT_ITAR_SCOPE_ARTIFACT_DIR
+    out_dir = base_dir / "corrected-scope"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    events = tuple(event for event in official_scope_events() if start_year <= event.year <= end_year)
+    yearly_rows = _build_corrected_scope_year_rows(start_year=start_year, end_year=end_year, events=events)
+
+    events_csv = out_dir / "official_scope_events.csv"
+    yearly_csv = out_dir / "corrected_scope_yearly.csv"
+    net_change_chart_png = out_dir / "corrected_net_scope_change.png"
+    cumulative_chart_png = out_dir / "corrected_cumulative_scope_index.png"
+    summary_markdown = out_dir / "corrected_scope_summary.md"
+
+    _write_corrected_scope_events_csv(events_csv, events)
+    _write_corrected_scope_yearly_csv(yearly_csv, yearly_rows)
+    plot_corrected_scope_years(
+        yearly_csv=yearly_csv,
+        output_png=net_change_chart_png,
+        metric="net_scope_delta",
+    )
+    plot_corrected_scope_years(
+        yearly_csv=yearly_csv,
+        output_png=cumulative_chart_png,
+        metric="cumulative_scope_index",
+    )
+    _write_corrected_scope_summary(summary_markdown, yearly_rows, events)
+
+    return CorrectedScopeBuildResult(
+        artifact_dir=out_dir,
+        events_csv=events_csv,
+        yearly_csv=yearly_csv,
+        net_change_chart_png=net_change_chart_png,
+        cumulative_chart_png=cumulative_chart_png,
+        summary_markdown=summary_markdown,
+    )
+
+
 def plot_itar_scope_yearly_changes(
     panel_csv: Path | str,
     output_png: Path | str,
@@ -735,6 +905,71 @@ def plot_itar_scope_yearly_changes(
 
     return ItarScopePlotResult(
         panel_csv=panel_path,
+        output_png=output_path,
+        metric=metric_key,
+        row_count=len(rows),
+    )
+
+
+def plot_corrected_scope_years(
+    yearly_csv: Path | str,
+    output_png: Path | str,
+    metric: str,
+) -> ItarScopePlotResult:
+    yearly_path = Path(yearly_csv)
+    output_path = Path(output_png)
+    metric_key = str(metric).strip()
+    metric_labels = {
+        "net_scope_delta": "Corrected Net Scope Delta",
+        "cumulative_scope_index": "Corrected Cumulative Scope Index",
+    }
+    if metric_key not in metric_labels:
+        raise ValueError(f"Unsupported corrected scope metric: {metric_key}")
+
+    rows = _read_csv_rows(yearly_path)
+    years = [int(row["year"]) for row in rows]
+    values = [int(row[metric_key]) for row in rows]
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    if metric_key == "net_scope_delta":
+        colors = ["#2f6f4f" if value >= 0 else "#8b2e2e" for value in values]
+        bars = ax.bar(years, values, color=colors, edgecolor="#1f1f1f", linewidth=0.6)
+        ax.axhline(0, color="#1f1f1f", linewidth=1.0)
+        value_span = max([abs(value) for value in values] + [1])
+        offset = max(0.15, value_span * 0.08)
+        for bar, value in zip(bars, values):
+            if value >= 0:
+                y_pos = value + offset
+                va = "bottom"
+            else:
+                y_pos = value - offset
+                va = "top"
+            ax.text(bar.get_x() + bar.get_width() / 2, y_pos, f"{value:+d}", ha="center", va=va, fontsize=8)
+    else:
+        ax.plot(years, values, color="#204f86", linewidth=2.4, marker="o", markersize=5)
+        ax.axhline(0, color="#1f1f1f", linewidth=1.0, alpha=0.7)
+        for year, value in zip(years, values):
+            ax.text(year, value + 0.18, f"{value:+d}", ha="center", va="bottom", fontsize=8)
+
+    ax.set_title(f"ITAR {metric_labels[metric_key]} (Official Rule Event Model)", fontsize=14, pad=12)
+    ax.set_xlabel("Year")
+    ax.set_ylabel(metric_labels[metric_key])
+    ax.set_xticks(years)
+    ax.set_xticklabels([str(year) for year in years], rotation=45, ha="right")
+    ax.grid(axis="y", alpha=0.25, linewidth=0.7)
+    fig.tight_layout()
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+
+    return ItarScopePlotResult(
+        panel_csv=yearly_path,
         output_png=output_path,
         metric=metric_key,
         row_count=len(rows),
@@ -840,6 +1075,85 @@ def _write_summary_files(
     summary_markdown_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _build_corrected_scope_year_rows(
+    start_year: int,
+    end_year: int,
+    events: tuple[OfficialScopeEvent, ...],
+) -> list[CorrectedScopeYearRow]:
+    event_map: dict[int, list[OfficialScopeEvent]] = {}
+    for event in events:
+        event_map.setdefault(event.year, []).append(event)
+
+    cumulative = 0
+    rows: list[CorrectedScopeYearRow] = []
+    for year in range(start_year, end_year + 1):
+        positive_units = sum(event.positive_units for event in event_map.get(year, []))
+        negative_units = sum(event.negative_units for event in event_map.get(year, []))
+        net_scope_delta = sum(event.net_scope_delta for event in event_map.get(year, []))
+        cumulative += net_scope_delta
+        rows.append(
+            CorrectedScopeYearRow(
+                year=year,
+                positive_units=positive_units,
+                negative_units=negative_units,
+                net_scope_delta=net_scope_delta,
+                cumulative_scope_index=cumulative,
+            )
+        )
+    return rows
+
+
+def _write_corrected_scope_events_csv(path: Path, events: tuple[OfficialScopeEvent, ...]) -> None:
+    fieldnames = [field.name for field in OfficialScopeEvent.__dataclass_fields__.values()]
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for event in events:
+            writer.writerow({field: getattr(event, field) for field in fieldnames})
+
+
+def _write_corrected_scope_yearly_csv(path: Path, rows: list[CorrectedScopeYearRow]) -> None:
+    fieldnames = [field.name for field in CorrectedScopeYearRow.__dataclass_fields__.values()]
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({field: getattr(row, field) for field in fieldnames})
+
+
+def _write_corrected_scope_summary(
+    path: Path,
+    yearly_rows: list[CorrectedScopeYearRow],
+    events: tuple[OfficialScopeEvent, ...],
+) -> None:
+    generated_at = datetime.now(UTC).isoformat()
+    lines = [
+        "# Corrected ITAR Scope Event Model",
+        "",
+        f"- generated_at_utc: `{generated_at}`",
+        "- methodology: `event-weighted category/tranche model based on official effective dates, not raw USML line counts`",
+        "",
+        "## Official Events",
+        "",
+    ]
+    for event in events:
+        lines.append(
+            f"- {event.effective_date}: `{event.net_scope_delta:+d}` — {event.title}. "
+            f"Source: {event.source_label}: {event.source_url}"
+        )
+    lines.extend(["", "## Yearly Rows", ""])
+    for row in yearly_rows:
+        lines.append(
+            f"- {row.year}: positive_units=`{row.positive_units}`, negative_units=`{row.negative_units}`, "
+            f"net_scope_delta=`{row.net_scope_delta:+d}`, cumulative_scope_index=`{row.cumulative_scope_index:+d}`"
+        )
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def _read_yearly_panel_csv(path: Path) -> list[dict[str, str]]:
+    return _read_csv_rows(path)
+
+
+def _read_csv_rows(path: Path) -> list[dict[str, str]]:
     with path.open("r", encoding="utf-8", newline="") as handle:
         return list(csv.DictReader(handle))

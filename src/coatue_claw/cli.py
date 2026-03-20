@@ -12,6 +12,7 @@ from coatue_claw.hf_analyst import analyze_podcast_url as hfa_analyze_podcast_ur
 from coatue_claw.hf_analyst import analyze_thread as hfa_analyze_thread
 from coatue_claw.hf_analyst import hfa_status
 from coatue_claw.itar_scope import build_itar_scope_dataset
+from coatue_claw.itar_scope import build_corrected_scope_dataset
 from coatue_claw.itar_scope import plot_itar_scope_yearly_changes
 from coatue_claw.memory_runtime import MemoryRuntime
 from coatue_claw.market_daily import debug_catalyst as market_daily_debug_catalyst
@@ -317,6 +318,28 @@ def _run_itar_scope_command(args) -> None:
         )
         return
 
+    if args.itar_scope_cmd == "corrected-build":
+        result = build_corrected_scope_dataset(
+            start_year=int(args.start_year),
+            end_year=int(args.end_year),
+            artifact_dir=(str(args.artifact_dir).strip() or None),
+        )
+        print(
+            json.dumps(
+                {
+                    "artifact_dir": str(result.artifact_dir),
+                    "events_csv": str(result.events_csv),
+                    "yearly_csv": str(result.yearly_csv),
+                    "net_change_chart_png": str(result.net_change_chart_png),
+                    "cumulative_chart_png": str(result.cumulative_chart_png),
+                    "summary_markdown": str(result.summary_markdown),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return
+
 
 def main():
     parser = argparse.ArgumentParser("coatue-claw")
@@ -440,6 +463,11 @@ def main():
     itarp.add_argument("--panel-csv", required=True)
     itarp.add_argument("--output", required=True)
     itarp.add_argument("--metric", choices=("net-entry-change", "net-scope-change"), default="net-entry-change")
+
+    itarc = itar_sub.add_parser("corrected-build")
+    itarc.add_argument("--start-year", type=int, default=2010)
+    itarc.add_argument("--end-year", type=int, default=datetime.now(UTC).year - 1)
+    itarc.add_argument("--artifact-dir", default="")
 
     args = parser.parse_args()
 
