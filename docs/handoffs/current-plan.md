@@ -7,7 +7,6 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - ITAR scope dataset pipeline is now in-repo as an analyst CLI utility:
   - command: `claw itar-scope build --start-year 2010 --end-year 2025 [--artifact-dir PATH]`
   - plotting command: `claw itar-scope plot --panel-csv PATH --output PATH --metric net-entry-change|net-scope-change`
-  - corrected event-based command: `claw itar-scope corrected-build --start-year 2010 --end-year 2025 [--artifact-dir PATH]`
   - output panel tracks:
     - `entries_total`
     - `entries_added`
@@ -21,12 +20,8 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - normalized yearly entry table uses deepest USML product-control leaves under `22 CFR 121.1`.
   - current exclusion rules: notes, `[Reserved]`, technical-data/defense-service clauses, EAR-only clauses, and interpretive branches.
   - build now also writes a default `net_entry_change.png` chart next to the CSV artifacts.
-  - corrected scope path now writes an official-rule-event model and two corrected charts:
-    - annual `corrected_net_scope_change.png`
-    - cumulative `corrected_cumulative_scope_index.png`
 - Short-term follow-up:
   - manually review 2013-2015 and 2024 diff outputs to calibrate modified-entry classifications against official rule history.
-  - if needed, refine the 2025 corrected-event weighting beyond the current `+1` net assumption.
   - decide whether this utility should stay analyst-facing only or get surfaced into a more formal research/export workflow.
 
 ## V1 Scope
