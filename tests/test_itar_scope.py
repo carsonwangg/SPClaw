@@ -4,7 +4,7 @@ import csv
 import json
 from pathlib import Path
 
-from coatue_claw.itar_scope import build_itar_scope_dataset, diff_snapshots, parse_year_snapshot
+from coatue_claw.itar_scope import build_itar_scope_dataset, diff_snapshots, parse_year_snapshot, plot_itar_scope_yearly_changes
 
 
 def _wrap_extract(year: int, extract_body: str) -> str:
@@ -167,6 +167,7 @@ def test_build_itar_scope_dataset_writes_artifacts_and_split_audit(tmp_path: Pat
     assert result.ambiguous_rewrites_csv.exists()
     assert result.summary_json.exists()
     assert result.summary_markdown.exists()
+    assert result.net_entry_change_chart_png.exists()
 
     with result.yearly_panel_csv.open(encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle))
@@ -185,3 +186,72 @@ def test_build_itar_scope_dataset_writes_artifacts_and_split_audit(tmp_path: Pat
     assert payload["snapshot_count"] == 2
     assert payload["change_counts"]["added"] == 2
     assert payload["change_counts"]["removed"] == 1
+
+
+def test_plot_itar_scope_yearly_changes_writes_png(tmp_path: Path) -> None:
+    panel_csv = tmp_path / "yearly_panel.csv"
+    with panel_csv.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=[
+                "year",
+                "snapshot_date",
+                "source_url",
+                "rule_citations",
+                "usml_categories_total",
+                "entries_total",
+                "entries_added",
+                "entries_removed",
+                "entries_broadened",
+                "entries_narrowed",
+                "entries_moved_to_ear",
+                "entries_moved_from_ear",
+                "net_entry_change",
+                "net_scope_change",
+            ],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "year": "2022",
+                "snapshot_date": "2022-04-01",
+                "source_url": "https://example.com/2022",
+                "rule_citations": "https://example.com/2022",
+                "usml_categories_total": "21",
+                "entries_total": "810",
+                "entries_added": "0",
+                "entries_removed": "0",
+                "entries_broadened": "0",
+                "entries_narrowed": "0",
+                "entries_moved_to_ear": "0",
+                "entries_moved_from_ear": "0",
+                "net_entry_change": "0",
+                "net_scope_change": "0",
+            }
+        )
+        writer.writerow(
+            {
+                "year": "2023",
+                "snapshot_date": "2023-04-01",
+                "source_url": "https://example.com/2023",
+                "rule_citations": "https://example.com/2023",
+                "usml_categories_total": "21",
+                "entries_total": "812",
+                "entries_added": "24",
+                "entries_removed": "22",
+                "entries_broadened": "0",
+                "entries_narrowed": "0",
+                "entries_moved_to_ear": "0",
+                "entries_moved_from_ear": "0",
+                "net_entry_change": "2",
+                "net_scope_change": "2",
+            }
+        )
+
+    output_png = tmp_path / "net_entry_change.png"
+    result = plot_itar_scope_yearly_changes(panel_csv=panel_csv, output_png=output_png, metric="net_entry_change")
+
+    assert result.output_png == output_png
+    assert result.row_count == 2
+    assert output_png.exists()
+    assert output_png.stat().st_size > 0

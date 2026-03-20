@@ -56,18 +56,22 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - diffs adjacent years into added/removed/modified entries and writes CSV/JSON/Markdown artifacts.
   - includes ambiguous split/merge audit output to flag rewrite-driven false growth.
   - added structured fallback to section-specific GovInfo XML for years where the package XML is incomplete (`CFR-2020-title22-vol1-sec121-1.xml` path exercised in validation).
+  - added bar-chart rendering for yearly panel metrics (`net_entry_change` and `net_scope_change`).
 - Updated `/Users/carsonwang/CoatueClaw/src/coatue_claw/cli.py`:
   - new CLI command: `claw itar-scope build --start-year 2010 --end-year 2025 [--artifact-dir PATH]`.
-  - command emits artifact paths for `usml_entries.csv`, `yearly_panel.csv`, `entry_changes.csv`, `ambiguous_rewrites.csv`, `summary.json`, and `summary.md`.
+  - build now emits `net_entry_change.png` alongside `usml_entries.csv`, `yearly_panel.csv`, `entry_changes.csv`, `ambiguous_rewrites.csv`, `summary.json`, and `summary.md`.
+  - added `claw itar-scope plot --panel-csv PATH --output PATH --metric net-entry-change|net-scope-change`.
 - Added `/Users/carsonwang/CoatueClaw/tests/test_itar_scope.py`:
   - parser coverage for product-only deepest-leaf counting.
   - regression for `121.1` vs `121.16` section selection.
   - diff coverage for add/remove/broadened/narrowed behavior.
   - artifact-generation coverage including split audit output.
+  - chart-generation coverage for yearly panel plotting.
 - Validation:
-  - `PYTHONPATH=src python3 -m pytest -q tests/test_itar_scope.py` -> `4 passed`
+  - `PYTHONPATH=src python3 -m pytest -q tests/test_itar_scope.py` -> `5 passed`
   - `PYTHONPATH=src python3 - <<'PY' ... parse_year_snapshot(year) ... PY` on `2010, 2014, 2017, 2020, 2022, 2024` -> all parsed successfully
   - `PYTHONPATH=src python3 -m coatue_claw.cli itar-scope build --start-year 2010 --end-year 2025 --artifact-dir /tmp/itar-scope-full` -> succeeded
+  - `PYTHONPATH=src python3 -m coatue_claw.cli itar-scope plot --panel-csv /tmp/itar-scope-full/yearly_panel.csv --output /tmp/itar-scope-full/net_entry_change.png --metric net-entry-change` -> succeeded
 - Current caveats:
   - `entries_added` / `entries_removed` are the strongest metrics today.
   - `entries_moved_to_ear` / `entries_moved_from_ear` are currently heuristic and mostly useful as review hooks, not final policy-grade labels.
