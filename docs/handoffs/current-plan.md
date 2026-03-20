@@ -22,9 +22,8 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - current exclusion rules: notes, `[Reserved]`, technical-data/defense-service clauses, EAR-only clauses, and interpretive branches.
   - build now also writes a default `net_entry_change.png` chart next to the CSV artifacts.
   - corrected scope path now writes an official-rule-event model and two corrected charts:
-    - annual `corrected_added_removed_by_year.png` as the primary user-facing chart
     - annual `corrected_net_scope_change.png`
-    - cumulative `corrected_cumulative_scope_index.png` as an audit companion only
+    - cumulative `corrected_cumulative_scope_index.png`
 - Short-term follow-up:
   - manually review 2013-2015 and 2024 diff outputs to calibrate modified-entry classifications against official rule history.
   - if needed, refine the 2025 corrected-event weighting beyond the current `+1` net assumption.
@@ -96,7 +95,6 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
 - Remaining limitation on the ITAR path:
   - added/removed counts are the primary reliable metric now.
   - broadened/narrowed and EAR-shift labels are best-effort heuristics and should be reviewed before using them in external-facing analysis.
-  - corrected annual event charts are category/tranche counts across cited ITAR rule changes, not literal SKU counts.
 - Board-seat now runs warning-only quality handling on role branch:
   - rewrite fallback mode has been removed.
   - quality-failed drafts are skipped and replaced by diagnostic warning posts for easier operator debugging.

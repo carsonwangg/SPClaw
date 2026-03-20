@@ -330,7 +330,6 @@ def _run_itar_scope_command(args) -> None:
                     "artifact_dir": str(result.artifact_dir),
                     "events_csv": str(result.events_csv),
                     "yearly_csv": str(result.yearly_csv),
-                    "added_removed_chart_png": str(result.added_removed_chart_png),
                     "net_change_chart_png": str(result.net_change_chart_png),
                     "cumulative_chart_png": str(result.cumulative_chart_png),
                     "summary_markdown": str(result.summary_markdown),

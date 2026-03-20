@@ -202,7 +202,6 @@ class CorrectedScopeBuildResult:
     artifact_dir: Path
     events_csv: Path
     yearly_csv: Path
-    added_removed_chart_png: Path
     net_change_chart_png: Path
     cumulative_chart_png: Path
     summary_markdown: Path
@@ -817,17 +816,12 @@ def build_corrected_scope_dataset(
 
     events_csv = out_dir / "official_scope_events.csv"
     yearly_csv = out_dir / "corrected_scope_yearly.csv"
-    added_removed_chart_png = out_dir / "corrected_added_removed_by_year.png"
     net_change_chart_png = out_dir / "corrected_net_scope_change.png"
     cumulative_chart_png = out_dir / "corrected_cumulative_scope_index.png"
     summary_markdown = out_dir / "corrected_scope_summary.md"
 
     _write_corrected_scope_events_csv(events_csv, events)
     _write_corrected_scope_yearly_csv(yearly_csv, yearly_rows)
-    plot_corrected_scope_added_removed(
-        yearly_csv=yearly_csv,
-        output_png=added_removed_chart_png,
-    )
     plot_corrected_scope_years(
         yearly_csv=yearly_csv,
         output_png=net_change_chart_png,
@@ -844,7 +838,6 @@ def build_corrected_scope_dataset(
         artifact_dir=out_dir,
         events_csv=events_csv,
         yearly_csv=yearly_csv,
-        added_removed_chart_png=added_removed_chart_png,
         net_change_chart_png=net_change_chart_png,
         cumulative_chart_png=cumulative_chart_png,
         summary_markdown=summary_markdown,
@@ -979,76 +972,6 @@ def plot_corrected_scope_years(
         panel_csv=yearly_path,
         output_png=output_path,
         metric=metric_key,
-        row_count=len(rows),
-    )
-
-
-def plot_corrected_scope_added_removed(
-    yearly_csv: Path | str,
-    output_png: Path | str,
-) -> ItarScopePlotResult:
-    yearly_path = Path(yearly_csv)
-    output_path = Path(output_png)
-    rows = _read_csv_rows(yearly_path)
-    years = [int(row["year"]) for row in rows]
-    added_values = [int(row["positive_units"]) for row in rows]
-    removed_values = [-int(row["negative_units"]) for row in rows]
-
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    fig, ax = plt.subplots(figsize=(12, 6))
-    width = 0.38
-    x_positions = list(range(len(years)))
-    added_bars = ax.bar(
-        [x - width / 2 for x in x_positions],
-        added_values,
-        width=width,
-        color="#2f6f4f",
-        edgecolor="#1f1f1f",
-        linewidth=0.6,
-        label="Categories / tranches added",
-    )
-    removed_bars = ax.bar(
-        [x + width / 2 for x in x_positions],
-        removed_values,
-        width=width,
-        color="#8b2e2e",
-        edgecolor="#1f1f1f",
-        linewidth=0.6,
-        label="Categories / tranches removed",
-    )
-    ax.axhline(0, color="#1f1f1f", linewidth=1.0)
-    ax.set_title("ITAR Categories Added vs Removed by Year (Official Rule Event Model)", fontsize=14, pad=12)
-    ax.set_xlabel("Year")
-    ax.set_ylabel("Category / tranche count")
-    ax.set_xticks(x_positions)
-    ax.set_xticklabels([str(year) for year in years], rotation=45, ha="right")
-    ax.grid(axis="y", alpha=0.25, linewidth=0.7)
-    ax.legend(frameon=False)
-
-    max_abs = max(added_values + [abs(value) for value in removed_values] + [1])
-    offset = max(0.12, max_abs * 0.05)
-    for bar, value in zip(added_bars, added_values):
-        if value == 0:
-            continue
-        ax.text(bar.get_x() + bar.get_width() / 2, value + offset, f"+{value}", ha="center", va="bottom", fontsize=8)
-    for bar, raw_value in zip(removed_bars, removed_values):
-        if raw_value == 0:
-            continue
-        ax.text(bar.get_x() + bar.get_width() / 2, raw_value - offset, f"{raw_value}", ha="center", va="top", fontsize=8)
-
-    fig.tight_layout()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path, dpi=180, bbox_inches="tight")
-    plt.close(fig)
-
-    return ItarScopePlotResult(
-        panel_csv=yearly_path,
-        output_png=output_path,
-        metric="added_removed_by_year",
         row_count=len(rows),
     )
 
@@ -1208,9 +1131,7 @@ def _write_corrected_scope_summary(
         "# Corrected ITAR Scope Event Model",
         "",
         f"- generated_at_utc: `{generated_at}`",
-        "- methodology: `event-weighted category/tranche model across all cited ITAR changes based on official effective dates, not raw hardware-only USML line counts`",
-        "- primary_chart: `corrected_added_removed_by_year.png` (annual categories/tranches added above zero and removed below zero)",
-        "- audit_companions: `corrected_net_scope_change.png`, `corrected_cumulative_scope_index.png`",
+        "- methodology: `event-weighted category/tranche model based on official effective dates, not raw USML line counts`",
         "",
         "## Official Events",
         "",
@@ -1223,8 +1144,8 @@ def _write_corrected_scope_summary(
     lines.extend(["", "## Yearly Rows", ""])
     for row in yearly_rows:
         lines.append(
-            f"- {row.year}: added_units=`{row.positive_units}`, removed_units=`{row.negative_units}`, "
-            f"net_scope_delta=`{row.net_scope_delta:+d}`, cumulative_scope_index_audit=`{row.cumulative_scope_index:+d}`"
+            f"- {row.year}: positive_units=`{row.positive_units}`, negative_units=`{row.negative_units}`, "
+            f"net_scope_delta=`{row.net_scope_delta:+d}`, cumulative_scope_index=`{row.cumulative_scope_index:+d}`"
         )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
