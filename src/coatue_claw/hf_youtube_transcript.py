@@ -4,6 +4,8 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 import re
+import shutil
+import subprocess
 import tempfile
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -49,6 +51,7 @@ class PodcastTranscript:
     duration_sec: int | None
     transcript_source: str
     segments: tuple[TranscriptSegment, ...]
+    extraction_warnings: tuple[str, ...] = ()
 
     @property
     def full_text(self) -> str:
@@ -176,35 +179,23 @@ def _is_response_format_incompatible_error(exc: Exception) -> bool:
     return "response_format" in text and "compatible" in text
 
 
-def _asr_transcript(url: str) -> list[TranscriptSegment]:
-    if OpenAI is None:
-        raise YouTubeTranscriptError("openai_client_unavailable_for_asr")
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        raise YouTubeTranscriptError("openai_api_key_missing_for_asr")
-    model = (os.environ.get("COATUE_CLAW_HFA_PODCAST_ASR_MODEL", "gpt-4o-mini-transcribe") or "gpt-4o-mini-transcribe").strip()
-    client = OpenAI(api_key=api_key)
-    with tempfile.TemporaryDirectory(prefix="hfa-podcast-") as tmp:
-        audio_path = _download_audio(url, tmp_dir=Path(tmp))
-        try:
+def _transcribe_audio_file(*, client: Any, model: str, audio_path: Path, source_type: str) -> list[TranscriptSegment]:
+    try:
+        with audio_path.open("rb") as handle:
+            response = client.audio.transcriptions.create(
+                model=model,
+                file=handle,
+                response_format="verbose_json",
+            )
+    except Exception as exc:
+        if _is_response_format_incompatible_error(exc):
             with audio_path.open("rb") as handle:
                 response = client.audio.transcriptions.create(
                     model=model,
                     file=handle,
-                    response_format="verbose_json",
                 )
-        except Exception as exc:
-            if _is_response_format_incompatible_error(exc):
-                try:
-                    with audio_path.open("rb") as handle:
-                        response = client.audio.transcriptions.create(
-                            model=model,
-                            file=handle,
-                        )
-                except Exception as retry_exc:
-                    raise YouTubeTranscriptError(f"asr_transcription_failed:{type(retry_exc).__name__}") from retry_exc
-            else:
-                raise YouTubeTranscriptError(f"asr_transcription_failed:{type(exc).__name__}") from exc
+        else:
+            raise
 
     segments_raw = getattr(response, "segments", None)
     if segments_raw is None and isinstance(response, dict):
@@ -218,14 +209,14 @@ def _asr_transcript(url: str) -> list[TranscriptSegment]:
                     continue
                 start = float(row.get("start") or 0.0)
                 end = float(row.get("end") or start)
-                out.append(TranscriptSegment(start_sec=max(0.0, start), end_sec=max(start, end), text=text, source_type="asr"))
+                out.append(TranscriptSegment(start_sec=max(0.0, start), end_sec=max(start, end), text=text, source_type=source_type))
             else:
                 text = str(getattr(row, "text", "") or "").strip()
                 if not text:
                     continue
                 start = float(getattr(row, "start", 0.0) or 0.0)
                 end = float(getattr(row, "end", start) or start)
-                out.append(TranscriptSegment(start_sec=max(0.0, start), end_sec=max(start, end), text=text, source_type="asr"))
+                out.append(TranscriptSegment(start_sec=max(0.0, start), end_sec=max(start, end), text=text, source_type=source_type))
     if out:
         return out
 
@@ -236,7 +227,100 @@ def _asr_transcript(url: str) -> list[TranscriptSegment]:
         text = str(getattr(response, "text", "") or "").strip()
     if not text:
         raise YouTubeTranscriptError("asr_no_text")
-    return [TranscriptSegment(start_sec=0.0, end_sec=0.0, text=text, source_type="asr")]
+    return [TranscriptSegment(start_sec=0.0, end_sec=0.0, text=text, source_type=source_type)]
+
+
+def _ffmpeg_available() -> bool:
+    return shutil.which("ffmpeg") is not None
+
+
+def _transcode_to_wav(*, src: Path, dst: Path) -> None:
+    cmd = ["ffmpeg", "-y", "-i", str(src), "-ac", "1", "-ar", "16000", str(dst)]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        raise YouTubeTranscriptError("ffmpeg_transcode_failed")
+
+
+def _chunk_wav(*, src: Path, out_dir: Path, chunk_seconds: int) -> list[Path]:
+    pattern = out_dir / "chunk-%03d.wav"
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(src),
+        "-f",
+        "segment",
+        "-segment_time",
+        str(chunk_seconds),
+        str(pattern),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        raise YouTubeTranscriptError("ffmpeg_chunk_failed")
+    return sorted(path for path in out_dir.glob("chunk-*.wav") if path.is_file() and path.stat().st_size > 0)
+
+
+def _asr_transcript(url: str) -> tuple[list[TranscriptSegment], str, list[str]]:
+    if OpenAI is None:
+        raise YouTubeTranscriptError("openai_client_unavailable_for_asr")
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        raise YouTubeTranscriptError("openai_api_key_missing_for_asr")
+    model = (os.environ.get("COATUE_CLAW_HFA_PODCAST_ASR_MODEL", "gpt-4o-mini-transcribe") or "gpt-4o-mini-transcribe").strip()
+    client = OpenAI(api_key=api_key)
+    warnings: list[str] = []
+
+    with tempfile.TemporaryDirectory(prefix="hfa-podcast-") as tmp:
+        tmp_dir = Path(tmp)
+        audio_path = _download_audio(url, tmp_dir=tmp_dir)
+
+        try:
+            return _transcribe_audio_file(client=client, model=model, audio_path=audio_path, source_type="asr"), "asr", warnings
+        except Exception as primary_exc:
+            warnings.append(f"asr_primary_failed:{type(primary_exc).__name__}")
+
+        if _ffmpeg_available():
+            wav_path = tmp_dir / "audio-16k.wav"
+            try:
+                _transcode_to_wav(src=audio_path, dst=wav_path)
+                segments = _transcribe_audio_file(client=client, model=model, audio_path=wav_path, source_type="fallback_transcode_asr")
+                warnings.append("transcript_fallback_used:fallback_transcode_asr")
+                return segments, "fallback_transcode_asr", warnings
+            except Exception as transcode_exc:
+                warnings.append(f"fallback_transcode_failed:{type(transcode_exc).__name__}")
+
+                try:
+                    chunk_seconds = 600
+                    chunks_dir = tmp_dir / "chunks"
+                    chunks_dir.mkdir(parents=True, exist_ok=True)
+                    chunk_paths = _chunk_wav(src=wav_path, out_dir=chunks_dir, chunk_seconds=chunk_seconds)
+                    if not chunk_paths:
+                        raise YouTubeTranscriptError("chunked_asr_no_chunks")
+                    stitched: list[TranscriptSegment] = []
+                    offset = 0.0
+                    for chunk in chunk_paths:
+                        chunk_segments = _transcribe_audio_file(
+                            client=client,
+                            model=model,
+                            audio_path=chunk,
+                            source_type="fallback_chunked_asr",
+                        )
+                        for seg in chunk_segments:
+                            stitched.append(
+                                TranscriptSegment(
+                                    start_sec=seg.start_sec + offset,
+                                    end_sec=seg.end_sec + offset,
+                                    text=seg.text,
+                                    source_type="fallback_chunked_asr",
+                                )
+                            )
+                        offset += float(chunk_seconds)
+                    warnings.append("transcript_fallback_used:fallback_chunked_asr")
+                    return stitched, "fallback_chunked_asr", warnings
+                except Exception as chunk_exc:
+                    warnings.append(f"fallback_chunked_failed:{type(chunk_exc).__name__}")
+
+        raise YouTubeTranscriptError("asr_transcription_failed_all_fallbacks")
 
 
 def fetch_youtube_transcript(url: str) -> PodcastTranscript:
@@ -247,14 +331,15 @@ def fetch_youtube_transcript(url: str) -> PodcastTranscript:
     title, channel_name, duration_sec = _fetch_video_metadata(raw, video_id)
 
     errors: list[str] = []
+    extraction_warnings: list[str] = []
     try:
         segments = _captions_transcript(video_id)
         source = "captions"
     except Exception as exc:
         errors.append(str(exc))
         try:
-            segments = _asr_transcript(raw)
-            source = "asr"
+            segments, source, asr_warnings = _asr_transcript(raw)
+            extraction_warnings.extend(asr_warnings)
         except Exception as asr_exc:
             errors.append(str(asr_exc))
             raise YouTubeTranscriptError("transcript_unavailable:" + " | ".join(errors)) from asr_exc
@@ -267,4 +352,5 @@ def fetch_youtube_transcript(url: str) -> PodcastTranscript:
         duration_sec=duration_sec,
         transcript_source=source,
         segments=tuple(segments),
+        extraction_warnings=tuple(extraction_warnings),
     )

@@ -29,7 +29,7 @@ except Exception:  # pragma: no cover - optional dependency
     OpenAI = None  # type: ignore[assignment]
 
 
-load_dotenv("/opt/coatue-claw/.env.prod")
+load_dotenv("/opt/SPClaw/.env.prod")
 
 logger = logging.getLogger(__name__)
 

@@ -31,7 +31,7 @@ except Exception:  # pragma: no cover - optional dependency
         pass
 
 
-load_dotenv("/opt/coatue-claw/.env.prod")
+load_dotenv("/opt/SPClaw/.env.prod")
 
 DEFAULT_TZ = "America/Los_Angeles"
 DEFAULT_PORTCOS: list[tuple[str, str]] = [

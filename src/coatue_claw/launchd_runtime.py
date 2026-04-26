@@ -12,7 +12,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-load_dotenv("/opt/coatue-claw/.env.prod")
+load_dotenv("/opt/SPClaw/.env.prod")
 
 EMAIL_LABEL = "com.coatueclaw.email-gateway"
 MEMORY_PRUNE_LABEL = "com.coatueclaw.memory-prune"

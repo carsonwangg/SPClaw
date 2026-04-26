@@ -51,6 +51,86 @@ def clip(text: str, *, max_chars: int) -> str:
     return cleaned[: max_chars - 1].rstrip()
 
 
+def _looks_like_weak_question(text: str) -> bool:
+    t = (text or "").strip()
+    if not t.endswith("?"):
+        return False
+    lower = t.lower()
+    weak_starts = (
+        "how much",
+        "can you",
+        "what do you",
+        "do you",
+        "is it",
+        "are you",
+        "would you",
+        "could you",
+        "should we",
+        "why don't",
+    )
+    return any(lower.startswith(prefix) for prefix in weak_starts)
+
+
+def _insight_score(text: str) -> float:
+    t = (text or "").strip()
+    if not t:
+        return 0.0
+    lower = t.lower()
+    words = t.split()
+    score = 0.0
+    if 10 <= len(words) <= 55:
+        score += 1.0
+    if re.search(r"\b\d+(?:\.\d+)?%\b", lower):
+        score += 1.4
+    if re.search(r"\b\d+(?:\.\d+)?\s*(?:x|bps|bp|million|billion|k)\b", lower):
+        score += 0.8
+    claim_tokens = (
+        "because",
+        "therefore",
+        "means",
+        "implies",
+        "so that",
+        "the reason",
+        "tradeoff",
+        "moat",
+        "distribution",
+        "pricing",
+        "margin",
+        "retention",
+        "churn",
+        "ltv",
+        "cac",
+        "workflow",
+        "system of record",
+        "agent",
+        "automation",
+        "deployment",
+        "inference",
+        "token",
+        "csat",
+    )
+    score += sum(0.35 for tok in claim_tokens if tok in lower)
+    if _looks_like_weak_question(t):
+        score -= 1.8
+    # de-emphasize fluffy language
+    fluffy = ("great question", "super exciting", "really cool", "kind of", "sort of")
+    score -= sum(0.4 for tok in fluffy if tok in lower)
+    return score
+
+
+def _topic_bucket(text: str) -> str:
+    lower = (text or "").lower()
+    if any(k in lower for k in ("valuation", "multiple", "stock", "market", "macro")):
+        return "market"
+    if any(k in lower for k in ("customer", "sales", "lead", "g tm", "go-to-market", "pricing")):
+        return "gtm"
+    if any(k in lower for k in ("model", "token", "inference", "agent", "workflow", "deployment", "ci/cd")):
+        return "product"
+    if any(k in lower for k in ("margin", "csat", "retention", "churn", "efficiency", "cost")):
+        return "unit_econ"
+    return "other"
+
+
 def transcript_excerpt(transcript: PodcastTranscript, *, max_chars: int = 80_000) -> str:
     joined = "\n".join(
         f"[{format_timestamp(segment.start_sec)}] {segment.text.strip()}"
@@ -62,43 +142,42 @@ def transcript_excerpt(transcript: PodcastTranscript, *, max_chars: int = 80_000
 
 def _fallback_quotes(transcript: PodcastTranscript, *, count: int = 5) -> tuple[PodcastQuote, ...]:
     scored: list[tuple[float, TranscriptSegment]] = []
-    keywords = (
-        "important",
-        "thesis",
-        "risk",
-        "valuation",
-        "growth",
-        "customer",
-        "market",
-        "ai",
-        "strategy",
-        "catalyst",
-    )
     for segment in transcript.segments:
         text = segment.text.strip()
         if not text:
             continue
-        lower = text.lower()
-        score = min(len(text), 280) / 100.0
-        for token in keywords:
-            if token in lower:
-                score += 0.7
-        if len(text.split()) >= 8:
-            scored.append((score, segment))
+        if len(text.split()) < 8:
+            continue
+        score = _insight_score(text)
+        scored.append((score, segment))
+
     scored.sort(key=lambda item: item[0], reverse=True)
     out: list[PodcastQuote] = []
     seen: set[str] = set()
-    for _, segment in scored:
+    bucket_counts: dict[str, int] = {}
+    for score, segment in scored:
         quote = clip(segment.text, max_chars=260)
         key = normalize_for_match(quote)
         if key in seen:
             continue
+        bucket = _topic_bucket(quote)
+        # diversity soft-cap: allow at most 2 per bucket while alternatives exist
+        if bucket_counts.get(bucket, 0) >= 2 and len(out) < count - 1:
+            continue
+        # strict default: avoid weak question-style quotes unless we need fallback coverage
+        if _looks_like_weak_question(quote) and len(out) < count - 1:
+            continue
+        # minimum insight bar; soft fallback allows last slot if needed
+        min_bar = 1.0 if len(out) < count - 1 else 0.2
+        if score < min_bar:
+            continue
         seen.add(key)
+        bucket_counts[bucket] = bucket_counts.get(bucket, 0) + 1
         out.append(
             PodcastQuote(
                 quote=quote,
                 timestamp_sec=segment.start_sec,
-                why_it_matters="Captures a core discussion point likely to affect interpretation of the episode.",
+                why_it_matters="Concrete, investor-relevant claim that adds mechanism, evidence, or measurable implication.",
             )
         )
         if len(out) >= count:
@@ -256,6 +335,8 @@ def _model_analysis(transcript: PodcastTranscript, *, question: str | None, outp
                 break
         validated = tuple(merged[:5])
         warnings.append("model_quotes_backfilled_with_fallback")
+        if len(validated) < 5:
+            warnings.append("insight_density_low_soft_fallback")
     return PodcastAnalysis(
         executive_summary=(summary if summary else _fallback_analysis(transcript, question=question).executive_summary),
         key_themes=(themes if themes else _fallback_analysis(transcript, question=question).key_themes),

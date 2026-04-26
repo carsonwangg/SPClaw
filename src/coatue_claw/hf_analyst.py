@@ -1022,6 +1022,9 @@ def analyze_podcast_url(
             confidence_label=analysis.confidence_label,
         )
         warnings = list(analysis.warnings)
+        warnings.extend(list(transcript.extraction_warnings))
+        if transcript.transcript_source.startswith("fallback_"):
+            warnings.append(f"transcript_mode:{transcript.transcript_source}")
         if len(analysis.quotes) < 5:
             warnings.append("fewer_than_5_quotes")
         summary_text = (
@@ -1206,8 +1209,14 @@ def format_hfa_slack_summary(result: HFAnalysisResult) -> str:
         f"- confidence: `{result.scorecard.confidence_label}`",
         f"- summary: `{result.summary_text}`",
     ]
+    transcript_mode = next((item.split(":", 1)[1] for item in (result.memory_facts or ()) if item.startswith("transcript_source:")), None)
+    if transcript_mode:
+        lines.append(f"- transcript_mode: `{transcript_mode}`")
     if result.artifact_path:
         lines.append(f"- artifact: `{result.artifact_path}`")
     if result.warnings:
         lines.append(f"- warnings: `{len(result.warnings)}`")
+        fallback_warnings = [w for w in result.warnings if str(w).startswith("transcript_") or "fallback" in str(w)]
+        if fallback_warnings:
+            lines.append(f"- ⚠️ transcript_warning: `{fallback_warnings[0]}`")
     return "\n".join(lines)

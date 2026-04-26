@@ -33,7 +33,7 @@ except Exception:  # pragma: no cover - optional dependency
     SlackApiError = Exception  # type: ignore[assignment]
 
 
-load_dotenv("/opt/coatue-claw/.env.prod")
+load_dotenv("/opt/SPClaw/.env.prod")
 
 logger = logging.getLogger(__name__)
 
@@ -1471,6 +1471,9 @@ _GENERIC_WRAPPER_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bwhy\b.*\bshares?\b.*\btoday\b", flags=re.IGNORECASE),
     re.compile(r"\bshares?\b.*\btrading lower today\b", flags=re.IGNORECASE),
     re.compile(r"\bshares?\b.*\bfalling today\b", flags=re.IGNORECASE),
+    re.compile(r"\bstock price\s+(?:up|down)\b", flags=re.IGNORECASE),
+    re.compile(r"\bintraday high\b.*\bprevious close\b", flags=re.IGNORECASE),
+    re.compile(r"\bup from\s+(?:its\s+|the\s+)?previous close\b", flags=re.IGNORECASE),
 )
 
 _BASKET_MEMBERS: dict[str, set[str]] = {

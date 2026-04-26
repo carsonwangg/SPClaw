@@ -28,7 +28,7 @@ from coatue_claw.file_bridge import FileBridgeError, load_config
 from coatue_claw.memory_runtime import MemoryRuntime
 from coatue_claw.slack_file_ingest import classify_category
 
-load_dotenv("/opt/coatue-claw/.env.prod")
+load_dotenv("/opt/SPClaw/.env.prod")
 
 logger = logging.getLogger(__name__)
 

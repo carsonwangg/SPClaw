@@ -19,7 +19,7 @@ except Exception:  # pragma: no cover - optional dependency for non-Slack test e
 
 from coatue_claw.spencer_change_log import SpencerChange, SpencerChangeLog, requester_label
 
-load_dotenv("/opt/coatue-claw/.env.prod")
+load_dotenv("/opt/SPClaw/.env.prod")
 
 DEFAULT_DM_USER_IDS = ("U0AGD28QSQG",)
 

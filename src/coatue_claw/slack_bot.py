@@ -89,7 +89,7 @@ from coatue_claw.x_chart_daily import run_chart_scout_once
 from coatue_claw.x_chart_daily import status as x_chart_status
 from coatue_claw.x_digest import XDigestError, build_x_digest, format_x_digest_summary
 
-load_dotenv("/opt/coatue-claw/.env.prod")
+load_dotenv("/opt/SPClaw/.env.prod")
 
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
@@ -587,6 +587,48 @@ def _handle_hfa_implicit_instruction_update(
     return True
 
 
+def _maybe_auto_run_hfa_files(
+    *,
+    event: dict,
+    thread_ts: str,
+    channel: str | None,
+    user_id: str | None,
+    say,
+    trigger_mode: str,
+) -> bool:
+    if not channel:
+        return False
+    files = _extract_event_files(event)
+    file_ids = [str(item.get("id") or "").strip() for item in files if isinstance(item, dict) and str(item.get("id") or "").strip()]
+    if not file_ids:
+        return False
+
+    dedupe_user = user_id or "slack-auto"
+    if not should_run_dm_autorun(channel=channel, user_id=dedupe_user, thread_ts=thread_ts, file_ids=file_ids):
+        return False
+    try:
+        result = run_hfa_thread(
+            channel=channel,
+            thread_ts=thread_ts,
+            question=None,
+            requested_by=(user_id or "slack-auto"),
+            trigger_mode=trigger_mode,
+            dry_run=False,
+            slack_client=app.client,
+            memory_runtime=_memory_runtime(),
+        )
+    except HFAError as exc:
+        say(text=f"HFA auto-run failed: `{exc}`", thread_ts=thread_ts)
+        return True
+
+    record_dm_autorun(channel=channel, user_id=dedupe_user, thread_ts=thread_ts, file_ids=file_ids)
+    say(
+        text=f"{format_hfa_slack_summary(result)}\n- trigger_mode: `{trigger_mode}`",
+        thread_ts=thread_ts,
+    )
+    return True
+
+
 def _maybe_auto_run_hfa_dm(
     *,
     event: dict,
@@ -597,34 +639,14 @@ def _maybe_auto_run_hfa_dm(
 ) -> bool:
     if not _is_dm_event(event):
         return False
-    if not channel or not user_id:
-        return False
-    files = _extract_event_files(event)
-    file_ids = [str(item.get("id") or "").strip() for item in files if isinstance(item, dict) and str(item.get("id") or "").strip()]
-    if not file_ids:
-        return False
-    if not should_run_dm_autorun(channel=channel, user_id=user_id, thread_ts=thread_ts, file_ids=file_ids):
-        return False
-    try:
-        result = run_hfa_thread(
-            channel=channel,
-            thread_ts=thread_ts,
-            question=None,
-            requested_by=user_id,
-            trigger_mode="dm_auto",
-            dry_run=False,
-            slack_client=app.client,
-            memory_runtime=_memory_runtime(),
-        )
-    except HFAError as exc:
-        say(text=f"HFA auto-run failed: `{exc}`", thread_ts=thread_ts)
-        return True
-    record_dm_autorun(channel=channel, user_id=user_id, thread_ts=thread_ts, file_ids=file_ids)
-    say(
-        text=f"{format_hfa_slack_summary(result)}\n- trigger_mode: `dm_auto`",
+    return _maybe_auto_run_hfa_files(
+        event=event,
         thread_ts=thread_ts,
+        channel=channel,
+        user_id=user_id,
+        say=say,
+        trigger_mode="dm_auto",
     )
-    return True
 
 
 def _maybe_auto_run_hfa_podcast_dm(
@@ -2272,13 +2294,23 @@ def handle_message(event, say):
             memory_source=source_event,
         )
         return
-    # Not default-routed (typically because another user was @mentioned), but still ingest files.
+    # Not default-routed (typically because another user was @mentioned), but still ingest files
+    # and auto-run HFA so every uploaded file is analyzed + memory-updated.
     if _extract_event_files(event):
+        thread_ts = event.get("thread_ts") or event.get("ts")
         _handle_file_ingest_event(
             event=event,
             source_event="slack-message",
-            thread_ts=event.get("thread_ts") or event.get("ts"),
+            thread_ts=thread_ts,
             say=say,
+        )
+        _maybe_auto_run_hfa_files(
+            event=event,
+            thread_ts=thread_ts,
+            channel=event.get("channel"),
+            user_id=event.get("user"),
+            say=say,
+            trigger_mode="slack_file_auto",
         )
 
 
@@ -2307,6 +2339,14 @@ def handle_file_shared(event, say):
         reply_in_thread=False,
         say=say,
     )
+    _maybe_auto_run_hfa_files(
+        event=enriched,
+        thread_ts=(str(event.get("thread_ts") or event.get("event_ts") or "file-shared")),
+        channel=enriched.get("channel"),
+        user_id=enriched.get("user"),
+        say=say,
+        trigger_mode="slack_file_auto",
+    )
 
 
 def _handle_slack_request_event(*, event, say, source_event: str, memory_source: str) -> None:
@@ -2322,6 +2362,15 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
         source_event=source_event,
         thread_ts=thread_ts,
         say=say,
+    )
+
+    _maybe_auto_run_hfa_files(
+        event=event,
+        thread_ts=thread_ts,
+        channel=channel,
+        user_id=user_id,
+        say=say,
+        trigger_mode="slack_file_auto",
     )
 
     if not text.strip():

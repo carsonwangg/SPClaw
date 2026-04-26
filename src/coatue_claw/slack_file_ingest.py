@@ -120,6 +120,52 @@ def _now_utc_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _default_entities() -> list[str]:
+    return [
+        "Anthropic",
+        "OpenAI",
+        "Cursor",
+        "Ramp",
+        "Stripe",
+        "Anduril",
+        "SpaceX",
+        "Neuralink",
+        "Physical Intelligence",
+        "Sunday Robotics",
+    ]
+
+
+def _entity_alias_map() -> dict[str, list[str]]:
+    raw = (os.environ.get("COATUE_CLAW_KB_ENTITIES") or "").strip()
+    entities = [item.strip() for item in raw.split(",") if item.strip()] if raw else _default_entities()
+    out: dict[str, list[str]] = {}
+    for name in entities:
+        aliases = {name.strip()}
+        if " " in name:
+            aliases.add(name.replace(" ", ""))
+        out[name] = sorted({a for a in aliases if a})
+    # Common aliases
+    if "OpenAI" in out:
+        out["OpenAI"].append("ChatGPT")
+    if "Anthropic" in out:
+        out["Anthropic"].append("Claude")
+    return {k: sorted({x.lower() for x in v if x}) for k, v in out.items()}
+
+
+def _extract_entities(*, original_name: str, title: str | None, source_text: str | None) -> list[tuple[str, str]]:
+    hay = "\n".join([original_name or "", title or "", source_text or ""])
+    text = hay.lower()
+    hits: list[tuple[str, str]] = []
+    for entity, aliases in _entity_alias_map().items():
+        for alias in aliases:
+            if not alias:
+                continue
+            if re.search(rf"(?<![a-z0-9]){re.escape(alias)}(?![a-z0-9])", text):
+                hits.append((entity, alias))
+                break
+    return hits
+
+
 def _default_db_path() -> Path:
     data_root = Path(os.environ.get("COATUE_CLAW_DATA_ROOT", "/opt/coatue-claw-data"))
     return Path(os.environ.get("COATUE_CLAW_FILE_INGEST_DB_PATH", str(data_root / "db/file_ingest.sqlite")))
@@ -262,6 +308,22 @@ class FileIngestStore:
             )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_slack_file_ingest_when ON slack_file_ingest(ingested_at_utc DESC);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_slack_file_ingest_category ON slack_file_ingest(category);")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS kb_entity_links (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    slack_file_id TEXT NOT NULL,
+                    entity TEXT NOT NULL,
+                    confidence REAL NOT NULL DEFAULT 0.8,
+                    match_source TEXT NOT NULL,
+                    matched_text TEXT NOT NULL,
+                    created_at_utc TEXT NOT NULL,
+                    UNIQUE(slack_file_id, entity, match_source, matched_text)
+                );
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_kb_entity_links_entity ON kb_entity_links(entity);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_kb_entity_links_file ON kb_entity_links(slack_file_id);")
 
     def is_ingested(self, slack_file_id: str) -> bool:
         with self._connect() as conn:
@@ -318,6 +380,27 @@ class FileIngestStore:
                     _now_utc_iso(),
                 ),
             )
+
+            for entity, alias in _extract_entities(
+                original_name=original_name,
+                title=title,
+                source_text=source_text,
+            ):
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO kb_entity_links (
+                        slack_file_id, entity, confidence, match_source, matched_text, created_at_utc
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        file_id,
+                        entity,
+                        0.8,
+                        "name_title_text_match",
+                        alias,
+                        _now_utc_iso(),
+                    ),
+                )
 
 
 def ingest_slack_files(
