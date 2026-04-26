@@ -232,3 +232,26 @@ def test_enable_services_error_includes_label(monkeypatch) -> None:
         raise AssertionError("expected RuntimeError")
     except RuntimeError as exc:
         assert "failed enabling com.spclaw.email-gateway" in str(exc)
+
+
+def test_cleanup_legacy_services_removes_old_plists(tmp_path: Path, monkeypatch) -> None:
+    launch_agents = tmp_path / "launch-agents"
+    launch_agents.mkdir()
+    legacy_path = launch_agents / "com.coatueclaw.email-gateway.plist"
+    legacy_path.write_text("legacy", encoding="utf-8")
+
+    bootouts: list[str] = []
+    monkeypatch.setenv("SPCLAW_LAUNCHAGENTS_DIR", str(launch_agents))
+    monkeypatch.setattr(launchd_runtime, "_bootout", lambda label: bootouts.append(label))
+
+    cleaned = launchd_runtime._cleanup_legacy_services(services=[launchd_runtime.EMAIL_LABEL])
+
+    assert bootouts == ["com.coatueclaw.email-gateway"]
+    assert cleaned == [
+        {
+            "label": "com.coatueclaw.email-gateway",
+            "plist": str(legacy_path),
+            "action": "deleted",
+        }
+    ]
+    assert not legacy_path.exists()

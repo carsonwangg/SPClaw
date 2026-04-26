@@ -19,6 +19,7 @@ MEMORY_PRUNE_LABEL = "com.spclaw.memory-prune"
 MEMORY_RECONCILE_LABEL = "com.spclaw.memory-reconcile-export"
 X_CHART_LABEL = "com.spclaw.x-chart-daily"
 SPENCER_CHANGE_DIGEST_LABEL = "com.spclaw.spencer-change-digest"
+BOARD_SEAT_DAILY_LABEL = "com.spclaw.board-seat-daily"
 MARKET_DAILY_LABEL = "com.spclaw.market-daily"
 MARKET_DAILY_EARNINGS_RECAP_LABEL = "com.spclaw.market-daily-earnings-recap"
 
@@ -87,6 +88,31 @@ def _spencer_digest_schedule() -> list[dict[str, int]]:
     minute = int(m.group(2))
     if not (0 <= hour <= 23 and 0 <= minute <= 59):
         return [{"Hour": 18, "Minute": 0}]
+    return [{"Hour": hour, "Minute": minute}]
+
+
+def _board_seat_schedule() -> list[dict[str, int]]:
+    raw = (os.environ.get("SPCLAW_BOARD_SEAT_TIME", "12:00") or "").strip()
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})", raw)
+    if not m:
+        hour, minute = 12, 0
+    else:
+        hour = int(m.group(1))
+        minute = int(m.group(2))
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            hour, minute = 12, 0
+
+    weekdays_only = (os.environ.get("SPCLAW_BOARD_SEAT_WEEKDAYS_ONLY", "1") or "1").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+    if weekdays_only:
+        return [
+            {"Weekday": weekday, "Hour": hour, "Minute": minute}
+            for weekday in (1, 2, 3, 4, 5)
+        ]
     return [{"Hour": hour, "Minute": minute}]
 
 
@@ -193,6 +219,18 @@ def _service_specs() -> dict[str, dict[str, Any]]:
         "EnvironmentVariables": _runtime_env(),
     }
 
+    board_seat = {
+        "Label": BOARD_SEAT_DAILY_LABEL,
+        "ProgramArguments": [python_bin, "-m", "spclaw.board_seat_daily", "run-once"],
+        "WorkingDirectory": str(repo),
+        "RunAtLoad": False,
+        "StartCalendarInterval": _board_seat_schedule(),
+        "ProcessType": "Background",
+        "StandardOutPath": str(logs_dir / "board-seat-daily.stdout.log"),
+        "StandardErrorPath": str(logs_dir / "board-seat-daily.stderr.log"),
+        "EnvironmentVariables": _runtime_env(),
+    }
+
     spencer_digest = {
         "Label": SPENCER_CHANGE_DIGEST_LABEL,
         "ProgramArguments": [python_bin, "-m", "spclaw.spencer_change_digest", "run-once"],
@@ -234,6 +272,7 @@ def _service_specs() -> dict[str, dict[str, Any]]:
         MEMORY_PRUNE_LABEL: prune,
         MEMORY_RECONCILE_LABEL: memory_reconcile,
         X_CHART_LABEL: x_chart,
+        BOARD_SEAT_DAILY_LABEL: board_seat,
         SPENCER_CHANGE_DIGEST_LABEL: spencer_digest,
         MARKET_DAILY_LABEL: market_daily,
         MARKET_DAILY_EARNINGS_RECAP_LABEL: market_daily_earnings_recap,
@@ -242,6 +281,29 @@ def _service_specs() -> dict[str, dict[str, Any]]:
 
 def _plist_path(label: str) -> Path:
     return _launch_agents_dir() / f"{label}.plist"
+
+
+def _legacy_label(label: str) -> str | None:
+    prefix = "com.spclaw."
+    if not label.startswith(prefix):
+        return None
+    return "com.coatueclaw." + label[len(prefix) :]
+
+
+def _cleanup_legacy_services(*, services: list[str]) -> list[dict[str, str]]:
+    cleaned: list[dict[str, str]] = []
+    for label in services:
+        legacy = _legacy_label(label)
+        if legacy is None:
+            continue
+        _bootout(legacy)
+        legacy_path = _plist_path(legacy)
+        removed = "absent"
+        if legacy_path.exists():
+            legacy_path.unlink()
+            removed = "deleted"
+        cleaned.append({"label": legacy, "plist": str(legacy_path), "action": removed})
+    return cleaned
 
 
 def write_service_plists() -> dict[str, str]:
@@ -317,7 +379,7 @@ def enable_services(*, services: list[str]) -> dict[str, Any]:
         except RuntimeError as exc:
             raise RuntimeError(f"failed enabling {label}: {exc}") from exc
         changed.append({"label": label, "plist": path, "domain": domain, "action": "enabled"})
-    return {"ok": True, "services": changed}
+    return {"ok": True, "services": changed, "legacy_cleanup": _cleanup_legacy_services(services=services)}
 
 
 def disable_services(*, services: list[str], remove_plists: bool = False) -> dict[str, Any]:
@@ -328,7 +390,7 @@ def disable_services(*, services: list[str], remove_plists: bool = False) -> dic
         if remove_plists and path.exists():
             path.unlink()
         changed.append({"label": label, "plist": str(path), "action": "disabled"})
-    return {"ok": True, "services": changed}
+    return {"ok": True, "services": changed, "legacy_cleanup": _cleanup_legacy_services(services=services)}
 
 
 def service_status(label: str) -> dict[str, Any]:
@@ -383,6 +445,7 @@ def _resolve_services(raw: str) -> list[str]:
             MEMORY_RECONCILE_LABEL,
             X_CHART_LABEL,
             SPENCER_CHANGE_DIGEST_LABEL,
+            BOARD_SEAT_DAILY_LABEL,
             MARKET_DAILY_LABEL,
             MARKET_DAILY_EARNINGS_RECAP_LABEL,
         ]
@@ -396,6 +459,8 @@ def _resolve_services(raw: str) -> list[str]:
         return [X_CHART_LABEL]
     if value in {"spencer", "spencer-digest", "changes"}:
         return [SPENCER_CHANGE_DIGEST_LABEL]
+    if value in {"boardseat", "board-seat", "bs"}:
+        return [BOARD_SEAT_DAILY_LABEL]
     if value in {"marketdaily", "market-daily", "md"}:
         return [MARKET_DAILY_LABEL, MARKET_DAILY_EARNINGS_RECAP_LABEL]
     raise ValueError(f"unknown service selector: {raw}")
@@ -410,7 +475,7 @@ def main() -> None:
         cmd.add_argument(
             "--service",
             default="all",
-            choices=["all", "email", "memory", "memoryreconcile", "xchart", "spencer", "marketdaily"],
+            choices=["all", "email", "memory", "memoryreconcile", "xchart", "spencer", "boardseat", "marketdaily"],
         )  # simplified UX
         if name == "disable":
             cmd.add_argument("--remove-plists", action="store_true")

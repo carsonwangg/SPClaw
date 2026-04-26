@@ -6,7 +6,7 @@ Define the runtime contract for SPClaw on OpenClaw, including process roles, ope
 ## Runtime Source of Truth
 - Gateway config: `~/.openclaw/openclaw.json`
 - Gateway service: `~/Library/LaunchAgents/ai.openclaw.gateway.plist`
-- Coatue 24/7 services:
+- SPClaw 24/7 services:
   - `~/Library/LaunchAgents/com.spclaw.email-gateway.plist`
   - `~/Library/LaunchAgents/com.spclaw.memory-prune.plist`
   - `~/Library/LaunchAgents/com.spclaw.memory-reconcile-export.plist`
@@ -40,7 +40,7 @@ Define the runtime contract for SPClaw on OpenClaw, including process roles, ope
   - `python -m spclaw.board_seat_daily run-once|status|target-memory|seed-target|export-ledger|refresh-funding|funding-quality-report`
   - `claw market-daily run-once --manual|--force|--dry-run`
   - `claw market-daily run-earnings-recap --manual|--force|--dry-run`
-  - `claw market-daily status|holdings|refresh-coatue-holdings|debug-catalyst`
+  - `claw market-daily status|holdings|refresh-holdings|debug-catalyst`
   - `claw memory status|query|prune|extract-daily|checkpoint`
 - Scheduled (planned but not yet wired in this repo):
   - Weekly idea scan

@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 import logging
 from pathlib import Path
 import json
+import sys
 
 from spclaw.chart_metrics import DEFAULT_X_METRIC, DEFAULT_Y_METRIC, METRIC_SPECS
 from spclaw.diligence_report import build_neutral_investment_memo
@@ -154,7 +155,7 @@ def _run_market_daily_command(args) -> None:
         print(json.dumps(market_daily_status(), indent=2, sort_keys=True))
         return
 
-    if args.market_daily_cmd == "refresh-coatue-holdings":
+    if args.market_daily_cmd in {"refresh-holdings", "refresh-coatue-holdings"}:
         print(json.dumps(market_daily_refresh_holdings(), indent=2, sort_keys=True))
         return
 
@@ -267,6 +268,7 @@ def _run_hfa_command(args) -> None:
 
 
 def main():
+    argv = ["refresh-holdings" if token == "refresh-coatue-holdings" else token for token in sys.argv[1:]]
     parser = argparse.ArgumentParser("spclaw")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -347,7 +349,7 @@ def main():
 
     md_sub.add_parser("status")
     md_sub.add_parser("holdings")
-    md_sub.add_parser("refresh-coatue-holdings")
+    md_sub.add_parser("refresh-holdings")
 
     mdi = md_sub.add_parser("include")
     mdi.add_argument("ticker")
@@ -376,7 +378,7 @@ def main():
     hfap.add_argument("--question", default="")
     hfap.add_argument("--dry-run", action="store_true")
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.cmd == "diligence":
         path = run_diligence(args.ticker)

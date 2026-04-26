@@ -3,6 +3,23 @@
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
+## Update (2026-04-25, SPClaw naming cleanup on repo + Mac mini runtime)
+- Repo cleanup shipped in `/Users/carsonwang/SPClaw`:
+  - `src/spclaw/launchd_runtime.py`
+    - restored explicit `board-seat` scheduler support under `com.spclaw.*`
+    - added automatic cleanup of legacy `com.coatueclaw.*` launch agents/plists during enable/disable
+  - renamed the last user-facing market-daily command from `refresh-coatue-holdings` to `refresh-holdings`
+    - updated `src/spclaw/cli.py`
+    - updated `src/spclaw/market_daily.py`
+    - updated `/Users/carsonwang/SPClaw/Makefile`
+    - updated `/Users/carsonwang/SPClaw/docs/openclaw-runtime.md`
+- Runtime cleanup planned/performed on Mac mini:
+  - migrate `/opt/spclaw/.env.prod` from legacy `COATUE_CLAW_*` keys to `SPCLAW_*` keys where the repo now expects them
+  - remove legacy `com.coatueclaw.*` launch agents
+  - refresh `~/.openclaw/workspace/*` instructions that still referenced `coatue_claw` module paths
+- Remaining caveat:
+  - Slack probe still reports bot username `coatue_claw`; that identity appears to be Slack-app-side metadata rather than repo code.
+
 ## Update (2026-02-28, fail-closed board-seat command routing)
 - Updated `/Users/carsonwang/worktrees/spclaw/board-seat/src/spclaw/slack_routing.py`:
   - added `is_explicit_board_seat_command(text)` for explicit `bs` / `board seat` command detection with mention stripping.

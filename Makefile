@@ -116,7 +116,7 @@ openclaw-market-daily-run-once:
 	/opt/spclaw/.venv/bin/python -m spclaw.market_daily run-once --manual $(if $(FORCE),--force,) $(if $(DRY_RUN),--dry-run,)
 
 openclaw-market-daily-refresh-holdings:
-	/opt/spclaw/.venv/bin/python -m spclaw.market_daily refresh-coatue-holdings
+	/opt/spclaw/.venv/bin/python -m spclaw.market_daily refresh-holdings
 
 openclaw-market-daily-earnings-recap-run-once:
 	/opt/spclaw/.venv/bin/python -m spclaw.market_daily run-earnings-recap --manual $(if $(FORCE),--force,) $(if $(DRY_RUN),--dry-run,)

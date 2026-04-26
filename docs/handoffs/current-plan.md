@@ -3,6 +3,19 @@
 ## Objective
 Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as the primary runtime and control plane.
 
+## Naming Cleanup (2026-04-25)
+- Goal: eliminate remaining `coatue_claw` runtime/operator naming so production presents consistently as `SPClaw`.
+- Repo work:
+  - auto-clean legacy `com.coatueclaw.*` launch agents when enabling/disabling 24x7 services
+  - restore explicit `boardseat` scheduler wiring under `com.spclaw.*`
+  - rename market-daily operator command from `refresh-coatue-holdings` to `refresh-holdings` while keeping a hidden legacy alias
+- Runtime work on Mac mini:
+  - migrate `.env.prod` legacy `COATUE_CLAW_*` keys to `SPCLAW_*`
+  - rewrite stale OpenClaw workspace instructions that still point to `coatue_claw` modules or `/opt/SPClaw`
+  - remove old `com.coatueclaw.*` launch-agent plists
+- Open question:
+  - Slack bot username shown by Slack probe may still require Slack-app-side rename if the API-level username is pinned there.
+
 ## V1 Scope
 - SEC + transcript + macro ingestion
 - Diligence packets (bull/bear + peer comp + charts)

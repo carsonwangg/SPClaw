@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import sys
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, unquote, urlencode, urlparse, urlunparse
@@ -5923,6 +5924,7 @@ def set_override(*, ticker: str, action: str, updated_by: str | None = None) -> 
 
 
 def _main() -> None:
+    argv = ["refresh-holdings" if token == "refresh-coatue-holdings" else token for token in sys.argv[1:]]
     parser = argparse.ArgumentParser("spclaw-market-daily")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -5940,7 +5942,7 @@ def _main() -> None:
 
     sub.add_parser("status")
     sub.add_parser("holdings")
-    sub.add_parser("refresh-coatue-holdings")
+    sub.add_parser("refresh-holdings")
 
     incl = sub.add_parser("include")
     incl.add_argument("ticker")
@@ -5952,7 +5954,7 @@ def _main() -> None:
     dbg.add_argument("ticker")
     dbg.add_argument("--slot", choices=("open", "close"), default="open")
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.cmd == "run-once":
         result = run_once(
             manual=bool(args.manual),
@@ -5971,7 +5973,7 @@ def _main() -> None:
         result = status()
     elif args.cmd == "holdings":
         result = holdings()
-    elif args.cmd == "refresh-coatue-holdings":
+    elif args.cmd in {"refresh-holdings", "refresh-coatue-holdings"}:
         result = refresh_coatue_holdings()
     elif args.cmd == "include":
         result = set_override(ticker=args.ticker, action="include")
