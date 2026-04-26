@@ -3144,3 +3144,19 @@ Then confirm bot returns:
 - Manual validation still required:
   - run `@SPClaw hfa analyze` in a Slack thread containing a PDF,
   - then verify `hf_run_inputs.local_path` points under `/opt/spclaw-data/kb/sources/...`.
+
+## Update (2026-04-26, DevBuzzAgent v1 implementation)
+- Added DevBuzzAgent for daily X-only tech/news collection and LLM-curated weekly Slack digest.
+- New runtime surfaces:
+  - CLI: `claw dev-buzz status|collect|publish|shortlist|add-source|remove-source|add-keyword|remove-keyword|pin|drop|explain`
+  - Slack: `dev buzz ...` controls for status, shortlist, manual collect, dry run, publish, source/keyword edits, pin/drop/explain.
+  - Scheduler: daily collector at 12:00 PT and Friday publisher at 16:00 PT.
+- Storage/artifacts:
+  - SQLite: `/opt/spclaw-data/db/dev_buzz.sqlite`
+  - Markdown artifacts: `/opt/spclaw-data/artifacts/dev-buzz/`
+- Validation status from laptop repo:
+  - focused tests added in `tests/test_dev_buzz.py`
+  - launchd tests updated for DevBuzz services.
+  - `PYTHONPATH=src python3 -m pytest -q` -> `349 passed, 1 skipped`.
+- Operational next steps:
+  - deploy to `/opt/spclaw`, run focused tests, restart OpenClaw, then verify Slack status and a `dev buzz status` command.

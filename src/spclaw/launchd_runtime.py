@@ -18,6 +18,8 @@ EMAIL_LABEL = "com.spclaw.email-gateway"
 MEMORY_PRUNE_LABEL = "com.spclaw.memory-prune"
 MEMORY_RECONCILE_LABEL = "com.spclaw.memory-reconcile-export"
 X_CHART_LABEL = "com.spclaw.x-chart-daily"
+DEV_BUZZ_COLLECTOR_LABEL = "com.spclaw.dev-buzz-collector"
+DEV_BUZZ_PUBLISHER_LABEL = "com.spclaw.dev-buzz-publisher"
 SPENCER_CHANGE_DIGEST_LABEL = "com.spclaw.spencer-change-digest"
 BOARD_SEAT_DAILY_LABEL = "com.spclaw.board-seat-daily"
 MARKET_DAILY_LABEL = "com.spclaw.market-daily"
@@ -89,6 +91,32 @@ def _spencer_digest_schedule() -> list[dict[str, int]]:
     if not (0 <= hour <= 23 and 0 <= minute <= 59):
         return [{"Hour": 18, "Minute": 0}]
     return [{"Hour": hour, "Minute": minute}]
+
+
+def _dev_buzz_collect_schedule() -> list[dict[str, int]]:
+    raw = (os.environ.get("SPCLAW_DEV_BUZZ_COLLECT_TIME", "12:00") or "").strip()
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})", raw)
+    if not m:
+        hour, minute = 12, 0
+    else:
+        hour = int(m.group(1))
+        minute = int(m.group(2))
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            hour, minute = 12, 0
+    return [{"Hour": hour, "Minute": minute}]
+
+
+def _dev_buzz_publish_schedule() -> list[dict[str, int]]:
+    raw = (os.environ.get("SPCLAW_DEV_BUZZ_PUBLISH_TIME", "16:00") or "").strip()
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})", raw)
+    if not m:
+        hour, minute = 16, 0
+    else:
+        hour = int(m.group(1))
+        minute = int(m.group(2))
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            hour, minute = 16, 0
+    return [{"Weekday": 5, "Hour": hour, "Minute": minute}]
 
 
 def _board_seat_schedule() -> list[dict[str, int]]:
@@ -219,6 +247,30 @@ def _service_specs() -> dict[str, dict[str, Any]]:
         "EnvironmentVariables": _runtime_env(),
     }
 
+    dev_buzz_collector = {
+        "Label": DEV_BUZZ_COLLECTOR_LABEL,
+        "ProgramArguments": [python_bin, "-m", "spclaw.dev_buzz", "collect"],
+        "WorkingDirectory": str(repo),
+        "RunAtLoad": False,
+        "StartCalendarInterval": _dev_buzz_collect_schedule(),
+        "ProcessType": "Background",
+        "StandardOutPath": str(logs_dir / "dev-buzz-collector.stdout.log"),
+        "StandardErrorPath": str(logs_dir / "dev-buzz-collector.stderr.log"),
+        "EnvironmentVariables": _runtime_env(),
+    }
+
+    dev_buzz_publisher = {
+        "Label": DEV_BUZZ_PUBLISHER_LABEL,
+        "ProgramArguments": [python_bin, "-m", "spclaw.dev_buzz", "publish"],
+        "WorkingDirectory": str(repo),
+        "RunAtLoad": False,
+        "StartCalendarInterval": _dev_buzz_publish_schedule(),
+        "ProcessType": "Background",
+        "StandardOutPath": str(logs_dir / "dev-buzz-publisher.stdout.log"),
+        "StandardErrorPath": str(logs_dir / "dev-buzz-publisher.stderr.log"),
+        "EnvironmentVariables": _runtime_env(),
+    }
+
     board_seat = {
         "Label": BOARD_SEAT_DAILY_LABEL,
         "ProgramArguments": [python_bin, "-m", "spclaw.board_seat_daily", "run-once"],
@@ -272,6 +324,8 @@ def _service_specs() -> dict[str, dict[str, Any]]:
         MEMORY_PRUNE_LABEL: prune,
         MEMORY_RECONCILE_LABEL: memory_reconcile,
         X_CHART_LABEL: x_chart,
+        DEV_BUZZ_COLLECTOR_LABEL: dev_buzz_collector,
+        DEV_BUZZ_PUBLISHER_LABEL: dev_buzz_publisher,
         BOARD_SEAT_DAILY_LABEL: board_seat,
         SPENCER_CHANGE_DIGEST_LABEL: spencer_digest,
         MARKET_DAILY_LABEL: market_daily,
@@ -444,6 +498,8 @@ def _resolve_services(raw: str) -> list[str]:
             MEMORY_PRUNE_LABEL,
             MEMORY_RECONCILE_LABEL,
             X_CHART_LABEL,
+            DEV_BUZZ_COLLECTOR_LABEL,
+            DEV_BUZZ_PUBLISHER_LABEL,
             SPENCER_CHANGE_DIGEST_LABEL,
             BOARD_SEAT_DAILY_LABEL,
             MARKET_DAILY_LABEL,
@@ -457,6 +513,8 @@ def _resolve_services(raw: str) -> list[str]:
         return [MEMORY_RECONCILE_LABEL]
     if value in {"x", "xchart", "chart", "x-chart"}:
         return [X_CHART_LABEL]
+    if value in {"devbuzz", "dev-buzz", "db"}:
+        return [DEV_BUZZ_COLLECTOR_LABEL, DEV_BUZZ_PUBLISHER_LABEL]
     if value in {"spencer", "spencer-digest", "changes"}:
         return [SPENCER_CHANGE_DIGEST_LABEL]
     if value in {"boardseat", "board-seat", "bs"}:
@@ -475,7 +533,7 @@ def main() -> None:
         cmd.add_argument(
             "--service",
             default="all",
-            choices=["all", "email", "memory", "memoryreconcile", "xchart", "spencer", "boardseat", "marketdaily"],
+            choices=["all", "email", "memory", "memoryreconcile", "xchart", "devbuzz", "spencer", "boardseat", "marketdaily"],
         )  # simplified UX
         if name == "disable":
             cmd.add_argument("--remove-plists", action="store_true")

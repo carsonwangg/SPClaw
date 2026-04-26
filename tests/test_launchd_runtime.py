@@ -47,6 +47,16 @@ def test_service_specs_build_expected_commands(tmp_path: Path, monkeypatch) -> N
     assert x_chart["RunAtLoad"] is True
     assert x_chart["StartInterval"] == 3600
 
+    dev_buzz_collector = specs[launchd_runtime.DEV_BUZZ_COLLECTOR_LABEL]
+    assert dev_buzz_collector["ProgramArguments"] == ["/tmp/python", "-m", "spclaw.dev_buzz", "collect"]
+    assert dev_buzz_collector["RunAtLoad"] is False
+    assert dev_buzz_collector["StartCalendarInterval"] == [{"Hour": 12, "Minute": 0}]
+
+    dev_buzz_publisher = specs[launchd_runtime.DEV_BUZZ_PUBLISHER_LABEL]
+    assert dev_buzz_publisher["ProgramArguments"] == ["/tmp/python", "-m", "spclaw.dev_buzz", "publish"]
+    assert dev_buzz_publisher["RunAtLoad"] is False
+    assert dev_buzz_publisher["StartCalendarInterval"] == [{"Weekday": 5, "Hour": 16, "Minute": 0}]
+
     spencer = specs[launchd_runtime.SPENCER_CHANGE_DIGEST_LABEL]
     assert spencer["ProgramArguments"] == ["/tmp/python", "-m", "spclaw.spencer_change_digest", "run-once"]
     assert spencer["RunAtLoad"] is False
@@ -107,6 +117,8 @@ def test_write_service_plists(tmp_path: Path, monkeypatch) -> None:
         launchd_runtime.MEMORY_PRUNE_LABEL,
         launchd_runtime.MEMORY_RECONCILE_LABEL,
         launchd_runtime.X_CHART_LABEL,
+        launchd_runtime.DEV_BUZZ_COLLECTOR_LABEL,
+        launchd_runtime.DEV_BUZZ_PUBLISHER_LABEL,
         launchd_runtime.SPENCER_CHANGE_DIGEST_LABEL,
         launchd_runtime.BOARD_SEAT_DAILY_LABEL,
         launchd_runtime.MARKET_DAILY_LABEL,
@@ -126,6 +138,8 @@ def test_resolve_services() -> None:
         launchd_runtime.MEMORY_PRUNE_LABEL,
         launchd_runtime.MEMORY_RECONCILE_LABEL,
         launchd_runtime.X_CHART_LABEL,
+        launchd_runtime.DEV_BUZZ_COLLECTOR_LABEL,
+        launchd_runtime.DEV_BUZZ_PUBLISHER_LABEL,
         launchd_runtime.SPENCER_CHANGE_DIGEST_LABEL,
         launchd_runtime.BOARD_SEAT_DAILY_LABEL,
         launchd_runtime.MARKET_DAILY_LABEL,
@@ -135,6 +149,10 @@ def test_resolve_services() -> None:
     assert launchd_runtime._resolve_services("memory") == [launchd_runtime.MEMORY_PRUNE_LABEL]
     assert launchd_runtime._resolve_services("memoryreconcile") == [launchd_runtime.MEMORY_RECONCILE_LABEL]
     assert launchd_runtime._resolve_services("xchart") == [launchd_runtime.X_CHART_LABEL]
+    assert launchd_runtime._resolve_services("devbuzz") == [
+        launchd_runtime.DEV_BUZZ_COLLECTOR_LABEL,
+        launchd_runtime.DEV_BUZZ_PUBLISHER_LABEL,
+    ]
     assert launchd_runtime._resolve_services("spencer") == [launchd_runtime.SPENCER_CHANGE_DIGEST_LABEL]
     assert launchd_runtime._resolve_services("boardseat") == [launchd_runtime.BOARD_SEAT_DAILY_LABEL]
     assert launchd_runtime._resolve_services("marketdaily") == [
@@ -157,6 +175,13 @@ def test_market_daily_schedule_env_override(monkeypatch) -> None:
         {"Weekday": 5, "Hour": 8, "Minute": 5},
         {"Weekday": 5, "Hour": 15, "Minute": 40},
     ]
+
+
+def test_dev_buzz_schedule_env_override(monkeypatch) -> None:
+    monkeypatch.setenv("SPCLAW_DEV_BUZZ_COLLECT_TIME", "11:30")
+    monkeypatch.setenv("SPCLAW_DEV_BUZZ_PUBLISH_TIME", "15:45")
+    assert launchd_runtime._dev_buzz_collect_schedule() == [{"Hour": 11, "Minute": 30}]
+    assert launchd_runtime._dev_buzz_publish_schedule() == [{"Weekday": 5, "Hour": 15, "Minute": 45}]
 
 
 def test_board_seat_schedule_env_override_weekday(monkeypatch) -> None:

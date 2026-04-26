@@ -1,4 +1,4 @@
-.PHONY: openclaw-status openclaw-restart openclaw-logs openclaw-dev openclaw-bot-status openclaw-bot-logs openclaw-schedulers-status openclaw-slack-status openclaw-slack-logs openclaw-slack-probe openclaw-slack-audit openclaw-memory-status openclaw-memory-prune openclaw-memory-extract-daily openclaw-memory-reconcile-status openclaw-memory-reconcile-export openclaw-files-init openclaw-files-status openclaw-files-index openclaw-files-sync-pull openclaw-files-sync-push openclaw-files-sync openclaw-email-status openclaw-email-run-once openclaw-email-serve openclaw-x-chart-status openclaw-x-chart-run-once openclaw-x-chart-sources openclaw-x-chart-add-source openclaw-spencer-digest-status openclaw-spencer-digest-run-once openclaw-board-seat-status openclaw-board-seat-run-once openclaw-board-seat-refresh-funding openclaw-board-seat-funding-report openclaw-market-daily-status openclaw-market-daily-run-once openclaw-market-daily-refresh-holdings openclaw-market-daily-earnings-recap-run-once openclaw-24x7-enable openclaw-24x7-status openclaw-24x7-disable valuation-chart
+.PHONY: openclaw-status openclaw-restart openclaw-logs openclaw-dev openclaw-bot-status openclaw-bot-logs openclaw-schedulers-status openclaw-slack-status openclaw-slack-logs openclaw-slack-probe openclaw-slack-audit openclaw-memory-status openclaw-memory-prune openclaw-memory-extract-daily openclaw-memory-reconcile-status openclaw-memory-reconcile-export openclaw-files-init openclaw-files-status openclaw-files-index openclaw-files-sync-pull openclaw-files-sync-push openclaw-files-sync openclaw-email-status openclaw-email-run-once openclaw-email-serve openclaw-x-chart-status openclaw-x-chart-run-once openclaw-x-chart-sources openclaw-x-chart-add-source openclaw-dev-buzz-status openclaw-dev-buzz-collect openclaw-dev-buzz-publish-dry-run openclaw-dev-buzz-publish-force openclaw-spencer-digest-status openclaw-spencer-digest-run-once openclaw-board-seat-status openclaw-board-seat-run-once openclaw-board-seat-refresh-funding openclaw-board-seat-funding-report openclaw-market-daily-status openclaw-market-daily-run-once openclaw-market-daily-refresh-holdings openclaw-market-daily-earnings-recap-run-once openclaw-24x7-enable openclaw-24x7-status openclaw-24x7-disable valuation-chart
 
 export PATH := /opt/homebrew/bin:$(PATH)
 OPENCLAW ?= $(shell command -v openclaw 2>/dev/null || echo /opt/homebrew/bin/openclaw)
@@ -90,6 +90,18 @@ openclaw-x-chart-sources:
 
 openclaw-x-chart-add-source:
 	/opt/spclaw/.venv/bin/python -m spclaw.x_chart_daily add-source $(HANDLE) --priority $(or $(PRIORITY),1.0)
+
+openclaw-dev-buzz-status:
+	/opt/spclaw/.venv/bin/python -m spclaw.dev_buzz status
+
+openclaw-dev-buzz-collect:
+	/opt/spclaw/.venv/bin/python -m spclaw.dev_buzz collect --manual
+
+openclaw-dev-buzz-publish-dry-run:
+	/opt/spclaw/.venv/bin/python -m spclaw.dev_buzz publish --dry-run --force
+
+openclaw-dev-buzz-publish-force:
+	/opt/spclaw/.venv/bin/python -m spclaw.dev_buzz publish --force
 
 openclaw-spencer-digest-status:
 	/opt/spclaw/.venv/bin/python -m spclaw.spencer_change_digest status

@@ -20,6 +20,19 @@ from spclaw.chart_intent import parse_chart_intent
 from spclaw.chart_metrics import METRIC_SPECS, metric_label
 from spclaw.chart_title_context import infer_chart_title_context
 from spclaw.cli import run_diligence
+from spclaw.dev_buzz import DevBuzzError
+from spclaw.dev_buzz import add_keyword as dev_buzz_add_keyword
+from spclaw.dev_buzz import add_source as dev_buzz_add_source
+from spclaw.dev_buzz import collect as dev_buzz_collect
+from spclaw.dev_buzz import drop as dev_buzz_drop
+from spclaw.dev_buzz import explain as dev_buzz_explain
+from spclaw.dev_buzz import format_shortlist as dev_buzz_format_shortlist
+from spclaw.dev_buzz import pin as dev_buzz_pin
+from spclaw.dev_buzz import publish as dev_buzz_publish
+from spclaw.dev_buzz import remove_keyword as dev_buzz_remove_keyword
+from spclaw.dev_buzz import remove_source as dev_buzz_remove_source
+from spclaw.dev_buzz import shortlist as dev_buzz_shortlist
+from spclaw.dev_buzz import status as dev_buzz_status
 from spclaw.hf_analyst import HFAError, analyze_podcast_url as run_hfa_podcast
 from spclaw.hf_analyst import analyze_thread as run_hfa_thread
 from spclaw.hf_analyst import extract_youtube_urls
@@ -54,6 +67,7 @@ from spclaw.spencer_change_log import (
 )
 from spclaw.slack_channel_access import channels_to_join, parse_created_channel_id
 from spclaw.slack_config_intent import parse_config_intent
+from spclaw.slack_dev_buzz_intent import parse_dev_buzz_intent
 from spclaw.slack_file_ingest import ingest_slack_files
 from spclaw.slack_pipeline import (
     PipelineError,
@@ -1412,6 +1426,134 @@ def _handle_x_digest_command(*, text: str, channel: str | None, thread_ts: str, 
     return True
 
 
+def _handle_dev_buzz_command(*, text: str, channel: str | None, thread_ts: str, say) -> bool:
+    intent = parse_dev_buzz_intent(text)
+    if intent is None:
+        return False
+
+    try:
+        if intent.kind == "help":
+            say(
+                text=(
+                    "Dev Buzz commands:\n"
+                    "- `dev buzz status`\n"
+                    "- `dev buzz shortlist`\n"
+                    "- `dev buzz collect now`\n"
+                    "- `dev buzz dry run`\n"
+                    "- `dev buzz publish now`\n"
+                    "- `dev buzz add source @handle` / `dev buzz remove source @handle`\n"
+                    "- `dev buzz add keyword <query>` / `dev buzz remove keyword <query>`\n"
+                    "- `dev buzz pin <item_id>` / `dev buzz drop <item_id>`\n"
+                    "- `dev buzz explain <item_id>`"
+                ),
+                thread_ts=thread_ts,
+            )
+            return True
+        if intent.kind == "status":
+            payload = dev_buzz_status()
+            say(
+                text=(
+                    "Dev Buzz status:\n"
+                    f"- items: `{payload['items']}` observations: `{payload['observations']}` shortlist: `{payload['shortlist_items']}`\n"
+                    f"- sources: `{payload['active_sources']}` keywords: `{payload['active_keywords']}`\n"
+                    f"- schedule: daily `{payload['daily_collect_time']}` PT, Friday `{payload['weekly_publish_time']}` PT\n"
+                    f"- channel: `{payload['slack_channel']}` model: `{payload['model']}`\n"
+                    f"- db: `{payload['db_path']}`"
+                ),
+                thread_ts=thread_ts,
+            )
+            return True
+        if intent.kind == "shortlist":
+            payload = dev_buzz_shortlist(limit=10)
+            say(text=dev_buzz_format_shortlist(payload.get("items", [])), thread_ts=thread_ts)
+            return True
+        if intent.kind == "collect":
+            say(text="Running Dev Buzz collection + LLM editor pass now...", thread_ts=thread_ts)
+            payload = dev_buzz_collect(manual=True)
+            say(
+                text=(
+                    "Dev Buzz collection complete:\n"
+                    f"- queries: `{payload['queries']}`\n"
+                    f"- observations inserted: `{payload['observations_inserted']}`\n"
+                    f"- editor mode: `{payload['editor_mode']}`\n"
+                    f"- snapshot: `{payload['snapshot_id']}`"
+                ),
+                thread_ts=thread_ts,
+            )
+            return True
+        if intent.kind == "publish_dry_run":
+            payload = dev_buzz_publish(dry_run=True, force=True, channel_override=channel)
+            say(
+                text=(
+                    "Dev Buzz dry-run generated:\n"
+                    f"- artifact: `{payload['artifact_path']}`\n\n"
+                    f"{payload.get('preview') or ''}"
+                ),
+                thread_ts=thread_ts,
+            )
+            return True
+        if intent.kind == "publish_force":
+            payload = dev_buzz_publish(dry_run=False, force=True, channel_override=channel)
+            say(
+                text=(
+                    "Dev Buzz published:\n"
+                    f"- channel: `{payload['channel']}`\n"
+                    f"- artifact: `{payload['artifact_path']}`"
+                ),
+                thread_ts=thread_ts,
+            )
+            return True
+        if intent.kind == "add_source":
+            payload = dev_buzz_add_source(intent.value or "")
+            say(text=f"Dev Buzz source added: `@{payload['handle']}`", thread_ts=thread_ts)
+            return True
+        if intent.kind == "remove_source":
+            payload = dev_buzz_remove_source(intent.value or "")
+            say(text=f"Dev Buzz source removed: `@{payload['handle']}`", thread_ts=thread_ts)
+            return True
+        if intent.kind == "add_keyword":
+            payload = dev_buzz_add_keyword(intent.value or "")
+            say(text=f"Dev Buzz keyword added: `{payload['keyword']}`", thread_ts=thread_ts)
+            return True
+        if intent.kind == "remove_keyword":
+            payload = dev_buzz_remove_keyword(intent.value or "")
+            say(text=f"Dev Buzz keyword removed: `{payload['keyword']}`", thread_ts=thread_ts)
+            return True
+        if intent.kind == "pin":
+            payload = dev_buzz_pin(intent.value or "")
+            say(text=f"Dev Buzz item pinned: `{payload['item_id']}`", thread_ts=thread_ts)
+            return True
+        if intent.kind == "drop":
+            payload = dev_buzz_drop(intent.value or "")
+            say(text=f"Dev Buzz item dropped for this week: `{payload['item_id']}`", thread_ts=thread_ts)
+            return True
+        if intent.kind == "explain":
+            payload = dev_buzz_explain(intent.value or "")
+            item = payload["item"]
+            headline = item.get("headline") or item.get("top_text") or item.get("item_id")
+            say(
+                text=(
+                    f"*{headline}*\n"
+                    f"- item_id: `{item.get('item_id')}`\n"
+                    f"- rank: `{item.get('editorial_rank') or '-'}` confidence: `{item.get('confidence') or '-'}`\n"
+                    f"- why: {item.get('why_matters') or 'n/a'}\n"
+                    f"- rationale: {item.get('rationale') or 'n/a'}\n"
+                    f"- source: {item.get('top_x_url') or 'n/a'}"
+                ),
+                thread_ts=thread_ts,
+            )
+            return True
+    except DevBuzzError as exc:
+        say(text=f"Dev Buzz failed: {exc}", thread_ts=thread_ts)
+        return True
+    except Exception:
+        logger.exception("Unexpected Dev Buzz command failure")
+        say(text="Dev Buzz failed unexpectedly. Check bot logs for details.", thread_ts=thread_ts)
+        return True
+
+    return False
+
+
 def _handle_market_daily_command(*, text: str, channel: str | None, thread_ts: str, say) -> bool:
     stripped = _strip_slack_mentions(text).strip()
     lower = stripped.lower()
@@ -2336,6 +2478,10 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
 
     if _handle_x_digest_command(text=text, channel=channel, thread_ts=thread_ts, say=say):
         _mark_spencer_change(change_id, status="implemented", note="Handled by X digest workflow.")
+        return
+
+    if _handle_dev_buzz_command(text=text, channel=channel, thread_ts=thread_ts, say=say):
+        _mark_spencer_change(change_id, status="implemented", note="Handled by Dev Buzz workflow.")
         return
 
     if _handle_market_daily_command(text=text, channel=channel, thread_ts=thread_ts, say=say):

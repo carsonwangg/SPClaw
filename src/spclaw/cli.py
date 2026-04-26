@@ -8,6 +8,17 @@ import json
 import sys
 
 from spclaw.chart_metrics import DEFAULT_X_METRIC, DEFAULT_Y_METRIC, METRIC_SPECS
+from spclaw.dev_buzz import add_keyword as dev_buzz_add_keyword
+from spclaw.dev_buzz import add_source as dev_buzz_add_source
+from spclaw.dev_buzz import collect as dev_buzz_collect
+from spclaw.dev_buzz import drop as dev_buzz_drop
+from spclaw.dev_buzz import explain as dev_buzz_explain
+from spclaw.dev_buzz import pin as dev_buzz_pin
+from spclaw.dev_buzz import publish as dev_buzz_publish
+from spclaw.dev_buzz import remove_keyword as dev_buzz_remove_keyword
+from spclaw.dev_buzz import remove_source as dev_buzz_remove_source
+from spclaw.dev_buzz import shortlist as dev_buzz_shortlist
+from spclaw.dev_buzz import status as dev_buzz_status
 from spclaw.diligence_report import build_neutral_investment_memo
 from spclaw.hf_analyst import analyze_podcast_url as hfa_analyze_podcast_url
 from spclaw.hf_analyst import analyze_thread as hfa_analyze_thread
@@ -267,6 +278,52 @@ def _run_hfa_command(args) -> None:
         return
 
 
+def _run_dev_buzz_command(args) -> None:
+    if args.dev_buzz_cmd == "status":
+        print(json.dumps(dev_buzz_status(), indent=2, sort_keys=True))
+        return
+    if args.dev_buzz_cmd == "collect":
+        print(json.dumps(dev_buzz_collect(manual=bool(args.manual)), indent=2, sort_keys=True))
+        return
+    if args.dev_buzz_cmd == "publish":
+        print(
+            json.dumps(
+                dev_buzz_publish(
+                    dry_run=bool(args.dry_run),
+                    force=bool(args.force),
+                    channel_override=(str(args.channel).strip() or None),
+                ),
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return
+    if args.dev_buzz_cmd == "shortlist":
+        print(json.dumps(dev_buzz_shortlist(limit=max(1, min(100, int(args.limit)))), indent=2, sort_keys=True))
+        return
+    if args.dev_buzz_cmd == "add-source":
+        print(json.dumps(dev_buzz_add_source(args.handle), indent=2, sort_keys=True))
+        return
+    if args.dev_buzz_cmd == "remove-source":
+        print(json.dumps(dev_buzz_remove_source(args.handle), indent=2, sort_keys=True))
+        return
+    if args.dev_buzz_cmd == "add-keyword":
+        print(json.dumps(dev_buzz_add_keyword(args.keyword), indent=2, sort_keys=True))
+        return
+    if args.dev_buzz_cmd == "remove-keyword":
+        print(json.dumps(dev_buzz_remove_keyword(args.keyword), indent=2, sort_keys=True))
+        return
+    if args.dev_buzz_cmd == "pin":
+        print(json.dumps(dev_buzz_pin(args.item_id), indent=2, sort_keys=True))
+        return
+    if args.dev_buzz_cmd == "drop":
+        print(json.dumps(dev_buzz_drop(args.item_id), indent=2, sort_keys=True))
+        return
+    if args.dev_buzz_cmd == "explain":
+        print(json.dumps(dev_buzz_explain(args.item_id), indent=2, sort_keys=True))
+        return
+
+
 def main():
     argv = ["refresh-holdings" if token == "refresh-coatue-holdings" else token for token in sys.argv[1:]]
     parser = argparse.ArgumentParser("spclaw")
@@ -315,6 +372,32 @@ def main():
     x.add_argument("query", help="Topic, ticker, handle, or boolean query")
     x.add_argument("--hours", type=int, default=24, help="Lookback window in hours (1-168)")
     x.add_argument("--limit", type=int, default=50, help="X API max results (10-100)")
+
+    db = sub.add_parser("dev-buzz")
+    db_sub = db.add_subparsers(dest="dev_buzz_cmd", required=True)
+    db_sub.add_parser("status")
+    dbc = db_sub.add_parser("collect")
+    dbc.add_argument("--manual", action="store_true")
+    dbp = db_sub.add_parser("publish")
+    dbp.add_argument("--dry-run", action="store_true")
+    dbp.add_argument("--force", action="store_true")
+    dbp.add_argument("--channel", default="")
+    dbl = db_sub.add_parser("shortlist")
+    dbl.add_argument("--limit", type=int, default=10)
+    dbas = db_sub.add_parser("add-source")
+    dbas.add_argument("handle")
+    dbrs = db_sub.add_parser("remove-source")
+    dbrs.add_argument("handle")
+    dbak = db_sub.add_parser("add-keyword")
+    dbak.add_argument("keyword")
+    dbrk = db_sub.add_parser("remove-keyword")
+    dbrk.add_argument("keyword")
+    dbpin = db_sub.add_parser("pin")
+    dbpin.add_argument("item_id")
+    dbdrop = db_sub.add_parser("drop")
+    dbdrop.add_argument("item_id")
+    dbexp = db_sub.add_parser("explain")
+    dbexp.add_argument("item_id")
 
     xc = sub.add_parser("x-chart")
     xc_sub = xc.add_subparsers(dest="x_chart_cmd", required=True)
@@ -424,6 +507,10 @@ def main():
             print(f"top_post: {result.top_post_url}")
         print(f"generated_at_utc: {result.generated_at_utc}")
         print(f"report: {result.output_path}")
+        return
+
+    if args.cmd == "dev-buzz":
+        _run_dev_buzz_command(args)
         return
 
     if args.cmd == "x-chart":
