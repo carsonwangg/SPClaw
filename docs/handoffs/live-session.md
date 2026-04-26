@@ -3154,9 +3154,18 @@ Then confirm bot returns:
 - Storage/artifacts:
   - SQLite: `/opt/spclaw-data/db/dev_buzz.sqlite`
   - Markdown artifacts: `/opt/spclaw-data/artifacts/dev-buzz/`
-- Validation status from laptop repo:
+- Validation:
   - focused tests added in `tests/test_dev_buzz.py`
   - launchd tests updated for DevBuzz services.
   - `PYTHONPATH=src python3 -m pytest -q` -> `349 passed, 1 skipped`.
+- Deployment:
+  - Pushed commit `086eda6` to `origin/main`.
+  - Pulled on mini `/opt/spclaw`, restarted OpenClaw, and Slack probe is healthy.
+  - Mini focused validation with Board Seat env defaults pinned: `18 passed`.
+  - Enabled launchd services:
+    - `com.spclaw.dev-buzz-collector`
+    - `com.spclaw.dev-buzz-publisher`
+  - `make openclaw-dev-buzz-status` shows DB/artifact paths healthy with default schedule `12:00` daily and Friday `16:00`.
 - Operational next steps:
-  - deploy to `/opt/spclaw`, run focused tests, restart OpenClaw, then verify Slack status and a `dev buzz status` command.
+  - In Slack, run `dev buzz status` for an end-user command smoke.
+  - First autonomous collection should occur at the next 12:00 PT launchd window.

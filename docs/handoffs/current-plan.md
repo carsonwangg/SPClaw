@@ -1584,7 +1584,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - verify `hf_run_inputs.local_path` uses KB paths.
 
 ## DevBuzzAgent Weekly X Digest (2026-04-26)
-- Status: implemented in laptop repo, pending mini deploy/restart.
+- Status: deployed on mini and scheduler services enabled.
 - Goal:
   - Daily 12 PM PT collection of buzzy tech/dev-related X discussion.
   - LLM-curated living shortlist with stored rationale.
@@ -1597,5 +1597,7 @@ Build a 24/7 equity research bot (Slack-first) that runs natively on OpenClaw as
   - Added focused tests for parsing, dedupe, editorial fallback, pin/drop, dry-run artifact, Slack command parsing, and scheduler shape.
 - Next:
   - Validation complete: `PYTHONPATH=src python3 -m pytest -q` -> `349 passed, 1 skipped`.
-  - Commit/push.
-  - Deploy to `/opt/spclaw`, restart OpenClaw, verify `dev buzz status` in Slack.
+  - Mini focused validation complete: `18 passed`.
+  - Pulled on `/opt/spclaw`, restarted OpenClaw, Slack probe healthy.
+  - Enabled `com.spclaw.dev-buzz-collector` and `com.spclaw.dev-buzz-publisher`.
+  - Remaining manual smoke: run `dev buzz status` in Slack.
