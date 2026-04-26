@@ -17,7 +17,7 @@ def _now_utc_iso() -> str:
 
 
 def _default_config_path() -> Path:
-    return Path(os.environ.get("COATUE_CLAW_FILE_BRIDGE_CONFIG", "/opt/coatue-claw/config/file-bridge.json"))
+    return Path(os.environ.get("SPCLAW_FILE_BRIDGE_CONFIG", "/opt/spclaw/config/file-bridge.json"))
 
 
 @dataclass(frozen=True)
@@ -89,13 +89,13 @@ def load_config(path: Path | None = None) -> FileBridgeConfig:
     rclone_raw = payload.get("rclone") or {}
 
     local = LocalPaths(
-        working=_as_path(local_raw.get("working", "/opt/coatue-claw-data/files/working")),
-        archive=_as_path(local_raw.get("archive", "/opt/coatue-claw-data/files/archive")),
-        published=_as_path(local_raw.get("published", "/opt/coatue-claw-data/files/published")),
-        incoming=_as_path(local_raw.get("incoming", "/opt/coatue-claw-data/files/incoming")),
+        working=_as_path(local_raw.get("working", "/opt/spclaw-data/files/working")),
+        archive=_as_path(local_raw.get("archive", "/opt/spclaw-data/files/archive")),
+        published=_as_path(local_raw.get("published", "/opt/spclaw-data/files/published")),
+        incoming=_as_path(local_raw.get("incoming", "/opt/spclaw-data/files/incoming")),
     )
 
-    drive_root = _as_path(drive_raw.get("root", "/opt/coatue-claw-data/files/drive-share"))
+    drive_root = _as_path(drive_raw.get("root", "/opt/spclaw-data/files/drive-share"))
     drive = DrivePaths(
         root=drive_root,
         latest=drive_root / str(drive_raw.get("latest", "Latest")),
@@ -315,7 +315,7 @@ def build_index(config: FileBridgeConfig) -> dict[str, Any]:
         handle.write("\n")
 
     lines = [
-        "# Coatue Claw Published Files Index",
+        "# SPClaw Published Files Index",
         "",
         f"- generated_at_utc: `{payload['generated_at_utc']}`",
         f"- published_root: `{payload['published_root']}`",
@@ -399,7 +399,7 @@ def status(config: FileBridgeConfig) -> dict[str, Any]:
 
 
 def run_cli(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser("coatue-claw-file-bridge")
+    parser = argparse.ArgumentParser("spclaw-file-bridge")
     parser.add_argument("--config", default=None, help="Path to file bridge JSON config")
     sub = parser.add_subparsers(dest="cmd", required=True)
 

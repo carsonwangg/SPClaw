@@ -8,7 +8,7 @@ import types
 
 import pytest
 
-from coatue_claw.x_chart_daily import (
+from spclaw.x_chart_daily import (
     Candidate,
     RebuiltBars,
     StyleDraft,
@@ -57,7 +57,7 @@ from coatue_claw.x_chart_daily import (
 @pytest.fixture(autouse=True)
 def _default_chart_reconstructable(monkeypatch) -> None:
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._has_reconstructable_chart_data",
+        "spclaw.x_chart_daily._has_reconstructable_chart_data",
         lambda _candidate: True,
     )
 
@@ -86,7 +86,7 @@ def test_slot_key_maps_to_latest_elapsed_window() -> None:
 
 def test_store_seeds_priority_sources(tmp_path: Path, monkeypatch) -> None:
     db = tmp_path / "x_chart.sqlite"
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(db))
+    monkeypatch.setenv("SPCLAW_X_CHART_DB_PATH", str(db))
     store = XChartStore()
     handles = {item["handle"] for item in store.list_sources(limit=200)}
     seeded = {h.lower() for h in handles}
@@ -98,16 +98,16 @@ def test_store_seeds_priority_sources(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_run_chart_scout_dry_run(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("SPCLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("SPCLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("SPCLAW_X_CHART_TIMEZONE", "UTC")
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._fetch_x_candidates_from_sources",
+        "spclaw.x_chart_daily._fetch_x_candidates_from_sources",
         lambda **kwargs: [
             Candidate(
                 candidate_key="x:1",
@@ -134,7 +134,7 @@ def test_run_chart_scout_dry_run(tmp_path: Path, monkeypatch) -> None:
                 return base
             return base.astimezone(tz)
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
+    monkeypatch.setattr("spclaw.x_chart_daily.datetime", Frozen)
 
     result = run_chart_scout_once(manual=False, dry_run=True)
     assert result["ok"] is True
@@ -144,12 +144,12 @@ def test_run_chart_scout_dry_run(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_run_chart_scout_hybrid_can_pick_open_search_candidate(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DISCOVERY_MODE", "hybrid")
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("SPCLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("SPCLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("SPCLAW_X_CHART_TIMEZONE", "UTC")
+    monkeypatch.setenv("SPCLAW_X_CHART_DISCOVERY_MODE", "hybrid")
 
     seed = Candidate(
         candidate_key="x:seed-1",
@@ -182,12 +182,12 @@ def test_run_chart_scout_hybrid_can_pick_open_search_candidate(tmp_path: Path, m
         discovered_via="open_search",
     )
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [seed])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_open_search", lambda **kwargs: [open_pick])
+    monkeypatch.setattr("spclaw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [seed])
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_x_candidates_open_search", lambda **kwargs: [open_pick])
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._select_style_draft",
+        "spclaw.x_chart_daily._select_style_draft",
         lambda _candidate: StyleDraft(
             headline="S&P 500 breadth is broadening.",
             chart_label="S&P 500 outperformers (%)",
@@ -209,7 +209,7 @@ def test_run_chart_scout_hybrid_can_pick_open_search_candidate(tmp_path: Path, m
                 return base
             return base.astimezone(tz)
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
+    monkeypatch.setattr("spclaw.x_chart_daily.datetime", Frozen)
     result = run_chart_scout_once(manual=False, dry_run=True)
     assert result["ok"] is True
     assert result["reason"] == "dry_run"
@@ -218,14 +218,14 @@ def test_run_chart_scout_hybrid_can_pick_open_search_candidate(tmp_path: Path, m
 
 
 def test_run_chart_scout_auto_adds_new_winner_source(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DISCOVERY_MODE", "open_only")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_AUTO_ADD_SOURCES", "1")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_AUTO_ADD_DAILY_CAP", "10")
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("SPCLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("SPCLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("SPCLAW_X_CHART_TIMEZONE", "UTC")
+    monkeypatch.setenv("SPCLAW_X_CHART_DISCOVERY_MODE", "open_only")
+    monkeypatch.setenv("SPCLAW_X_CHART_AUTO_ADD_SOURCES", "1")
+    monkeypatch.setenv("SPCLAW_X_CHART_AUTO_ADD_DAILY_CAP", "10")
 
     open_pick = Candidate(
         candidate_key="x:open-fresh",
@@ -243,12 +243,12 @@ def test_run_chart_scout_auto_adds_new_winner_source(tmp_path: Path, monkeypatch
         discovered_via="open_search",
     )
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_open_search", lambda **kwargs: [open_pick])
+    monkeypatch.setattr("spclaw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_x_candidates_open_search", lambda **kwargs: [open_pick])
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._select_style_draft",
+        "spclaw.x_chart_daily._select_style_draft",
         lambda _candidate: StyleDraft(
             headline="US data center power demand is accelerating.",
             chart_label="US data center power demand (TWh)",
@@ -270,7 +270,7 @@ def test_run_chart_scout_auto_adds_new_winner_source(tmp_path: Path, monkeypatch
                 return base
             return base.astimezone(tz)
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
+    monkeypatch.setattr("spclaw.x_chart_daily.datetime", Frozen)
     result = run_chart_scout_once(manual=False, dry_run=True)
     assert result["ok"] is True
     assert result["new_source_auto_added"] is True
@@ -280,12 +280,12 @@ def test_run_chart_scout_auto_adds_new_winner_source(tmp_path: Path, monkeypatch
 
 
 def test_run_chart_scout_pull_log_includes_discovery_metadata(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DISCOVERY_MODE", "hybrid")
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("SPCLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("SPCLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("SPCLAW_X_CHART_TIMEZONE", "UTC")
+    monkeypatch.setenv("SPCLAW_X_CHART_DISCOVERY_MODE", "hybrid")
 
     seed = Candidate(
         candidate_key="x:seed-meta",
@@ -318,12 +318,12 @@ def test_run_chart_scout_pull_log_includes_discovery_metadata(tmp_path: Path, mo
         discovered_via="open_search",
     )
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [seed])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_open_search", lambda **kwargs: [open_pick])
+    monkeypatch.setattr("spclaw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [seed])
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_x_candidates_open_search", lambda **kwargs: [open_pick])
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._select_style_draft",
+        "spclaw.x_chart_daily._select_style_draft",
         lambda _candidate: StyleDraft(
             headline="S&P 500 breadth is widening.",
             chart_label="S&P 500 outperformers (%)",
@@ -343,7 +343,7 @@ def test_run_chart_scout_pull_log_includes_discovery_metadata(tmp_path: Path, mo
                 return base
             return base.astimezone(tz)
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
+    monkeypatch.setattr("spclaw.x_chart_daily.datetime", Frozen)
     result = run_chart_scout_once(manual=False, dry_run=True)
     payload = json.loads(Path(result["pull_log_path"]).read_text(encoding="utf-8"))
     assert payload["seed_candidates_count"] == 1
@@ -354,11 +354,11 @@ def test_run_chart_scout_pull_log_includes_discovery_metadata(tmp_path: Path, mo
 
 
 def test_run_chart_scout_before_first_window_updates_pool(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("SPCLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("SPCLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("SPCLAW_X_CHART_TIMEZONE", "UTC")
 
     candidate = Candidate(
         candidate_key="x:pool-1",
@@ -375,9 +375,9 @@ def test_run_chart_scout_before_first_window_updates_pool(tmp_path: Path, monkey
         score=91.0,
     )
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [candidate])
+    monkeypatch.setattr("spclaw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [candidate])
 
     class Frozen(datetime):
         @classmethod
@@ -387,7 +387,7 @@ def test_run_chart_scout_before_first_window_updates_pool(tmp_path: Path, monkey
                 return base
             return base.astimezone(tz)
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
+    monkeypatch.setattr("spclaw.x_chart_daily.datetime", Frozen)
 
     result = run_chart_scout_once(manual=False, dry_run=False)
     assert result["ok"] is True
@@ -403,11 +403,11 @@ def test_run_chart_scout_before_first_window_updates_pool(tmp_path: Path, monkey
 
 
 def test_run_chart_scout_window_uses_hourly_pool_since_last_slot(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("SPCLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("SPCLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("SPCLAW_X_CHART_TIMEZONE", "UTC")
 
     high = Candidate(
         candidate_key="x:high",
@@ -453,10 +453,10 @@ def test_run_chart_scout_window_uses_hourly_pool_since_last_slot(tmp_path: Path,
             return [high]
         return [lower]
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
-    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", _fetch_candidates)
+    monkeypatch.setattr("spclaw.x_chart_daily.datetime", Frozen)
+    monkeypatch.setattr("spclaw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_x_candidates_from_sources", _fetch_candidates)
 
     posted: dict[str, str] = {}
 
@@ -465,7 +465,7 @@ def test_run_chart_scout_window_uses_hourly_pool_since_last_slot(tmp_path: Path,
         posted["candidate_url"] = candidate.url
         return {"ok": True, "channel": kwargs["channel"], "file_id": "FTEST"}
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
+    monkeypatch.setattr("spclaw.x_chart_daily._post_winner_to_slack", _fake_post)
 
     first = run_chart_scout_once(manual=False, dry_run=False, channel_override="C123")
     assert first["posted"] is False
@@ -480,11 +480,11 @@ def test_run_chart_scout_window_uses_hourly_pool_since_last_slot(tmp_path: Path,
 
 
 def test_run_chart_scout_falls_back_when_top_candidate_copy_is_bad(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("SPCLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("SPCLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("SPCLAW_X_CHART_TIMEZONE", "UTC")
 
     bad_top = Candidate(
         candidate_key="x:bad-top",
@@ -523,12 +523,12 @@ def test_run_chart_scout_falls_back_when_top_candidate_copy_is_bad(tmp_path: Pat
                 return base
             return base.astimezone(tz)
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
-    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [bad_top, good_second])
+    monkeypatch.setattr("spclaw.x_chart_daily.datetime", Frozen)
+    monkeypatch.setattr("spclaw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [bad_top, good_second])
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._rewrite_headline_from_candidate",
+        "spclaw.x_chart_daily._rewrite_headline_from_candidate",
         lambda candidate: ("", "headline_unrecoverable") if candidate.candidate_key == "x:bad-top" else ("US pending home sales are at a record low.", "headline_sentence_rewritten"),
     )
 
@@ -539,7 +539,7 @@ def test_run_chart_scout_falls_back_when_top_candidate_copy_is_bad(tmp_path: Pat
         captured["takeaway"] = kwargs["style_draft"].takeaway
         return {"ok": True, "channel": kwargs["channel"], "file_id": "FTEST"}
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
+    monkeypatch.setattr("spclaw.x_chart_daily._post_winner_to_slack", _fake_post)
 
     result = run_chart_scout_once(manual=False, dry_run=False, channel_override="C123")
     assert result["posted"] is True
@@ -549,11 +549,11 @@ def test_run_chart_scout_falls_back_when_top_candidate_copy_is_bad(tmp_path: Pat
 
 
 def test_run_chart_scout_falls_back_when_top_candidate_headline_is_incomplete(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("SPCLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("SPCLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("SPCLAW_X_CHART_TIMEZONE", "UTC")
 
     bad_top = Candidate(
         candidate_key="x:bad-headline",
@@ -592,12 +592,12 @@ def test_run_chart_scout_falls_back_when_top_candidate_headline_is_incomplete(tm
                 return base
             return base.astimezone(tz)
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
-    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [bad_top, good_second])
+    monkeypatch.setattr("spclaw.x_chart_daily.datetime", Frozen)
+    monkeypatch.setattr("spclaw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [bad_top, good_second])
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._synthesize_style_via_llm",
+        "spclaw.x_chart_daily._synthesize_style_via_llm",
         lambda candidate: (
                 {
                     "headline": "U.S. Housing Market Home Sellers now is",
@@ -613,7 +613,7 @@ def test_run_chart_scout_falls_back_when_top_candidate_headline_is_incomplete(tm
             ),
         )
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._rewrite_headline_from_candidate",
+        "spclaw.x_chart_daily._rewrite_headline_from_candidate",
         lambda candidate: ("", "headline_unrecoverable") if candidate.candidate_key == "x:bad-headline" else ("US housing sellers outnumber buyers", "headline_rewritten"),
     )
 
@@ -624,7 +624,7 @@ def test_run_chart_scout_falls_back_when_top_candidate_headline_is_incomplete(tm
         captured["headline"] = kwargs["style_draft"].headline
         return {"ok": True, "channel": kwargs["channel"], "file_id": "FTEST"}
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
+    monkeypatch.setattr("spclaw.x_chart_daily._post_winner_to_slack", _fake_post)
 
     result = run_chart_scout_once(manual=False, dry_run=False, channel_override="C123")
     assert result["posted"] is True
@@ -634,11 +634,11 @@ def test_run_chart_scout_falls_back_when_top_candidate_headline_is_incomplete(tm
 
 
 def test_run_chart_scout_falls_back_when_top_candidate_has_fragment_tail(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("SPCLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("SPCLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("SPCLAW_X_CHART_TIMEZONE", "UTC")
 
     bad_top = Candidate(
         candidate_key="x:fragment-top",
@@ -677,12 +677,12 @@ def test_run_chart_scout_falls_back_when_top_candidate_has_fragment_tail(tmp_pat
                 return base
             return base.astimezone(tz)
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
-    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [bad_top, good_second])
+    monkeypatch.setattr("spclaw.x_chart_daily.datetime", Frozen)
+    monkeypatch.setattr("spclaw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [bad_top, good_second])
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._synthesize_style_via_llm",
+        "spclaw.x_chart_daily._synthesize_style_via_llm",
         lambda candidate: (
             {
                 "headline": "US stock market futures open lower in their",
@@ -698,7 +698,7 @@ def test_run_chart_scout_falls_back_when_top_candidate_has_fragment_tail(tmp_pat
         ),
     )
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._rewrite_headline_from_candidate",
+        "spclaw.x_chart_daily._rewrite_headline_from_candidate",
         lambda candidate: ("", "headline_unrecoverable") if candidate.candidate_key == "x:fragment-top" else ("US stock futures are trending lower", "headline_rewritten"),
     )
 
@@ -710,7 +710,7 @@ def test_run_chart_scout_falls_back_when_top_candidate_has_fragment_tail(tmp_pat
         captured["takeaway"] = kwargs["style_draft"].takeaway
         return {"ok": True, "channel": kwargs["channel"], "file_id": "FTEST"}
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
+    monkeypatch.setattr("spclaw.x_chart_daily._post_winner_to_slack", _fake_post)
 
     result = run_chart_scout_once(manual=False, dry_run=False, channel_override="C123")
     assert result["posted"] is True
@@ -721,11 +721,11 @@ def test_run_chart_scout_falls_back_when_top_candidate_has_fragment_tail(tmp_pat
 
 
 def test_run_chart_scout_posts_when_headline_is_fragmentary(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("SPCLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("SPCLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("SPCLAW_X_CHART_TIMEZONE", "UTC")
 
     bad_only = Candidate(
         candidate_key="x:only-bad",
@@ -750,12 +750,12 @@ def test_run_chart_scout_posts_when_headline_is_fragmentary(tmp_path: Path, monk
                 return base
             return base.astimezone(tz)
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
-    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [bad_only])
+    monkeypatch.setattr("spclaw.x_chart_daily.datetime", Frozen)
+    monkeypatch.setattr("spclaw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [bad_only])
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._synthesize_style_via_llm",
+        "spclaw.x_chart_daily._synthesize_style_via_llm",
         lambda _candidate: {
             "headline": "U.S. Housing Market Home Sellers now is",
             "chart_label": "U.S. housing sellers versus buyers",
@@ -763,11 +763,11 @@ def test_run_chart_scout_posts_when_headline_is_fragmentary(tmp_path: Path, monk
         },
     )
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._rewrite_headline_from_candidate",
+        "spclaw.x_chart_daily._rewrite_headline_from_candidate",
         lambda _candidate: ("", "headline_unrecoverable"),
     )
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test-token")
-    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", lambda **kwargs: {"ok": True, "channel": kwargs["channel"], "file_id": "FTEST"})
+    monkeypatch.setattr("spclaw.x_chart_daily._post_winner_to_slack", lambda **kwargs: {"ok": True, "channel": kwargs["channel"], "file_id": "FTEST"})
 
     result = run_chart_scout_once(manual=False, dry_run=False, channel_override="C123")
     assert result["posted"] is True
@@ -783,8 +783,8 @@ def test_convention_name_uses_morning_afternoon_evening_windows() -> None:
 
 
 def test_pick_winner_prefers_variety_within_score_floor(monkeypatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_SOURCE_VARIETY_LOOKBACK", "6")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_SOURCE_VARIETY_SCORE_FLOOR", "0.90")
+    monkeypatch.setenv("SPCLAW_X_CHART_SOURCE_VARIETY_LOOKBACK", "6")
+    monkeypatch.setenv("SPCLAW_X_CHART_SOURCE_VARIETY_SCORE_FLOOR", "0.90")
 
     class _Store:
         def was_item_posted_recently(self, candidate_key: str, *, days: int = 30) -> bool:
@@ -832,8 +832,8 @@ def test_pick_winner_prefers_variety_within_score_floor(monkeypatch) -> None:
 
 
 def test_pick_winner_keeps_top_when_alternative_too_low(monkeypatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_SOURCE_VARIETY_LOOKBACK", "6")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_SOURCE_VARIETY_SCORE_FLOOR", "0.90")
+    monkeypatch.setenv("SPCLAW_X_CHART_SOURCE_VARIETY_LOOKBACK", "6")
+    monkeypatch.setenv("SPCLAW_X_CHART_SOURCE_VARIETY_SCORE_FLOOR", "0.90")
 
     class _Store:
         def was_item_posted_recently(self, candidate_key: str, *, days: int = 30) -> bool:
@@ -876,9 +876,9 @@ def test_pick_winner_keeps_top_when_alternative_too_low(monkeypatch) -> None:
 
 
 def test_pick_winner_enforces_source_repeat_cooldown_with_alternative(monkeypatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_SOURCE_REPEAT_DAYS", "3")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_SOURCE_VARIETY_LOOKBACK", "6")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_SOURCE_VARIETY_SCORE_FLOOR", "0.90")
+    monkeypatch.setenv("SPCLAW_X_CHART_SOURCE_REPEAT_DAYS", "3")
+    monkeypatch.setenv("SPCLAW_X_CHART_SOURCE_VARIETY_LOOKBACK", "6")
+    monkeypatch.setenv("SPCLAW_X_CHART_SOURCE_VARIETY_SCORE_FLOOR", "0.90")
     recent_iso = datetime.now(UTC).isoformat()
 
     class _Store:
@@ -925,7 +925,7 @@ def test_pick_winner_enforces_source_repeat_cooldown_with_alternative(monkeypatc
 
 
 def test_pick_winner_returns_none_when_all_sources_in_cooldown(monkeypatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_SOURCE_REPEAT_DAYS", "3")
+    monkeypatch.setenv("SPCLAW_X_CHART_SOURCE_REPEAT_DAYS", "3")
     recent_iso = datetime.now(UTC).isoformat()
 
     class _Store:
@@ -955,7 +955,7 @@ def test_pick_winner_returns_none_when_all_sources_in_cooldown(monkeypatch) -> N
 
 def test_candidate_pool_permanently_excludes_posted_candidate(tmp_path: Path, monkeypatch) -> None:
     db = tmp_path / "x_chart.sqlite"
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(db))
+    monkeypatch.setenv("SPCLAW_X_CHART_DB_PATH", str(db))
     store = XChartStore()
 
     already_posted = Candidate(
@@ -989,7 +989,7 @@ def test_candidate_pool_permanently_excludes_posted_candidate(tmp_path: Path, mo
 
     store.record_post(slot_key="manual-20260224-120000", channel="C123", candidate=already_posted)
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._has_reconstructable_chart_data",
+        "spclaw.x_chart_daily._has_reconstructable_chart_data",
         lambda candidate: candidate.candidate_key == "x:fresh-candidate",
     )
     pool = _candidate_pool_for_post(store=store, candidates=[already_posted, fresh])
@@ -998,7 +998,7 @@ def test_candidate_pool_permanently_excludes_posted_candidate(tmp_path: Path, mo
 
 def test_candidate_pool_excludes_non_chart_images_even_if_score_is_higher(tmp_path: Path, monkeypatch) -> None:
     db = tmp_path / "x_chart.sqlite"
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(db))
+    monkeypatch.setenv("SPCLAW_X_CHART_DB_PATH", str(db))
     store = XChartStore()
 
     non_chart_high = Candidate(
@@ -1031,7 +1031,7 @@ def test_candidate_pool_excludes_non_chart_images_even_if_score_is_higher(tmp_pa
     )
 
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._has_reconstructable_chart_data",
+        "spclaw.x_chart_daily._has_reconstructable_chart_data",
         lambda candidate: candidate.candidate_key == "x:actual-chart",
     )
     pool = _candidate_pool_for_post(store=store, candidates=[non_chart_high, chart_lower])
@@ -1039,12 +1039,12 @@ def test_candidate_pool_excludes_non_chart_images_even_if_score_is_higher(tmp_pa
 
 
 def test_run_chart_scout_posts_cooldown_exhaustion_notice(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_SOURCE_REPEAT_DAYS", "3")
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("SPCLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("SPCLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("SPCLAW_X_CHART_TIMEZONE", "UTC")
+    monkeypatch.setenv("SPCLAW_X_CHART_SOURCE_REPEAT_DAYS", "3")
 
     candidate = Candidate(
         candidate_key="x:cooldown-hit",
@@ -1069,10 +1069,10 @@ def test_run_chart_scout_posts_cooldown_exhaustion_notice(tmp_path: Path, monkey
                 return base
             return base.astimezone(tz)
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
-    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [candidate])
+    monkeypatch.setattr("spclaw.x_chart_daily.datetime", Frozen)
+    monkeypatch.setattr("spclaw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [candidate])
 
     store = XChartStore()
     recent_same_source = Candidate(
@@ -1097,7 +1097,7 @@ def test_run_chart_scout_posts_cooldown_exhaustion_notice(tmp_path: Path, monkey
         notice["channel"] = kwargs["channel"]
         return {"ok": True, "channel": kwargs["channel"], "ts": "123.456"}
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily._post_no_candidate_message_to_slack", _fake_notice)
+    monkeypatch.setattr("spclaw.x_chart_daily._post_no_candidate_message_to_slack", _fake_notice)
     result = run_chart_scout_once(manual=False, dry_run=False, channel_override="C123")
     assert result["posted"] is False
     assert result["reason"] == "all_candidates_in_cooldown"
@@ -1107,12 +1107,12 @@ def test_run_chart_scout_posts_cooldown_exhaustion_notice(tmp_path: Path, monkey
 
 
 def test_run_chart_scout_does_not_notice_in_dry_run_on_cooldown_exhaustion(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_SOURCE_REPEAT_DAYS", "3")
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("SPCLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("SPCLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("SPCLAW_X_CHART_TIMEZONE", "UTC")
+    monkeypatch.setenv("SPCLAW_X_CHART_SOURCE_REPEAT_DAYS", "3")
 
     candidate = Candidate(
         candidate_key="x:cooldown-hit-dry",
@@ -1137,10 +1137,10 @@ def test_run_chart_scout_does_not_notice_in_dry_run_on_cooldown_exhaustion(tmp_p
                 return base
             return base.astimezone(tz)
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
-    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [candidate])
+    monkeypatch.setattr("spclaw.x_chart_daily.datetime", Frozen)
+    monkeypatch.setattr("spclaw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [candidate])
 
     store = XChartStore()
     recent_same_source = Candidate(
@@ -1165,7 +1165,7 @@ def test_run_chart_scout_does_not_notice_in_dry_run_on_cooldown_exhaustion(tmp_p
         notice_called["called"] = True
         return {"ok": True}
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily._post_no_candidate_message_to_slack", _fake_notice)
+    monkeypatch.setattr("spclaw.x_chart_daily._post_no_candidate_message_to_slack", _fake_notice)
     result = run_chart_scout_once(manual=False, dry_run=True, channel_override="C123")
     assert result["posted"] is False
     assert result["reason"] == "all_candidates_in_cooldown"
@@ -1187,12 +1187,12 @@ def test_cli_run_post_url_command(monkeypatch, capsys) -> None:
         called["title_override"] = title_override
         return {"ok": True, "posted": True, "winner": {"url": post_url}, "channel": channel_override or "default"}
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily.run_chart_for_post_url", _fake_run)
+    monkeypatch.setattr("spclaw.x_chart_daily.run_chart_for_post_url", _fake_run)
     monkeypatch.setattr(
         sys,
         "argv",
         [
-            "coatue-claw-x-chart-daily",
+            "spclaw-x-chart-daily",
             "run-post-url",
             "https://x.com/oguzerkan/status/2024447368137994460",
             "--channel",
@@ -1222,12 +1222,12 @@ def test_cli_run_post_url_command_with_title_override(monkeypatch, capsys) -> No
         called["title_override"] = title_override
         return {"ok": True, "posted": True, "winner": {"url": post_url}, "channel": channel_override or "default"}
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily.run_chart_for_post_url", _fake_run)
+    monkeypatch.setattr("spclaw.x_chart_daily.run_chart_for_post_url", _fake_run)
     monkeypatch.setattr(
         sys,
         "argv",
         [
-            "coatue-claw-x-chart-daily",
+            "spclaw-x-chart-daily",
             "run-post-url",
             "https://x.com/KobeissiLetter/status/2026040229535047769",
             "--channel",
@@ -1456,7 +1456,7 @@ def test_style_draft_chart_label_matches_headline_llm_path(monkeypatch) -> None:
         score=98.0,
     )
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._synthesize_style_via_llm",
+        "spclaw.x_chart_daily._synthesize_style_via_llm",
         lambda _candidate: {
             "headline": "US software demand is re-accelerating.",
             "chart_label": "Different label that should be ignored",
@@ -1482,7 +1482,7 @@ def test_style_draft_chart_label_matches_headline_fallback_path(monkeypatch) -> 
         source_priority=1.3,
         score=88.0,
     )
-    monkeypatch.setattr("coatue_claw.x_chart_daily._synthesize_style_via_llm", lambda _candidate: None)
+    monkeypatch.setattr("spclaw.x_chart_daily._synthesize_style_via_llm", lambda _candidate: None)
     draft = _select_style_draft(candidate)
     assert draft.chart_label == draft.headline
 
@@ -1522,9 +1522,9 @@ def test_post_winner_uploads_file_in_initial_message(monkeypatch, tmp_path: Path
 
     monkeypatch.setitem(sys.modules, "slack_sdk", types.SimpleNamespace(WebClient=FakeWebClient))
     monkeypatch.setitem(sys.modules, "slack_sdk.errors", types.SimpleNamespace(SlackApiError=FakeSlackApiError))
-    monkeypatch.setattr("coatue_claw.x_chart_daily._slack_tokens", lambda: ["xoxb-test"])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._write_source_chart_image", lambda **kwargs: styled)
-    monkeypatch.setattr("coatue_claw.x_chart_daily._render_source_snip_card", lambda **kwargs: styled)
+    monkeypatch.setattr("spclaw.x_chart_daily._slack_tokens", lambda: ["xoxb-test"])
+    monkeypatch.setattr("spclaw.x_chart_daily._write_source_chart_image", lambda **kwargs: styled)
+    monkeypatch.setattr("spclaw.x_chart_daily._render_source_snip_card", lambda **kwargs: styled)
 
     result = _post_winner_to_slack(candidate=candidate, channel="C123", slot_key="manual-1", windows_text="09:00,12:00,18:00")
     assert result["ok"] is True
@@ -1574,9 +1574,9 @@ def test_post_winner_preserves_takeaway_punctuation_in_slack_comment(monkeypatch
 
     monkeypatch.setitem(sys.modules, "slack_sdk", types.SimpleNamespace(WebClient=FakeWebClient))
     monkeypatch.setitem(sys.modules, "slack_sdk.errors", types.SimpleNamespace(SlackApiError=FakeSlackApiError))
-    monkeypatch.setattr("coatue_claw.x_chart_daily._slack_tokens", lambda: ["xoxb-test"])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._write_source_chart_image", lambda **kwargs: styled)
-    monkeypatch.setattr("coatue_claw.x_chart_daily._render_source_snip_card", lambda **kwargs: styled)
+    monkeypatch.setattr("spclaw.x_chart_daily._slack_tokens", lambda: ["xoxb-test"])
+    monkeypatch.setattr("spclaw.x_chart_daily._write_source_chart_image", lambda **kwargs: styled)
+    monkeypatch.setattr("spclaw.x_chart_daily._render_source_snip_card", lambda **kwargs: styled)
 
     style_draft = StyleDraft(
         headline="US stocks erase nearly -$800 billion in market cap.",
@@ -1757,7 +1757,7 @@ def test_post_publish_checklist_passes_for_clean_rebuilt_chart(tmp_path: Path) -
 
 def test_review_feedback_penalizes_failing_source(tmp_path: Path, monkeypatch) -> None:
     db = tmp_path / "x_chart.sqlite"
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(db))
+    monkeypatch.setenv("SPCLAW_X_CHART_DB_PATH", str(db))
     store = XChartStore()
     store.upsert_source("badsource", priority=1.0, manual=True)
     before = {row["handle"]: float(row["priority"]) for row in store.list_sources(limit=200)}
@@ -1950,8 +1950,8 @@ def test_extract_rebuilt_bars_via_vision_parses_json(monkeypatch) -> None:
             self.chat = FakeChat()
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setattr("coatue_claw.x_chart_daily.OpenAI", FakeOpenAI)
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_image_bytes", lambda url: (b"img-bytes", "image/png"))
+    monkeypatch.setattr("spclaw.x_chart_daily.OpenAI", FakeOpenAI)
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_image_bytes", lambda url: (b"img-bytes", "image/png"))
     rebuilt = _extract_rebuilt_bars_via_vision(candidate=candidate)
     assert rebuilt is not None
     assert rebuilt.source == "vision"
@@ -1963,7 +1963,7 @@ def test_extract_rebuilt_bars_via_vision_parses_json(monkeypatch) -> None:
 
 
 def test_extract_rebuilt_bars_via_vision_requires_grouped_for_employees_robots(monkeypatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_VISION_ENABLED", "1")
+    monkeypatch.setenv("SPCLAW_X_CHART_VISION_ENABLED", "1")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
     class _FakeChoice:
@@ -1994,8 +1994,8 @@ def test_extract_rebuilt_bars_via_vision_requires_grouped_for_employees_robots(m
         def __init__(self, api_key: str) -> None:
             self.chat = _FakeChat()
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily.OpenAI", _FakeOpenAI)
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_image_bytes", lambda _url: (b"png", "image/png"))
+    monkeypatch.setattr("spclaw.x_chart_daily.OpenAI", _FakeOpenAI)
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_image_bytes", lambda _url: (b"png", "image/png"))
 
     candidate = Candidate(
         candidate_key="x:robots-single",
@@ -2045,17 +2045,17 @@ def test_extract_rebuilt_bars_prefers_grouped_cv_for_employee_robot_chart(monkey
         secondary_color="#6D63E7",
         secondary_label="Robots",
     )
-    monkeypatch.setattr("coatue_claw.x_chart_daily._extract_employees_robots_bars_cv", lambda **kwargs: grouped)
+    monkeypatch.setattr("spclaw.x_chart_daily._extract_employees_robots_bars_cv", lambda **kwargs: grouped)
     image = np.zeros((600, 1000, 3), dtype=float)
     rebuilt = _extract_rebuilt_bars(image=image, candidate=candidate, allow_vision=False)
     assert rebuilt is grouped
 
 
 def test_run_chart_for_post_url_posts_specific_tweet(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
-    monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
+    monkeypatch.setenv("SPCLAW_X_CHART_SLACK_CHANNEL", "C123")
+    monkeypatch.setattr("spclaw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
 
     payload = {
         "data": [
@@ -2074,9 +2074,9 @@ def test_run_chart_for_post_url_posts_specific_tweet(monkeypatch, tmp_path: Path
         },
     }
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily._http_json", lambda **kwargs: payload)
+    monkeypatch.setattr("spclaw.x_chart_daily._http_json", lambda **kwargs: payload)
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._extract_rebuilt_bars_via_vision",
+        "spclaw.x_chart_daily._extract_rebuilt_bars_via_vision",
         lambda **kwargs: RebuiltBars(
             labels=["2023", "2024", "2025", "2026"],
             values=[44.0, 55.0, 126.0, 245.0],
@@ -2095,7 +2095,7 @@ def test_run_chart_for_post_url_posts_specific_tweet(monkeypatch, tmp_path: Path
         captured["channel"] = kwargs["channel"]
         return {"ok": True, "channel": kwargs["channel"], "styled_artifact": str(tmp_path / "styled.png")}
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
+    monkeypatch.setattr("spclaw.x_chart_daily._post_winner_to_slack", _fake_post)
     result = run_chart_for_post_url(
         post_url="https://x.com/KobeissiLetter/status/2024543034734768600",
         channel_override="C123",
@@ -2111,10 +2111,10 @@ def test_run_chart_for_post_url_posts_specific_tweet(monkeypatch, tmp_path: Path
 
 
 def test_run_chart_for_post_url_rewrites_takeaway_but_keeps_requested_url(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
-    monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
+    monkeypatch.setenv("SPCLAW_X_CHART_SLACK_CHANNEL", "C123")
+    monkeypatch.setattr("spclaw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
 
     payload = {
         "data": [
@@ -2133,9 +2133,9 @@ def test_run_chart_for_post_url_rewrites_takeaway_but_keeps_requested_url(monkey
         },
     }
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily._http_json", lambda **kwargs: payload)
+    monkeypatch.setattr("spclaw.x_chart_daily._http_json", lambda **kwargs: payload)
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._synthesize_style_via_llm",
+        "spclaw.x_chart_daily._synthesize_style_via_llm",
         lambda _candidate: {
             "headline": "US stock market futures open lower in their",
             "chart_label": "US index futures snapshot",
@@ -2143,7 +2143,7 @@ def test_run_chart_for_post_url_rewrites_takeaway_but_keeps_requested_url(monkey
         },
     )
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._extract_rebuilt_bars_via_vision",
+        "spclaw.x_chart_daily._extract_rebuilt_bars_via_vision",
         lambda **kwargs: RebuiltBars(
             labels=["2023", "2024", "2025", "2026"],
             values=[120.0, 110.0, 95.0, 80.0],
@@ -2163,7 +2163,7 @@ def test_run_chart_for_post_url_rewrites_takeaway_but_keeps_requested_url(monkey
         captured["takeaway"] = kwargs["style_draft"].takeaway
         return {"ok": True, "channel": kwargs["channel"], "styled_artifact": str(tmp_path / "styled.png")}
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
+    monkeypatch.setattr("spclaw.x_chart_daily._post_winner_to_slack", _fake_post)
     result = run_chart_for_post_url(
         post_url="https://x.com/Barchart/status/2025715989384663396",
         channel_override="C123",
@@ -2180,12 +2180,12 @@ def test_run_chart_for_post_url_rewrites_takeaway_but_keeps_requested_url(monkey
 
 
 def test_run_chart_for_post_url_uses_window_slot_and_blocks_duplicate_slot(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
-    monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
+    monkeypatch.setenv("SPCLAW_X_CHART_SLACK_CHANNEL", "C123")
+    monkeypatch.setenv("SPCLAW_X_CHART_TIMEZONE", "UTC")
+    monkeypatch.setenv("SPCLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setattr("spclaw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
 
     class Frozen(datetime):
         @classmethod
@@ -2195,7 +2195,7 @@ def test_run_chart_for_post_url_uses_window_slot_and_blocks_duplicate_slot(monke
                 return base
             return base.astimezone(tz)
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
+    monkeypatch.setattr("spclaw.x_chart_daily.datetime", Frozen)
     payload = {
         "data": [
             {
@@ -2212,7 +2212,7 @@ def test_run_chart_for_post_url_uses_window_slot_and_blocks_duplicate_slot(monke
             "media": [{"media_key": "m1", "type": "photo", "url": "https://example.com/chart.png"}],
         },
     }
-    monkeypatch.setattr("coatue_claw.x_chart_daily._http_json", lambda **kwargs: payload)
+    monkeypatch.setattr("spclaw.x_chart_daily._http_json", lambda **kwargs: payload)
 
     posted = {"count": 0}
 
@@ -2220,7 +2220,7 @@ def test_run_chart_for_post_url_uses_window_slot_and_blocks_duplicate_slot(monke
         posted["count"] = int(posted["count"]) + 1
         return {"ok": True, "channel": kwargs["channel"], "styled_artifact": str(tmp_path / "styled.png")}
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
+    monkeypatch.setattr("spclaw.x_chart_daily._post_winner_to_slack", _fake_post)
 
     first = run_chart_for_post_url(
         post_url="https://x.com/MikeZaccardi/status/2026395304245837982",
@@ -2259,7 +2259,7 @@ def test_style_draft_swaps_title_and_takeaway_roles_for_market_cap_copy(monkeypa
         score=90.0,
     )
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._synthesize_style_via_llm",
+        "spclaw.x_chart_daily._synthesize_style_via_llm",
         lambda _candidate: {
             "headline": "US stocks erase nearly -$800 billion in market cap AI disruption fears spread and trade war headlines return.",
             "chart_label": "US equities sector heatmap snapshot",
@@ -2276,10 +2276,10 @@ def test_style_draft_swaps_title_and_takeaway_roles_for_market_cap_copy(monkeypa
 
 
 def test_run_chart_for_post_url_allows_fragmentary_headline(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
-    monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
+    monkeypatch.setenv("SPCLAW_X_CHART_SLACK_CHANNEL", "C123")
+    monkeypatch.setattr("spclaw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
 
     payload = {
         "data": [
@@ -2298,9 +2298,9 @@ def test_run_chart_for_post_url_allows_fragmentary_headline(monkeypatch, tmp_pat
         },
     }
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily._http_json", lambda **kwargs: payload)
+    monkeypatch.setattr("spclaw.x_chart_daily._http_json", lambda **kwargs: payload)
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._synthesize_style_via_llm",
+        "spclaw.x_chart_daily._synthesize_style_via_llm",
         lambda _candidate: {
             "headline": "U.S. Housing Market Home Sellers now is",
             "chart_label": "U.S. housing sellers and buyers",
@@ -2308,7 +2308,7 @@ def test_run_chart_for_post_url_allows_fragmentary_headline(monkeypatch, tmp_pat
         },
     )
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._rewrite_headline_from_candidate",
+        "spclaw.x_chart_daily._rewrite_headline_from_candidate",
         lambda _candidate: ("", "headline_unrecoverable"),
     )
 
@@ -2318,7 +2318,7 @@ def test_run_chart_for_post_url_allows_fragmentary_headline(monkeypatch, tmp_pat
         posted["called"] = True
         return {"ok": True, "channel": kwargs["channel"], "styled_artifact": str(tmp_path / "styled.png")}
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
+    monkeypatch.setattr("spclaw.x_chart_daily._post_winner_to_slack", _fake_post)
     result = run_chart_for_post_url(
         post_url="https://x.com/Barchart/status/2026003310256533863",
         channel_override="C123",
@@ -2328,10 +2328,10 @@ def test_run_chart_for_post_url_allows_fragmentary_headline(monkeypatch, tmp_pat
 
 
 def test_run_chart_for_post_url_applies_title_override(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
-    monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
+    monkeypatch.setenv("SPCLAW_X_CHART_SLACK_CHANNEL", "C123")
+    monkeypatch.setattr("spclaw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
 
     payload = {
         "data": [
@@ -2349,7 +2349,7 @@ def test_run_chart_for_post_url_applies_title_override(monkeypatch, tmp_path: Pa
             "media": [{"media_key": "m1", "type": "photo", "url": "https://example.com/chart.png"}],
         },
     }
-    monkeypatch.setattr("coatue_claw.x_chart_daily._http_json", lambda **kwargs: payload)
+    monkeypatch.setattr("spclaw.x_chart_daily._http_json", lambda **kwargs: payload)
     captured: dict[str, object] = {"called": False}
 
     def _fake_post(**kwargs):
@@ -2358,7 +2358,7 @@ def test_run_chart_for_post_url_applies_title_override(monkeypatch, tmp_path: Pa
         captured["candidate_url"] = kwargs["candidate"].url
         return {"ok": True, "channel": kwargs["channel"], "styled_artifact": str(tmp_path / "styled.png")}
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
+    monkeypatch.setattr("spclaw.x_chart_daily._post_winner_to_slack", _fake_post)
     result = run_chart_for_post_url(
         post_url="https://x.com/KobeissiLetter/status/2026040229535047769",
         channel_override="C123",
@@ -2373,10 +2373,10 @@ def test_run_chart_for_post_url_applies_title_override(monkeypatch, tmp_path: Pa
 
 
 def test_run_post_url_title_override_syncs_chart_label(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
-    monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
+    monkeypatch.setenv("SPCLAW_X_CHART_SLACK_CHANNEL", "C123")
+    monkeypatch.setattr("spclaw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
 
     payload = {
         "data": [
@@ -2394,7 +2394,7 @@ def test_run_post_url_title_override_syncs_chart_label(monkeypatch, tmp_path: Pa
             "media": [{"media_key": "m1", "type": "photo", "url": "https://example.com/chart.png"}],
         },
     }
-    monkeypatch.setattr("coatue_claw.x_chart_daily._http_json", lambda **kwargs: payload)
+    monkeypatch.setattr("spclaw.x_chart_daily._http_json", lambda **kwargs: payload)
     captured: dict[str, object] = {"called": False}
 
     def _fake_post(**kwargs):
@@ -2403,7 +2403,7 @@ def test_run_post_url_title_override_syncs_chart_label(monkeypatch, tmp_path: Pa
         captured["chart_label"] = kwargs["style_draft"].chart_label
         return {"ok": True, "channel": kwargs["channel"], "styled_artifact": str(tmp_path / "styled.png")}
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
+    monkeypatch.setattr("spclaw.x_chart_daily._post_winner_to_slack", _fake_post)
     result = run_chart_for_post_url(
         post_url="https://x.com/KobeissiLetter/status/2026040229535047769",
         channel_override="C123",
@@ -2416,10 +2416,10 @@ def test_run_post_url_title_override_syncs_chart_label(monkeypatch, tmp_path: Pa
 
 
 def test_run_chart_for_post_url_title_override_allows_freeform_text(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
-    monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
+    monkeypatch.setenv("SPCLAW_X_CHART_SLACK_CHANNEL", "C123")
+    monkeypatch.setattr("spclaw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
 
     payload = {
         "data": [
@@ -2437,7 +2437,7 @@ def test_run_chart_for_post_url_title_override_allows_freeform_text(monkeypatch,
             "media": [{"media_key": "m1", "type": "photo", "url": "https://example.com/chart.png"}],
         },
     }
-    monkeypatch.setattr("coatue_claw.x_chart_daily._http_json", lambda **kwargs: payload)
+    monkeypatch.setattr("spclaw.x_chart_daily._http_json", lambda **kwargs: payload)
     captured: dict[str, object] = {"called": False}
 
     def _fake_post(**kwargs):
@@ -2445,7 +2445,7 @@ def test_run_chart_for_post_url_title_override_allows_freeform_text(monkeypatch,
         captured["headline"] = kwargs["style_draft"].headline
         return {"ok": True, "channel": kwargs["channel"], "styled_artifact": str(tmp_path / "styled.png")}
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
+    monkeypatch.setattr("spclaw.x_chart_daily._post_winner_to_slack", _fake_post)
     result = run_chart_for_post_url(
         post_url="https://x.com/KobeissiLetter/status/2026040229535047769",
         channel_override="C123",
@@ -2457,11 +2457,11 @@ def test_run_chart_for_post_url_title_override_allows_freeform_text(monkeypatch,
 
 
 def test_run_chart_for_post_url_uses_vxtwitter_fallback(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
-    monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
-    monkeypatch.setattr("coatue_claw.x_chart_daily._http_json", lambda **kwargs: {"data": [], "includes": {}})
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
+    monkeypatch.setenv("SPCLAW_X_CHART_SLACK_CHANNEL", "C123")
+    monkeypatch.setattr("spclaw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
+    monkeypatch.setattr("spclaw.x_chart_daily._http_json", lambda **kwargs: {"data": [], "includes": {}})
     fallback_candidate = Candidate(
         candidate_key="x:2024447368137994460",
         source_type="x",
@@ -2477,11 +2477,11 @@ def test_run_chart_for_post_url_uses_vxtwitter_fallback(monkeypatch, tmp_path: P
         score=80.0,
     )
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._fetch_vxtwitter_post_candidate",
+        "spclaw.x_chart_daily._fetch_vxtwitter_post_candidate",
         lambda **kwargs: fallback_candidate,
     )
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._extract_rebuilt_bars_via_vision",
+        "spclaw.x_chart_daily._extract_rebuilt_bars_via_vision",
         lambda **kwargs: RebuiltBars(
             labels=["2018", "2019", "2020", "2021", "2022", "2023", "2024", "2025"],
             values=[100.0, 154.0, 644.0, 798.0, 1298.0, 1608.0, 1541.0, 1556.0],
@@ -2500,7 +2500,7 @@ def test_run_chart_for_post_url_uses_vxtwitter_fallback(monkeypatch, tmp_path: P
         captured["source_id"] = kwargs["candidate"].source_id
         return {"ok": True, "channel": kwargs["channel"], "styled_artifact": str(tmp_path / "styled.png")}
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
+    monkeypatch.setattr("spclaw.x_chart_daily._post_winner_to_slack", _fake_post)
     result = run_chart_for_post_url(
         post_url="https://x.com/oguzerkan/status/2024447368137994460",
         channel_override="C123",
@@ -2531,9 +2531,9 @@ def test_llm_prompt_uses_general_contextual_title_and_takeaway_instructions(monk
             self.api_key = api_key
             self.chat = types.SimpleNamespace(completions=_FakeCompletions())
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily.OpenAI", _FakeOpenAI)
-    monkeypatch.setattr("coatue_claw.x_chart_daily._extract_chart_title_hint_via_vision", lambda _candidate: "M2 has reached an all-time high")
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_image_bytes", lambda _url: (b"fake-image", "image/png"))
+    monkeypatch.setattr("spclaw.x_chart_daily.OpenAI", _FakeOpenAI)
+    monkeypatch.setattr("spclaw.x_chart_daily._extract_chart_title_hint_via_vision", lambda _candidate: "M2 has reached an all-time high")
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_image_bytes", lambda _url: (b"fake-image", "image/png"))
 
     candidate = Candidate(
         candidate_key="x:llm-prompt",
@@ -2579,9 +2579,9 @@ def test_llm_context_includes_tweet_title_text_and_chart_hint(monkeypatch) -> No
             self.api_key = api_key
             self.chat = types.SimpleNamespace(completions=_FakeCompletions())
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily.OpenAI", _FakeOpenAI)
-    monkeypatch.setattr("coatue_claw.x_chart_daily._extract_chart_title_hint_via_vision", lambda _candidate: "Data center demand rises sharply through 2030")
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_image_bytes", lambda _url: (b"fake-image", "image/png"))
+    monkeypatch.setattr("spclaw.x_chart_daily.OpenAI", _FakeOpenAI)
+    monkeypatch.setattr("spclaw.x_chart_daily._extract_chart_title_hint_via_vision", lambda _candidate: "Data center demand rises sharply through 2030")
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_image_bytes", lambda _url: (b"fake-image", "image/png"))
 
     candidate = Candidate(
         candidate_key="x:llm-context",
@@ -2614,11 +2614,11 @@ def test_role_check_is_minimal_non_identical_not_length_based() -> None:
 
 
 def test_manual_url_on_llm_error_posts_warning_and_uses_raw_tweet_copy(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "C123")
-    monkeypatch.setattr("coatue_claw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
-    monkeypatch.setattr("coatue_claw.x_chart_daily._synthesize_style_via_llm", lambda _candidate: (None, "api_error"))
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_X_CHART_DB_PATH", str(tmp_path / "db.sqlite"))
+    monkeypatch.setenv("SPCLAW_X_CHART_SLACK_CHANNEL", "C123")
+    monkeypatch.setattr("spclaw.x_chart_daily._resolve_bearer_token", lambda: "test-token")
+    monkeypatch.setattr("spclaw.x_chart_daily._synthesize_style_via_llm", lambda _candidate: (None, "api_error"))
 
     payload = {
         "data": [
@@ -2636,7 +2636,7 @@ def test_manual_url_on_llm_error_posts_warning_and_uses_raw_tweet_copy(monkeypat
             "media": [{"media_key": "m1", "type": "photo", "url": "https://example.com/chart.png"}],
         },
     }
-    monkeypatch.setattr("coatue_claw.x_chart_daily._http_json", lambda **kwargs: payload)
+    monkeypatch.setattr("spclaw.x_chart_daily._http_json", lambda **kwargs: payload)
     warning = {"called": False}
     posted: dict[str, object] = {}
 
@@ -2649,8 +2649,8 @@ def test_manual_url_on_llm_error_posts_warning_and_uses_raw_tweet_copy(monkeypat
         posted["takeaway"] = kwargs["style_draft"].takeaway
         return {"ok": True, "channel": kwargs["channel"], "styled_artifact": str(tmp_path / "styled.png")}
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily._post_llm_copy_warning_to_slack", _fake_warning)
-    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
+    monkeypatch.setattr("spclaw.x_chart_daily._post_llm_copy_warning_to_slack", _fake_warning)
+    monkeypatch.setattr("spclaw.x_chart_daily._post_winner_to_slack", _fake_post)
     result = run_chart_for_post_url(
         post_url="https://x.com/Barchart/status/2027311589528097031",
         channel_override="C123",
@@ -2666,12 +2666,12 @@ def test_manual_url_on_llm_error_posts_warning_and_uses_raw_tweet_copy(monkeypat
 
 
 def test_scheduled_flow_on_llm_error_posts_warning_and_uses_raw_tweet_copy(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_TIMEZONE", "UTC")
-    monkeypatch.setattr("coatue_claw.x_chart_daily._synthesize_style_via_llm", lambda _candidate: (None, "invalid_json"))
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_X_CHART_DB_PATH", str(tmp_path / "db/x_chart.sqlite"))
+    monkeypatch.setenv("SPCLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("SPCLAW_X_CHART_WINDOWS", "09:00,12:00,18:00")
+    monkeypatch.setenv("SPCLAW_X_CHART_TIMEZONE", "UTC")
+    monkeypatch.setattr("spclaw.x_chart_daily._synthesize_style_via_llm", lambda _candidate: (None, "invalid_json"))
 
     candidate = Candidate(
         candidate_key="x:schedule-warning",
@@ -2687,9 +2687,9 @@ def test_scheduled_flow_on_llm_error_posts_warning_and_uses_raw_tweet_copy(monke
         source_priority=1.2,
         score=95.0,
     )
-    monkeypatch.setattr("coatue_claw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [candidate])
+    monkeypatch.setattr("spclaw.x_chart_daily._discover_new_sources", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_visualcapitalist_candidates", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._fetch_x_candidates_from_sources", lambda **kwargs: [candidate])
     warning = {"called": False}
     posted: dict[str, object] = {}
 
@@ -2701,7 +2701,7 @@ def test_scheduled_flow_on_llm_error_posts_warning_and_uses_raw_tweet_copy(monke
                 return base
             return base.astimezone(tz)
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily.datetime", Frozen)
+    monkeypatch.setattr("spclaw.x_chart_daily.datetime", Frozen)
 
     def _fake_warning(**kwargs):
         warning["called"] = True
@@ -2711,8 +2711,8 @@ def test_scheduled_flow_on_llm_error_posts_warning_and_uses_raw_tweet_copy(monke
         posted["headline"] = kwargs["style_draft"].headline
         return {"ok": True, "channel": kwargs["channel"], "file_id": "FTEST"}
 
-    monkeypatch.setattr("coatue_claw.x_chart_daily._post_llm_copy_warning_to_slack", _fake_warning)
-    monkeypatch.setattr("coatue_claw.x_chart_daily._post_winner_to_slack", _fake_post)
+    monkeypatch.setattr("spclaw.x_chart_daily._post_llm_copy_warning_to_slack", _fake_warning)
+    monkeypatch.setattr("spclaw.x_chart_daily._post_winner_to_slack", _fake_post)
     result = run_chart_scout_once(manual=False, dry_run=False, channel_override="C123")
     assert result["ok"] is True
     assert result["posted"] is True
@@ -2758,9 +2758,9 @@ def test_post_winner_does_not_require_rebuild(monkeypatch, tmp_path: Path) -> No
 
     monkeypatch.setitem(sys.modules, "slack_sdk", types.SimpleNamespace(WebClient=FakeWebClient))
     monkeypatch.setitem(sys.modules, "slack_sdk.errors", types.SimpleNamespace(SlackApiError=FakeSlackApiError))
-    monkeypatch.setattr("coatue_claw.x_chart_daily._slack_tokens", lambda: ["xoxb-test"])
-    monkeypatch.setattr("coatue_claw.x_chart_daily._write_source_chart_image", lambda **kwargs: source_path)
-    monkeypatch.setattr("coatue_claw.x_chart_daily._render_source_snip_card", lambda **kwargs: source_path)
+    monkeypatch.setattr("spclaw.x_chart_daily._slack_tokens", lambda: ["xoxb-test"])
+    monkeypatch.setattr("spclaw.x_chart_daily._write_source_chart_image", lambda **kwargs: source_path)
+    monkeypatch.setattr("spclaw.x_chart_daily._render_source_snip_card", lambda **kwargs: source_path)
 
     result = _post_winner_to_slack(candidate=candidate, channel="C123", slot_key="manual-2", windows_text="09:00,12:00,18:00")
     assert result["ok"] is True
@@ -2775,7 +2775,7 @@ def test_render_source_snip_card_wraps_takeaway_to_two_lines(monkeypatch, tmp_pa
     except Exception:
         return
 
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
     source_path = tmp_path / "source.png"
     plt.imsave(str(source_path), np.ones((240, 420, 3), dtype=float))
 
@@ -2822,7 +2822,7 @@ def test_render_source_snip_card_handles_cashtag_copy(monkeypatch, tmp_path: Pat
     except Exception:
         return
 
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
     source_path = tmp_path / "source-cashtag.png"
     plt.imsave(str(source_path), np.ones((220, 420, 3), dtype=float))
 
@@ -2864,8 +2864,8 @@ def test_render_chart_rejects_screenshot_fallback_even_if_env_disabled(monkeypat
     import numpy as np
     import pytest
 
-    monkeypatch.setenv("COATUE_CLAW_X_CHART_REQUIRE_REBUILD", "0")
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_X_CHART_REQUIRE_REBUILD", "0")
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
 
     candidate = Candidate(
         candidate_key="x:no-fallback",
@@ -2882,10 +2882,10 @@ def test_render_chart_rejects_screenshot_fallback_even_if_env_disabled(monkeypat
         score=50.0,
     )
     style = _select_style_draft(candidate)
-    monkeypatch.setattr("coatue_claw.x_chart_daily._safe_image_from_url", lambda _url: np.zeros((120, 200, 3), dtype=float))
-    monkeypatch.setattr("coatue_claw.x_chart_daily._extract_rebuilt_bars_via_vision", lambda **kwargs: None)
-    monkeypatch.setattr("coatue_claw.x_chart_daily._infer_chart_mode", lambda **kwargs: "line")
-    monkeypatch.setattr("coatue_claw.x_chart_daily._extract_rebuilt_series", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._safe_image_from_url", lambda _url: np.zeros((120, 200, 3), dtype=float))
+    monkeypatch.setattr("spclaw.x_chart_daily._extract_rebuilt_bars_via_vision", lambda **kwargs: None)
+    monkeypatch.setattr("spclaw.x_chart_daily._infer_chart_mode", lambda **kwargs: "line")
+    monkeypatch.setattr("spclaw.x_chart_daily._extract_rebuilt_series", lambda **kwargs: [])
 
     with pytest.raises(XChartError):
         _render_chart_of_day_style(
@@ -2900,7 +2900,7 @@ def test_render_chart_rejects_single_series_for_employees_robots(monkeypatch, tm
     import numpy as np
     import pytest
 
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
     candidate = Candidate(
         candidate_key="x:robots-single-series",
         source_type="x",
@@ -2916,9 +2916,9 @@ def test_render_chart_rejects_single_series_for_employees_robots(monkeypatch, tm
         score=50.0,
     )
     style = _select_style_draft(candidate)
-    monkeypatch.setattr("coatue_claw.x_chart_daily._safe_image_from_url", lambda _url: np.zeros((500, 900, 3), dtype=float))
+    monkeypatch.setattr("spclaw.x_chart_daily._safe_image_from_url", lambda _url: np.zeros((500, 900, 3), dtype=float))
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._extract_rebuilt_bars_via_vision",
+        "spclaw.x_chart_daily._extract_rebuilt_bars_via_vision",
         lambda **kwargs: RebuiltBars(
             labels=["2022", "2023", "2024", "2025"],
             values=[520.0, 750.0, 750.0, 1000.0],
@@ -2942,7 +2942,7 @@ def test_render_chart_rejects_missing_y_axis_tick_labels(monkeypatch, tmp_path: 
     import numpy as np
     import pytest
 
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
     candidate = Candidate(
         candidate_key="x:robots-no-yticks",
         source_type="x",
@@ -2958,9 +2958,9 @@ def test_render_chart_rejects_missing_y_axis_tick_labels(monkeypatch, tmp_path: 
         score=50.0,
     )
     style = _select_style_draft(candidate)
-    monkeypatch.setattr("coatue_claw.x_chart_daily._safe_image_from_url", lambda _url: np.zeros((500, 900, 3), dtype=float))
+    monkeypatch.setattr("spclaw.x_chart_daily._safe_image_from_url", lambda _url: np.zeros((500, 900, 3), dtype=float))
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._extract_rebuilt_bars_via_vision",
+        "spclaw.x_chart_daily._extract_rebuilt_bars_via_vision",
         lambda **kwargs: RebuiltBars(
             labels=["2016", "2017", "2018", "2019", "2020", "2021", "2022", "2023", "2024", "2025"],
             values=[117.0, 154.0, 341.0, 648.0, 798.0, 1298.0, 1608.0, 1541.0, 1525.0, 1556.0],
@@ -2975,7 +2975,7 @@ def test_render_chart_rejects_missing_y_axis_tick_labels(monkeypatch, tmp_path: 
             secondary_label="Robots",
         ),
     )
-    monkeypatch.setattr("coatue_claw.x_chart_daily._compute_y_ticks", lambda **kwargs: [])
+    monkeypatch.setattr("spclaw.x_chart_daily._compute_y_ticks", lambda **kwargs: [])
 
     with pytest.raises(XChartError):
         _render_chart_of_day_style(
@@ -3072,7 +3072,7 @@ def test_style_draft_uses_chart_hint_for_low_signal_copy(monkeypatch) -> None:
         score=90.0,
     )
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._extract_chart_title_hint_via_vision",
+        "spclaw.x_chart_daily._extract_chart_title_hint_via_vision",
         lambda _candidate: "The US Tariff Take Has Surged",
     )
     draft = _select_style_draft(candidate)
@@ -3097,7 +3097,7 @@ def test_style_draft_rewrites_low_signal_takeaway_even_if_headline_is_good(monke
         score=90.0,
     )
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._synthesize_style_via_llm",
+        "spclaw.x_chart_daily._synthesize_style_via_llm",
         lambda _candidate: {
             "headline": "US tariff receipts are surging",
             "chart_label": "Monthly US customs duties (US$B)",
@@ -3105,7 +3105,7 @@ def test_style_draft_rewrites_low_signal_takeaway_even_if_headline_is_good(monke
         },
     )
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._extract_chart_title_hint_via_vision",
+        "spclaw.x_chart_daily._extract_chart_title_hint_via_vision",
         lambda _candidate: "The US Tariff Take Has Surged",
     )
     draft = _select_style_draft(candidate)
@@ -3129,11 +3129,11 @@ def test_style_draft_rewrites_low_signal_takeaway_from_headline_context(monkeypa
         score=90.0,
     )
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._extract_chart_title_hint_via_vision",
+        "spclaw.x_chart_daily._extract_chart_title_hint_via_vision",
         lambda _candidate: None,
     )
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._synthesize_style_via_llm",
+        "spclaw.x_chart_daily._synthesize_style_via_llm",
         lambda _candidate: {
             "headline": "US tariff receipts are surging",
             "chart_label": "Monthly US customs duties (US$B)",
@@ -3160,7 +3160,7 @@ def test_style_draft_rewrites_incoherent_institutional_selling_headline(monkeypa
         score=90.0,
     )
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._synthesize_style_via_llm",
+        "spclaw.x_chart_daily._synthesize_style_via_llm",
         lambda _candidate: {
             "headline": "Institutional investors sold a are at an extreme",
             "chart_label": "US institutional net buying (selling) (US$M)",
@@ -3188,7 +3188,7 @@ def test_style_draft_rewrites_broken_headline_phrase(monkeypatch) -> None:
         score=91.0,
     )
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._synthesize_style_via_llm",
+        "spclaw.x_chart_daily._synthesize_style_via_llm",
         lambda _candidate: {
             "headline": "U.S. Housing Market Home Sellers now is",
             "chart_label": "U.S. housing sellers versus buyers",
@@ -3222,7 +3222,7 @@ def test_style_draft_rewrites_degenerate_fields_and_fragment_takeaway(monkeypatc
         score=91.0,
     )
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._synthesize_style_via_llm",
+        "spclaw.x_chart_daily._synthesize_style_via_llm",
         lambda _candidate: {
             "headline": "U.S",
             "chart_label": "U.S",
@@ -3256,7 +3256,7 @@ def test_style_draft_rewrites_fragmented_kobeissi_copy(monkeypatch) -> None:
         score=90.0,
     )
     monkeypatch.setattr(
-        "coatue_claw.x_chart_daily._synthesize_style_via_llm",
+        "spclaw.x_chart_daily._synthesize_style_via_llm",
         lambda _candidate: {
             "headline": "US stock market futures open lower in their",
             "chart_label": "US index futures snapshot",

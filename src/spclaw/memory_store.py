@@ -105,8 +105,8 @@ def _parse_iso_utc(value: str | None) -> datetime | None:
 
 
 def _memory_db_path() -> Path:
-    data_root = Path(os.environ.get("COATUE_CLAW_DATA_ROOT", "/opt/coatue-claw-data"))
-    return Path(os.environ.get("COATUE_CLAW_MEMORY_DB_PATH", str(data_root / "db/memory.sqlite")))
+    data_root = Path(os.environ.get("SPCLAW_DATA_ROOT", "/opt/spclaw-data"))
+    return Path(os.environ.get("SPCLAW_MEMORY_DB_PATH", str(data_root / "db/memory.sqlite")))
 
 
 def _normalize_text(value: str) -> str:

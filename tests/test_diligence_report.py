@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 import pandas as pd
 
-from coatue_claw.diligence_report import (
+from spclaw.diligence_report import (
     LocalResearchLookup,
     LocalResearchReport,
     build_neutral_investment_memo,
@@ -111,7 +111,7 @@ def test_build_neutral_investment_memo_checks_local_reports_first():
             LocalResearchReport(
                 source="file_ingest",
                 title="SNOW - prior diligence report",
-                path="/opt/coatue-claw-data/files/incoming/Companies/SNOW-prior.md",
+                path="/opt/spclaw-data/files/incoming/Companies/SNOW-prior.md",
                 category="Companies",
                 recorded_at_utc="2026-02-17T20:00:00+00:00",
             )

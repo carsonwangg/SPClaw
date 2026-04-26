@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from coatue_claw.memory_store import FactCandidate, MemoryStore
+from spclaw.memory_store import FactCandidate, MemoryStore
 
 
 def _candidate(*, key: str, value: str, tier: str = "stable") -> FactCandidate:
@@ -22,7 +22,7 @@ def _candidate(*, key: str, value: str, tier: str = "stable") -> FactCandidate:
 
 def test_structured_insert_and_retrieval(tmp_path: Path, monkeypatch):
     db_path = tmp_path / "memory.sqlite"
-    monkeypatch.setenv("COATUE_CLAW_MEMORY_DB_PATH", str(db_path))
+    monkeypatch.setenv("SPCLAW_MEMORY_DB_PATH", str(db_path))
     store = MemoryStore()
 
     store.upsert_fact(_candidate(key="daughter birthday", value="June 3rd"))
@@ -34,7 +34,7 @@ def test_structured_insert_and_retrieval(tmp_path: Path, monkeypatch):
 
 def test_refresh_on_access_for_stable_tier(tmp_path: Path, monkeypatch):
     db_path = tmp_path / "memory.sqlite"
-    monkeypatch.setenv("COATUE_CLAW_MEMORY_DB_PATH", str(db_path))
+    monkeypatch.setenv("SPCLAW_MEMORY_DB_PATH", str(db_path))
     store = MemoryStore()
 
     t0 = datetime(2026, 1, 1, tzinfo=UTC)
@@ -54,7 +54,7 @@ def test_refresh_on_access_for_stable_tier(tmp_path: Path, monkeypatch):
 
 def test_prune_expired_facts_and_checkpoints(tmp_path: Path, monkeypatch):
     db_path = tmp_path / "memory.sqlite"
-    monkeypatch.setenv("COATUE_CLAW_MEMORY_DB_PATH", str(db_path))
+    monkeypatch.setenv("SPCLAW_MEMORY_DB_PATH", str(db_path))
     store = MemoryStore()
 
     t0 = datetime(2026, 1, 1, tzinfo=UTC)
@@ -77,7 +77,7 @@ def test_prune_expired_facts_and_checkpoints(tmp_path: Path, monkeypatch):
 
 def test_latest_checkpoint(tmp_path: Path, monkeypatch):
     db_path = tmp_path / "memory.sqlite"
-    monkeypatch.setenv("COATUE_CLAW_MEMORY_DB_PATH", str(db_path))
+    monkeypatch.setenv("SPCLAW_MEMORY_DB_PATH", str(db_path))
     store = MemoryStore()
 
     store.write_checkpoint(

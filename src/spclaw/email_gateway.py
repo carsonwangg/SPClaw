@@ -23,12 +23,12 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from coatue_claw.cli import run_diligence
-from coatue_claw.file_bridge import FileBridgeError, load_config
-from coatue_claw.memory_runtime import MemoryRuntime
-from coatue_claw.slack_file_ingest import classify_category
+from spclaw.cli import run_diligence
+from spclaw.file_bridge import FileBridgeError, load_config
+from spclaw.memory_runtime import MemoryRuntime
+from spclaw.slack_file_ingest import classify_category
 
-load_dotenv("/opt/coatue-claw/.env.prod")
+load_dotenv("/opt/spclaw/.env.prod")
 
 logger = logging.getLogger(__name__)
 
@@ -38,13 +38,13 @@ def _now_utc_iso() -> str:
 
 
 def _data_root() -> Path:
-    return Path(os.environ.get("COATUE_CLAW_DATA_ROOT", "/opt/coatue-claw-data"))
+    return Path(os.environ.get("SPCLAW_DATA_ROOT", "/opt/spclaw-data"))
 
 
 def _db_path() -> Path:
     return Path(
         os.environ.get(
-            "COATUE_CLAW_EMAIL_DB_PATH",
+            "SPCLAW_EMAIL_DB_PATH",
             str(_data_root() / "db/email_gateway.sqlite"),
         )
     )
@@ -223,41 +223,41 @@ class EmailGatewayStore:
 
 
 def load_email_config() -> EmailConfig:
-    enabled = os.environ.get("COATUE_CLAW_EMAIL_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
-    allowed_raw = os.environ.get("COATUE_CLAW_EMAIL_ALLOWED_SENDERS", "").strip()
+    enabled = os.environ.get("SPCLAW_EMAIL_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+    allowed_raw = os.environ.get("SPCLAW_EMAIL_ALLOWED_SENDERS", "").strip()
     allowed = {item.strip().lower() for item in allowed_raw.split(",") if item.strip()}
     return EmailConfig(
         enabled=enabled,
-        imap_host=os.environ.get("COATUE_CLAW_EMAIL_IMAP_HOST", "").strip(),
-        imap_port=int(os.environ.get("COATUE_CLAW_EMAIL_IMAP_PORT", "993")),
-        imap_user=os.environ.get("COATUE_CLAW_EMAIL_IMAP_USER", "").strip(),
-        imap_password=os.environ.get("COATUE_CLAW_EMAIL_IMAP_PASSWORD", "").strip(),
-        imap_mailbox=os.environ.get("COATUE_CLAW_EMAIL_IMAP_MAILBOX", "INBOX").strip() or "INBOX",
-        smtp_host=os.environ.get("COATUE_CLAW_EMAIL_SMTP_HOST", "").strip(),
-        smtp_port=int(os.environ.get("COATUE_CLAW_EMAIL_SMTP_PORT", "587")),
-        smtp_user=os.environ.get("COATUE_CLAW_EMAIL_SMTP_USER", "").strip(),
-        smtp_password=os.environ.get("COATUE_CLAW_EMAIL_SMTP_PASSWORD", "").strip(),
-        from_address=os.environ.get("COATUE_CLAW_EMAIL_FROM", "").strip(),
-        poll_seconds=max(15, int(os.environ.get("COATUE_CLAW_EMAIL_POLL_SECONDS", "60"))),
+        imap_host=os.environ.get("SPCLAW_EMAIL_IMAP_HOST", "").strip(),
+        imap_port=int(os.environ.get("SPCLAW_EMAIL_IMAP_PORT", "993")),
+        imap_user=os.environ.get("SPCLAW_EMAIL_IMAP_USER", "").strip(),
+        imap_password=os.environ.get("SPCLAW_EMAIL_IMAP_PASSWORD", "").strip(),
+        imap_mailbox=os.environ.get("SPCLAW_EMAIL_IMAP_MAILBOX", "INBOX").strip() or "INBOX",
+        smtp_host=os.environ.get("SPCLAW_EMAIL_SMTP_HOST", "").strip(),
+        smtp_port=int(os.environ.get("SPCLAW_EMAIL_SMTP_PORT", "587")),
+        smtp_user=os.environ.get("SPCLAW_EMAIL_SMTP_USER", "").strip(),
+        smtp_password=os.environ.get("SPCLAW_EMAIL_SMTP_PASSWORD", "").strip(),
+        from_address=os.environ.get("SPCLAW_EMAIL_FROM", "").strip(),
+        poll_seconds=max(15, int(os.environ.get("SPCLAW_EMAIL_POLL_SECONDS", "60"))),
         allowed_senders=allowed,
-        max_attachment_mb=max(1, int(os.environ.get("COATUE_CLAW_EMAIL_MAX_ATTACHMENT_MB", "25"))),
+        max_attachment_mb=max(1, int(os.environ.get("SPCLAW_EMAIL_MAX_ATTACHMENT_MB", "25"))),
     )
 
 
 def _config_errors(cfg: EmailConfig) -> list[str]:
     missing: list[str] = []
     for key, value in (
-        ("COATUE_CLAW_EMAIL_IMAP_HOST", cfg.imap_host),
-        ("COATUE_CLAW_EMAIL_IMAP_USER", cfg.imap_user),
-        ("COATUE_CLAW_EMAIL_IMAP_PASSWORD", cfg.imap_password),
-        ("COATUE_CLAW_EMAIL_SMTP_HOST", cfg.smtp_host),
-        ("COATUE_CLAW_EMAIL_SMTP_USER", cfg.smtp_user),
-        ("COATUE_CLAW_EMAIL_SMTP_PASSWORD", cfg.smtp_password),
+        ("SPCLAW_EMAIL_IMAP_HOST", cfg.imap_host),
+        ("SPCLAW_EMAIL_IMAP_USER", cfg.imap_user),
+        ("SPCLAW_EMAIL_IMAP_PASSWORD", cfg.imap_password),
+        ("SPCLAW_EMAIL_SMTP_HOST", cfg.smtp_host),
+        ("SPCLAW_EMAIL_SMTP_USER", cfg.smtp_user),
+        ("SPCLAW_EMAIL_SMTP_PASSWORD", cfg.smtp_password),
     ):
         if not value:
             missing.append(key)
     if not cfg.from_address:
-        missing.append("COATUE_CLAW_EMAIL_FROM")
+        missing.append("SPCLAW_EMAIL_FROM")
     return missing
 
 
@@ -272,7 +272,7 @@ def _extract_message_id(msg: Message) -> str:
     if msg_id:
         return msg_id
     digest = hashlib.sha256((msg.as_string() or "").encode("utf-8")).hexdigest()
-    return f"<fallback-{digest[:24]}@coatue-claw>"
+    return f"<fallback-{digest[:24]}@spclaw>"
 
 
 def _extract_subject(msg: Message) -> str:
@@ -463,7 +463,7 @@ def _ingest_email_attachments(
 
 def _format_help() -> str:
     return (
-        "Coatue Claw Email Commands\n\n"
+        "SPClaw Email Commands\n\n"
         "Examples:\n"
         "- diligence SNOW\n"
         "- dilligence MDB\n"
@@ -570,7 +570,7 @@ def _render_memo_pdf(
                 ax.text(
                     0.5,
                     0.915,
-                    f"Generated {datetime.now(UTC).strftime('%B %d, %Y at %I:%M %p UTC')} | Coatue Claw",
+                    f"Generated {datetime.now(UTC).strftime('%B %d, %Y at %I:%M %p UTC')} | SPClaw",
                     transform=ax.transAxes,
                     fontsize=10.5,
                     color=muted,
@@ -594,7 +594,7 @@ def _render_memo_pdf(
             return 0.91
 
         def save_current_page() -> None:
-            ax.text(left, 0.03, "Coatue Claw Diligence Brief", transform=ax.transAxes, fontsize=8.8, color=muted, va="bottom", ha="left")
+            ax.text(left, 0.03, "SPClaw Diligence Brief", transform=ax.transAxes, fontsize=8.8, color=muted, va="bottom", ha="left")
             ax.text(right, 0.03, f"Page {page_num}", transform=ax.transAxes, fontsize=8.8, color=muted, va="bottom", ha="right")
             pdf.savefig(fig, bbox_inches="tight")
             plt.close(fig)
@@ -771,7 +771,7 @@ def _handle_command(command: EmailCommand) -> EmailReply:
         return EmailReply(body_text=memory.format_retrieval(command.arg, limit=6))
     if command.kind == "files_status":
         bridge = load_config()
-        from coatue_claw.file_bridge import status as file_status
+        from spclaw.file_bridge import status as file_status
 
         return EmailReply(body_text="File bridge status:\n" + json.dumps(file_status(bridge), indent=2, sort_keys=True))
     return EmailReply(body_text=_format_help())
@@ -910,7 +910,7 @@ def _process_email_message(
     reply_html = None
     if command_output.body_html:
         reply_html = f"{command_output.body_html}{ingest_block_html}"
-    reply_subject = f"Re: {subject}" if subject else "Re: Coatue Claw"
+    reply_subject = f"Re: {subject}" if subject else "Re: SPClaw"
     _send_reply(
         cfg,
         to_address=sender,
@@ -939,7 +939,7 @@ def run_once() -> dict[str, Any]:
         return {
             "ok": False,
             "reason": "email_disabled",
-            "hint": "Set COATUE_CLAW_EMAIL_ENABLED=true",
+            "hint": "Set SPCLAW_EMAIL_ENABLED=true",
             "stats": store.stats(),
             "timestamp_utc": _now_utc_iso(),
         }
@@ -1042,7 +1042,7 @@ def status_snapshot() -> dict[str, Any]:
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
-    parser = argparse.ArgumentParser("coatue-claw-email-gateway")
+    parser = argparse.ArgumentParser("spclaw-email-gateway")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("status")
     sub.add_parser("run-once")

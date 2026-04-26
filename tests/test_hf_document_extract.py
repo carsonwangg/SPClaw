@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from coatue_claw.hf_document_extract import extract_document
+from spclaw.hf_document_extract import extract_document
 
 
 def test_extract_txt_document(tmp_path: Path) -> None:
@@ -51,7 +51,7 @@ def test_dispatch_pdf_extractor(monkeypatch, tmp_path: Path) -> None:
     file_path.write_text("placeholder", encoding="utf-8")
 
     monkeypatch.setattr(
-        "coatue_claw.hf_document_extract._extract_pdf",
+        "spclaw.hf_document_extract._extract_pdf",
         lambda path: ("pdf text", 2, []),
     )
     doc = extract_document(
@@ -70,7 +70,7 @@ def test_dispatch_docx_extractor(monkeypatch, tmp_path: Path) -> None:
     file_path.write_text("placeholder", encoding="utf-8")
 
     monkeypatch.setattr(
-        "coatue_claw.hf_document_extract._extract_docx",
+        "spclaw.hf_document_extract._extract_docx",
         lambda path: ("docx text", 1, []),
     )
     doc = extract_document(
@@ -89,7 +89,7 @@ def test_dispatch_pptx_extractor(monkeypatch, tmp_path: Path) -> None:
     file_path.write_text("placeholder", encoding="utf-8")
 
     monkeypatch.setattr(
-        "coatue_claw.hf_document_extract._extract_pptx",
+        "spclaw.hf_document_extract._extract_pptx",
         lambda path: ("pptx text", 5, []),
     )
     doc = extract_document(

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from coatue_claw.slack_x_chart_intent import parse_x_chart_post_intent
+from spclaw.slack_x_chart_intent import parse_x_chart_post_intent
 
 
 def test_parse_compound_intent_add_source_and_chart() -> None:

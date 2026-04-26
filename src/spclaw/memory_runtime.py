@@ -5,8 +5,8 @@ from datetime import UTC, datetime
 import os
 from typing import Any
 
-from coatue_claw.memory_extraction import extract_fact_candidates
-from coatue_claw.memory_store import FactCandidate, MemoryHit, MemoryStore
+from spclaw.memory_extraction import extract_fact_candidates
+from spclaw.memory_store import FactCandidate, MemoryHit, MemoryStore
 
 try:
     from openai import OpenAI
@@ -50,11 +50,11 @@ class SemanticMemoryIndex:
             return
 
         try:
-            data_root = os.environ.get("COATUE_CLAW_DATA_ROOT", "/opt/coatue-claw-data")
-            uri = os.environ.get("COATUE_CLAW_MEMORY_VECTOR_DIR", f"{data_root}/db/lancedb")
+            data_root = os.environ.get("SPCLAW_DATA_ROOT", "/opt/spclaw-data")
+            uri = os.environ.get("SPCLAW_MEMORY_VECTOR_DIR", f"{data_root}/db/lancedb")
             self._db = lancedb.connect(uri)
             self._client = OpenAI(api_key=api_key)
-            self._model = os.environ.get("COATUE_CLAW_MEMORY_EMBED_MODEL", "text-embedding-3-large")
+            self._model = os.environ.get("SPCLAW_MEMORY_EMBED_MODEL", "text-embedding-3-large")
 
             tables = set(self._db.table_names())
             if "memory_facts" in tables:

@@ -6,33 +6,33 @@ import logging
 from pathlib import Path
 import json
 
-from coatue_claw.chart_metrics import DEFAULT_X_METRIC, DEFAULT_Y_METRIC, METRIC_SPECS
-from coatue_claw.diligence_report import build_neutral_investment_memo
-from coatue_claw.hf_analyst import analyze_podcast_url as hfa_analyze_podcast_url
-from coatue_claw.hf_analyst import analyze_thread as hfa_analyze_thread
-from coatue_claw.hf_analyst import hfa_status
-from coatue_claw.memory_runtime import MemoryRuntime
-from coatue_claw.market_daily import debug_catalyst as market_daily_debug_catalyst
-from coatue_claw.market_daily import holdings as market_daily_holdings
-from coatue_claw.market_daily import refresh_coatue_holdings as market_daily_refresh_holdings
-from coatue_claw.market_daily import run_earnings_recap as run_market_daily_earnings_recap
-from coatue_claw.market_daily import run_once as run_market_daily_once
-from coatue_claw.market_daily import set_override as market_daily_set_override
-from coatue_claw.market_daily import status as market_daily_status
-from coatue_claw.spencer_change_log import SpencerChangeLog
-from coatue_claw.valuation_chart import run_valuation_chart
-from coatue_claw.x_chart_daily import add_source as add_x_chart_source
-from coatue_claw.x_chart_daily import list_sources as list_x_chart_sources
-from coatue_claw.x_chart_daily import run_chart_scout_once
-from coatue_claw.x_chart_daily import status as x_chart_status
-from coatue_claw.x_digest import build_x_digest
+from spclaw.chart_metrics import DEFAULT_X_METRIC, DEFAULT_Y_METRIC, METRIC_SPECS
+from spclaw.diligence_report import build_neutral_investment_memo
+from spclaw.hf_analyst import analyze_podcast_url as hfa_analyze_podcast_url
+from spclaw.hf_analyst import analyze_thread as hfa_analyze_thread
+from spclaw.hf_analyst import hfa_status
+from spclaw.memory_runtime import MemoryRuntime
+from spclaw.market_daily import debug_catalyst as market_daily_debug_catalyst
+from spclaw.market_daily import holdings as market_daily_holdings
+from spclaw.market_daily import refresh_coatue_holdings as market_daily_refresh_holdings
+from spclaw.market_daily import run_earnings_recap as run_market_daily_earnings_recap
+from spclaw.market_daily import run_once as run_market_daily_once
+from spclaw.market_daily import set_override as market_daily_set_override
+from spclaw.market_daily import status as market_daily_status
+from spclaw.spencer_change_log import SpencerChangeLog
+from spclaw.valuation_chart import run_valuation_chart
+from spclaw.x_chart_daily import add_source as add_x_chart_source
+from spclaw.x_chart_daily import list_sources as list_x_chart_sources
+from spclaw.x_chart_daily import run_chart_scout_once
+from spclaw.x_chart_daily import status as x_chart_status
+from spclaw.x_digest import build_x_digest
 
 logger = logging.getLogger(__name__)
 
 
 def run_diligence(ticker: str) -> Path:
     ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    out_dir = Path("/opt/coatue-claw-data/artifacts/packets")
+    out_dir = Path("/opt/spclaw-data/artifacts/packets")
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / f"{ticker.upper()}-{ts}.md"
     try:
@@ -267,7 +267,7 @@ def _run_hfa_command(args) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser("coatue-claw")
+    parser = argparse.ArgumentParser("spclaw")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     d = sub.add_parser("diligence")

@@ -17,9 +17,9 @@ except Exception:  # pragma: no cover - optional dependency for non-Slack test e
     WebClient = None  # type: ignore[assignment]
     SlackApiError = Exception  # type: ignore[assignment]
 
-from coatue_claw.spencer_change_log import SpencerChange, SpencerChangeLog, requester_label
+from spclaw.spencer_change_log import SpencerChange, SpencerChangeLog, requester_label
 
-load_dotenv("/opt/coatue-claw/.env.prod")
+load_dotenv("/opt/spclaw/.env.prod")
 
 DEFAULT_DM_USER_IDS = ("U0AGD28QSQG",)
 
@@ -29,7 +29,7 @@ def _utc_now_iso() -> str:
 
 
 def _timezone() -> ZoneInfo:
-    name = (os.environ.get("COATUE_CLAW_SPENCER_CHANGE_DIGEST_TZ", "America/Los_Angeles") or "").strip()
+    name = (os.environ.get("SPCLAW_SPENCER_CHANGE_DIGEST_TZ", "America/Los_Angeles") or "").strip()
     if not name:
         name = "America/Los_Angeles"
     try:
@@ -69,7 +69,7 @@ def _slack_tokens() -> list[str]:
 
 
 def _dm_user_ids() -> list[str]:
-    raw = (os.environ.get("COATUE_CLAW_SPENCER_CHANGE_DIGEST_DM_USER_IDS", "") or "").strip()
+    raw = (os.environ.get("SPCLAW_SPENCER_CHANGE_DIGEST_DM_USER_IDS", "") or "").strip()
     if raw:
         out = [item.strip() for item in raw.split(",") if item.strip()]
         if out:
@@ -253,7 +253,7 @@ def status() -> dict[str, Any]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser("coatue-claw-spencer-change-digest")
+    parser = argparse.ArgumentParser("spclaw-spencer-change-digest")
     sub = parser.add_subparsers(dest="command", required=True)
 
     run = sub.add_parser("run-once")

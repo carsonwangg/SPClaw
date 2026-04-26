@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from coatue_claw.memory_runtime import MemoryRuntime, RetrievedMemory
-from coatue_claw.memory_store import FactCandidate, MemoryStore
+from spclaw.memory_runtime import MemoryRuntime, RetrievedMemory
+from spclaw.memory_store import FactCandidate, MemoryStore
 
 
 class _NoSemantic:
@@ -19,7 +19,7 @@ class _NoSemantic:
 
 def test_runtime_ingest_and_retrieve(tmp_path: Path, monkeypatch):
     db_path = tmp_path / "memory.sqlite"
-    monkeypatch.setenv("COATUE_CLAW_MEMORY_DB_PATH", str(db_path))
+    monkeypatch.setenv("SPCLAW_MEMORY_DB_PATH", str(db_path))
 
     runtime = MemoryRuntime(store=MemoryStore(), semantic=_NoSemantic())
     persisted = runtime.ingest_message(
@@ -38,7 +38,7 @@ def test_runtime_ingest_and_retrieve(tmp_path: Path, monkeypatch):
 
 def test_extract_daily_dry_run_and_insert(tmp_path: Path, monkeypatch):
     db_path = tmp_path / "memory.sqlite"
-    monkeypatch.setenv("COATUE_CLAW_MEMORY_DB_PATH", str(db_path))
+    monkeypatch.setenv("SPCLAW_MEMORY_DB_PATH", str(db_path))
 
     runtime = MemoryRuntime(store=MemoryStore(), semantic=_NoSemantic())
     runtime.store.log_event(
@@ -59,7 +59,7 @@ def test_extract_daily_dry_run_and_insert(tmp_path: Path, monkeypatch):
 
 def test_hfa_output_control_set_get_clear(tmp_path: Path, monkeypatch):
     db_path = tmp_path / "memory.sqlite"
-    monkeypatch.setenv("COATUE_CLAW_MEMORY_DB_PATH", str(db_path))
+    monkeypatch.setenv("SPCLAW_MEMORY_DB_PATH", str(db_path))
     runtime = MemoryRuntime(store=MemoryStore(), semantic=_NoSemantic())
 
     inserted = runtime.set_hfa_output_control(
@@ -82,7 +82,7 @@ def test_hfa_output_control_set_get_clear(tmp_path: Path, monkeypatch):
 
 def test_hfa_output_control_rejects_non_freeform_mode(tmp_path: Path, monkeypatch):
     db_path = tmp_path / "memory.sqlite"
-    monkeypatch.setenv("COATUE_CLAW_MEMORY_DB_PATH", str(db_path))
+    monkeypatch.setenv("SPCLAW_MEMORY_DB_PATH", str(db_path))
     runtime = MemoryRuntime(store=MemoryStore(), semantic=_NoSemantic())
     try:
         runtime.set_hfa_output_control(requested_by="U123", mode="strict")

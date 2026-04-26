@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import re
 
-from coatue_claw.memory_store import FactCandidate
+from spclaw.memory_store import FactCandidate
 
 
 def _utc_now_iso() -> str:

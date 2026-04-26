@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from coatue_claw.slack_config_intent import parse_config_intent
+from spclaw.slack_config_intent import parse_config_intent
 
 
 def test_parse_show_settings_intent():
-    intent = parse_config_intent("@Coatue Claw show my settings")
+    intent = parse_config_intent("@SPClaw show my settings")
     assert intent is not None
     assert intent.kind == "show"
 

@@ -1,10 +1,10 @@
 {
   "mode": "local-drive-copy",
   "local": {
-    "working": "/opt/coatue-claw-data/files/working",
-    "archive": "/opt/coatue-claw-data/files/archive",
-    "published": "/opt/coatue-claw-data/files/published",
-    "incoming": "/opt/coatue-claw-data/files/incoming"
+    "working": "/opt/spclaw-data/files/working",
+    "archive": "/opt/spclaw-data/files/archive",
+    "published": "/opt/spclaw-data/files/published",
+    "incoming": "/opt/spclaw-data/files/incoming"
   },
   "drive": {
     "root": "/Users/spclaw/Documents/SPClaw Database",

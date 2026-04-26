@@ -10,13 +10,13 @@ import shlex
 import subprocess
 from typing import Any
 
-from coatue_claw.chart_metrics import DEFAULT_X_METRIC, DEFAULT_Y_METRIC, METRIC_SPECS
+from spclaw.chart_metrics import DEFAULT_X_METRIC, DEFAULT_Y_METRIC, METRIC_SPECS
 
 DEFAULT_FOLLOWUP_PROMPT = (
     "Any adjustments to the stock screen or data you'd like me to double-check?\n"
     "Formatting tweaks too. Reply in-thread with updates like:\n"
-    "- `@Coatue Claw include AVAV,HII`\n"
-    "- `@Coatue Claw exclude GD`"
+    "- `@SPClaw include AVAV,HII`\n"
+    "- `@SPClaw exclude GD`"
 )
 
 
@@ -61,31 +61,31 @@ def _iso_utc_now() -> str:
 
 
 def data_root() -> Path:
-    return Path(os.environ.get("COATUE_CLAW_DATA_ROOT", "/opt/coatue-claw-data"))
+    return Path(os.environ.get("SPCLAW_DATA_ROOT", "/opt/spclaw-data"))
 
 
 def runtime_settings_path() -> Path:
-    return Path(os.environ.get("COATUE_CLAW_RUNTIME_SETTINGS_PATH", str(data_root() / "db/runtime-settings.json")))
+    return Path(os.environ.get("SPCLAW_RUNTIME_SETTINGS_PATH", str(data_root() / "db/runtime-settings.json")))
 
 
 def runtime_settings_backup_dir() -> Path:
-    return Path(os.environ.get("COATUE_CLAW_RUNTIME_SETTINGS_BACKUP_DIR", str(data_root() / "db/runtime-settings-backups")))
+    return Path(os.environ.get("SPCLAW_RUNTIME_SETTINGS_BACKUP_DIR", str(data_root() / "db/runtime-settings-backups")))
 
 
 def runtime_audit_dir() -> Path:
-    return Path(os.environ.get("COATUE_CLAW_CONFIG_AUDIT_DIR", str(data_root() / "artifacts/config-audit")))
+    return Path(os.environ.get("SPCLAW_CONFIG_AUDIT_DIR", str(data_root() / "artifacts/config-audit")))
 
 
 def promotion_ledger_path() -> Path:
-    return Path(os.environ.get("COATUE_CLAW_PROMOTION_LEDGER_PATH", str(data_root() / "db/settings-promotions.json")))
+    return Path(os.environ.get("SPCLAW_PROMOTION_LEDGER_PATH", str(data_root() / "db/settings-promotions.json")))
 
 
 def repo_path() -> Path:
-    return Path(os.environ.get("COATUE_CLAW_REPO_PATH", "/opt/coatue-claw"))
+    return Path(os.environ.get("SPCLAW_REPO_PATH", "/opt/spclaw"))
 
 
 def repo_defaults_path() -> Path:
-    return Path(os.environ.get("COATUE_CLAW_REPO_DEFAULTS_PATH", str(repo_path() / "config/runtime-defaults.json")))
+    return Path(os.environ.get("SPCLAW_REPO_DEFAULTS_PATH", str(repo_path() / "config/runtime-defaults.json")))
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -295,8 +295,8 @@ def promote_current_settings_to_main(*, actor: str) -> PromotionResult:
     )
     _save_promotion_ledger(entries)
 
-    restart_ok = _run_optional_make(os.environ.get("COATUE_CLAW_RESTART_COMMAND", "make openclaw-restart"), cwd=repo_dir)
-    status_ok = _run_optional_make(os.environ.get("COATUE_CLAW_STATUS_COMMAND", "make openclaw-slack-status"), cwd=repo_dir)
+    restart_ok = _run_optional_make(os.environ.get("SPCLAW_RESTART_COMMAND", "make openclaw-restart"), cwd=repo_dir)
+    status_ok = _run_optional_make(os.environ.get("SPCLAW_STATUS_COMMAND", "make openclaw-slack-status"), cwd=repo_dir)
 
     return PromotionResult(
         commit=commit,
@@ -333,8 +333,8 @@ def undo_last_settings_promotion(*, actor: str) -> UndoPromotionResult:
     entries[target_index]["reverted_actor"] = actor
     _save_promotion_ledger(entries)
 
-    restart_ok = _run_optional_make(os.environ.get("COATUE_CLAW_RESTART_COMMAND", "make openclaw-restart"), cwd=repo_dir)
-    status_ok = _run_optional_make(os.environ.get("COATUE_CLAW_STATUS_COMMAND", "make openclaw-slack-status"), cwd=repo_dir)
+    restart_ok = _run_optional_make(os.environ.get("SPCLAW_RESTART_COMMAND", "make openclaw-restart"), cwd=repo_dir)
+    status_ok = _run_optional_make(os.environ.get("SPCLAW_STATUS_COMMAND", "make openclaw-slack-status"), cwd=repo_dir)
 
     return UndoPromotionResult(
         reverted_target_commit=target_commit,

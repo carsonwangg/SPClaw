@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 
 
-UNIVERSE_DIR = Path("/opt/coatue-claw-data/db/universes")
+UNIVERSE_DIR = Path("/opt/spclaw-data/db/universes")
 CSV_FIELDS = ["ticker", "added_at_utc", "source", "notes"]
 
 _TICKER_STOPWORDS = {

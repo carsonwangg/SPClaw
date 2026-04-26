@@ -49,28 +49,28 @@ class XDigestResult:
 
 
 def _data_root() -> Path:
-    return Path(os.environ.get("COATUE_CLAW_DATA_ROOT", "/opt/coatue-claw-data"))
+    return Path(os.environ.get("SPCLAW_DATA_ROOT", "/opt/spclaw-data"))
 
 
 def _digest_dir() -> Path:
     return Path(
         os.environ.get(
-            "COATUE_CLAW_X_DIGEST_DIR",
+            "SPCLAW_X_DIGEST_DIR",
             str(_data_root() / "artifacts/x-digest"),
         )
     )
 
 
 def _x_api_base() -> str:
-    return (os.environ.get("COATUE_CLAW_X_API_BASE", "https://api.x.com").strip() or "https://api.x.com").rstrip("/")
+    return (os.environ.get("SPCLAW_X_API_BASE", "https://api.x.com").strip() or "https://api.x.com").rstrip("/")
 
 
 def _resolve_bearer_token() -> str:
-    for key in ("COATUE_CLAW_X_BEARER_TOKEN", "X_BEARER_TOKEN", "COATUE_CLAW_TWITTER_BEARER_TOKEN"):
+    for key in ("SPCLAW_X_BEARER_TOKEN", "X_BEARER_TOKEN", "SPCLAW_TWITTER_BEARER_TOKEN"):
         value = os.environ.get(key, "").strip()
         if value:
             return value
-    raise XDigestError("X bearer token missing. Set COATUE_CLAW_X_BEARER_TOKEN in .env.prod.")
+    raise XDigestError("X bearer token missing. Set SPCLAW_X_BEARER_TOKEN in .env.prod.")
 
 
 def _slugify(value: str) -> str:

@@ -29,7 +29,7 @@ except Exception:  # pragma: no cover - optional dependency
     OpenAI = None  # type: ignore[assignment]
 
 
-load_dotenv("/opt/coatue-claw/.env.prod")
+load_dotenv("/opt/spclaw/.env.prod")
 
 logger = logging.getLogger(__name__)
 
@@ -654,37 +654,37 @@ class RebuiltBars:
 
 
 def _data_root() -> Path:
-    return Path(os.environ.get("COATUE_CLAW_DATA_ROOT", "/opt/coatue-claw-data"))
+    return Path(os.environ.get("SPCLAW_DATA_ROOT", "/opt/spclaw-data"))
 
 
 def _db_path() -> Path:
     return Path(
         os.environ.get(
-            "COATUE_CLAW_X_CHART_DB_PATH",
+            "SPCLAW_X_CHART_DB_PATH",
             str(_data_root() / "db/x_chart_daily.sqlite"),
         )
     )
 
 
 def _x_api_base() -> str:
-    return (os.environ.get("COATUE_CLAW_X_API_BASE", "https://api.x.com").strip() or "https://api.x.com").rstrip("/")
+    return (os.environ.get("SPCLAW_X_API_BASE", "https://api.x.com").strip() or "https://api.x.com").rstrip("/")
 
 
 def _output_dir() -> Path:
     return Path(
         os.environ.get(
-            "COATUE_CLAW_X_CHART_DIR",
+            "SPCLAW_X_CHART_DIR",
             str(_data_root() / "artifacts/x-chart-daily"),
         )
     )
 
 
 def _resolve_bearer_token() -> str:
-    for key in ("COATUE_CLAW_X_BEARER_TOKEN", "X_BEARER_TOKEN", "COATUE_CLAW_TWITTER_BEARER_TOKEN"):
+    for key in ("SPCLAW_X_BEARER_TOKEN", "X_BEARER_TOKEN", "SPCLAW_TWITTER_BEARER_TOKEN"):
         value = os.environ.get(key, "").strip()
         if value:
             return value
-    raise XChartError("X bearer token missing. Set COATUE_CLAW_X_BEARER_TOKEN in .env.prod.")
+    raise XChartError("X bearer token missing. Set SPCLAW_X_BEARER_TOKEN in .env.prod.")
 
 
 def _slack_tokens() -> list[str]:
@@ -720,14 +720,14 @@ def _slack_tokens() -> list[str]:
 
 
 def _slack_channel() -> str:
-    channel = os.environ.get("COATUE_CLAW_X_CHART_SLACK_CHANNEL", "").strip()
+    channel = os.environ.get("SPCLAW_X_CHART_SLACK_CHANNEL", "").strip()
     if not channel:
-        raise XChartError("COATUE_CLAW_X_CHART_SLACK_CHANNEL missing (set Slack channel id).")
+        raise XChartError("SPCLAW_X_CHART_SLACK_CHANNEL missing (set Slack channel id).")
     return channel
 
 
 def _timezone() -> ZoneInfo:
-    tz_name = os.environ.get("COATUE_CLAW_X_CHART_TIMEZONE", DEFAULT_TIMEZONE).strip() or DEFAULT_TIMEZONE
+    tz_name = os.environ.get("SPCLAW_X_CHART_TIMEZONE", DEFAULT_TIMEZONE).strip() or DEFAULT_TIMEZONE
     try:
         return ZoneInfo(tz_name)
     except Exception as exc:
@@ -735,7 +735,7 @@ def _timezone() -> ZoneInfo:
 
 
 def _parse_windows(raw: str | None = None) -> list[tuple[int, int]]:
-    value = (raw or os.environ.get("COATUE_CLAW_X_CHART_WINDOWS", DEFAULT_WINDOWS) or DEFAULT_WINDOWS).strip()
+    value = (raw or os.environ.get("SPCLAW_X_CHART_WINDOWS", DEFAULT_WINDOWS) or DEFAULT_WINDOWS).strip()
     out: list[tuple[int, int]] = []
     for part in value.split(","):
         p = part.strip()
@@ -1930,7 +1930,7 @@ def _format_numeric_tick(value: float) -> str:
 
 
 def _vision_enabled() -> bool:
-    raw = (os.environ.get("COATUE_CLAW_X_CHART_VISION_ENABLED", "1") or "1").strip().lower()
+    raw = (os.environ.get("SPCLAW_X_CHART_VISION_ENABLED", "1") or "1").strip().lower()
     return raw not in {"0", "false", "off", "no"}
 
 
@@ -1954,7 +1954,7 @@ def _extract_rebuilt_bars_via_vision(*, candidate: Candidate) -> RebuiltBars | N
 
     try:
         client = OpenAI(api_key=api_key)
-        model = os.environ.get("COATUE_CLAW_X_CHART_VISION_MODEL", "gpt-4.1").strip() or "gpt-4.1"
+        model = os.environ.get("SPCLAW_X_CHART_VISION_MODEL", "gpt-4.1").strip() or "gpt-4.1"
         force_grouped = _is_employees_robots_chart(candidate)
         prompt = (
             "Extract bar-chart data from this image.\n"
@@ -2266,7 +2266,7 @@ def _extract_chart_title_hint_via_vision(candidate: Candidate) -> str | None:
         return None
     try:
         client = OpenAI(api_key=api_key)
-        model = os.environ.get("COATUE_CLAW_X_CHART_TITLE_MODEL", "gpt-5.2-chat-latest").strip() or "gpt-5.2-chat-latest"
+        model = os.environ.get("SPCLAW_X_CHART_TITLE_MODEL", "gpt-5.2-chat-latest").strip() or "gpt-5.2-chat-latest"
         b64 = base64.b64encode(payload).decode("ascii")
         data_url = f"data:{mime};base64,{b64}"
         response = client.chat.completions.create(
@@ -2346,12 +2346,12 @@ def _employees_robots_takeaway(sentence: str) -> str:
 
 
 def _llm_title_enabled() -> bool:
-    raw = (os.environ.get("COATUE_CLAW_X_CHART_LLM_TITLES_ENABLED", "1") or "1").strip().lower()
+    raw = (os.environ.get("SPCLAW_X_CHART_LLM_TITLES_ENABLED", "1") or "1").strip().lower()
     return raw not in {"0", "false", "off", "no"}
 
 
 def _require_reconstruction() -> bool:
-    raw = (os.environ.get("COATUE_CLAW_X_CHART_REQUIRE_REBUILD", "1") or "1").strip().lower()
+    raw = (os.environ.get("SPCLAW_X_CHART_REQUIRE_REBUILD", "1") or "1").strip().lower()
     return raw not in {"0", "false", "off", "no"}
 
 
@@ -2379,7 +2379,7 @@ def _synthesize_style_via_llm(candidate: Candidate) -> tuple[dict[str, str] | No
     title = _normalize_render_text(candidate.title)
     if not text and not title:
         return None, "missing_fields"
-    model = os.environ.get("COATUE_CLAW_X_CHART_TITLE_MODEL", "gpt-5.2-chat-latest").strip() or "gpt-5.2-chat-latest"
+    model = os.environ.get("SPCLAW_X_CHART_TITLE_MODEL", "gpt-5.2-chat-latest").strip() or "gpt-5.2-chat-latest"
     chart_hint = _extract_chart_title_hint_via_vision(candidate)
     prompt = [
         "Using the tweet and chart context, generate an encompassing Coatue Chart of the Day style title.",
@@ -3195,7 +3195,7 @@ def _parse_x_post_url(post_url: str) -> tuple[str, str] | None:
 
 def _fetch_vxtwitter_post_candidate(*, handle: str, tweet_id: str) -> Candidate | None:
     api_url = f"https://api.vxtwitter.com/{handle}/status/{tweet_id}"
-    req = Request(api_url, headers={"User-Agent": "coatue-claw/1.0", "Accept": "application/json"}, method="GET")
+    req = Request(api_url, headers={"User-Agent": "spclaw/1.0", "Accept": "application/json"}, method="GET")
     try:
         with urlopen(req, timeout=25) as resp:
             payload = json.loads((resp.read() or b"{}").decode("utf-8", errors="ignore"))
@@ -3428,7 +3428,7 @@ def _fetch_x_candidates_open_search(
     queries = _open_search_queries()
     if not queries:
         return []
-    per_query = max(10, min(60, int(os.environ.get("COATUE_CLAW_X_CHART_OPEN_SEARCH_MAX_RESULTS", "35"))))
+    per_query = max(10, min(60, int(os.environ.get("SPCLAW_X_CHART_OPEN_SEARCH_MAX_RESULTS", "35"))))
     out: list[Candidate] = []
     for query in queries:
         try:
@@ -3445,7 +3445,7 @@ def _fetch_x_candidates_open_search(
 
 def _discover_new_sources(*, token: str) -> list[tuple[str, int]]:
     query = os.environ.get(
-        "COATUE_CLAW_X_CHART_DISCOVERY_QUERY",
+        "SPCLAW_X_CHART_DISCOVERY_QUERY",
         "(ai OR software OR semiconductor OR macro OR consumer) has:images -is:retweet -is:reply lang:en",
     ).strip()
     payload = _x_search_recent(query, hours=24, max_results=60, token=token)
@@ -3463,8 +3463,8 @@ def _discover_new_sources(*, token: str) -> list[tuple[str, int]]:
 
 
 def _fetch_visualcapitalist_candidates(*, max_items: int = 20) -> list[Candidate]:
-    feed_url = os.environ.get("COATUE_CLAW_VISUALCAPITALIST_FEED_URL", "https://www.visualcapitalist.com/feed/").strip()
-    req = Request(feed_url, headers={"User-Agent": "coatue-claw/1.0"}, method="GET")
+    feed_url = os.environ.get("SPCLAW_VISUALCAPITALIST_FEED_URL", "https://www.visualcapitalist.com/feed/").strip()
+    req = Request(feed_url, headers={"User-Agent": "spclaw/1.0"}, method="GET")
     try:
         with urlopen(req, timeout=30) as resp:
             content = resp.read()
@@ -3577,8 +3577,8 @@ def _normalize_posted_source(source: str) -> str:
 
 
 def _source_variety_params() -> tuple[int, float]:
-    lookback_raw = (os.environ.get("COATUE_CLAW_X_CHART_SOURCE_VARIETY_LOOKBACK", "6") or "6").strip()
-    floor_raw = (os.environ.get("COATUE_CLAW_X_CHART_SOURCE_VARIETY_SCORE_FLOOR", "0.90") or "0.90").strip()
+    lookback_raw = (os.environ.get("SPCLAW_X_CHART_SOURCE_VARIETY_LOOKBACK", "6") or "6").strip()
+    floor_raw = (os.environ.get("SPCLAW_X_CHART_SOURCE_VARIETY_SCORE_FLOOR", "0.90") or "0.90").strip()
     try:
         lookback = max(2, min(20, int(lookback_raw)))
     except Exception:
@@ -3592,7 +3592,7 @@ def _source_variety_params() -> tuple[int, float]:
 
 
 def _source_repeat_days() -> int:
-    raw = (os.environ.get("COATUE_CLAW_X_CHART_SOURCE_REPEAT_DAYS", "3") or "3").strip()
+    raw = (os.environ.get("SPCLAW_X_CHART_SOURCE_REPEAT_DAYS", "3") or "3").strip()
     try:
         days = int(raw)
     except Exception:
@@ -3601,24 +3601,24 @@ def _source_repeat_days() -> int:
 
 
 def _discovery_mode() -> str:
-    mode = (os.environ.get("COATUE_CLAW_X_CHART_DISCOVERY_MODE", "hybrid") or "hybrid").strip().lower()
+    mode = (os.environ.get("SPCLAW_X_CHART_DISCOVERY_MODE", "hybrid") or "hybrid").strip().lower()
     if mode not in {"seed_only", "open_only", "hybrid"}:
         return "hybrid"
     return mode
 
 
 def _open_search_enabled() -> bool:
-    raw = (os.environ.get("COATUE_CLAW_X_CHART_OPEN_SEARCH_ENABLED", "1") or "1").strip().lower()
+    raw = (os.environ.get("SPCLAW_X_CHART_OPEN_SEARCH_ENABLED", "1") or "1").strip().lower()
     return raw not in {"0", "false", "off", "no"}
 
 
 def _auto_add_sources_enabled() -> bool:
-    raw = (os.environ.get("COATUE_CLAW_X_CHART_AUTO_ADD_SOURCES", "1") or "1").strip().lower()
+    raw = (os.environ.get("SPCLAW_X_CHART_AUTO_ADD_SOURCES", "1") or "1").strip().lower()
     return raw not in {"0", "false", "off", "no"}
 
 
 def _auto_add_daily_cap() -> int:
-    raw = (os.environ.get("COATUE_CLAW_X_CHART_AUTO_ADD_DAILY_CAP", "8") or "8").strip()
+    raw = (os.environ.get("SPCLAW_X_CHART_AUTO_ADD_DAILY_CAP", "8") or "8").strip()
     try:
         cap = int(raw)
     except Exception:
@@ -3629,7 +3629,7 @@ def _auto_add_daily_cap() -> int:
 def _open_search_queries() -> list[str]:
     raw = (
         os.environ.get(
-            "COATUE_CLAW_X_CHART_OPEN_SEARCH_QUERIES",
+            "SPCLAW_X_CHART_OPEN_SEARCH_QUERIES",
             (
                 "has:images (\"S&P 500\" OR breadth OR dispersion OR rotation) -is:retweet -is:reply lang:en || "
                 "has:images (\"data center\" OR \"power demand\" OR AI OR semiconductor) -is:retweet -is:reply lang:en || "
@@ -4086,7 +4086,7 @@ def _has_reconstructable_chart_data(candidate: Candidate) -> bool:
 def _fetch_image_bytes(url: str | None) -> tuple[bytes | None, str]:
     if not url:
         return None, "image/png"
-    req = Request(url, headers={"User-Agent": "coatue-claw/1.0", "Accept": "image/*"}, method="GET")
+    req = Request(url, headers={"User-Agent": "spclaw/1.0", "Accept": "image/*"}, method="GET")
     try:
         with urlopen(req, timeout=30) as resp:
             payload = resp.read() or b""
@@ -4293,7 +4293,7 @@ def _render_source_snip_card(
         from matplotlib.lines import Line2D
     except Exception as exc:
         raise XChartError("Chart card renderer unavailable (matplotlib missing).") from exc
-    from coatue_claw.valuation_chart import COATUE_FONT_FAMILY
+    from spclaw.valuation_chart import COATUE_FONT_FAMILY
 
     if not source_path.exists():
         raise XChartError("Source chart image is missing for card render.")
@@ -4751,7 +4751,7 @@ def _render_chart_of_day_style(
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
     from matplotlib.ticker import FuncFormatter
-    from coatue_claw.valuation_chart import COATUE_FONT_FAMILY
+    from spclaw.valuation_chart import COATUE_FONT_FAMILY
 
     output_dir = _output_dir()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -5200,7 +5200,7 @@ def run_chart_scout_once(
     windows_text = ",".join(f"{h:02d}:{m:02d}" for h, m in windows)
     repeat_days = _source_repeat_days()
     token = _resolve_bearer_token()
-    source_limit = max(8, min(60, int(os.environ.get("COATUE_CLAW_X_CHART_SOURCE_LIMIT", "25"))))
+    source_limit = max(8, min(60, int(os.environ.get("SPCLAW_X_CHART_SOURCE_LIMIT", "25"))))
     top_sources = store.top_sources(limit=source_limit)
     known_source_handles = {
         _canonical_handle(str(item.get("handle") or ""))
@@ -5226,7 +5226,7 @@ def run_chart_scout_once(
     open_search_candidates_count = len(x_open_candidates)
     merged_candidates_count = len(all_candidates)
     observed_count = store.upsert_observed_candidates(all_candidates)
-    pool_prune_days = max(2, min(30, int(os.environ.get("COATUE_CLAW_X_CHART_POOL_KEEP_DAYS", "10"))))
+    pool_prune_days = max(2, min(30, int(os.environ.get("SPCLAW_X_CHART_POOL_KEEP_DAYS", "10"))))
     pruned_count = store.prune_observed_candidates(keep_days=pool_prune_days)
 
     for item in all_candidates[:80]:
@@ -5235,7 +5235,7 @@ def run_chart_scout_once(
 
     discovery = _discover_new_sources(token=token)
     for handle, engagement in discovery:
-        if engagement >= int(os.environ.get("COATUE_CLAW_X_CHART_DISCOVERY_MIN_ENGAGEMENT", "120")):
+        if engagement >= int(os.environ.get("SPCLAW_X_CHART_DISCOVERY_MIN_ENGAGEMENT", "120")):
             store.note_candidate_observed(handle, engagement=engagement)
 
     source_last_posted = _collect_source_last_posted(store=store, limit=400)
@@ -5323,7 +5323,7 @@ def run_chart_scout_once(
         }
 
     since_utc = None if manual else store.latest_scheduled_posted_at_utc()
-    pool_limit = max(50, min(2000, int(os.environ.get("COATUE_CLAW_X_CHART_POOL_LIMIT", "600"))))
+    pool_limit = max(50, min(2000, int(os.environ.get("SPCLAW_X_CHART_POOL_LIMIT", "600"))))
     pool_candidates = store.observed_candidates_since(since_utc=since_utc, limit=pool_limit)
     ranking_pool = _dedupe_candidates(pool_candidates) if pool_candidates else all_candidates
 
@@ -5902,9 +5902,9 @@ def status() -> dict[str, Any]:
         "render_mode": "source-snip-card",
         "schedule_mode": "hourly-scout+windowed-post",
         "db_path": str(store.db_path),
-        "timezone": os.environ.get("COATUE_CLAW_X_CHART_TIMEZONE", DEFAULT_TIMEZONE),
+        "timezone": os.environ.get("SPCLAW_X_CHART_TIMEZONE", DEFAULT_TIMEZONE),
         "windows": ",".join(f"{h:02d}:{m:02d}" for h, m in _parse_windows()),
-        "slack_channel": os.environ.get("COATUE_CLAW_X_CHART_SLACK_CHANNEL", ""),
+        "slack_channel": os.environ.get("SPCLAW_X_CHART_SLACK_CHANNEL", ""),
         "sources_count": len(store.list_sources(limit=1000)),
         "last_scheduled_posted_at_utc": last_scheduled,
         "pool_candidates_since_last_post": store.observed_candidates_count_since(since_utc=last_scheduled),
@@ -5928,7 +5928,7 @@ def list_sources(*, limit: int = 50) -> dict[str, Any]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser("coatue-claw-x-chart-daily")
+    parser = argparse.ArgumentParser("spclaw-x-chart-daily")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     r = sub.add_parser("run-once")

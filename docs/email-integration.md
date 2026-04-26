@@ -1,17 +1,17 @@
-# Email Integration (Spencer <-> Coatue Claw)
+# Email Integration (Spencer <-> SPClaw)
 
 ## Objective
-Allow Spencer to interact with Coatue Claw via email using the same core workflows (diligence, memory queries, file ingest).
+Allow Spencer to interact with SPClaw via email using the same core workflows (diligence, memory queries, file ingest).
 
 ## How It Works
 - Inbound email is polled from IMAP.
 - Message subject/body is parsed into a command.
 - Bot executes command and replies by SMTP.
 - Any email attachments are auto-ingested into the knowledge folders:
-  - local: `/opt/coatue-claw-data/files/incoming/{Universes|Companies|Industries}/...`
+  - local: `/opt/spclaw-data/files/incoming/{Universes|Companies|Industries}/...`
   - shared Drive: `01_DROP_HERE_Incoming/{Universes|Companies|Industries}/...`
 - Ingestion and message processing are logged in:
-  - `/opt/coatue-claw-data/db/email_gateway.sqlite`
+  - `/opt/spclaw-data/db/email_gateway.sqlite`
 
 ## Supported Commands (email body or subject)
 - `diligence TICKER`
@@ -29,23 +29,23 @@ For diligence replies:
 - PDF header/title is generic to the company/topic being diligenced (for example `SNOW Diligence Report`) and does not use external brand naming.
 
 ## Required Environment Variables (Mac mini `.env.prod`)
-- `COATUE_CLAW_EMAIL_ENABLED=true`
-- `COATUE_CLAW_EMAIL_IMAP_HOST=<imap host>`
-- `COATUE_CLAW_EMAIL_IMAP_PORT=993`
-- `COATUE_CLAW_EMAIL_IMAP_USER=<email username>`
-- `COATUE_CLAW_EMAIL_IMAP_PASSWORD=<email password or app password>`
-- `COATUE_CLAW_EMAIL_IMAP_MAILBOX=INBOX`
-- `COATUE_CLAW_EMAIL_SMTP_HOST=<smtp host>`
-- `COATUE_CLAW_EMAIL_SMTP_PORT=587`
-- `COATUE_CLAW_EMAIL_SMTP_USER=<email username>`
-- `COATUE_CLAW_EMAIL_SMTP_PASSWORD=<email password or app password>`
-- `COATUE_CLAW_EMAIL_FROM=<bot sender email>`
+- `SPCLAW_EMAIL_ENABLED=true`
+- `SPCLAW_EMAIL_IMAP_HOST=<imap host>`
+- `SPCLAW_EMAIL_IMAP_PORT=993`
+- `SPCLAW_EMAIL_IMAP_USER=<email username>`
+- `SPCLAW_EMAIL_IMAP_PASSWORD=<email password or app password>`
+- `SPCLAW_EMAIL_IMAP_MAILBOX=INBOX`
+- `SPCLAW_EMAIL_SMTP_HOST=<smtp host>`
+- `SPCLAW_EMAIL_SMTP_PORT=587`
+- `SPCLAW_EMAIL_SMTP_USER=<email username>`
+- `SPCLAW_EMAIL_SMTP_PASSWORD=<email password or app password>`
+- `SPCLAW_EMAIL_FROM=<bot sender email>`
 
 Optional:
-- `COATUE_CLAW_EMAIL_ALLOWED_SENDERS=spencer@domain.com,carson@domain.com`
-- `COATUE_CLAW_EMAIL_POLL_SECONDS=60`
-- `COATUE_CLAW_EMAIL_MAX_ATTACHMENT_MB=25`
-- `COATUE_CLAW_EMAIL_DB_PATH=/opt/coatue-claw-data/db/email_gateway.sqlite`
+- `SPCLAW_EMAIL_ALLOWED_SENDERS=spencer@domain.com,carson@domain.com`
+- `SPCLAW_EMAIL_POLL_SECONDS=60`
+- `SPCLAW_EMAIL_MAX_ATTACHMENT_MB=25`
+- `SPCLAW_EMAIL_DB_PATH=/opt/spclaw-data/db/email_gateway.sqlite`
 
 ## Operations
 Status:
@@ -67,14 +67,14 @@ make openclaw-email-serve
 Enable launchd supervision so email polling survives logouts/reboots:
 
 ```bash
-cd /opt/coatue-claw
+cd /opt/spclaw
 make openclaw-24x7-enable
 make openclaw-24x7-status
 ```
 
 This installs:
-- `~/Library/LaunchAgents/com.coatueclaw.email-gateway.plist`
-- `~/Library/LaunchAgents/com.coatueclaw.memory-prune.plist`
+- `~/Library/LaunchAgents/com.spclaw.email-gateway.plist`
+- `~/Library/LaunchAgents/com.spclaw.memory-prune.plist`
 
 Disable/remove:
 

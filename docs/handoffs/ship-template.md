@@ -8,7 +8,7 @@ Use this template on every Codex ship so a new session can resume instantly.
 ## What Shipped
 - Commit(s): `<hash>`
 - Files changed:
-  - `/opt/coatue-claw/...`
+  - `/opt/spclaw/...`
 - Behavioral change summary:
   - what now works
   - what is still not working

@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from coatue_claw.spencer_change_digest import run_once, status
-from coatue_claw.spencer_change_log import SpencerChangeLog
+from spclaw.spencer_change_digest import run_once, status
+from spclaw.spencer_change_log import SpencerChangeLog
 
 
 def test_run_once_dry_run(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "spencer_changes.sqlite"
-    monkeypatch.setenv("COATUE_CLAW_SPENCER_CHANGE_DB_PATH", str(db_path))
+    monkeypatch.setenv("SPCLAW_SPENCER_CHANGE_DB_PATH", str(db_path))
     log = SpencerChangeLog(db_path=db_path)
     log.capture_request(
         user_id="U0AFJ5RS31C",
@@ -28,7 +28,7 @@ def test_run_once_dry_run(tmp_path: Path, monkeypatch) -> None:
 
 def test_run_once_dry_run_includes_carson_label(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "spencer_changes.sqlite"
-    monkeypatch.setenv("COATUE_CLAW_SPENCER_CHANGE_DB_PATH", str(db_path))
+    monkeypatch.setenv("SPCLAW_SPENCER_CHANGE_DB_PATH", str(db_path))
     log = SpencerChangeLog(db_path=db_path)
     log.capture_request(
         user_id="U0AGD28QSQG",
@@ -45,8 +45,8 @@ def test_run_once_dry_run_includes_carson_label(tmp_path: Path, monkeypatch) -> 
 
 def test_run_once_sends_and_dedupes(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "spencer_changes.sqlite"
-    monkeypatch.setenv("COATUE_CLAW_SPENCER_CHANGE_DB_PATH", str(db_path))
-    monkeypatch.setenv("COATUE_CLAW_SPENCER_CHANGE_DIGEST_DM_USER_IDS", "U_CARSON")
+    monkeypatch.setenv("SPCLAW_SPENCER_CHANGE_DB_PATH", str(db_path))
+    monkeypatch.setenv("SPCLAW_SPENCER_CHANGE_DIGEST_DM_USER_IDS", "U_CARSON")
     log = SpencerChangeLog(db_path=db_path)
     log.capture_request(
         user_id="U0AFJ5T6JTY",
@@ -69,8 +69,8 @@ def test_run_once_sends_and_dedupes(tmp_path: Path, monkeypatch) -> None:
             sent_messages.append({"channel": channel, "text": text})
             return {"ok": True, "ts": "123.456"}
 
-    monkeypatch.setattr("coatue_claw.spencer_change_digest.WebClient", FakeClient)
-    monkeypatch.setattr("coatue_claw.spencer_change_digest._slack_tokens", lambda: ["xoxb-test"])
+    monkeypatch.setattr("spclaw.spencer_change_digest.WebClient", FakeClient)
+    monkeypatch.setattr("spclaw.spencer_change_digest._slack_tokens", lambda: ["xoxb-test"])
 
     first = run_once()
     second = run_once()
@@ -83,8 +83,8 @@ def test_run_once_sends_and_dedupes(tmp_path: Path, monkeypatch) -> None:
 
 def test_status_reports_recent_runs(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "spencer_changes.sqlite"
-    monkeypatch.setenv("COATUE_CLAW_SPENCER_CHANGE_DB_PATH", str(db_path))
-    monkeypatch.setenv("COATUE_CLAW_SPENCER_CHANGE_DIGEST_DM_USER_IDS", "U_CARSON")
+    monkeypatch.setenv("SPCLAW_SPENCER_CHANGE_DB_PATH", str(db_path))
+    monkeypatch.setenv("SPCLAW_SPENCER_CHANGE_DIGEST_DM_USER_IDS", "U_CARSON")
     log = SpencerChangeLog(db_path=db_path)
     change_id = log.capture_request(
         user_id="U0AFJ5RS31C",
@@ -103,8 +103,8 @@ def test_status_reports_recent_runs(tmp_path: Path, monkeypatch) -> None:
 
 def test_missing_scope_falls_back_to_user_channel_post(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "spencer_changes.sqlite"
-    monkeypatch.setenv("COATUE_CLAW_SPENCER_CHANGE_DB_PATH", str(db_path))
-    monkeypatch.setenv("COATUE_CLAW_SPENCER_CHANGE_DIGEST_DM_USER_IDS", "U_CARSON")
+    monkeypatch.setenv("SPCLAW_SPENCER_CHANGE_DB_PATH", str(db_path))
+    monkeypatch.setenv("SPCLAW_SPENCER_CHANGE_DIGEST_DM_USER_IDS", "U_CARSON")
     log = SpencerChangeLog(db_path=db_path)
     log.capture_request(
         user_id="U0AFJ5RS31C",
@@ -131,9 +131,9 @@ def test_missing_scope_falls_back_to_user_channel_post(tmp_path: Path, monkeypat
             posted_channels.append(channel)
             return {"ok": True, "ts": "123.999"}
 
-    monkeypatch.setattr("coatue_claw.spencer_change_digest.WebClient", FakeClient)
-    monkeypatch.setattr("coatue_claw.spencer_change_digest.SlackApiError", FakeSlackApiError)
-    monkeypatch.setattr("coatue_claw.spencer_change_digest._slack_tokens", lambda: ["xoxb-test"])
+    monkeypatch.setattr("spclaw.spencer_change_digest.WebClient", FakeClient)
+    monkeypatch.setattr("spclaw.spencer_change_digest.SlackApiError", FakeSlackApiError)
+    monkeypatch.setattr("spclaw.spencer_change_digest._slack_tokens", lambda: ["xoxb-test"])
 
     payload = run_once(force=True)
     assert payload["ok"] is True

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from coatue_claw.slack_routing import (
+from spclaw.slack_routing import (
     extract_user_mentions,
     is_explicit_board_seat_command,
     is_explicit_hfa_command,

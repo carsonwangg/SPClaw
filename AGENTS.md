@@ -1,4 +1,4 @@
-# Coatue Claw - AGENTS Rules
+# SPClaw - AGENTS Rules
 
 ## Mission
 Build and operate a 24/7 equity research system for Spencer + Carson, with Slack-first interaction, durable memory, and auditable outputs.
@@ -17,14 +17,14 @@ Build and operate a 24/7 equity research system for Spencer + Carson, with Slack
 - All major outputs also written as markdown artifacts
 
 ## Operator Workflow (Laptop + Codex + Mac mini)
-- Canonical production repo path on Mac mini: `/opt/coatue-claw`
-- Runtime control path on Mac mini: `openclaw` CLI + `make` targets in `/opt/coatue-claw/Makefile`
+- Canonical production repo path on Mac mini: `/opt/spclaw`
+- Runtime control path on Mac mini: `openclaw` CLI + `make` targets in `/opt/spclaw/Makefile`
 - Mac mini SSH host alias: `mini` (use `ssh mini` for remote ops from laptop/Codex sessions)
-- If Codex opens an empty/local mirror repo (for example `/Users/spclaw/Documents/Coatue Claw` with no commits), switch immediately to `/opt/coatue-claw` before making changes.
+- If Codex opens an empty/local mirror repo (for example `/Users/spclaw/Documents/SPClaw` with no commits), switch immediately to `/opt/spclaw` before making changes.
 - Never store SSH passwords or secrets in git-tracked files.
 
 Required end-to-end loop for every Codex task:
-1. Edit code/docs in `/opt/coatue-claw`.
+1. Edit code/docs in `/opt/spclaw`.
 2. Run validation (tests and/or compile checks appropriate to the change).
 3. Commit and push to `origin/main`.
 4. Update handoff docs:
@@ -36,18 +36,18 @@ Required end-to-end loop for every Codex task:
    - `make openclaw-slack-logs` (if needed)
 
 New Codex session boot prompt (recommended):
-- "Read `/opt/coatue-claw/AGENTS.md` and `/opt/coatue-claw/docs/handoffs/live-session.md`, then continue from there. Use `/opt/coatue-claw` as the active repo and ship all changes to git."
+- "Read `/opt/spclaw/AGENTS.md` and `/opt/spclaw/docs/handoffs/live-session.md`, then continue from there. Use `/opt/spclaw` as the active repo and ship all changes to git."
 
 Detailed runbook for humans and Codex:
 - `docs/laptop-codex-openclaw-workflow.md`
 
 ## Data/Storage Contracts
-- Code path: /opt/coatue-claw
-- Runtime path: /opt/coatue-claw-data
+- Code path: /opt/spclaw
+- Runtime path: /opt/spclaw-data
 - Keep runtime data out of git:
-  - /opt/coatue-claw-data/db
-  - /opt/coatue-claw-data/logs
-  - /opt/coatue-claw-data/artifacts
+  - /opt/spclaw-data/db
+  - /opt/spclaw-data/logs
+  - /opt/spclaw-data/artifacts
 - Every generated insight must include source + timestamp
 
 ## Quality Bar
@@ -115,7 +115,7 @@ Detailed runbook for humans and Codex:
   - sends immediate DM alert to Carson (or configured notify users).
 - Codex reconciliation loop (batch per session):
   1. `claw memory reconcile-export --limit 200`
-  2. implement accepted requests in `/opt/coatue-claw`
+  2. implement accepted requests in `/opt/spclaw`
   3. link resolved IDs to shipped commit:
      - `claw memory reconcile-link --ids 12,13 --commit <hash> --resolved-by codex`
 - Repo audit artifacts (git-tracked):
@@ -126,7 +126,7 @@ Detailed runbook for humans and Codex:
 
 ## Slack X-URL Chart Rule
 - For Slack requests that include an X/Twitter status URL and ask for chart-of-the-day output, use the deterministic CLI path:
-  - `/opt/coatue-claw/.venv/bin/python -m coatue_claw.x_chart_daily run-post-url "<x-url>" [--channel "<channel-id>"]`
+  - `/opt/spclaw/.venv/bin/python -m spclaw.x_chart_daily run-post-url "<x-url>" [--channel "<channel-id>"]`
 - Final chart artifact should be the source chart image snip from the X post (no Coatue-style redraw/reconstruction required).
 - If source image is unavailable, return the explicit error to Slack.
 

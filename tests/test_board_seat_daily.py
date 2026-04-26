@@ -9,7 +9,7 @@ import sys
 
 import pytest
 
-from coatue_claw import board_seat_daily
+from spclaw import board_seat_daily
 
 
 def _row(*, title: str, url: str, snippet: str = "") -> board_seat_daily.EvidenceRow:
@@ -30,21 +30,21 @@ def _row(*, title: str, url: str, snippet: str = "") -> board_seat_daily.Evidenc
 @pytest.fixture
 def board_seat_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     data_root = tmp_path / "data"
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(data_root))
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_DB_PATH", str(data_root / "db" / "board_seat_daily.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_RESET_MODE", "0")
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_ENABLED", "1")
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_WEEKDAYS_ONLY", "0")
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_TIME", "12:00")
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SEARCH_ORDER", "brave,serp")
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", "1")
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_LLM_CANDIDATE_GEN_ENABLED", "0")
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE", "0")
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_CHANNEL_DISCOVERY", "static")
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_MEMORY_REWRITE_ON_FAIL", "1")
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SOURCES_IN_THREAD", "1")
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SIMPLE_USE_ALL_BACKENDS", "0")
-    monkeypatch.delenv("COATUE_CLAW_BOARD_SEAT_PORTCOS", raising=False)
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(data_root))
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_DB_PATH", str(data_root / "db" / "board_seat_daily.sqlite"))
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_RESET_MODE", "0")
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_ENABLED", "1")
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_WEEKDAYS_ONLY", "0")
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_TIME", "12:00")
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_SEARCH_ORDER", "brave,serp")
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", "1")
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_LLM_CANDIDATE_GEN_ENABLED", "0")
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_SIMPLE_MODE", "0")
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_CHANNEL_DISCOVERY", "static")
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_MEMORY_REWRITE_ON_FAIL", "1")
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_SOURCES_IN_THREAD", "1")
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_SIMPLE_USE_ALL_BACKENDS", "0")
+    monkeypatch.delenv("SPCLAW_BOARD_SEAT_PORTCOS", raising=False)
     # Keep legacy-path unit tests deterministic; simple-mode tests override this.
     monkeypatch.setattr(board_seat_daily, "_simple_mode_enabled", lambda: False)
     return data_root
@@ -62,7 +62,7 @@ def test_parse_portcos_custom() -> None:
 
 
 def test_run_once_reset_mode_skips_all(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_RESET_MODE", "1")
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_RESET_MODE", "1")
     payload = board_seat_daily.run_once(force=True, dry_run=False)
     assert payload["ok"] is True
     assert payload["reset_mode"] is True
@@ -72,7 +72,7 @@ def test_run_once_reset_mode_skips_all(board_seat_env: Path, monkeypatch: pytest
 
 
 def test_run_once_disabled(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_ENABLED", "0")
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_ENABLED", "0")
     payload = board_seat_daily.run_once(force=True, dry_run=False)
     assert payload["ok"] is True
     assert payload["sent"] == []
@@ -502,8 +502,8 @@ def test_run_once_replenishes_batches_until_winner(board_seat_env: Path, monkeyp
             [],
         ),
     )
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_MAX_LLM_BATCHES", "2")
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_MAX_CANDIDATE_EVALS", "10")
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_MAX_LLM_BATCHES", "2")
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_MAX_CANDIDATE_EVALS", "10")
 
     calls = {"n": 0}
 
@@ -595,8 +595,8 @@ def test_run_once_replenishes_batches_until_winner(board_seat_env: Path, monkeyp
 
 def test_run_once_simple_mode_sends_valid_target(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(board_seat_daily, "_simple_mode_enabled", lambda: True)
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE", "1")
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_LLM_CANDIDATE_GEN_ENABLED", "1")
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_SIMPLE_MODE", "1")
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_LLM_CANDIDATE_GEN_ENABLED", "1")
     monkeypatch.setattr(
         board_seat_daily,
         "_discover_channels_from_slack",
@@ -647,8 +647,8 @@ def test_run_once_simple_mode_sends_valid_target(board_seat_env: Path, monkeypat
 
 def test_run_once_simple_mode_respects_cooldown(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(board_seat_daily, "_simple_mode_enabled", lambda: True)
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE", "1")
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_LLM_CANDIDATE_GEN_ENABLED", "1")
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_SIMPLE_MODE", "1")
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_LLM_CANDIDATE_GEN_ENABLED", "1")
     store = board_seat_daily.BoardSeatStore()
     store.record_target(
         company="Anduril",
@@ -688,9 +688,9 @@ def test_run_once_simple_mode_respects_cooldown(board_seat_env: Path, monkeypatc
 
 def test_run_once_simple_mode_regenerates_batches(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(board_seat_daily, "_simple_mode_enabled", lambda: True)
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE", "1")
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_LLM_CANDIDATE_GEN_ENABLED", "1")
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_SIMPLE_MAX_REGEN_BATCHES", "2")
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_SIMPLE_MODE", "1")
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_LLM_CANDIDATE_GEN_ENABLED", "1")
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_SIMPLE_MAX_REGEN_BATCHES", "2")
     monkeypatch.setattr(
         board_seat_daily,
         "_discover_channels_from_slack",
@@ -754,7 +754,7 @@ def test_run_once_skip_reports_rejection_breakdown(board_seat_env: Path, monkeyp
         "_collect_web_rows",
         lambda queries: ([_row(title="Anthropic update", url="https://example.com/1", snippet="general")], []),
     )
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_MAX_LLM_BATCHES", "1")
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_MAX_LLM_BATCHES", "1")
     monkeypatch.setattr(
         board_seat_daily,
         "_build_candidate_pool",
@@ -843,7 +843,7 @@ def test_status_reports_metrics(board_seat_env: Path) -> None:
 
 
 def test_schema_migration_adds_missing_source_url(board_seat_env: Path) -> None:
-    db_path = Path(os.environ["COATUE_CLAW_BOARD_SEAT_DB_PATH"])
+    db_path = Path(os.environ["SPCLAW_BOARD_SEAT_DB_PATH"])
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.execute(
@@ -882,7 +882,7 @@ def test_schema_migration_adds_missing_source_url(board_seat_env: Path) -> None:
 
 
 def test_schema_migration_adds_missing_board_seat_runs_columns(board_seat_env: Path) -> None:
-    db_path = Path(os.environ["COATUE_CLAW_BOARD_SEAT_DB_PATH"])
+    db_path = Path(os.environ["SPCLAW_BOARD_SEAT_DB_PATH"])
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.execute(
@@ -941,7 +941,7 @@ def test_schema_migration_adds_missing_board_seat_runs_columns(board_seat_env: P
 
 def test_cli_status_json(board_seat_env: Path) -> None:
     env = os.environ.copy()
-    cmd = [sys.executable, "-m", "coatue_claw.board_seat_daily", "status"]
+    cmd = [sys.executable, "-m", "spclaw.board_seat_daily", "status"]
     out = subprocess.check_output(cmd, text=True, env=env)
     payload = json.loads(out)
     assert payload["ok"] is True
@@ -961,7 +961,7 @@ def test_cli_run_once_json(board_seat_env: Path, monkeypatch: pytest.MonkeyPatch
     )
 
     env = os.environ.copy()
-    cmd = [sys.executable, "-m", "coatue_claw.board_seat_daily", "run-once", "--force", "--dry-run"]
+    cmd = [sys.executable, "-m", "spclaw.board_seat_daily", "run-once", "--force", "--dry-run"]
     out = subprocess.check_output(cmd, text=True, env=env)
     payload = json.loads(out)
     assert payload["ok"] is True

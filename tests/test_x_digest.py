@@ -5,12 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from coatue_claw.x_digest import XDigestError, build_x_digest
+from spclaw.x_digest import XDigestError, build_x_digest
 
 
 def test_build_x_digest_writes_markdown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
-    monkeypatch.setenv("COATUE_CLAW_X_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_X_BEARER_TOKEN", "test-token")
 
     captured: dict[str, object] = {}
 
@@ -69,8 +69,8 @@ def test_build_x_digest_writes_markdown(tmp_path: Path, monkeypatch: pytest.Monk
 
 
 def test_missing_bearer_token_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("COATUE_CLAW_X_BEARER_TOKEN", raising=False)
+    monkeypatch.delenv("SPCLAW_X_BEARER_TOKEN", raising=False)
     monkeypatch.delenv("X_BEARER_TOKEN", raising=False)
-    monkeypatch.delenv("COATUE_CLAW_TWITTER_BEARER_TOKEN", raising=False)
+    monkeypatch.delenv("SPCLAW_TWITTER_BEARER_TOKEN", raising=False)
     with pytest.raises(XDigestError):
         build_x_digest("snowflake")

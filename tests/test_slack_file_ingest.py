@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import sqlite3
 
-from coatue_claw.slack_file_ingest import classify_category, ingest_slack_files
+from spclaw.slack_file_ingest import classify_category, ingest_slack_files
 
 
 def _write_file_bridge_config(path: Path, *, root: Path) -> None:
@@ -49,8 +49,8 @@ def test_ingest_slack_files_downloads_and_dedupes(tmp_path: Path, monkeypatch) -
     _write_file_bridge_config(cfg_path, root=tmp_path)
 
     db_path = tmp_path / "db/file_ingest.sqlite"
-    monkeypatch.setenv("COATUE_CLAW_FILE_BRIDGE_CONFIG", str(cfg_path))
-    monkeypatch.setenv("COATUE_CLAW_FILE_INGEST_DB_PATH", str(db_path))
+    monkeypatch.setenv("SPCLAW_FILE_BRIDGE_CONFIG", str(cfg_path))
+    monkeypatch.setenv("SPCLAW_FILE_INGEST_DB_PATH", str(db_path))
 
     files = [
         {

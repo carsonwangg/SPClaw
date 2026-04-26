@@ -4,7 +4,7 @@ import re
 
 import yfinance as yf
 
-from coatue_claw.universe_store import parse_tickers
+from spclaw.universe_store import parse_tickers
 
 
 _GOOD_QUOTE_TYPES = {"EQUITY", "ETF"}

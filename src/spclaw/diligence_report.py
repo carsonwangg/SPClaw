@@ -102,13 +102,13 @@ def build_neutral_investment_memo(
 
 
 def _file_ingest_db_path() -> Path:
-    data_root = Path(os.environ.get("COATUE_CLAW_DATA_ROOT", "/opt/coatue-claw-data"))
-    return Path(os.environ.get("COATUE_CLAW_FILE_INGEST_DB_PATH", str(data_root / "db/file_ingest.sqlite")))
+    data_root = Path(os.environ.get("SPCLAW_DATA_ROOT", "/opt/spclaw-data"))
+    return Path(os.environ.get("SPCLAW_FILE_INGEST_DB_PATH", str(data_root / "db/file_ingest.sqlite")))
 
 
 def _packets_dir() -> Path:
-    data_root = Path(os.environ.get("COATUE_CLAW_DATA_ROOT", "/opt/coatue-claw-data"))
-    return Path(os.environ.get("COATUE_CLAW_PACKETS_DIR", str(data_root / "artifacts/packets")))
+    data_root = Path(os.environ.get("SPCLAW_DATA_ROOT", "/opt/spclaw-data"))
+    return Path(os.environ.get("SPCLAW_PACKETS_DIR", str(data_root / "artifacts/packets")))
 
 
 def _search_tokens(query: str) -> list[str]:

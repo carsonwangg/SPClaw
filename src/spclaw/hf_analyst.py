@@ -13,12 +13,12 @@ from typing import Any
 
 import yfinance as yf
 
-from coatue_claw.hf_document_extract import extract_documents
-from coatue_claw.hf_podcast import build_podcast_analysis, render_full_transcript_markdown, render_podcast_summary_markdown
-from coatue_claw.hf_prompt_contract import CitationRef, HFScorecard, PromptDraft, build_scorecard, parse_model_json, render_markdown
-from coatue_claw.hf_store import HFStore
-from coatue_claw.hf_youtube_transcript import fetch_youtube_transcript, is_youtube_url
-from coatue_claw.slack_file_ingest import ingest_slack_files
+from spclaw.hf_document_extract import extract_documents
+from spclaw.hf_podcast import build_podcast_analysis, render_full_transcript_markdown, render_podcast_summary_markdown
+from spclaw.hf_prompt_contract import CitationRef, HFScorecard, PromptDraft, build_scorecard, parse_model_json, render_markdown
+from spclaw.hf_store import HFStore
+from spclaw.hf_youtube_transcript import fetch_youtube_transcript, is_youtube_url
+from spclaw.slack_file_ingest import ingest_slack_files
 
 try:
     from openai import OpenAI
@@ -75,13 +75,13 @@ def _utc_now_iso() -> str:
 
 
 def _data_root() -> Path:
-    return Path(os.environ.get("COATUE_CLAW_DATA_ROOT", "/opt/coatue-claw-data"))
+    return Path(os.environ.get("SPCLAW_DATA_ROOT", "/opt/spclaw-data"))
 
 
 def _artifact_dir() -> Path:
     return Path(
         os.environ.get(
-            "COATUE_CLAW_HFA_ARTIFACT_DIR",
+            "SPCLAW_HFA_ARTIFACT_DIR",
             str(_data_root() / "artifacts/hf-analyst"),
         )
     )
@@ -90,20 +90,20 @@ def _artifact_dir() -> Path:
 def _kb_sources_dir() -> Path:
     return Path(
         os.environ.get(
-            "COATUE_CLAW_HFA_KB_SOURCES_DIR",
+            "SPCLAW_HFA_KB_SOURCES_DIR",
             str(_data_root() / "kb/sources"),
         )
     )
 
 
 def _hfa_model() -> str:
-    return (os.environ.get("COATUE_CLAW_HFA_MODEL", "gpt-5.2-chat-latest") or "gpt-5.2-chat-latest").strip()
+    return (os.environ.get("SPCLAW_HFA_MODEL", "gpt-5.2-chat-latest") or "gpt-5.2-chat-latest").strip()
 
 
 def _file_ingest_db_path() -> Path:
     return Path(
         os.environ.get(
-            "COATUE_CLAW_FILE_INGEST_DB_PATH",
+            "SPCLAW_FILE_INGEST_DB_PATH",
             str(_data_root() / "db/file_ingest.sqlite"),
         )
     )
@@ -312,7 +312,7 @@ def _web_context(tickers: list[str], *, as_of_utc: str) -> tuple[list[str], list
     if not tickers:
         return rows, sources, warnings
     try:
-        from coatue_claw import market_daily as md
+        from spclaw import market_daily as md
     except Exception:
         warnings.append("web_context_unavailable:market_daily_import_failed")
         return rows, sources, warnings

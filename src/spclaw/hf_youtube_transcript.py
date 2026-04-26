@@ -29,7 +29,7 @@ class YouTubeTranscriptError(RuntimeError):
 
 
 def _venv_install_hint() -> str:
-    return "/opt/coatue-claw/.venv/bin/python -m pip install -U youtube-transcript-api yt-dlp"
+    return "/opt/spclaw/.venv/bin/python -m pip install -U youtube-transcript-api yt-dlp"
 
 
 @dataclass(frozen=True)
@@ -182,7 +182,7 @@ def _asr_transcript(url: str) -> list[TranscriptSegment]:
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
         raise YouTubeTranscriptError("openai_api_key_missing_for_asr")
-    model = (os.environ.get("COATUE_CLAW_HFA_PODCAST_ASR_MODEL", "gpt-4o-mini-transcribe") or "gpt-4o-mini-transcribe").strip()
+    model = (os.environ.get("SPCLAW_HFA_PODCAST_ASR_MODEL", "gpt-4o-mini-transcribe") or "gpt-4o-mini-transcribe").strip()
     client = OpenAI(api_key=api_key)
     with tempfile.TemporaryDirectory(prefix="hfa-podcast-") as tmp:
         audio_path = _download_audio(url, tmp_dir=Path(tmp))

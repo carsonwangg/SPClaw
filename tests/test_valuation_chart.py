@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import numpy as np
 
-from coatue_claw.valuation_chart import (
+from spclaw.valuation_chart import (
     ProviderSnapshot,
     _build_point,
     _choose_category_guide_position,

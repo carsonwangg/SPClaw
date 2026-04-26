@@ -12,32 +12,31 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-load_dotenv("/opt/coatue-claw/.env.prod")
+load_dotenv("/opt/spclaw/.env.prod")
 
-EMAIL_LABEL = "com.coatueclaw.email-gateway"
-MEMORY_PRUNE_LABEL = "com.coatueclaw.memory-prune"
-MEMORY_RECONCILE_LABEL = "com.coatueclaw.memory-reconcile-export"
-X_CHART_LABEL = "com.coatueclaw.x-chart-daily"
-SPENCER_CHANGE_DIGEST_LABEL = "com.coatueclaw.spencer-change-digest"
-BOARD_SEAT_DAILY_LABEL = "com.coatueclaw.board-seat-daily"
-MARKET_DAILY_LABEL = "com.coatueclaw.market-daily"
-MARKET_DAILY_EARNINGS_RECAP_LABEL = "com.coatueclaw.market-daily-earnings-recap"
+EMAIL_LABEL = "com.spclaw.email-gateway"
+MEMORY_PRUNE_LABEL = "com.spclaw.memory-prune"
+MEMORY_RECONCILE_LABEL = "com.spclaw.memory-reconcile-export"
+X_CHART_LABEL = "com.spclaw.x-chart-daily"
+SPENCER_CHANGE_DIGEST_LABEL = "com.spclaw.spencer-change-digest"
+MARKET_DAILY_LABEL = "com.spclaw.market-daily"
+MARKET_DAILY_EARNINGS_RECAP_LABEL = "com.spclaw.market-daily-earnings-recap"
 
 
 def _repo_root() -> Path:
-    return Path(os.environ.get("COATUE_CLAW_REPO_ROOT", "/opt/coatue-claw")).expanduser().resolve()
+    return Path(os.environ.get("SPCLAW_REPO_ROOT", "/opt/spclaw")).expanduser().resolve()
 
 
 def _data_root() -> Path:
-    return Path(os.environ.get("COATUE_CLAW_DATA_ROOT", "/opt/coatue-claw-data")).expanduser().resolve()
+    return Path(os.environ.get("SPCLAW_DATA_ROOT", "/opt/spclaw-data")).expanduser().resolve()
 
 
 def _python_bin() -> str:
-    return os.environ.get("COATUE_CLAW_PYTHON_BIN", str(_repo_root() / ".venv/bin/python"))
+    return os.environ.get("SPCLAW_PYTHON_BIN", str(_repo_root() / ".venv/bin/python"))
 
 
 def _launch_agents_dir() -> Path:
-    raw = os.environ.get("COATUE_CLAW_LAUNCHAGENTS_DIR")
+    raw = os.environ.get("SPCLAW_LAUNCHAGENTS_DIR")
     if raw:
         return Path(raw).expanduser().resolve()
     return (Path.home() / "Library/LaunchAgents").resolve()
@@ -48,12 +47,12 @@ def _runtime_env() -> dict[str, str]:
     return {
         "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
         "PYTHONPATH": str(repo / "src"),
-        "COATUE_CLAW_REPO_ROOT": str(repo),
+        "SPCLAW_REPO_ROOT": str(repo),
     }
 
 
 def _x_chart_hourly_interval_seconds() -> int:
-    raw = (os.environ.get("COATUE_CLAW_X_CHART_SCOUT_INTERVAL_SECONDS", "3600") or "3600").strip()
+    raw = (os.environ.get("SPCLAW_X_CHART_SCOUT_INTERVAL_SECONDS", "3600") or "3600").strip()
     try:
         seconds = int(raw)
     except Exception:
@@ -62,7 +61,7 @@ def _x_chart_hourly_interval_seconds() -> int:
 
 
 def _memory_reconcile_interval_seconds() -> int:
-    raw = (os.environ.get("COATUE_CLAW_MEMORY_RECONCILE_INTERVAL_SECONDS", "900") or "900").strip()
+    raw = (os.environ.get("SPCLAW_MEMORY_RECONCILE_INTERVAL_SECONDS", "900") or "900").strip()
     try:
         seconds = int(raw)
     except Exception:
@@ -71,7 +70,7 @@ def _memory_reconcile_interval_seconds() -> int:
 
 
 def _memory_reconcile_limit() -> int:
-    raw = (os.environ.get("COATUE_CLAW_MEMORY_RECONCILE_EXPORT_LIMIT", "200") or "200").strip()
+    raw = (os.environ.get("SPCLAW_MEMORY_RECONCILE_EXPORT_LIMIT", "200") or "200").strip()
     try:
         limit = int(raw)
     except Exception:
@@ -80,7 +79,7 @@ def _memory_reconcile_limit() -> int:
 
 
 def _spencer_digest_schedule() -> list[dict[str, int]]:
-    raw = (os.environ.get("COATUE_CLAW_SPENCER_CHANGE_DIGEST_TIME", "18:00") or "").strip()
+    raw = (os.environ.get("SPCLAW_SPENCER_CHANGE_DIGEST_TIME", "18:00") or "").strip()
     m = re.fullmatch(r"(\d{1,2}):(\d{2})", raw)
     if not m:
         return [{"Hour": 18, "Minute": 0}]
@@ -91,25 +90,8 @@ def _spencer_digest_schedule() -> list[dict[str, int]]:
     return [{"Hour": hour, "Minute": minute}]
 
 
-def _board_seat_schedule() -> list[dict[str, int]]:
-    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_TIME", "12:00") or "").strip()
-    m = re.fullmatch(r"(\d{1,2}):(\d{2})", raw)
-    if not m:
-        hour, minute = 12, 0
-    else:
-        hour = int(m.group(1))
-        minute = int(m.group(2))
-        if not (0 <= hour <= 23 and 0 <= minute <= 59):
-            hour, minute = 12, 0
-    weekdays_only_raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_WEEKDAYS_ONLY", "1") or "1").strip().lower()
-    weekdays_only = weekdays_only_raw in {"1", "true", "yes", "on"}
-    if weekdays_only:
-        return [{"Weekday": weekday, "Hour": hour, "Minute": minute} for weekday in (1, 2, 3, 4, 5)]
-    return [{"Hour": hour, "Minute": minute}]
-
-
 def _market_daily_schedule() -> list[dict[str, int]]:
-    raw = (os.environ.get("COATUE_CLAW_MD_TIMES", "07:00,14:15") or "").strip()
+    raw = (os.environ.get("SPCLAW_MD_TIMES", "07:00,14:15") or "").strip()
     picks: list[tuple[int, int]] = []
     for token in raw.split(","):
         token = token.strip()
@@ -131,7 +113,7 @@ def _market_daily_schedule() -> list[dict[str, int]]:
 
 
 def _market_daily_earnings_recap_schedule() -> list[dict[str, int]]:
-    raw = (os.environ.get("COATUE_CLAW_MD_EARNINGS_RECAP_TIME", "19:00") or "").strip()
+    raw = (os.environ.get("SPCLAW_MD_EARNINGS_RECAP_TIME", "19:00") or "").strip()
     m = re.fullmatch(r"(\d{1,2}):(\d{2})", raw)
     if not m:
         hour, minute = 19, 0
@@ -155,7 +137,7 @@ def _service_specs() -> dict[str, dict[str, Any]]:
 
     poller = {
         "Label": EMAIL_LABEL,
-        "ProgramArguments": [python_bin, "-m", "coatue_claw.email_gateway", "serve"],
+        "ProgramArguments": [python_bin, "-m", "spclaw.email_gateway", "serve"],
         "WorkingDirectory": str(repo),
         "RunAtLoad": True,
         "KeepAlive": True,
@@ -166,10 +148,10 @@ def _service_specs() -> dict[str, dict[str, Any]]:
         "EnvironmentVariables": _runtime_env(),
     }
 
-    prune_interval = max(300, int(os.environ.get("COATUE_CLAW_MEMORY_PRUNE_INTERVAL_SECONDS", "3600")))
+    prune_interval = max(300, int(os.environ.get("SPCLAW_MEMORY_PRUNE_INTERVAL_SECONDS", "3600")))
     prune = {
         "Label": MEMORY_PRUNE_LABEL,
-        "ProgramArguments": [python_bin, "-m", "coatue_claw.cli", "memory", "prune"],
+        "ProgramArguments": [python_bin, "-m", "spclaw.cli", "memory", "prune"],
         "WorkingDirectory": str(repo),
         "RunAtLoad": True,
         "StartInterval": prune_interval,
@@ -184,7 +166,7 @@ def _service_specs() -> dict[str, dict[str, Any]]:
         "ProgramArguments": [
             python_bin,
             "-m",
-            "coatue_claw.cli",
+            "spclaw.cli",
             "memory",
             "reconcile-export",
             "--limit",
@@ -201,7 +183,7 @@ def _service_specs() -> dict[str, dict[str, Any]]:
 
     x_chart = {
         "Label": X_CHART_LABEL,
-        "ProgramArguments": [python_bin, "-m", "coatue_claw.x_chart_daily", "run-once"],
+        "ProgramArguments": [python_bin, "-m", "spclaw.x_chart_daily", "run-once"],
         "WorkingDirectory": str(repo),
         "RunAtLoad": True,
         "StartInterval": _x_chart_hourly_interval_seconds(),
@@ -213,7 +195,7 @@ def _service_specs() -> dict[str, dict[str, Any]]:
 
     spencer_digest = {
         "Label": SPENCER_CHANGE_DIGEST_LABEL,
-        "ProgramArguments": [python_bin, "-m", "coatue_claw.spencer_change_digest", "run-once"],
+        "ProgramArguments": [python_bin, "-m", "spclaw.spencer_change_digest", "run-once"],
         "WorkingDirectory": str(repo),
         "RunAtLoad": False,
         "StartCalendarInterval": _spencer_digest_schedule(),
@@ -223,21 +205,9 @@ def _service_specs() -> dict[str, dict[str, Any]]:
         "EnvironmentVariables": _runtime_env(),
     }
 
-    board_seat_daily = {
-        "Label": BOARD_SEAT_DAILY_LABEL,
-        "ProgramArguments": [python_bin, "-m", "coatue_claw.board_seat_daily", "run-once"],
-        "WorkingDirectory": str(repo),
-        "RunAtLoad": False,
-        "StartCalendarInterval": _board_seat_schedule(),
-        "ProcessType": "Background",
-        "StandardOutPath": str(logs_dir / "board-seat-daily.stdout.log"),
-        "StandardErrorPath": str(logs_dir / "board-seat-daily.stderr.log"),
-        "EnvironmentVariables": _runtime_env(),
-    }
-
     market_daily = {
         "Label": MARKET_DAILY_LABEL,
-        "ProgramArguments": [python_bin, "-m", "coatue_claw.market_daily", "run-once"],
+        "ProgramArguments": [python_bin, "-m", "spclaw.market_daily", "run-once"],
         "WorkingDirectory": str(repo),
         "RunAtLoad": False,
         "StartCalendarInterval": _market_daily_schedule(),
@@ -249,7 +219,7 @@ def _service_specs() -> dict[str, dict[str, Any]]:
 
     market_daily_earnings_recap = {
         "Label": MARKET_DAILY_EARNINGS_RECAP_LABEL,
-        "ProgramArguments": [python_bin, "-m", "coatue_claw.market_daily", "run-earnings-recap"],
+        "ProgramArguments": [python_bin, "-m", "spclaw.market_daily", "run-earnings-recap"],
         "WorkingDirectory": str(repo),
         "RunAtLoad": False,
         "StartCalendarInterval": _market_daily_earnings_recap_schedule(),
@@ -265,7 +235,6 @@ def _service_specs() -> dict[str, dict[str, Any]]:
         MEMORY_RECONCILE_LABEL: memory_reconcile,
         X_CHART_LABEL: x_chart,
         SPENCER_CHANGE_DIGEST_LABEL: spencer_digest,
-        BOARD_SEAT_DAILY_LABEL: board_seat_daily,
         MARKET_DAILY_LABEL: market_daily,
         MARKET_DAILY_EARNINGS_RECAP_LABEL: market_daily_earnings_recap,
     }
@@ -288,7 +257,7 @@ def write_service_plists() -> dict[str, str]:
 
 
 def _launchctl_domains() -> list[str]:
-    override = os.environ.get("COATUE_CLAW_LAUNCHCTL_DOMAIN", "").strip()
+    override = os.environ.get("SPCLAW_LAUNCHCTL_DOMAIN", "").strip()
     if override:
         return [override]
     uid = os.getuid()
@@ -308,7 +277,7 @@ def _bootout(label: str) -> None:
 
 
 def _bootstrap(path: str) -> str:
-    retries_raw = (os.environ.get("COATUE_CLAW_LAUNCHCTL_BOOTSTRAP_RETRIES", "3") or "3").strip()
+    retries_raw = (os.environ.get("SPCLAW_LAUNCHCTL_BOOTSTRAP_RETRIES", "3") or "3").strip()
     try:
         retries = int(retries_raw)
     except Exception:
@@ -414,7 +383,6 @@ def _resolve_services(raw: str) -> list[str]:
             MEMORY_RECONCILE_LABEL,
             X_CHART_LABEL,
             SPENCER_CHANGE_DIGEST_LABEL,
-            BOARD_SEAT_DAILY_LABEL,
             MARKET_DAILY_LABEL,
             MARKET_DAILY_EARNINGS_RECAP_LABEL,
         ]
@@ -428,15 +396,13 @@ def _resolve_services(raw: str) -> list[str]:
         return [X_CHART_LABEL]
     if value in {"spencer", "spencer-digest", "changes"}:
         return [SPENCER_CHANGE_DIGEST_LABEL]
-    if value in {"board", "boardseat", "board-seat"}:
-        return [BOARD_SEAT_DAILY_LABEL]
     if value in {"marketdaily", "market-daily", "md"}:
         return [MARKET_DAILY_LABEL, MARKET_DAILY_EARNINGS_RECAP_LABEL]
     raise ValueError(f"unknown service selector: {raw}")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser("coatue-claw-launchd-runtime")
+    parser = argparse.ArgumentParser("spclaw-launchd-runtime")
     sub = parser.add_subparsers(dest="command", required=True)
 
     for name in ("enable", "disable", "status"):
@@ -444,7 +410,7 @@ def main() -> None:
         cmd.add_argument(
             "--service",
             default="all",
-            choices=["all", "email", "memory", "memoryreconcile", "xchart", "spencer", "boardseat", "marketdaily"],
+            choices=["all", "email", "memory", "memoryreconcile", "xchart", "spencer", "marketdaily"],
         )  # simplified UX
         if name == "disable":
             cmd.add_argument("--remove-plists", action="store_true")

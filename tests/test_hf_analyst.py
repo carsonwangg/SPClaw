@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import sqlite3
 
-from coatue_claw.hf_analyst import (
+from spclaw.hf_analyst import (
     HFAError,
     analyze_podcast_url,
     analyze_thread,
@@ -18,7 +18,7 @@ from coatue_claw.hf_analyst import (
     should_run_dm_autorun,
     should_run_dm_podcast_autorun,
 )
-from coatue_claw.hf_store import HFStore
+from spclaw.hf_store import HFStore
 
 
 class _FakeMemoryRuntime:
@@ -92,11 +92,11 @@ def test_analyze_thread_model_failure_returns_reason(tmp_path: Path, monkeypatch
     db_path = tmp_path / "hfa.sqlite"
     artifact_dir = tmp_path / "artifacts"
 
-    monkeypatch.setenv("COATUE_CLAW_HFA_DB_PATH", str(db_path))
-    monkeypatch.setenv("COATUE_CLAW_HFA_ARTIFACT_DIR", str(artifact_dir))
+    monkeypatch.setenv("SPCLAW_HFA_DB_PATH", str(db_path))
+    monkeypatch.setenv("SPCLAW_HFA_ARTIFACT_DIR", str(artifact_dir))
 
     monkeypatch.setattr(
-        "coatue_claw.hf_analyst._thread_file_rows",
+        "spclaw.hf_analyst._thread_file_rows",
         lambda **kwargs: [
             {
                 "slack_file_id": "F123",
@@ -108,13 +108,13 @@ def test_analyze_thread_model_failure_returns_reason(tmp_path: Path, monkeypatch
             }
         ],
     )
-    monkeypatch.setattr("coatue_claw.hf_analyst._model_freeform_markdown", lambda **kwargs: (None, "forced_model_failure"))
+    monkeypatch.setattr("spclaw.hf_analyst._model_freeform_markdown", lambda **kwargs: (None, "forced_model_failure"))
     monkeypatch.setattr(
-        "coatue_claw.hf_analyst._market_context",
+        "spclaw.hf_analyst._market_context",
         lambda tickers, as_of_utc: (["SNOW market context"], [f"market source (timestamp_utc: `{as_of_utc}`)"]),
     )
     monkeypatch.setattr(
-        "coatue_claw.hf_analyst._web_context",
+        "spclaw.hf_analyst._web_context",
         lambda tickers, as_of_utc: (["SNOW web context"], [f"web source (timestamp_utc: `{as_of_utc}`)"], []),
     )
 
@@ -134,8 +134,8 @@ def test_analyze_thread_model_failure_returns_reason(tmp_path: Path, monkeypatch
 
 
 def test_analyze_podcast_url(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_HFA_DB_PATH", str(tmp_path / "hfa.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_HFA_ARTIFACT_DIR", str(tmp_path / "artifacts"))
+    monkeypatch.setenv("SPCLAW_HFA_DB_PATH", str(tmp_path / "hfa.sqlite"))
+    monkeypatch.setenv("SPCLAW_HFA_ARTIFACT_DIR", str(tmp_path / "artifacts"))
 
     class _Transcript:
         url = "https://youtu.be/abcDEF12345"
@@ -154,8 +154,8 @@ def test_analyze_podcast_url(tmp_path: Path, monkeypatch) -> None:
         confidence_label = "Medium"
         warnings = ()
 
-    monkeypatch.setattr("coatue_claw.hf_analyst.fetch_youtube_transcript", lambda url: _Transcript())
-    monkeypatch.setattr("coatue_claw.hf_analyst.build_podcast_analysis", lambda transcript, question=None, output_instruction=None: _Analysis())
+    monkeypatch.setattr("spclaw.hf_analyst.fetch_youtube_transcript", lambda url: _Transcript())
+    monkeypatch.setattr("spclaw.hf_analyst.build_podcast_analysis", lambda transcript, question=None, output_instruction=None: _Analysis())
 
     memory = _FakeMemoryRuntime()
     result = analyze_podcast_url(
@@ -177,11 +177,11 @@ def test_analyze_podcast_url(tmp_path: Path, monkeypatch) -> None:
 def test_analyze_thread_freeform_mode(tmp_path: Path, monkeypatch) -> None:
     doc_path = tmp_path / "memo.txt"
     doc_path.write_text("AI demand appears resilient with mixed macro.", encoding="utf-8")
-    monkeypatch.setenv("COATUE_CLAW_HFA_DB_PATH", str(tmp_path / "hfa.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_HFA_ARTIFACT_DIR", str(tmp_path / "artifacts"))
-    monkeypatch.setenv("COATUE_CLAW_HFA_KB_SOURCES_DIR", str(tmp_path / "kb/sources"))
+    monkeypatch.setenv("SPCLAW_HFA_DB_PATH", str(tmp_path / "hfa.sqlite"))
+    monkeypatch.setenv("SPCLAW_HFA_ARTIFACT_DIR", str(tmp_path / "artifacts"))
+    monkeypatch.setenv("SPCLAW_HFA_KB_SOURCES_DIR", str(tmp_path / "kb/sources"))
     monkeypatch.setattr(
-        "coatue_claw.hf_analyst._thread_file_rows",
+        "spclaw.hf_analyst._thread_file_rows",
         lambda **kwargs: [
             {
                 "slack_file_id": "F123",
@@ -194,15 +194,15 @@ def test_analyze_thread_freeform_mode(tmp_path: Path, monkeypatch) -> None:
         ],
     )
     monkeypatch.setattr(
-        "coatue_claw.hf_analyst._model_freeform_markdown",
+        "spclaw.hf_analyst._model_freeform_markdown",
         lambda **kwargs: ("# Freeform\n\nCustom output from operator mode.", None),
     )
     monkeypatch.setattr(
-        "coatue_claw.hf_analyst._market_context",
+        "spclaw.hf_analyst._market_context",
         lambda tickers, as_of_utc: (["MKT"], [f"market source (timestamp_utc: `{as_of_utc}`)"]),
     )
     monkeypatch.setattr(
-        "coatue_claw.hf_analyst._web_context",
+        "spclaw.hf_analyst._web_context",
         lambda tickers, as_of_utc: (["WEB"], [f"web source (timestamp_utc: `{as_of_utc}`)"], []),
     )
 

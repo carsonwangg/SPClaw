@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from coatue_claw.memory_extraction import extract_fact_candidates, parse_memory_lookup_query
+from spclaw.memory_extraction import extract_fact_candidates, parse_memory_lookup_query
 
 
 def test_extract_decision_and_convention_candidates():

@@ -33,7 +33,7 @@ except Exception:  # pragma: no cover - optional dependency
     SlackApiError = Exception  # type: ignore[assignment]
 
 
-load_dotenv("/opt/coatue-claw/.env.prod")
+load_dotenv("/opt/spclaw/.env.prod")
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +42,8 @@ DEFAULT_TIMES = "07:00,14:15"
 DEFAULT_TOP_N = 3
 DEFAULT_TOP_K = 40
 DEFAULT_CHANNEL = "general"
-DEFAULT_DATA_ROOT = "/opt/coatue-claw-data"
-DEFAULT_SEED_PATH = "/opt/coatue-claw/config/md_tmt_seed_universe.csv"
+DEFAULT_DATA_ROOT = "/opt/spclaw-data"
+DEFAULT_SEED_PATH = "/opt/spclaw/config/md_tmt_seed_universe.csv"
 DEFAULT_MODEL = "gpt-5.2-chat-latest"
 US_MARKET_TZ = "America/New_York"
 FALLBACK_CAUSE_LINE = "Likely positioning/flow; no single confirmed catalyst."
@@ -147,13 +147,13 @@ def _utc_now_iso() -> str:
 
 
 def _data_root() -> Path:
-    return Path(os.environ.get("COATUE_CLAW_DATA_ROOT", DEFAULT_DATA_ROOT)).expanduser().resolve()
+    return Path(os.environ.get("SPCLAW_DATA_ROOT", DEFAULT_DATA_ROOT)).expanduser().resolve()
 
 
 def _db_path() -> Path:
     return Path(
         os.environ.get(
-            "COATUE_CLAW_MD_DB_PATH",
+            "SPCLAW_MD_DB_PATH",
             str(_data_root() / "db/market_daily.sqlite"),
         )
     ).expanduser().resolve()
@@ -162,18 +162,18 @@ def _db_path() -> Path:
 def _artifact_dir() -> Path:
     return Path(
         os.environ.get(
-            "COATUE_CLAW_MD_ARTIFACT_DIR",
+            "SPCLAW_MD_ARTIFACT_DIR",
             str(_data_root() / "artifacts/market-daily"),
         )
     ).expanduser().resolve()
 
 
 def _seed_path() -> Path:
-    return Path(os.environ.get("COATUE_CLAW_MD_CANDIDATE_SEED_PATH", DEFAULT_SEED_PATH)).expanduser().resolve()
+    return Path(os.environ.get("SPCLAW_MD_CANDIDATE_SEED_PATH", DEFAULT_SEED_PATH)).expanduser().resolve()
 
 
 def _timezone() -> ZoneInfo:
-    name = (os.environ.get("COATUE_CLAW_MD_TZ", DEFAULT_TZ) or "").strip() or DEFAULT_TZ
+    name = (os.environ.get("SPCLAW_MD_TZ", DEFAULT_TZ) or "").strip() or DEFAULT_TZ
     try:
         return ZoneInfo(name)
     except Exception as exc:  # pragma: no cover
@@ -181,7 +181,7 @@ def _timezone() -> ZoneInfo:
 
 
 def _parse_times(raw: str | None = None) -> list[tuple[int, int]]:
-    value = (raw or os.environ.get("COATUE_CLAW_MD_TIMES", DEFAULT_TIMES) or DEFAULT_TIMES).strip()
+    value = (raw or os.environ.get("SPCLAW_MD_TIMES", DEFAULT_TIMES) or DEFAULT_TIMES).strip()
     out: list[tuple[int, int]] = []
     for item in value.split(","):
         item = item.strip()
@@ -199,7 +199,7 @@ def _parse_times(raw: str | None = None) -> list[tuple[int, int]]:
 
 
 def _earnings_recap_time() -> tuple[int, int]:
-    raw = (os.environ.get("COATUE_CLAW_MD_EARNINGS_RECAP_TIME", "19:00") or "19:00").strip()
+    raw = (os.environ.get("SPCLAW_MD_EARNINGS_RECAP_TIME", "19:00") or "19:00").strip()
     m = re.fullmatch(r"(\d{1,2}):(\d{2})", raw)
     if not m:
         return (19, 0)
@@ -211,28 +211,28 @@ def _earnings_recap_time() -> tuple[int, int]:
 
 
 def _md_model() -> str:
-    return (os.environ.get("COATUE_CLAW_MD_MODEL", DEFAULT_MODEL) or DEFAULT_MODEL).strip() or DEFAULT_MODEL
+    return (os.environ.get("SPCLAW_MD_MODEL", DEFAULT_MODEL) or DEFAULT_MODEL).strip() or DEFAULT_MODEL
 
 
 def _reason_quality_mode() -> str:
-    raw = (os.environ.get("COATUE_CLAW_MD_REASON_QUALITY_MODE", "hybrid") or "hybrid").strip().lower()
+    raw = (os.environ.get("SPCLAW_MD_REASON_QUALITY_MODE", "hybrid") or "hybrid").strip().lower()
     if raw == "deterministic":
         return "deterministic"
     return "hybrid"
 
 
 def _reason_polish_enabled() -> bool:
-    raw = (os.environ.get("COATUE_CLAW_MD_REASON_POLISH_ENABLED", "1") or "1").strip().lower()
+    raw = (os.environ.get("SPCLAW_MD_REASON_POLISH_ENABLED", "1") or "1").strip().lower()
     return raw in {"1", "true", "yes", "on"}
 
 
 def _reason_polish_model() -> str:
     fallback = _md_model()
-    return (os.environ.get("COATUE_CLAW_MD_REASON_POLISH_MODEL", fallback) or fallback).strip() or fallback
+    return (os.environ.get("SPCLAW_MD_REASON_POLISH_MODEL", fallback) or fallback).strip() or fallback
 
 
 def _reason_polish_max_chars() -> int:
-    raw = (os.environ.get("COATUE_CLAW_MD_REASON_POLISH_MAX_CHARS", "90") or "90").strip()
+    raw = (os.environ.get("SPCLAW_MD_REASON_POLISH_MAX_CHARS", "90") or "90").strip()
     try:
         val = int(raw)
     except Exception:
@@ -241,14 +241,14 @@ def _reason_polish_max_chars() -> int:
 
 
 def _reason_output_mode() -> str:
-    raw = (os.environ.get("COATUE_CLAW_MD_REASON_OUTPUT_MODE", "free_sentence") or "free_sentence").strip().lower()
+    raw = (os.environ.get("SPCLAW_MD_REASON_OUTPUT_MODE", "free_sentence") or "free_sentence").strip().lower()
     if raw in {"wrapper", "legacy_wrapper"}:
         return "wrapper"
     return "free_sentence"
 
 
 def _synth_support_count() -> int:
-    raw = (os.environ.get("COATUE_CLAW_MD_SYNTH_SUPPORT_COUNT", "2") or "2").strip()
+    raw = (os.environ.get("SPCLAW_MD_SYNTH_SUPPORT_COUNT", "2") or "2").strip()
     try:
         val = int(raw)
     except Exception:
@@ -257,19 +257,19 @@ def _synth_support_count() -> int:
 
 
 def _md_post_as_is() -> bool:
-    raw = (os.environ.get("COATUE_CLAW_MD_POST_AS_IS", "1") or "1").strip().lower()
+    raw = (os.environ.get("SPCLAW_MD_POST_AS_IS", "1") or "1").strip().lower()
     return raw in {"1", "true", "yes", "on"}
 
 
 def _relevance_mode() -> str:
-    raw = (os.environ.get("COATUE_CLAW_MD_RELEVANCE_MODE", "llm_first") or "llm_first").strip().lower()
+    raw = (os.environ.get("SPCLAW_MD_RELEVANCE_MODE", "llm_first") or "llm_first").strip().lower()
     if raw in {"deterministic", "code", "heuristic"}:
         return "deterministic"
     return "llm_first"
 
 
 def _recap_support_count() -> int:
-    raw = (os.environ.get("COATUE_CLAW_MD_RECAP_SUPPORT_COUNT", "") or "").strip()
+    raw = (os.environ.get("SPCLAW_MD_RECAP_SUPPORT_COUNT", "") or "").strip()
     if not raw:
         return _synth_support_count()
     try:
@@ -280,21 +280,21 @@ def _recap_support_count() -> int:
 
 
 def _recap_post_as_is() -> bool:
-    raw = (os.environ.get("COATUE_CLAW_MD_RECAP_POST_AS_IS", "") or "").strip().lower()
+    raw = (os.environ.get("SPCLAW_MD_RECAP_POST_AS_IS", "") or "").strip().lower()
     if not raw:
         return _md_post_as_is()
     return raw in {"1", "true", "yes", "on"}
 
 
 def _catalyst_mode() -> str:
-    raw = (os.environ.get("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis") or "simple_synthesis").strip().lower()
+    raw = (os.environ.get("SPCLAW_MD_CATALYST_MODE", "simple_synthesis") or "simple_synthesis").strip().lower()
     if raw in {"legacy", "legacy_heuristic", "heuristic"}:
         return "legacy_heuristic"
     return "simple_synthesis"
 
 
 def _synth_max_results() -> int:
-    raw = (os.environ.get("COATUE_CLAW_MD_SYNTH_MAX_RESULTS", "5") or "5").strip()
+    raw = (os.environ.get("SPCLAW_MD_SYNTH_MAX_RESULTS", "5") or "5").strip()
     try:
         val = int(raw)
     except Exception:
@@ -303,7 +303,7 @@ def _synth_max_results() -> int:
 
 
 def _synth_source_mode() -> str:
-    raw = (os.environ.get("COATUE_CLAW_MD_SYNTH_SOURCE_MODE", "google_plus_yahoo") or "google_plus_yahoo").strip().lower()
+    raw = (os.environ.get("SPCLAW_MD_SYNTH_SOURCE_MODE", "google_plus_yahoo") or "google_plus_yahoo").strip().lower()
     if raw in {"google_only", "google"}:
         return "google_only"
     if raw in {"yahoo_only", "yahoo"}:
@@ -312,7 +312,7 @@ def _synth_source_mode() -> str:
 
 
 def _synth_domain_gate() -> str:
-    raw = (os.environ.get("COATUE_CLAW_MD_SYNTH_DOMAIN_GATE", "soft") or "soft").strip().lower()
+    raw = (os.environ.get("SPCLAW_MD_SYNTH_DOMAIN_GATE", "soft") or "soft").strip().lower()
     if raw in {"quality_only", "strict"}:
         return "quality_only"
     if raw in {"off", "any", "none"}:
@@ -321,32 +321,32 @@ def _synth_domain_gate() -> str:
 
 
 def _synth_force_best_guess() -> bool:
-    raw = (os.environ.get("COATUE_CLAW_MD_SYNTH_FORCE_BEST_GUESS", "1") or "1").strip().lower()
+    raw = (os.environ.get("SPCLAW_MD_SYNTH_FORCE_BEST_GUESS", "1") or "1").strip().lower()
     return raw in {"1", "true", "yes", "on"}
 
 
 def _require_in_window_dates() -> bool:
-    raw = (os.environ.get("COATUE_CLAW_MD_REQUIRE_IN_WINDOW_DATES", "1") or "1").strip().lower()
+    raw = (os.environ.get("SPCLAW_MD_REQUIRE_IN_WINDOW_DATES", "1") or "1").strip().lower()
     return raw in {"1", "true", "yes", "on"}
 
 
 def _allow_undated_fallback() -> bool:
-    raw = (os.environ.get("COATUE_CLAW_MD_ALLOW_UNDATED_FALLBACK", "0") or "0").strip().lower()
+    raw = (os.environ.get("SPCLAW_MD_ALLOW_UNDATED_FALLBACK", "0") or "0").strip().lower()
     return raw in {"1", "true", "yes", "on"}
 
 
 def _reject_historical_callback() -> bool:
-    raw = (os.environ.get("COATUE_CLAW_MD_REJECT_HISTORICAL_CALLBACK", "1") or "1").strip().lower()
+    raw = (os.environ.get("SPCLAW_MD_REJECT_HISTORICAL_CALLBACK", "1") or "1").strip().lower()
     return raw in {"1", "true", "yes", "on"}
 
 
 def _publish_time_enrich_enabled() -> bool:
-    raw = (os.environ.get("COATUE_CLAW_MD_PUBLISH_TIME_ENRICH_ENABLED", "1") or "1").strip().lower()
+    raw = (os.environ.get("SPCLAW_MD_PUBLISH_TIME_ENRICH_ENABLED", "1") or "1").strip().lower()
     return raw in {"1", "true", "yes", "on"}
 
 
 def _publish_time_enrich_timeout_ms() -> int:
-    raw = (os.environ.get("COATUE_CLAW_MD_PUBLISH_TIME_ENRICH_TIMEOUT_MS", "1200") or "1200").strip()
+    raw = (os.environ.get("SPCLAW_MD_PUBLISH_TIME_ENRICH_TIMEOUT_MS", "1200") or "1200").strip()
     try:
         val = int(raw)
     except Exception:
@@ -355,12 +355,12 @@ def _publish_time_enrich_timeout_ms() -> int:
 
 
 def _article_context_enabled() -> bool:
-    raw = (os.environ.get("COATUE_CLAW_MD_ARTICLE_CONTEXT_ENABLED", "1") or "1").strip().lower()
+    raw = (os.environ.get("SPCLAW_MD_ARTICLE_CONTEXT_ENABLED", "1") or "1").strip().lower()
     return raw in {"1", "true", "yes", "on"}
 
 
 def _article_context_timeout_ms() -> int:
-    raw = (os.environ.get("COATUE_CLAW_MD_ARTICLE_CONTEXT_TIMEOUT_MS", "3500") or "3500").strip()
+    raw = (os.environ.get("SPCLAW_MD_ARTICLE_CONTEXT_TIMEOUT_MS", "3500") or "3500").strip()
     try:
         val = int(raw)
     except Exception:
@@ -369,7 +369,7 @@ def _article_context_timeout_ms() -> int:
 
 
 def _article_context_max_chars() -> int:
-    raw = (os.environ.get("COATUE_CLAW_MD_ARTICLE_CONTEXT_MAX_CHARS", "6000") or "6000").strip()
+    raw = (os.environ.get("SPCLAW_MD_ARTICLE_CONTEXT_MAX_CHARS", "6000") or "6000").strip()
     try:
         val = int(raw)
     except Exception:
@@ -378,7 +378,7 @@ def _article_context_max_chars() -> int:
 
 
 def _article_context_limit() -> int:
-    raw = (os.environ.get("COATUE_CLAW_MD_ARTICLE_CONTEXT_LIMIT", "4") or "4").strip()
+    raw = (os.environ.get("SPCLAW_MD_ARTICLE_CONTEXT_LIMIT", "4") or "4").strip()
     try:
         val = int(raw)
     except Exception:
@@ -387,7 +387,7 @@ def _article_context_limit() -> int:
 
 
 def _top_n() -> int:
-    raw = (os.environ.get("COATUE_CLAW_MD_TOP_N", str(DEFAULT_TOP_N)) or str(DEFAULT_TOP_N)).strip()
+    raw = (os.environ.get("SPCLAW_MD_TOP_N", str(DEFAULT_TOP_N)) or str(DEFAULT_TOP_N)).strip()
     try:
         val = int(raw)
     except Exception:
@@ -396,7 +396,7 @@ def _top_n() -> int:
 
 
 def _top_k() -> int:
-    raw = (os.environ.get("COATUE_CLAW_MD_TMT_TOP_K", str(DEFAULT_TOP_K)) or str(DEFAULT_TOP_K)).strip()
+    raw = (os.environ.get("SPCLAW_MD_TMT_TOP_K", str(DEFAULT_TOP_K)) or str(DEFAULT_TOP_K)).strip()
     try:
         val = int(raw)
     except Exception:
@@ -405,11 +405,11 @@ def _top_k() -> int:
 
 
 def _channel_default() -> str:
-    return (os.environ.get("COATUE_CLAW_MD_SLACK_CHANNEL", DEFAULT_CHANNEL) or DEFAULT_CHANNEL).strip()
+    return (os.environ.get("SPCLAW_MD_SLACK_CHANNEL", DEFAULT_CHANNEL) or DEFAULT_CHANNEL).strip()
 
 
 def _x_max_results() -> int:
-    raw = (os.environ.get("COATUE_CLAW_MD_X_MAX_RESULTS", "50") or "50").strip()
+    raw = (os.environ.get("SPCLAW_MD_X_MAX_RESULTS", "50") or "50").strip()
     try:
         val = int(raw)
     except Exception:
@@ -418,7 +418,7 @@ def _x_max_results() -> int:
 
 
 def _max_lookback_hours() -> int:
-    raw = (os.environ.get("COATUE_CLAW_MD_MAX_LOOKBACK_HOURS", "96") or "96").strip()
+    raw = (os.environ.get("SPCLAW_MD_MAX_LOOKBACK_HOURS", "96") or "96").strip()
     try:
         val = int(raw)
     except Exception:
@@ -427,16 +427,16 @@ def _max_lookback_hours() -> int:
 
 
 def _web_search_enabled() -> bool:
-    raw = (os.environ.get("COATUE_CLAW_MD_WEB_SEARCH_ENABLED", "1") or "1").strip().lower()
+    raw = (os.environ.get("SPCLAW_MD_WEB_SEARCH_ENABLED", "1") or "1").strip().lower()
     return raw in {"1", "true", "yes", "on"}
 
 
 def _web_search_backend() -> str:
-    return (os.environ.get("COATUE_CLAW_MD_WEB_SEARCH_BACKEND", "google_serp") or "google_serp").strip().lower()
+    return (os.environ.get("SPCLAW_MD_WEB_SEARCH_BACKEND", "google_serp") or "google_serp").strip().lower()
 
 
 def _google_serp_api_key() -> str | None:
-    for key in ("COATUE_CLAW_MD_GOOGLE_SERP_API_KEY", "SERPAPI_API_KEY"):
+    for key in ("SPCLAW_MD_GOOGLE_SERP_API_KEY", "SERPAPI_API_KEY"):
         value = (os.environ.get(key, "") or "").strip()
         if value:
             return value
@@ -444,11 +444,11 @@ def _google_serp_api_key() -> str | None:
 
 
 def _google_serp_endpoint() -> str:
-    return (os.environ.get("COATUE_CLAW_MD_GOOGLE_SERP_ENDPOINT", "https://serpapi.com/search.json") or "https://serpapi.com/search.json").strip()
+    return (os.environ.get("SPCLAW_MD_GOOGLE_SERP_ENDPOINT", "https://serpapi.com/search.json") or "https://serpapi.com/search.json").strip()
 
 
 def _web_max_results() -> int:
-    raw = (os.environ.get("COATUE_CLAW_MD_WEB_MAX_RESULTS", "20") or "20").strip()
+    raw = (os.environ.get("SPCLAW_MD_WEB_MAX_RESULTS", "20") or "20").strip()
     try:
         val = int(raw)
     except Exception:
@@ -457,7 +457,7 @@ def _web_max_results() -> int:
 
 
 def _min_evidence_confidence() -> float:
-    raw = (os.environ.get("COATUE_CLAW_MD_MIN_EVIDENCE_CONFIDENCE", "0.55") or "0.55").strip()
+    raw = (os.environ.get("SPCLAW_MD_MIN_EVIDENCE_CONFIDENCE", "0.55") or "0.55").strip()
     try:
         val = float(raw)
     except Exception:
@@ -466,7 +466,7 @@ def _min_evidence_confidence() -> float:
 
 
 def _min_cause_sources() -> int:
-    raw = (os.environ.get("COATUE_CLAW_MD_MIN_CAUSE_SOURCES", "2") or "2").strip()
+    raw = (os.environ.get("SPCLAW_MD_MIN_CAUSE_SOURCES", "2") or "2").strip()
     try:
         val = int(raw)
     except Exception:
@@ -475,7 +475,7 @@ def _min_cause_sources() -> int:
 
 
 def _min_cause_domains() -> int:
-    raw = (os.environ.get("COATUE_CLAW_MD_MIN_CAUSE_DOMAINS", "2") or "2").strip()
+    raw = (os.environ.get("SPCLAW_MD_MIN_CAUSE_DOMAINS", "2") or "2").strip()
     try:
         val = int(raw)
     except Exception:
@@ -484,27 +484,27 @@ def _min_cause_domains() -> int:
 
 
 def _enable_cause_cluster_reuse() -> bool:
-    raw = (os.environ.get("COATUE_CLAW_MD_ENABLE_CAUSE_CLUSTER_REUSE", "1") or "1").strip().lower()
+    raw = (os.environ.get("SPCLAW_MD_ENABLE_CAUSE_CLUSTER_REUSE", "1") or "1").strip().lower()
     return raw in {"1", "true", "yes", "on"}
 
 
 def _generic_headline_blocklist_enabled() -> bool:
-    raw = (os.environ.get("COATUE_CLAW_MD_GENERIC_HEADLINE_BLOCKLIST_ENABLED", "1") or "1").strip().lower()
+    raw = (os.environ.get("SPCLAW_MD_GENERIC_HEADLINE_BLOCKLIST_ENABLED", "1") or "1").strip().lower()
     return raw in {"1", "true", "yes", "on"}
 
 
 def _reason_mode() -> str:
-    mode = (os.environ.get("COATUE_CLAW_MD_REASON_MODE", "best_effort") or "best_effort").strip().lower()
+    mode = (os.environ.get("SPCLAW_MD_REASON_MODE", "best_effort") or "best_effort").strip().lower()
     return mode if mode in {"best_effort"} else "best_effort"
 
 
 def _decisive_primary_reason_enabled() -> bool:
-    raw = (os.environ.get("COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_ENABLED", "1") or "1").strip().lower()
+    raw = (os.environ.get("SPCLAW_MD_DECISIVE_PRIMARY_REASON_ENABLED", "1") or "1").strip().lower()
     return raw in {"1", "true", "yes", "on"}
 
 
 def _decisive_primary_reason_min_score() -> float:
-    raw = (os.environ.get("COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_SCORE", "0.60") or "0.60").strip()
+    raw = (os.environ.get("SPCLAW_MD_DECISIVE_PRIMARY_REASON_MIN_SCORE", "0.60") or "0.60").strip()
     try:
         val = float(raw)
     except Exception:
@@ -513,7 +513,7 @@ def _decisive_primary_reason_min_score() -> float:
 
 
 def _decisive_primary_reason_min_margin() -> float:
-    raw = (os.environ.get("COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_MARGIN", "0.03") or "0.03").strip()
+    raw = (os.environ.get("SPCLAW_MD_DECISIVE_PRIMARY_REASON_MIN_MARGIN", "0.03") or "0.03").strip()
     try:
         val = float(raw)
     except Exception:
@@ -522,11 +522,11 @@ def _decisive_primary_reason_min_margin() -> float:
 
 
 def _x_api_base() -> str:
-    return (os.environ.get("COATUE_CLAW_X_API_BASE", "https://api.x.com").strip() or "https://api.x.com").rstrip("/")
+    return (os.environ.get("SPCLAW_X_API_BASE", "https://api.x.com").strip() or "https://api.x.com").rstrip("/")
 
 
 def _x_bearer_token() -> str | None:
-    for key in ("COATUE_CLAW_X_BEARER_TOKEN", "X_BEARER_TOKEN", "COATUE_CLAW_TWITTER_BEARER_TOKEN"):
+    for key in ("SPCLAW_X_BEARER_TOKEN", "X_BEARER_TOKEN", "SPCLAW_TWITTER_BEARER_TOKEN"):
         value = os.environ.get(key, "").strip()
         if value:
             return value
@@ -1099,7 +1099,7 @@ def _http_json(
 
 
 def _sec_headers() -> dict[str, str]:
-    ua = (os.environ.get("COATUE_CLAW_SEC_USER_AGENT", "CoatueClaw/1.0 (ops@coatueclaw.local)") or "").strip()
+    ua = (os.environ.get("SPCLAW_SEC_USER_AGENT", "SPClaw/1.0 (ops@spclaw.local)") or "").strip()
     return {"User-Agent": ua, "Accept": "application/json,text/plain,*/*"}
 
 
@@ -1211,7 +1211,7 @@ def _normalize_whitespace(text: str) -> str:
 
 
 def _resolve_ticker_via_openfigi(cusip: str) -> tuple[str | None, str, float]:
-    api_key = os.environ.get("COATUE_CLAW_MD_OPENFIGI_API_KEY", "").strip()
+    api_key = os.environ.get("SPCLAW_MD_OPENFIGI_API_KEY", "").strip()
     if not api_key:
         return (None, "openfigi_missing_key", 0.0)
 
@@ -1274,7 +1274,7 @@ def _resolve_ticker_via_name(issuer: str) -> tuple[str | None, str, float]:
 
 def refresh_coatue_holdings(*, store: MarketDailyStore | None = None) -> dict[str, Any]:
     store = store or MarketDailyStore()
-    cik = (os.environ.get("COATUE_CLAW_MD_COATUE_CIK", "") or "").strip()
+    cik = (os.environ.get("SPCLAW_MD_COATUE_CIK", "") or "").strip()
     if not cik:
         return {
             "ok": True,
@@ -2572,7 +2572,7 @@ def _fetch_web_evidence_google_serp(*, ticker: str, aliases: list[str], since_ut
     out: list[_EvidenceCandidate] = []
     seen_urls: set[str] = set()
     max_results = _web_max_results()
-    headers = {"Accept": "application/json", "User-Agent": "CoatueClaw/1.0"}
+    headers = {"Accept": "application/json", "User-Agent": "SPClaw/1.0"}
 
     now_utc = datetime.now(UTC)
     for query in _web_queries_for_ticker(ticker=ticker, aliases=aliases, pct_move=pct_move):
@@ -5849,7 +5849,7 @@ def status() -> dict[str, Any]:
     return {
         "ok": True,
         "db_path": str(store.db_path),
-        "timezone": os.environ.get("COATUE_CLAW_MD_TZ", DEFAULT_TZ),
+        "timezone": os.environ.get("SPCLAW_MD_TZ", DEFAULT_TZ),
         "times": ",".join(f"{h:02d}:{m:02d}" for h, m in _parse_times()),
         "earnings_recap_time": f"{recap_hh:02d}:{recap_mm:02d}",
         "channel": _channel_default(),
@@ -5923,7 +5923,7 @@ def set_override(*, ticker: str, action: str, updated_by: str | None = None) -> 
 
 
 def _main() -> None:
-    parser = argparse.ArgumentParser("coatue-claw-market-daily")
+    parser = argparse.ArgumentParser("spclaw-market-daily")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     run = sub.add_parser("run-once")

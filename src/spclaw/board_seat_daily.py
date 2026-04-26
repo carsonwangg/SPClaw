@@ -31,7 +31,7 @@ except Exception:  # pragma: no cover - optional dependency
         pass
 
 
-load_dotenv("/opt/coatue-claw/.env.prod")
+load_dotenv("/opt/spclaw/.env.prod")
 
 DEFAULT_TZ = "America/Los_Angeles"
 DEFAULT_PORTCOS: list[tuple[str, str]] = [
@@ -318,7 +318,7 @@ def _env_flag(name: str, default: bool) -> bool:
 
 
 def _timezone() -> ZoneInfo:
-    name = (os.environ.get("COATUE_CLAW_BOARD_SEAT_TZ", DEFAULT_TZ) or "").strip() or DEFAULT_TZ
+    name = (os.environ.get("SPCLAW_BOARD_SEAT_TZ", DEFAULT_TZ) or "").strip() or DEFAULT_TZ
     try:
         return ZoneInfo(name)
     except Exception:
@@ -338,20 +338,20 @@ def _utc_now() -> datetime:
 
 
 def _data_root() -> Path:
-    return Path(os.environ.get("COATUE_CLAW_DATA_ROOT", "/opt/coatue-claw-data"))
+    return Path(os.environ.get("SPCLAW_DATA_ROOT", "/opt/spclaw-data"))
 
 
 def _db_path() -> Path:
     return Path(
         os.environ.get(
-            "COATUE_CLAW_BOARD_SEAT_DB_PATH",
+            "SPCLAW_BOARD_SEAT_DB_PATH",
             str(_data_root() / "db/board_seat_daily.sqlite"),
         )
     )
 
 
 def _fallback_db_path() -> Path:
-    return Path.home() / ".coatue-claw-data" / "db" / "board_seat_daily.sqlite"
+    return Path.home() / ".spclaw-data" / "db" / "board_seat_daily.sqlite"
 
 
 def _artifact_dir() -> Path:
@@ -361,19 +361,19 @@ def _artifact_dir() -> Path:
 
 
 def _reset_mode_enabled() -> bool:
-    return _env_flag("COATUE_CLAW_BOARD_SEAT_RESET_MODE", False)
+    return _env_flag("SPCLAW_BOARD_SEAT_RESET_MODE", False)
 
 
 def _board_seat_enabled() -> bool:
-    return _env_flag("COATUE_CLAW_BOARD_SEAT_ENABLED", True)
+    return _env_flag("SPCLAW_BOARD_SEAT_ENABLED", True)
 
 
 def _weekdays_only() -> bool:
-    return _env_flag("COATUE_CLAW_BOARD_SEAT_WEEKDAYS_ONLY", True)
+    return _env_flag("SPCLAW_BOARD_SEAT_WEEKDAYS_ONLY", True)
 
 
 def _board_seat_time() -> str:
-    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_TIME", "12:00") or "12:00").strip()
+    raw = (os.environ.get("SPCLAW_BOARD_SEAT_TIME", "12:00") or "12:00").strip()
     if re.fullmatch(r"\d{1,2}:\d{2}", raw):
         hh, mm = raw.split(":", 1)
         h = int(hh)
@@ -384,7 +384,7 @@ def _board_seat_time() -> str:
 
 
 def _target_lock_days() -> int:
-    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_TARGET_LOCK_DAYS", "20") or "20").strip()
+    raw = (os.environ.get("SPCLAW_BOARD_SEAT_TARGET_LOCK_DAYS", "20") or "20").strip()
     try:
         val = int(raw)
     except Exception:
@@ -393,11 +393,11 @@ def _target_lock_days() -> int:
 
 
 def _require_high_conf_new_target() -> bool:
-    return _env_flag("COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", True)
+    return _env_flag("SPCLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET", True)
 
 
 def _repitch_significance_min() -> float:
-    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_REPITCH_SIGNIFICANCE_MIN", "0.85") or "0.85").strip()
+    raw = (os.environ.get("SPCLAW_BOARD_SEAT_REPITCH_SIGNIFICANCE_MIN", "0.85") or "0.85").strip()
     try:
         val = float(raw)
     except Exception:
@@ -406,7 +406,7 @@ def _repitch_significance_min() -> float:
 
 
 def _search_order() -> list[str]:
-    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_SEARCH_ORDER", "brave,serp") or "brave,serp").strip().lower()
+    raw = (os.environ.get("SPCLAW_BOARD_SEAT_SEARCH_ORDER", "brave,serp") or "brave,serp").strip().lower()
     out: list[str] = []
     for token in raw.split(","):
         item = token.strip()
@@ -416,7 +416,7 @@ def _search_order() -> list[str]:
 
 
 def _funding_min_domains() -> int:
-    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_FUNDING_MIN_DOMAINS", "2") or "2").strip()
+    raw = (os.environ.get("SPCLAW_BOARD_SEAT_FUNDING_MIN_DOMAINS", "2") or "2").strip()
     try:
         val = int(raw)
     except Exception:
@@ -425,7 +425,7 @@ def _funding_min_domains() -> int:
 
 
 def _funding_low_conf_threshold() -> float:
-    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_FUNDING_LOW_CONF_THRESHOLD", "0.55") or "0.55").strip()
+    raw = (os.environ.get("SPCLAW_BOARD_SEAT_FUNDING_LOW_CONF_THRESHOLD", "0.55") or "0.55").strip()
     try:
         val = float(raw)
     except Exception:
@@ -434,7 +434,7 @@ def _funding_low_conf_threshold() -> float:
 
 
 def _funding_cache_ttl_hours() -> int:
-    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_FUNDING_CACHE_TTL_HOURS", "168") or "168").strip()
+    raw = (os.environ.get("SPCLAW_BOARD_SEAT_FUNDING_CACHE_TTL_HOURS", "168") or "168").strip()
     try:
         val = int(raw)
     except Exception:
@@ -443,7 +443,7 @@ def _funding_cache_ttl_hours() -> int:
 
 
 def _max_web_rewrites() -> int:
-    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_MAX_WEB_REWRITES", "2") or "2").strip()
+    raw = (os.environ.get("SPCLAW_BOARD_SEAT_MAX_WEB_REWRITES", "2") or "2").strip()
     try:
         val = int(raw)
     except Exception:
@@ -461,29 +461,29 @@ def _memory_rewrite_max_retries() -> int:
 
 
 def _no_quotes() -> bool:
-    return _env_flag("COATUE_CLAW_BOARD_SEAT_NO_QUOTES", True)
+    return _env_flag("SPCLAW_BOARD_SEAT_NO_QUOTES", True)
 
 
 def _sources_in_thread() -> bool:
-    return _env_flag("COATUE_CLAW_BOARD_SEAT_SOURCES_IN_THREAD", True)
+    return _env_flag("SPCLAW_BOARD_SEAT_SOURCES_IN_THREAD", True)
 
 
 def _channel_discovery_mode() -> str:
-    mode = (os.environ.get("COATUE_CLAW_BOARD_SEAT_CHANNEL_DISCOVERY", "company_match") or "company_match").strip().lower()
+    mode = (os.environ.get("SPCLAW_BOARD_SEAT_CHANNEL_DISCOVERY", "company_match") or "company_match").strip().lower()
     return mode if mode in {"company_match", "static"} else "company_match"
 
 
 def _channel_types() -> str:
-    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_CHANNEL_TYPES", "public_channel,private_channel") or "public_channel,private_channel").strip()
+    raw = (os.environ.get("SPCLAW_BOARD_SEAT_CHANNEL_TYPES", "public_channel,private_channel") or "public_channel,private_channel").strip()
     return raw or "public_channel,private_channel"
 
 
 def _openai_model() -> str:
-    return (os.environ.get("COATUE_CLAW_BOARD_SEAT_MODEL", "gpt-5.2-chat-latest") or "gpt-5.2-chat-latest").strip()
+    return (os.environ.get("SPCLAW_BOARD_SEAT_MODEL", "gpt-5.2-chat-latest") or "gpt-5.2-chat-latest").strip()
 
 
 def _llm_candidate_generation_enabled() -> bool:
-    return _env_flag("COATUE_CLAW_BOARD_SEAT_LLM_CANDIDATE_GEN_ENABLED", True)
+    return _env_flag("SPCLAW_BOARD_SEAT_LLM_CANDIDATE_GEN_ENABLED", True)
 
 
 def _simple_mode_enabled() -> bool:
@@ -492,7 +492,7 @@ def _simple_mode_enabled() -> bool:
 
 
 def _simple_batch_size() -> int:
-    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_SIMPLE_BATCH_SIZE", "8") or "8").strip()
+    raw = (os.environ.get("SPCLAW_BOARD_SEAT_SIMPLE_BATCH_SIZE", "8") or "8").strip()
     try:
         val = int(raw)
     except Exception:
@@ -501,7 +501,7 @@ def _simple_batch_size() -> int:
 
 
 def _simple_max_regen_batches() -> int:
-    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_SIMPLE_MAX_REGEN_BATCHES", "4") or "4").strip()
+    raw = (os.environ.get("SPCLAW_BOARD_SEAT_SIMPLE_MAX_REGEN_BATCHES", "4") or "4").strip()
     try:
         val = int(raw)
     except Exception:
@@ -510,7 +510,7 @@ def _simple_max_regen_batches() -> int:
 
 
 def _simple_max_evals() -> int:
-    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_SIMPLE_MAX_EVALS", "40") or "40").strip()
+    raw = (os.environ.get("SPCLAW_BOARD_SEAT_SIMPLE_MAX_EVALS", "40") or "40").strip()
     try:
         val = int(raw)
     except Exception:
@@ -519,7 +519,7 @@ def _simple_max_evals() -> int:
 
 
 def _simple_source_fetch_pages() -> int:
-    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_SIMPLE_SOURCE_FETCH_PAGES", "15") or "15").strip()
+    raw = (os.environ.get("SPCLAW_BOARD_SEAT_SIMPLE_SOURCE_FETCH_PAGES", "15") or "15").strip()
     try:
         val = int(raw)
     except Exception:
@@ -528,7 +528,7 @@ def _simple_source_fetch_pages() -> int:
 
 
 def _simple_source_doc_chars() -> int:
-    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_SIMPLE_SOURCE_DOC_CHARS", "0") or "0").strip()
+    raw = (os.environ.get("SPCLAW_BOARD_SEAT_SIMPLE_SOURCE_DOC_CHARS", "0") or "0").strip()
     try:
         val = int(raw)
     except Exception:
@@ -537,19 +537,19 @@ def _simple_source_doc_chars() -> int:
 
 
 def _simple_use_all_backends() -> bool:
-    return _env_flag("COATUE_CLAW_BOARD_SEAT_SIMPLE_USE_ALL_BACKENDS", True)
+    return _env_flag("SPCLAW_BOARD_SEAT_SIMPLE_USE_ALL_BACKENDS", True)
 
 
 def _llm_first_mode_enabled() -> bool:
-    return _env_flag("COATUE_CLAW_BOARD_SEAT_LLM_FIRST_MODE", True)
+    return _env_flag("SPCLAW_BOARD_SEAT_LLM_FIRST_MODE", True)
 
 
 def _web_candidate_enrichment_enabled() -> bool:
-    return _env_flag("COATUE_CLAW_BOARD_SEAT_WEB_CANDIDATE_ENRICHMENT", True)
+    return _env_flag("SPCLAW_BOARD_SEAT_WEB_CANDIDATE_ENRICHMENT", True)
 
 
 def _llm_batch_size() -> int:
-    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_LLM_BATCH_SIZE", "8") or "8").strip()
+    raw = (os.environ.get("SPCLAW_BOARD_SEAT_LLM_BATCH_SIZE", "8") or "8").strip()
     try:
         val = int(raw)
     except Exception:
@@ -558,7 +558,7 @@ def _llm_batch_size() -> int:
 
 
 def _max_llm_batches() -> int:
-    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_MAX_LLM_BATCHES", "4") or "4").strip()
+    raw = (os.environ.get("SPCLAW_BOARD_SEAT_MAX_LLM_BATCHES", "4") or "4").strip()
     try:
         val = int(raw)
     except Exception:
@@ -567,7 +567,7 @@ def _max_llm_batches() -> int:
 
 
 def _max_candidate_evals() -> int:
-    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_MAX_CANDIDATE_EVALS", "40") or "40").strip()
+    raw = (os.environ.get("SPCLAW_BOARD_SEAT_MAX_CANDIDATE_EVALS", "40") or "40").strip()
     try:
         val = int(raw)
     except Exception:
@@ -577,7 +577,7 @@ def _max_candidate_evals() -> int:
 
 def _openai_api_key() -> str | None:
     for key in (
-        "COATUE_CLAW_OPENAI_API_KEY",
+        "SPCLAW_OPENAI_API_KEY",
         "OPENAI_API_KEY",
     ):
         value = (os.environ.get(key, "") or "").strip()
@@ -651,7 +651,7 @@ def _canonicalize_url(url: str) -> str:
 
 
 def _parse_portcos(raw: str | None = None) -> list[tuple[str, str]]:
-    data = raw if raw is not None else os.environ.get("COATUE_CLAW_BOARD_SEAT_PORTCOS", "")
+    data = raw if raw is not None else os.environ.get("SPCLAW_BOARD_SEAT_PORTCOS", "")
     if not data:
         return list(DEFAULT_PORTCOS)
     parsed: list[tuple[str, str]] = []
@@ -700,7 +700,7 @@ def _http_json(url: str, *, headers: dict[str, str] | None = None, params: dict[
 
 
 def _brave_api_key() -> str | None:
-    for key in ("COATUE_CLAW_BRAVE_API_KEY", "BRAVE_SEARCH_API_KEY"):
+    for key in ("SPCLAW_BRAVE_API_KEY", "BRAVE_SEARCH_API_KEY"):
         val = (os.environ.get(key, "") or "").strip()
         if val:
             return val
@@ -708,7 +708,7 @@ def _brave_api_key() -> str | None:
 
 
 def _serp_api_key() -> str | None:
-    for key in ("COATUE_CLAW_BOARD_SEAT_GOOGLE_SERP_API_KEY", "SERPAPI_API_KEY"):
+    for key in ("SPCLAW_BOARD_SEAT_GOOGLE_SERP_API_KEY", "SERPAPI_API_KEY"):
         val = (os.environ.get(key, "") or "").strip()
         if val:
             return val
@@ -716,7 +716,7 @@ def _serp_api_key() -> str | None:
 
 
 def _search_count() -> int:
-    raw = (os.environ.get("COATUE_CLAW_BOARD_SEAT_SEARCH_MAX_RESULTS", "12") or "12").strip()
+    raw = (os.environ.get("SPCLAW_BOARD_SEAT_SEARCH_MAX_RESULTS", "12") or "12").strip()
     try:
         val = int(raw)
     except Exception:
@@ -728,13 +728,13 @@ def _brave_search_rows(query: str) -> list[EvidenceRow]:
     key = _brave_api_key()
     if not key:
         return []
-    endpoint = (os.environ.get("COATUE_CLAW_BOARD_SEAT_BRAVE_ENDPOINT", "https://api.search.brave.com/res/v1/web/search") or "").strip()
+    endpoint = (os.environ.get("SPCLAW_BOARD_SEAT_BRAVE_ENDPOINT", "https://api.search.brave.com/res/v1/web/search") or "").strip()
     if not endpoint:
         return []
     headers = {
         "Accept": "application/json",
         "X-Subscription-Token": key,
-        "User-Agent": "CoatueClaw/1.0",
+        "User-Agent": "SPClaw/1.0",
     }
     try:
         payload = _http_json(endpoint, headers=headers, params={"q": query, "count": str(_search_count())}, timeout=8)
@@ -777,11 +777,11 @@ def _google_serp_rows(query: str) -> list[EvidenceRow]:
     key = _serp_api_key()
     if not key:
         return []
-    endpoint = (os.environ.get("COATUE_CLAW_BOARD_SEAT_GOOGLE_SERP_ENDPOINT", "https://serpapi.com/search.json") or "").strip()
+    endpoint = (os.environ.get("SPCLAW_BOARD_SEAT_GOOGLE_SERP_ENDPOINT", "https://serpapi.com/search.json") or "").strip()
     try:
         payload = _http_json(
             endpoint,
-            headers={"Accept": "application/json", "User-Agent": "CoatueClaw/1.0"},
+            headers={"Accept": "application/json", "User-Agent": "SPClaw/1.0"},
             params={
                 "engine": "google",
                 "q": query,
@@ -972,7 +972,7 @@ def _fetch_page_text(url: str, *, max_chars: int) -> str:
         req = Request(
             raw_url,
             headers={
-                "User-Agent": "CoatueClaw/1.0 (+board-seat-simple-research)",
+                "User-Agent": "SPClaw/1.0 (+board-seat-simple-research)",
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             },
             method="GET",
@@ -3552,7 +3552,7 @@ def run_once(*, force: bool = False, dry_run: bool = False) -> dict[str, Any]:
                     "company": company,
                     "channel_ref": channel_ref,
                     "reason": "board_seat_disabled",
-                    "detail": "Enable COATUE_CLAW_BOARD_SEAT_ENABLED=1.",
+                    "detail": "Enable SPCLAW_BOARD_SEAT_ENABLED=1.",
                     "delivery_mode_applied": "skip",
                 }
             )
@@ -3801,7 +3801,7 @@ def _seed_target(*, company: str, target: str, channel_ref: str) -> SeedTargetRe
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser("coatue-claw-board-seat-daily")
+    parser = argparse.ArgumentParser("spclaw-board-seat-daily")
     sub = parser.add_subparsers(dest="command", required=True)
 
     run = sub.add_parser("run-once")

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from coatue_claw.slack_pipeline_intent import parse_pipeline_intent
+from spclaw.slack_pipeline_intent import parse_pipeline_intent
 
 
 def test_parse_deploy_latest_intent():
-    intent = parse_pipeline_intent("@Coatue Claw deploy latest")
+    intent = parse_pipeline_intent("@SPClaw deploy latest")
     assert intent is not None
     assert intent.kind == "deploy_latest"
 

@@ -11,7 +11,7 @@ import sqlite3
 from typing import Any, Callable
 from urllib.request import Request, urlopen
 
-from coatue_claw.file_bridge import FileBridgeError, load_config
+from spclaw.file_bridge import FileBridgeError, load_config
 
 logger = logging.getLogger(__name__)
 
@@ -121,8 +121,8 @@ def _now_utc_iso() -> str:
 
 
 def _default_db_path() -> Path:
-    data_root = Path(os.environ.get("COATUE_CLAW_DATA_ROOT", "/opt/coatue-claw-data"))
-    return Path(os.environ.get("COATUE_CLAW_FILE_INGEST_DB_PATH", str(data_root / "db/file_ingest.sqlite")))
+    data_root = Path(os.environ.get("SPCLAW_DATA_ROOT", "/opt/spclaw-data"))
+    return Path(os.environ.get("SPCLAW_FILE_INGEST_DB_PATH", str(data_root / "db/file_ingest.sqlite")))
 
 
 def _sanitize_filename(name: str) -> str:
@@ -354,7 +354,7 @@ def ingest_slack_files(
             "errors": [f"file_bridge_config_error: {exc}"],
         }
 
-    max_mb = int(os.environ.get("COATUE_CLAW_SLACK_FILE_MAX_MB", "50"))
+    max_mb = int(os.environ.get("SPCLAW_SLACK_FILE_MAX_MB", "50"))
     max_bytes = max_mb * 1024 * 1024
 
     store = FileIngestStore(db_path=db_path)

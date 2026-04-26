@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from coatue_claw.hf_prompt_contract import CitationRef, build_scorecard, validate_section_citations
+from spclaw.hf_prompt_contract import CitationRef, build_scorecard, validate_section_citations
 
 
 def test_build_scorecard_bounds_and_weighted_total() -> None:

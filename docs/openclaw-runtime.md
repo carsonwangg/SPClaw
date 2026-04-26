@@ -1,43 +1,43 @@
 # OpenClaw Runtime Guide
 
 ## Purpose
-Define the runtime contract for Coatue Claw on OpenClaw, including process roles, operational controls, storage boundaries, and validation expectations.
+Define the runtime contract for SPClaw on OpenClaw, including process roles, operational controls, storage boundaries, and validation expectations.
 
 ## Runtime Source of Truth
 - Gateway config: `~/.openclaw/openclaw.json`
 - Gateway service: `~/Library/LaunchAgents/ai.openclaw.gateway.plist`
 - Coatue 24/7 services:
-  - `~/Library/LaunchAgents/com.coatueclaw.email-gateway.plist`
-  - `~/Library/LaunchAgents/com.coatueclaw.memory-prune.plist`
-  - `~/Library/LaunchAgents/com.coatueclaw.memory-reconcile-export.plist`
-  - `~/Library/LaunchAgents/com.coatueclaw.x-chart-daily.plist`
-  - `~/Library/LaunchAgents/com.coatueclaw.board-seat-daily.plist`
-  - `~/Library/LaunchAgents/com.coatueclaw.spencer-change-digest.plist`
-  - `~/Library/LaunchAgents/com.coatueclaw.market-daily.plist`
+  - `~/Library/LaunchAgents/com.spclaw.email-gateway.plist`
+  - `~/Library/LaunchAgents/com.spclaw.memory-prune.plist`
+  - `~/Library/LaunchAgents/com.spclaw.memory-reconcile-export.plist`
+  - `~/Library/LaunchAgents/com.spclaw.x-chart-daily.plist`
+  - `~/Library/LaunchAgents/com.spclaw.board-seat-daily.plist`
+  - `~/Library/LaunchAgents/com.spclaw.spencer-change-digest.plist`
+  - `~/Library/LaunchAgents/com.spclaw.market-daily.plist`
 - Gateway logs: `/tmp/openclaw/openclaw-YYYY-MM-DD.log`
-- App repo: `/opt/coatue-claw`
-- Runtime data: `/opt/coatue-claw-data`
+- App repo: `/opt/spclaw`
+- Runtime data: `/opt/spclaw-data`
 - File management runbook: `docs/file-management-system.md`
 - Email integration runbook: `docs/email-integration.md`
 
 ## Execution Model
 - OpenClaw gateway is the long-running control plane and Slack channel transport.
-- Slack bot handling is event-driven in `src/coatue_claw/slack_bot.py` and runs under OpenClaw channel delivery.
-- CLI entrypoint is `claw` (`src/coatue_claw/cli.py`) for on-demand operations (valuation charts, diligence packets).
-- Chart generation engine is `src/coatue_claw/valuation_chart.py`.
+- Slack bot handling is event-driven in `src/spclaw/slack_bot.py` and runs under OpenClaw channel delivery.
+- CLI entrypoint is `claw` (`src/spclaw/cli.py`) for on-demand operations (valuation charts, diligence packets).
+- Chart generation engine is `src/spclaw/valuation_chart.py`.
 
 ## Job Classes
 - Long-running:
   - OpenClaw gateway process
   - Slack channel event handling
-  - Optional email poller (`coatue_claw.email_gateway`)
+  - Optional email poller (`spclaw.email_gateway`)
 - On-demand:
   - `claw valuation-chart ...`
   - `claw diligence ...`
   - `claw x-digest "QUERY" --hours 24 --limit 50`
   - `claw x-chart run-once --manual`
   - `claw x-chart status|list-sources|add-source`
-  - `python -m coatue_claw.board_seat_daily run-once|status|target-memory|seed-target|export-ledger|refresh-funding|funding-quality-report`
+  - `python -m spclaw.board_seat_daily run-once|status|target-memory|seed-target|export-ledger|refresh-funding|funding-quality-report`
   - `claw market-daily run-once --manual|--force|--dry-run`
   - `claw market-daily run-earnings-recap --manual|--force|--dry-run`
   - `claw market-daily status|holdings|refresh-coatue-holdings|debug-catalyst`
@@ -45,13 +45,13 @@ Define the runtime contract for Coatue Claw on OpenClaw, including process roles
 - Scheduled (planned but not yet wired in this repo):
   - Weekly idea scan
 - Scheduled (wired):
-  - Hourly memory prune via `launchd` (`com.coatueclaw.memory-prune`)
-  - Memory reconcile queue export via `launchd` (`com.coatueclaw.memory-reconcile-export`) every 15 minutes by default (`COATUE_CLAW_MEMORY_RECONCILE_INTERVAL_SECONDS=900`)
-  - Chart scout via `launchd` (`com.coatueclaw.x-chart-daily`) every hour (`StartInterval=3600` default), with posting gated by `COATUE_CLAW_X_CHART_WINDOWS` (default `07:00,12:00,18:00`)
-  - Board Seat daily post via `launchd` (`com.coatueclaw.board-seat-daily`) at `COATUE_CLAW_BOARD_SEAT_TIME` (default `08:30`)
-  - Daily Spencer change-request digest DM via `launchd` (`com.coatueclaw.spencer-change-digest`) at `COATUE_CLAW_SPENCER_CHANGE_DIGEST_TIME` (default `18:00`)
-  - MD (Market Daily) via `launchd` (`com.coatueclaw.market-daily`) on US weekdays at `COATUE_CLAW_MD_TIMES` (default `07:00,14:15`, local PT runtime)
-  - MD earnings recap via `launchd` (`com.coatueclaw.market-daily-earnings-recap`) on US weekdays at `COATUE_CLAW_MD_EARNINGS_RECAP_TIME` (default `19:00`, local PT runtime)
+  - Hourly memory prune via `launchd` (`com.spclaw.memory-prune`)
+  - Memory reconcile queue export via `launchd` (`com.spclaw.memory-reconcile-export`) every 15 minutes by default (`SPCLAW_MEMORY_RECONCILE_INTERVAL_SECONDS=900`)
+  - Chart scout via `launchd` (`com.spclaw.x-chart-daily`) every hour (`StartInterval=3600` default), with posting gated by `SPCLAW_X_CHART_WINDOWS` (default `07:00,12:00,18:00`)
+  - Board Seat daily post via `launchd` (`com.spclaw.board-seat-daily`) at `SPCLAW_BOARD_SEAT_TIME` (default `08:30`)
+  - Daily Spencer change-request digest DM via `launchd` (`com.spclaw.spencer-change-digest`) at `SPCLAW_SPENCER_CHANGE_DIGEST_TIME` (default `18:00`)
+  - MD (Market Daily) via `launchd` (`com.spclaw.market-daily`) on US weekdays at `SPCLAW_MD_TIMES` (default `07:00,14:15`, local PT runtime)
+  - MD earnings recap via `launchd` (`com.spclaw.market-daily-earnings-recap`) on US weekdays at `SPCLAW_MD_EARNINGS_RECAP_TIME` (default `19:00`, local PT runtime)
   - Chart scout posts upload the source chart image snip from the selected X post (no redraw/reconstruction step)
 
 Diligence output contract:
@@ -60,7 +60,7 @@ Diligence output contract:
 - Before external fetches, diligence checks local research artifacts first (`file_ingest.sqlite` + prior packet markdowns) and includes matches in memo sources.
 
 Memory output contract:
-- Primary memory store: SQLite + FTS5 (`/opt/coatue-claw-data/db/memory.sqlite`).
+- Primary memory store: SQLite + FTS5 (`/opt/spclaw-data/db/memory.sqlite`).
 - Structured facts are stored as `category/entity/key/value/rationale/source/timestamp` rows with decay tiers.
 - Decay tiers:
   - `permanent` (no expiry)
@@ -72,7 +72,7 @@ Memory output contract:
 - Semantic fallback is optional via LanceDB/OpenAI embeddings when configured.
 
 ## Secrets and Environment Contract
-- Production secrets live only in `/opt/coatue-claw/.env.prod`.
+- Production secrets live only in `/opt/spclaw/.env.prod`.
 - Do not commit secrets to git.
 - Slack runtime requires:
   - `SLACK_BOT_TOKEN`
@@ -122,7 +122,7 @@ Memory output contract:
   - `make openclaw-market-daily-earnings-recap-run-once`
 
 24/7 runtime bootstrap on Mac mini:
-1. `cd /opt/coatue-claw`
+1. `cd /opt/spclaw`
 2. `git pull --ff-only origin main`
 3. `make openclaw-restart`
 4. `make openclaw-24x7-enable`
@@ -134,7 +134,7 @@ Memory output contract:
   - `make openclaw-slack-audit`
 
 ## Artifact Contract
-- Chart/data artifacts are written to `/opt/coatue-claw-data/artifacts/charts/`:
+- Chart/data artifacts are written to `/opt/spclaw-data/artifacts/charts/`:
   - `valuation-scatter-*.png`
   - `valuation-scatter-*.csv`
   - `valuation-scatter-*.json`
@@ -143,50 +143,50 @@ Memory output contract:
 
 File bridge contract:
 - Local canonical bot-managed paths:
-  - `/opt/coatue-claw-data/files/working`
-  - `/opt/coatue-claw-data/files/archive`
-  - `/opt/coatue-claw-data/files/published`
-  - `/opt/coatue-claw-data/files/incoming`
+  - `/opt/spclaw-data/files/working`
+  - `/opt/spclaw-data/files/archive`
+  - `/opt/spclaw-data/files/published`
+  - `/opt/spclaw-data/files/incoming`
 - Shared mirror paths (Google Drive or local fallback) are configured in `config/file-bridge.json`.
 - Default Mac mini Drive root is `/Users/spclaw/Documents/SPClaw Database`.
 - `openclaw-files-sync` performs pull (`01_DROP_HERE_Incoming` -> local incoming), push (`published/archive` -> shared paths), and index regeneration.
 - `01_DROP_HERE_Incoming/_Latest_Reference_READ_ONLY` is auto-mirrored from published outputs and excluded from pull ingestion.
 - Canonical category set is simplified to `Universes`, `Companies`, and `Industries`.
 - Published index artifacts are generated at:
-  - `/opt/coatue-claw-data/files/published/index.json`
-  - `/opt/coatue-claw-data/files/published/index.md`
+  - `/opt/spclaw-data/files/published/index.json`
+  - `/opt/spclaw-data/files/published/index.md`
 - Slack file ingest contract:
   - Slack message/app_mention events with file attachments trigger automatic file intake.
   - Files are downloaded with bot token auth and categorized into `incoming/{Universes|Companies|Industries}`.
   - Files are mirrored into Drive `01_DROP_HERE_Incoming/{Universes|Companies|Industries}` for shared visibility.
-  - Intake metadata is stored in `/opt/coatue-claw-data/db/file_ingest.sqlite`.
+  - Intake metadata is stored in `/opt/spclaw-data/db/file_ingest.sqlite`.
 
 ## Runtime Settings Contract
 - Live Slack-configurable settings are stored outside git:
-  - `/opt/coatue-claw-data/db/runtime-settings.json`
+  - `/opt/spclaw-data/db/runtime-settings.json`
 - Change audits are written to:
-  - `/opt/coatue-claw-data/artifacts/config-audit/*.md`
+  - `/opt/spclaw-data/artifacts/config-audit/*.md`
 - Git-tracked baseline defaults are stored in:
-  - `/opt/coatue-claw/config/runtime-defaults.json`
+  - `/opt/spclaw/config/runtime-defaults.json`
 - Promotion ledger is stored in:
-  - `/opt/coatue-claw-data/db/settings-promotions.json`
+  - `/opt/spclaw-data/db/settings-promotions.json`
 
 Slack conversational controls:
-1. `@Coatue Claw show my settings`
-2. `@Coatue Claw going forward look for 12 peers`
-3. `@Coatue Claw use market cap as the default x-axis`
-4. `@Coatue Claw promote current settings` (direct commit/push to `main`)
-5. `@Coatue Claw undo last promotion` (auto-revert of last promoted settings commit)
+1. `@SPClaw show my settings`
+2. `@SPClaw going forward look for 12 peers`
+3. `@SPClaw use market cap as the default x-axis`
+4. `@SPClaw promote current settings` (direct commit/push to `main`)
+5. `@SPClaw undo last promotion` (auto-revert of last promoted settings commit)
 
 Slack deploy pipeline controls:
-1. `@Coatue Claw deploy latest` (pull + restart + Slack health probe)
-2. `@Coatue Claw undo last deploy` (revert last deploy target + push + restart + probe)
-3. `@Coatue Claw run checks` (`PYTHONPATH=src pytest -q`)
-4. `@Coatue Claw show pipeline status`
-5. `@Coatue Claw show deploy history`
-6. `@Coatue Claw build: <request>` (runs Codex CLI by default if installed, otherwise requires custom runner)
-7. `@Coatue Claw x digest SNOW last 24h limit 80`
-8. `@Coatue Claw x status`
+1. `@SPClaw deploy latest` (pull + restart + Slack health probe)
+2. `@SPClaw undo last deploy` (revert last deploy target + push + restart + probe)
+3. `@SPClaw run checks` (`PYTHONPATH=src pytest -q`)
+4. `@SPClaw show pipeline status`
+5. `@SPClaw show deploy history`
+6. `@SPClaw build: <request>` (runs Codex CLI by default if installed, otherwise requires custom runner)
+7. `@SPClaw x digest SNOW last 24h limit 80`
+8. `@SPClaw x status`
 9. `x chart now`
 10. `x chart sources`
 11. `x chart add @fiscal_AI priority 1.6`
@@ -194,95 +194,95 @@ Slack deploy pipeline controls:
 
 Pipeline environment controls:
 - `SLACK_PIPELINE_ADMINS`: optional comma-separated Slack user IDs allowed to run pipeline commands
-- `COATUE_CLAW_SLACK_BUILD_COMMAND`: optional custom build command template with `{request}` placeholder
-- `COATUE_CLAW_DEPLOY_HISTORY_PATH`: optional deploy history JSON path (default under `/opt/coatue-claw-data/db/`)
+- `SPCLAW_SLACK_BUILD_COMMAND`: optional custom build command template with `{request}` placeholder
+- `SPCLAW_DEPLOY_HISTORY_PATH`: optional deploy history JSON path (default under `/opt/spclaw-data/db/`)
 
 Memory environment controls:
-- `COATUE_CLAW_MEMORY_DB_PATH`: optional SQLite memory DB path
-- `COATUE_CLAW_MEMORY_VECTOR_DIR`: optional LanceDB directory path
-- `COATUE_CLAW_MEMORY_EMBED_MODEL`: optional embedding model (default `text-embedding-3-large`)
-- `COATUE_CLAW_MEMORY_RECONCILE_INTERVAL_SECONDS`: scheduler interval for memory queue export (default `900`, min `300`, max `86400`)
-- `COATUE_CLAW_MEMORY_RECONCILE_EXPORT_LIMIT`: queue export limit used by scheduler (default `200`, min `1`, max `1000`)
+- `SPCLAW_MEMORY_DB_PATH`: optional SQLite memory DB path
+- `SPCLAW_MEMORY_VECTOR_DIR`: optional LanceDB directory path
+- `SPCLAW_MEMORY_EMBED_MODEL`: optional embedding model (default `text-embedding-3-large`)
+- `SPCLAW_MEMORY_RECONCILE_INTERVAL_SECONDS`: scheduler interval for memory queue export (default `900`, min `300`, max `86400`)
+- `SPCLAW_MEMORY_RECONCILE_EXPORT_LIMIT`: queue export limit used by scheduler (default `200`, min `1`, max `1000`)
 - `OPENAI_API_KEY`: required only for semantic memory fallback
 
 File ingest environment controls:
-- `COATUE_CLAW_FILE_INGEST_DB_PATH`: optional override for Slack file ingest SQLite path
-- `COATUE_CLAW_SLACK_FILE_MAX_MB`: optional max Slack file size in MB for auto-ingest (default `50`)
+- `SPCLAW_FILE_INGEST_DB_PATH`: optional override for Slack file ingest SQLite path
+- `SPCLAW_SLACK_FILE_MAX_MB`: optional max Slack file size in MB for auto-ingest (default `50`)
 
 X digest environment controls:
-- `COATUE_CLAW_X_BEARER_TOKEN`: required for X API requests
-- `COATUE_CLAW_X_API_BASE`: optional API base URL override (default `https://api.x.com`)
-- `COATUE_CLAW_X_DIGEST_DIR`: optional digest markdown output dir (default `/opt/coatue-claw-data/artifacts/x-digest`)
+- `SPCLAW_X_BEARER_TOKEN`: required for X API requests
+- `SPCLAW_X_API_BASE`: optional API base URL override (default `https://api.x.com`)
+- `SPCLAW_X_DIGEST_DIR`: optional digest markdown output dir (default `/opt/spclaw-data/artifacts/x-digest`)
 
 X chart scout environment controls:
-- `COATUE_CLAW_X_CHART_SLACK_CHANNEL`: required Slack destination (channel id like `C...` or channel name like `#charting`)
-- `COATUE_CLAW_X_CHART_TIMEZONE`: posting timezone (default `America/Los_Angeles`)
-- `COATUE_CLAW_X_CHART_WINDOWS`: comma-separated daily times (default `07:00,12:00,18:00`)
-- `COATUE_CLAW_X_CHART_SOURCE_LIMIT`: number of tracked source handles to scan each run (default `25`)
-- `COATUE_CLAW_X_CHART_DISCOVERY_MIN_ENGAGEMENT`: minimum engagement for auto-discovered source promotion (default `120`)
-- `COATUE_CLAW_X_CHART_DB_PATH`: optional SQLite store path (default `/opt/coatue-claw-data/db/x_chart_daily.sqlite`)
-- `COATUE_CLAW_X_CHART_DIR`: optional markdown artifact output dir (default `/opt/coatue-claw-data/artifacts/x-chart-daily`)
-- `COATUE_CLAW_VISUALCAPITALIST_FEED_URL`: optional feed override (default `https://www.visualcapitalist.com/feed/`)
+- `SPCLAW_X_CHART_SLACK_CHANNEL`: required Slack destination (channel id like `C...` or channel name like `#charting`)
+- `SPCLAW_X_CHART_TIMEZONE`: posting timezone (default `America/Los_Angeles`)
+- `SPCLAW_X_CHART_WINDOWS`: comma-separated daily times (default `07:00,12:00,18:00`)
+- `SPCLAW_X_CHART_SOURCE_LIMIT`: number of tracked source handles to scan each run (default `25`)
+- `SPCLAW_X_CHART_DISCOVERY_MIN_ENGAGEMENT`: minimum engagement for auto-discovered source promotion (default `120`)
+- `SPCLAW_X_CHART_DB_PATH`: optional SQLite store path (default `/opt/spclaw-data/db/x_chart_daily.sqlite`)
+- `SPCLAW_X_CHART_DIR`: optional markdown artifact output dir (default `/opt/spclaw-data/artifacts/x-chart-daily`)
+- `SPCLAW_VISUALCAPITALIST_FEED_URL`: optional feed override (default `https://www.visualcapitalist.com/feed/`)
 
 MD (Market Daily) environment controls:
-- `COATUE_CLAW_MD_SLACK_CHANNEL`: Slack destination channel id/name (default `general`)
-- `COATUE_CLAW_MD_TZ`: slot timezone (default `America/Los_Angeles`)
-- `COATUE_CLAW_MD_TIMES`: local run times (`HH:MM,HH:MM`, default `07:00,14:15`)
-- `COATUE_CLAW_MD_EARNINGS_RECAP_TIME`: local recap run time (`HH:MM`, default `19:00`)
-- `COATUE_CLAW_MD_TOP_N`: mover count (default `3`)
-- `COATUE_CLAW_MD_TMT_TOP_K`: top-ranked seed members to keep before overlay (default `40`)
-- `COATUE_CLAW_MD_CANDIDATE_SEED_PATH`: CSV universe seed path (default `/opt/coatue-claw/config/md_tmt_seed_universe.csv`)
-- `COATUE_CLAW_MD_DB_PATH`: SQLite path (default `/opt/coatue-claw-data/db/market_daily.sqlite`)
-- `COATUE_CLAW_MD_ARTIFACT_DIR`: markdown artifact output dir (default `/opt/coatue-claw-data/artifacts/market-daily`)
-- `COATUE_CLAW_MD_COATUE_CIK`: Coatue CIK for auto 13F refresh
-- `COATUE_CLAW_MD_OPENFIGI_API_KEY`: optional OpenFIGI key for stronger CUSIP->ticker resolution
-- `COATUE_CLAW_MD_MODEL`: optional catalyst summarizer model (default `gpt-5.2-chat-latest`)
-- `COATUE_CLAW_MD_CATALYST_MODE`: catalyst engine mode (`simple_synthesis` default, `legacy_heuristic` rollback)
-- `COATUE_CLAW_MD_SYNTH_MAX_RESULTS`: max evidence candidates passed to simple synthesis (default `5`)
-- `COATUE_CLAW_MD_SYNTH_SOURCE_MODE`: simple synthesis source mix (`google_plus_yahoo` default, `google_only`, `yahoo_only`)
-- `COATUE_CLAW_MD_SYNTH_DOMAIN_GATE`: synthesis domain filter (`soft` default, `quality_only`, `off`)
-- `COATUE_CLAW_MD_SYNTH_SUPPORT_COUNT`: max support links passed alongside the anchor evidence in simple synthesis (default `2`)
-- `COATUE_CLAW_MD_SYNTH_FORCE_BEST_GUESS`: legacy compatibility toggle from earlier phrase-based path (`1` default)
-- `COATUE_CLAW_MD_RELEVANCE_MODE`: anchor/support selection mode (`llm_first` default, `deterministic` fallback mode)
-- `COATUE_CLAW_MD_REASON_OUTPUT_MODE`: simple reason rendering mode (`free_sentence` default, `wrapper` optional rollback)
-- `COATUE_CLAW_MD_POST_AS_IS`: in simple mode, accept non-empty LLM sentence with minimal normalization (`1` default)
-- `COATUE_CLAW_MD_RECAP_SUPPORT_COUNT`: earnings recap support evidence count (defaults to `COATUE_CLAW_MD_SYNTH_SUPPORT_COUNT`; default effective value `2`)
-- `COATUE_CLAW_MD_RECAP_POST_AS_IS`: earnings recap post-as-is policy (defaults to `COATUE_CLAW_MD_POST_AS_IS`; default effective value `1`)
-- `COATUE_CLAW_MD_REQUIRE_IN_WINDOW_DATES`: require candidate publish timestamps to fall within the active session window (`1` default)
-- `COATUE_CLAW_MD_ALLOW_UNDATED_FALLBACK`: allow undated candidates when timestamp validation fails (`0` default)
-- `COATUE_CLAW_MD_REJECT_HISTORICAL_CALLBACK`: reject headlines/summaries that cite materially older event dates (for example “On January 26 ...”) (`1` default)
-- `COATUE_CLAW_MD_PUBLISH_TIME_ENRICH_ENABLED`: attempt publish-time enrichment from article metadata when feed/search timestamp is missing (`1` default)
-- `COATUE_CLAW_MD_PUBLISH_TIME_ENRICH_TIMEOUT_MS`: per-url publish-time enrichment timeout in milliseconds (default `1200`)
-- `COATUE_CLAW_MD_ARTICLE_CONTEXT_ENABLED`: enable article-body context enrichment for LLM relevance + one-line catalyst writing (`1` default)
-- `COATUE_CLAW_MD_ARTICLE_CONTEXT_TIMEOUT_MS`: per-url article fetch timeout for context enrichment (default `3500`)
-- `COATUE_CLAW_MD_ARTICLE_CONTEXT_MAX_CHARS`: max context chars extracted per article before prompting (default `6000`)
-- `COATUE_CLAW_MD_ARTICLE_CONTEXT_LIMIT`: max candidate articles to enrich with full body context per ticker in LLM steps (default `4`)
-- `COATUE_CLAW_MD_MAX_LOOKBACK_HOURS`: max evidence lookback cap for session windows (default `96`)
-- `COATUE_CLAW_MD_WEB_SEARCH_ENABLED`: enable web fallback retrieval (`1`/`0`, default `1`)
-- `COATUE_CLAW_MD_WEB_SEARCH_BACKEND`: web backend (`google_serp` primary with `ddg_html` fallback, default `google_serp`)
-- `COATUE_CLAW_MD_GOOGLE_SERP_API_KEY`: SERP API key for Google-backed evidence retrieval
-- `COATUE_CLAW_MD_GOOGLE_SERP_ENDPOINT`: optional SERP endpoint override (default `https://serpapi.com/search.json`)
-- `COATUE_CLAW_MD_WEB_MAX_RESULTS`: max web evidence links per ticker (default `20`)
-- `COATUE_CLAW_MD_MIN_EVIDENCE_CONFIDENCE`: confidence threshold before fallback reason line (default `0.55`)
-- `COATUE_CLAW_MD_MIN_CAUSE_SOURCES`: minimum independent corroborating sources required to name a specific cause (default `2`)
-- `COATUE_CLAW_MD_MIN_CAUSE_DOMAINS`: minimum distinct corroborating domains required to name a specific cause (default `2`)
-- `COATUE_CLAW_MD_ENABLE_CAUSE_CLUSTER_REUSE`: reuse one confirmed basket cause phrase across multiple movers in the same run (`1`/`0`, default `1`)
-- `COATUE_CLAW_MD_GENERIC_HEADLINE_BLOCKLIST_ENABLED`: block generic wrappers (for example "stock is down today") from final catalyst lines (`1`/`0`, default `1`)
-- `COATUE_CLAW_MD_REASON_MODE`: catalyst reasoning mode (default `best_effort`)
-- `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_ENABLED`: allow decisive single-source event phrasing when one high-quality source is dominant (`1`/`0`, default `1`)
-- `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_SCORE`: minimum effective evidence score for decisive-primary override (default `0.60`)
-- `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_MARGIN`: minimum top-cluster score gap vs runner-up for decisive-primary override (default `0.03`)
-- `COATUE_CLAW_MD_REASON_QUALITY_MODE`: reason rendering mode (`hybrid` default, `deterministic` optional)
-- `COATUE_CLAW_MD_REASON_POLISH_ENABLED`: enable optional LLM polish pass for awkward phrases (`1`/`0`, default `1`)
-- `COATUE_CLAW_MD_REASON_POLISH_MODEL`: optional model override for reason polish (default follows `COATUE_CLAW_MD_MODEL`)
-- `COATUE_CLAW_MD_REASON_POLISH_MAX_CHARS`: max chars for polished reason phrase (default `90`)
+- `SPCLAW_MD_SLACK_CHANNEL`: Slack destination channel id/name (default `general`)
+- `SPCLAW_MD_TZ`: slot timezone (default `America/Los_Angeles`)
+- `SPCLAW_MD_TIMES`: local run times (`HH:MM,HH:MM`, default `07:00,14:15`)
+- `SPCLAW_MD_EARNINGS_RECAP_TIME`: local recap run time (`HH:MM`, default `19:00`)
+- `SPCLAW_MD_TOP_N`: mover count (default `3`)
+- `SPCLAW_MD_TMT_TOP_K`: top-ranked seed members to keep before overlay (default `40`)
+- `SPCLAW_MD_CANDIDATE_SEED_PATH`: CSV universe seed path (default `/opt/spclaw/config/md_tmt_seed_universe.csv`)
+- `SPCLAW_MD_DB_PATH`: SQLite path (default `/opt/spclaw-data/db/market_daily.sqlite`)
+- `SPCLAW_MD_ARTIFACT_DIR`: markdown artifact output dir (default `/opt/spclaw-data/artifacts/market-daily`)
+- `SPCLAW_MD_COATUE_CIK`: Coatue CIK for auto 13F refresh
+- `SPCLAW_MD_OPENFIGI_API_KEY`: optional OpenFIGI key for stronger CUSIP->ticker resolution
+- `SPCLAW_MD_MODEL`: optional catalyst summarizer model (default `gpt-5.2-chat-latest`)
+- `SPCLAW_MD_CATALYST_MODE`: catalyst engine mode (`simple_synthesis` default, `legacy_heuristic` rollback)
+- `SPCLAW_MD_SYNTH_MAX_RESULTS`: max evidence candidates passed to simple synthesis (default `5`)
+- `SPCLAW_MD_SYNTH_SOURCE_MODE`: simple synthesis source mix (`google_plus_yahoo` default, `google_only`, `yahoo_only`)
+- `SPCLAW_MD_SYNTH_DOMAIN_GATE`: synthesis domain filter (`soft` default, `quality_only`, `off`)
+- `SPCLAW_MD_SYNTH_SUPPORT_COUNT`: max support links passed alongside the anchor evidence in simple synthesis (default `2`)
+- `SPCLAW_MD_SYNTH_FORCE_BEST_GUESS`: legacy compatibility toggle from earlier phrase-based path (`1` default)
+- `SPCLAW_MD_RELEVANCE_MODE`: anchor/support selection mode (`llm_first` default, `deterministic` fallback mode)
+- `SPCLAW_MD_REASON_OUTPUT_MODE`: simple reason rendering mode (`free_sentence` default, `wrapper` optional rollback)
+- `SPCLAW_MD_POST_AS_IS`: in simple mode, accept non-empty LLM sentence with minimal normalization (`1` default)
+- `SPCLAW_MD_RECAP_SUPPORT_COUNT`: earnings recap support evidence count (defaults to `SPCLAW_MD_SYNTH_SUPPORT_COUNT`; default effective value `2`)
+- `SPCLAW_MD_RECAP_POST_AS_IS`: earnings recap post-as-is policy (defaults to `SPCLAW_MD_POST_AS_IS`; default effective value `1`)
+- `SPCLAW_MD_REQUIRE_IN_WINDOW_DATES`: require candidate publish timestamps to fall within the active session window (`1` default)
+- `SPCLAW_MD_ALLOW_UNDATED_FALLBACK`: allow undated candidates when timestamp validation fails (`0` default)
+- `SPCLAW_MD_REJECT_HISTORICAL_CALLBACK`: reject headlines/summaries that cite materially older event dates (for example “On January 26 ...”) (`1` default)
+- `SPCLAW_MD_PUBLISH_TIME_ENRICH_ENABLED`: attempt publish-time enrichment from article metadata when feed/search timestamp is missing (`1` default)
+- `SPCLAW_MD_PUBLISH_TIME_ENRICH_TIMEOUT_MS`: per-url publish-time enrichment timeout in milliseconds (default `1200`)
+- `SPCLAW_MD_ARTICLE_CONTEXT_ENABLED`: enable article-body context enrichment for LLM relevance + one-line catalyst writing (`1` default)
+- `SPCLAW_MD_ARTICLE_CONTEXT_TIMEOUT_MS`: per-url article fetch timeout for context enrichment (default `3500`)
+- `SPCLAW_MD_ARTICLE_CONTEXT_MAX_CHARS`: max context chars extracted per article before prompting (default `6000`)
+- `SPCLAW_MD_ARTICLE_CONTEXT_LIMIT`: max candidate articles to enrich with full body context per ticker in LLM steps (default `4`)
+- `SPCLAW_MD_MAX_LOOKBACK_HOURS`: max evidence lookback cap for session windows (default `96`)
+- `SPCLAW_MD_WEB_SEARCH_ENABLED`: enable web fallback retrieval (`1`/`0`, default `1`)
+- `SPCLAW_MD_WEB_SEARCH_BACKEND`: web backend (`google_serp` primary with `ddg_html` fallback, default `google_serp`)
+- `SPCLAW_MD_GOOGLE_SERP_API_KEY`: SERP API key for Google-backed evidence retrieval
+- `SPCLAW_MD_GOOGLE_SERP_ENDPOINT`: optional SERP endpoint override (default `https://serpapi.com/search.json`)
+- `SPCLAW_MD_WEB_MAX_RESULTS`: max web evidence links per ticker (default `20`)
+- `SPCLAW_MD_MIN_EVIDENCE_CONFIDENCE`: confidence threshold before fallback reason line (default `0.55`)
+- `SPCLAW_MD_MIN_CAUSE_SOURCES`: minimum independent corroborating sources required to name a specific cause (default `2`)
+- `SPCLAW_MD_MIN_CAUSE_DOMAINS`: minimum distinct corroborating domains required to name a specific cause (default `2`)
+- `SPCLAW_MD_ENABLE_CAUSE_CLUSTER_REUSE`: reuse one confirmed basket cause phrase across multiple movers in the same run (`1`/`0`, default `1`)
+- `SPCLAW_MD_GENERIC_HEADLINE_BLOCKLIST_ENABLED`: block generic wrappers (for example "stock is down today") from final catalyst lines (`1`/`0`, default `1`)
+- `SPCLAW_MD_REASON_MODE`: catalyst reasoning mode (default `best_effort`)
+- `SPCLAW_MD_DECISIVE_PRIMARY_REASON_ENABLED`: allow decisive single-source event phrasing when one high-quality source is dominant (`1`/`0`, default `1`)
+- `SPCLAW_MD_DECISIVE_PRIMARY_REASON_MIN_SCORE`: minimum effective evidence score for decisive-primary override (default `0.60`)
+- `SPCLAW_MD_DECISIVE_PRIMARY_REASON_MIN_MARGIN`: minimum top-cluster score gap vs runner-up for decisive-primary override (default `0.03`)
+- `SPCLAW_MD_REASON_QUALITY_MODE`: reason rendering mode (`hybrid` default, `deterministic` optional)
+- `SPCLAW_MD_REASON_POLISH_ENABLED`: enable optional LLM polish pass for awkward phrases (`1`/`0`, default `1`)
+- `SPCLAW_MD_REASON_POLISH_MODEL`: optional model override for reason polish (default follows `SPCLAW_MD_MODEL`)
+- `SPCLAW_MD_REASON_POLISH_MAX_CHARS`: max chars for polished reason phrase (default `90`)
 - `simple_synthesis` mode behavior:
   - collects top Google web + Yahoo ticker evidence
   - if Google SERP key is missing, skips DDG fallback for catalyst selection and relies on Yahoo evidence + safe fallback behavior
   - rejects quote-directory/generic wrapper items before synthesis
   - enforces strict time-integrity filtering for candidate links and catalyst selection
   - applies soft penalties to technical-analysis and multi-ticker roundup headlines
-  - chooses one anchor evidence candidate plus supports using `COATUE_CLAW_MD_RELEVANCE_MODE`:
+  - chooses one anchor evidence candidate plus supports using `SPCLAW_MD_RELEVANCE_MODE`:
     - `llm_first`: LLM selects anchor/support from ranked candidates
     - `deterministic`: code-only anchor/support selector
   - in `llm_first`, includes richer article-body context (not just title/snippet) for top candidates before relevance selection and sentence drafting
@@ -304,32 +304,32 @@ MD (Market Daily) environment controls:
 - MD fallback line (when corroboration gate fails): `Likely positioning/flow; no single confirmed catalyst.`
 
 Board Seat daily environment controls:
-- `COATUE_CLAW_BOARD_SEAT_PORTCOS`: comma-separated `Company:channel` mappings (default includes anduril/anthropic/cursor/neuralink/openai/physical-intelligence/ramp/spacex/stripe/sunday-robotics)
-- `COATUE_CLAW_BOARD_SEAT_TIME`: local daily runtime time (`HH:MM`, default `08:30`)
-- `COATUE_CLAW_BOARD_SEAT_TZ`: timezone for run date (default `America/Los_Angeles`)
-- `COATUE_CLAW_BOARD_SEAT_THEME_LOOKBACK_DAYS`: thematic context horizon used for monthly trend framing (default `30`)
-- `COATUE_CLAW_BOARD_SEAT_LOOKBACK_HOURS`: optional direct override of Slack history window; defaults to `theme_lookback_days * 24`
-- `COATUE_CLAW_BOARD_SEAT_MAX_MESSAGES`: max context messages fetched per channel (default `160`)
-- `COATUE_CLAW_BOARD_SEAT_DB_PATH`: optional SQLite path for daily run ledger
-- `COATUE_CLAW_BOARD_SEAT_MODEL`: optional LLM model for synthesis (default `gpt-5.2-chat-latest`)
-- `COATUE_CLAW_BOARD_SEAT_HEADER_STYLE`: Slack rendering style (`richtext` default; falls back to plaintext on block errors)
-- `COATUE_CLAW_BOARD_SEAT_SPECIFICITY_MODE`: draft specificity guard (`moderate` default)
-- `COATUE_CLAW_BOARD_SEAT_FUNDING_SCOPE`: funding entity scope (`target` default, `company` optional)
-- `COATUE_CLAW_BOARD_SEAT_CRUNCHBASE_ENABLED`: enable Crunchbase funding resolver (`1` default)
-- `COATUE_CLAW_CRUNCHBASE_API_KEY`: Crunchbase API key used for target funding lookup
-- `COATUE_CLAW_BOARD_SEAT_GOOGLE_SERP_API_KEY`: optional SERP API key for funding/source fallback retrieval (falls back to `SERPAPI_API_KEY`)
-- `COATUE_CLAW_BOARD_SEAT_FUNDING_WEB_TOP_ROWS`: max normalized funding evidence rows retained before extraction (default `8`)
-- `COATUE_CLAW_BOARD_SEAT_FUNDING_MIN_DOMAINS`: minimum corroborating domains required for `verified` funding status (default `2`)
-- `COATUE_CLAW_BOARD_SEAT_FUNDING_LOW_CONF_THRESHOLD`: confidence threshold below which funding is treated as `low` band (default `0.55`)
-- `COATUE_CLAW_BOARD_SEAT_FUNDING_WARNING_MODE`: include explicit low-confidence funding warning line in Board Seat output (`1` default)
-- `COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET`: require each post to be both a new target and `High` confidence; otherwise skip with `no_high_confidence_new_target` (`1` default)
-- `COATUE_CLAW_BOARD_SEAT_TARGET_LOCK_DAYS`: target-memory lock window (default `14`, minimum enforced `14`)
-- `COATUE_CLAW_BOARD_SEAT_ALLOW_REPEAT_TARGETS`: set `1` to bypass only the configurable lock window above 14 days; cannot bypass the hard 14-day no-repeat rule (default `0`)
-- `COATUE_CLAW_BOARD_SEAT_EVENT_TRACK_TARGETS_PER_COMPANY`: number of promising targets to track event flow for per company run (default `4`)
-- `COATUE_CLAW_BOARD_SEAT_EVENT_TRACK_ROWS_PER_TARGET`: max candidate event rows pulled per tracked target per run (default `8`)
-- `COATUE_CLAW_BOARD_SEAT_LEDGER_DIR`: board-seat target ledger artifact directory (default `/opt/coatue-claw-data/artifacts/board-seat`)
-- `COATUE_CLAW_BOARD_SEAT_LEDGER_MIRROR_ENABLED`: mirror ledger to Google Drive local path (default `1`)
-- `COATUE_CLAW_BOARD_SEAT_LEDGER_MIRROR_PATH`: mirror destination path (default `/Users/spclaw/Documents/SPClaw Database/Companies/Board-Seat`)
+- `SPCLAW_BOARD_SEAT_PORTCOS`: comma-separated `Company:channel` mappings (default includes anduril/anthropic/cursor/neuralink/openai/physical-intelligence/ramp/spacex/stripe/sunday-robotics)
+- `SPCLAW_BOARD_SEAT_TIME`: local daily runtime time (`HH:MM`, default `08:30`)
+- `SPCLAW_BOARD_SEAT_TZ`: timezone for run date (default `America/Los_Angeles`)
+- `SPCLAW_BOARD_SEAT_THEME_LOOKBACK_DAYS`: thematic context horizon used for monthly trend framing (default `30`)
+- `SPCLAW_BOARD_SEAT_LOOKBACK_HOURS`: optional direct override of Slack history window; defaults to `theme_lookback_days * 24`
+- `SPCLAW_BOARD_SEAT_MAX_MESSAGES`: max context messages fetched per channel (default `160`)
+- `SPCLAW_BOARD_SEAT_DB_PATH`: optional SQLite path for daily run ledger
+- `SPCLAW_BOARD_SEAT_MODEL`: optional LLM model for synthesis (default `gpt-5.2-chat-latest`)
+- `SPCLAW_BOARD_SEAT_HEADER_STYLE`: Slack rendering style (`richtext` default; falls back to plaintext on block errors)
+- `SPCLAW_BOARD_SEAT_SPECIFICITY_MODE`: draft specificity guard (`moderate` default)
+- `SPCLAW_BOARD_SEAT_FUNDING_SCOPE`: funding entity scope (`target` default, `company` optional)
+- `SPCLAW_BOARD_SEAT_CRUNCHBASE_ENABLED`: enable Crunchbase funding resolver (`1` default)
+- `SPCLAW_CRUNCHBASE_API_KEY`: Crunchbase API key used for target funding lookup
+- `SPCLAW_BOARD_SEAT_GOOGLE_SERP_API_KEY`: optional SERP API key for funding/source fallback retrieval (falls back to `SERPAPI_API_KEY`)
+- `SPCLAW_BOARD_SEAT_FUNDING_WEB_TOP_ROWS`: max normalized funding evidence rows retained before extraction (default `8`)
+- `SPCLAW_BOARD_SEAT_FUNDING_MIN_DOMAINS`: minimum corroborating domains required for `verified` funding status (default `2`)
+- `SPCLAW_BOARD_SEAT_FUNDING_LOW_CONF_THRESHOLD`: confidence threshold below which funding is treated as `low` band (default `0.55`)
+- `SPCLAW_BOARD_SEAT_FUNDING_WARNING_MODE`: include explicit low-confidence funding warning line in Board Seat output (`1` default)
+- `SPCLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET`: require each post to be both a new target and `High` confidence; otherwise skip with `no_high_confidence_new_target` (`1` default)
+- `SPCLAW_BOARD_SEAT_TARGET_LOCK_DAYS`: target-memory lock window (default `14`, minimum enforced `14`)
+- `SPCLAW_BOARD_SEAT_ALLOW_REPEAT_TARGETS`: set `1` to bypass only the configurable lock window above 14 days; cannot bypass the hard 14-day no-repeat rule (default `0`)
+- `SPCLAW_BOARD_SEAT_EVENT_TRACK_TARGETS_PER_COMPANY`: number of promising targets to track event flow for per company run (default `4`)
+- `SPCLAW_BOARD_SEAT_EVENT_TRACK_ROWS_PER_TARGET`: max candidate event rows pulled per tracked target per run (default `8`)
+- `SPCLAW_BOARD_SEAT_LEDGER_DIR`: board-seat target ledger artifact directory (default `/opt/spclaw-data/artifacts/board-seat`)
+- `SPCLAW_BOARD_SEAT_LEDGER_MIRROR_ENABLED`: mirror ledger to Google Drive local path (default `1`)
+- `SPCLAW_BOARD_SEAT_LEDGER_MIRROR_PATH`: mirror destination path (default `/Users/spclaw/Documents/SPClaw Database/Companies/Board-Seat`)
 
 Board Seat V6 message contract:
 - plaintext canonical format remains persisted in DB/artifacts for memory/repeat-guard/backfill.
@@ -355,24 +355,24 @@ Board Seat V6 message contract:
     - `New evidence`
 
 Spencer change-digest environment controls:
-- `COATUE_CLAW_CHANGE_TRACKER_USERS`: optional comma-separated `user_id:label` mappings for tracked requesters (example: `U0AGD28QSQG:Carson Wang,U0AFJ5RS31C:Spencer Peterson`)
-- `COATUE_CLAW_SPENCER_USER_IDS`: comma-separated Slack user IDs treated as Spencer request sources
-- `COATUE_CLAW_SPENCER_CHANGE_DB_PATH`: optional SQLite path for tracked Spencer requests
-- `COATUE_CLAW_SPENCER_CHANGE_DIGEST_DM_USER_IDS`: comma-separated Slack user IDs to DM with daily open-request digest
-- `COATUE_CLAW_SPENCER_CHANGE_DIGEST_TIME`: local daily digest time (`HH:MM`, default `18:00`)
-- `COATUE_CLAW_SPENCER_CHANGE_DIGEST_TZ`: timezone used in digest header text (default `America/Los_Angeles`)
-- `COATUE_CLAW_CHANGE_NOTIFY_USER_IDS`: comma-separated Slack user IDs for immediate DM notifications when behavior-change requests are captured (default `U0AGD28QSQG`)
-- `COATUE_CLAW_CHANGE_MEMORY_MD_PATH`: path to memory markdown file appended on change capture (default `/Users/spclaw/.openclaw/workspace/MEMORY.md`)
+- `SPCLAW_CHANGE_TRACKER_USERS`: optional comma-separated `user_id:label` mappings for tracked requesters (example: `U0AGD28QSQG:Carson Wang,U0AFJ5RS31C:Spencer Peterson`)
+- `SPCLAW_SPENCER_USER_IDS`: comma-separated Slack user IDs treated as Spencer request sources
+- `SPCLAW_SPENCER_CHANGE_DB_PATH`: optional SQLite path for tracked Spencer requests
+- `SPCLAW_SPENCER_CHANGE_DIGEST_DM_USER_IDS`: comma-separated Slack user IDs to DM with daily open-request digest
+- `SPCLAW_SPENCER_CHANGE_DIGEST_TIME`: local daily digest time (`HH:MM`, default `18:00`)
+- `SPCLAW_SPENCER_CHANGE_DIGEST_TZ`: timezone used in digest header text (default `America/Los_Angeles`)
+- `SPCLAW_CHANGE_NOTIFY_USER_IDS`: comma-separated Slack user IDs for immediate DM notifications when behavior-change requests are captured (default `U0AGD28QSQG`)
+- `SPCLAW_CHANGE_MEMORY_MD_PATH`: path to memory markdown file appended on change capture (default `/Users/spclaw/.openclaw/workspace/MEMORY.md`)
 
 Email integration environment controls:
-- `COATUE_CLAW_EMAIL_ENABLED`: set `true` to enable email processing
-- `COATUE_CLAW_EMAIL_IMAP_HOST|PORT|USER|PASSWORD|MAILBOX`
-- `COATUE_CLAW_EMAIL_SMTP_HOST|PORT|USER|PASSWORD`
-- `COATUE_CLAW_EMAIL_FROM`: sender address used for replies
-- `COATUE_CLAW_EMAIL_ALLOWED_SENDERS`: optional comma-separated allowlist
-- `COATUE_CLAW_EMAIL_POLL_SECONDS`: poll cadence for `serve` mode (default `60`)
-- `COATUE_CLAW_EMAIL_MAX_ATTACHMENT_MB`: max attachment size to ingest (default `25`)
-- `COATUE_CLAW_EMAIL_DB_PATH`: optional SQLite DB path for email gateway logs
+- `SPCLAW_EMAIL_ENABLED`: set `true` to enable email processing
+- `SPCLAW_EMAIL_IMAP_HOST|PORT|USER|PASSWORD|MAILBOX`
+- `SPCLAW_EMAIL_SMTP_HOST|PORT|USER|PASSWORD`
+- `SPCLAW_EMAIL_FROM`: sender address used for replies
+- `SPCLAW_EMAIL_ALLOWED_SENDERS`: optional comma-separated allowlist
+- `SPCLAW_EMAIL_POLL_SECONDS`: poll cadence for `serve` mode (default `60`)
+- `SPCLAW_EMAIL_MAX_ATTACHMENT_MB`: max attachment size to ingest (default `25`)
+- `SPCLAW_EMAIL_DB_PATH`: optional SQLite DB path for email gateway logs
 
 ## Slack Validation Checklist
 1. `make openclaw-slack-status` reports `running=true` and successful probe status.

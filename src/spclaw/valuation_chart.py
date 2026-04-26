@@ -15,11 +15,11 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from coatue_claw.chart_metrics import DEFAULT_X_METRIC, DEFAULT_Y_METRIC, METRIC_SPECS, metric_axis_kind, metric_label
+from spclaw.chart_metrics import DEFAULT_X_METRIC, DEFAULT_Y_METRIC, METRIC_SPECS, metric_axis_kind, metric_label
 
 
-ARTIFACTS_DIR = Path("/opt/coatue-claw-data/artifacts/charts")
-CACHE_DIR = Path("/opt/coatue-claw-data/cache/valuation")
+ARTIFACTS_DIR = Path("/opt/spclaw-data/artifacts/charts")
+CACHE_DIR = Path("/opt/spclaw-data/cache/valuation")
 CACHE_SCHEMA_VERSION = "v5"
 
 # Freshness policy.

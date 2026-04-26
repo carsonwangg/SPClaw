@@ -42,17 +42,17 @@ def _utc_now_iso() -> str:
 
 
 def _data_root() -> Path:
-    return Path(os.environ.get("COATUE_CLAW_DATA_ROOT", "/opt/coatue-claw-data"))
+    return Path(os.environ.get("SPCLAW_DATA_ROOT", "/opt/spclaw-data"))
 
 
 def _repo_root() -> Path:
-    return Path(os.environ.get("COATUE_CLAW_REPO_PATH", "/opt/coatue-claw"))
+    return Path(os.environ.get("SPCLAW_REPO_PATH", "/opt/spclaw"))
 
 
 def _db_path() -> Path:
     return Path(
         os.environ.get(
-            "COATUE_CLAW_SPENCER_CHANGE_DB_PATH",
+            "SPCLAW_SPENCER_CHANGE_DB_PATH",
             str(_data_root() / "db/spencer_changes.sqlite"),
         )
     )
@@ -124,14 +124,14 @@ def _parse_change_tracker_users(raw: str) -> dict[str, str]:
 def tracked_change_users() -> dict[str, str]:
     base = dict(DEFAULT_TRACKED_CHANGE_USERS)
 
-    raw_new = os.environ.get("COATUE_CLAW_CHANGE_TRACKER_USERS", "").strip()
+    raw_new = os.environ.get("SPCLAW_CHANGE_TRACKER_USERS", "").strip()
     if raw_new:
         parsed = _parse_change_tracker_users(raw_new)
         if parsed:
             base.update(parsed)
             return base
 
-    raw_legacy = os.environ.get("COATUE_CLAW_SPENCER_USER_IDS", "").strip()
+    raw_legacy = os.environ.get("SPCLAW_SPENCER_USER_IDS", "").strip()
     if raw_legacy:
         parsed = _parse_change_tracker_users(raw_legacy)
         if parsed:

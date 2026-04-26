@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import coatue_claw.universe_store as universe_store
+import spclaw.universe_store as universe_store
 
 
 def test_parse_tickers_filters_noise():

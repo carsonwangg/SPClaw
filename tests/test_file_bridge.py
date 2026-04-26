@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from coatue_claw.file_bridge import build_index, init_layout, load_config, status, sync_pull, sync_push
+from spclaw.file_bridge import build_index, init_layout, load_config, status, sync_pull, sync_push
 
 
 def _write_config(path: Path, *, root: Path) -> None:

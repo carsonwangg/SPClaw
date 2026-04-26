@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from coatue_claw.runtime_settings import (
+from spclaw.runtime_settings import (
     RuntimeSettings,
     format_settings_summary,
     load_runtime_settings,
@@ -15,9 +15,9 @@ def _configure_tmp_paths(tmp_path: Path, monkeypatch):
     data_root = tmp_path / "data"
     repo_root = tmp_path / "repo"
     repo_root.mkdir(parents=True)
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(data_root))
-    monkeypatch.setenv("COATUE_CLAW_REPO_PATH", str(repo_root))
-    monkeypatch.setenv("COATUE_CLAW_REPO_DEFAULTS_PATH", str(repo_root / "config/runtime-defaults.json"))
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(data_root))
+    monkeypatch.setenv("SPCLAW_REPO_PATH", str(repo_root))
+    monkeypatch.setenv("SPCLAW_REPO_DEFAULTS_PATH", str(repo_root / "config/runtime-defaults.json"))
 
 
 def test_load_runtime_settings_defaults(tmp_path: Path, monkeypatch):

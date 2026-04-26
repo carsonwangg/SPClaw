@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from coatue_claw.email_gateway import (
+from spclaw.email_gateway import (
     EmailAttachment,
     EmailCommand,
     EmailGatewayStore,
@@ -73,7 +73,7 @@ def test_diligence_email_reply_is_readable_and_attached(tmp_path: Path, monkeypa
         encoding="utf-8",
     )
 
-    monkeypatch.setattr("coatue_claw.email_gateway.run_diligence", lambda ticker: memo)
+    monkeypatch.setattr("spclaw.email_gateway.run_diligence", lambda ticker: memo)
     reply = _handle_command(EmailCommand(kind="diligence", arg="SNOW"))
 
     assert "Quick Takeaways:" in reply.body_text
@@ -90,8 +90,8 @@ def test_diligence_email_reply_is_readable_and_attached(tmp_path: Path, monkeypa
 
 
 def test_run_once_disabled(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_EMAIL_ENABLED", "false")
-    monkeypatch.setenv("COATUE_CLAW_EMAIL_DB_PATH", str(tmp_path / "email.sqlite"))
+    monkeypatch.setenv("SPCLAW_EMAIL_ENABLED", "false")
+    monkeypatch.setenv("SPCLAW_EMAIL_DB_PATH", str(tmp_path / "email.sqlite"))
     result = run_once()
     assert result["ok"] is False
     assert result["reason"] == "email_disabled"
@@ -100,7 +100,7 @@ def test_run_once_disabled(tmp_path: Path, monkeypatch) -> None:
 def test_ingest_email_attachments(tmp_path: Path, monkeypatch) -> None:
     cfg_path = tmp_path / "file-bridge.json"
     _write_file_bridge_config(cfg_path, root=tmp_path)
-    monkeypatch.setenv("COATUE_CLAW_FILE_BRIDGE_CONFIG", str(cfg_path))
+    monkeypatch.setenv("SPCLAW_FILE_BRIDGE_CONFIG", str(cfg_path))
 
     db_path = tmp_path / "email.sqlite"
     store = EmailGatewayStore(db_path=db_path)

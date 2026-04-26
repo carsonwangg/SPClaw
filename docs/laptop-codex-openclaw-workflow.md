@@ -8,29 +8,29 @@ This is the simple operating guide for Spencer/Carson.
 - Laptop is for Codex sessions, review, and triggering changes.
 
 ## Where the Real Repo Is
-- Production repo on Mac mini: `/opt/coatue-claw`
-- Runtime data: `/opt/coatue-claw-data`
+- Production repo on Mac mini: `/opt/spclaw`
+- Runtime data: `/opt/spclaw-data`
 
-If you see `/Users/spclaw/Documents/Coatue Claw` and it looks empty or has no commits, do not use it. Use `/opt/coatue-claw`.
+If you see `/Users/spclaw/Documents/SPClaw` and it looks empty or has no commits, do not use it. Use `/opt/spclaw`.
 
 ## Daily Change Loop
 1. Ask Codex for the change.
-2. Codex edits `/opt/coatue-claw`, validates, commits, and pushes to `origin/main`.
+2. Codex edits `/opt/spclaw`, validates, commits, and pushes to `origin/main`.
 3. On Mac mini, pull and restart runtime:
 
 ```bash
-cd /opt/coatue-claw
+cd /opt/spclaw
 git pull --ff-only origin main
 make openclaw-restart
 make openclaw-slack-status
 make openclaw-24x7-status
 ```
 
-4. Test in Slack by mentioning `@Coatue Claw`.
+4. Test in Slack by mentioning `@SPClaw`.
 5. If needed, inspect logs:
 
 ```bash
-cd /opt/coatue-claw
+cd /opt/spclaw
 make openclaw-slack-logs
 ```
 
@@ -54,15 +54,15 @@ Use this when Slack writes runtime memory that should become repo-tracked behavi
    - `claw memory reconcile-link --ids 12,13 --commit <hash> --resolved-by codex`
 
 Artifacts:
-- queue snapshot: `/opt/coatue-claw/docs/memory-inbox/queue.md`
-- append-only ledger: `/opt/coatue-claw/docs/memory-inbox/reconciliation-ledger.csv`
+- queue snapshot: `/opt/spclaw/docs/memory-inbox/queue.md`
+- append-only ledger: `/opt/spclaw/docs/memory-inbox/reconciliation-ledger.csv`
 
 ## How to Operate From Personal Laptop
 Use SSH to run runtime commands on Mac mini:
 
 ```bash
 ssh <mac-mini-user>@<mac-mini-host>
-cd /opt/coatue-claw
+cd /opt/spclaw
 make openclaw-status
 make openclaw-slack-status
 ```
@@ -73,8 +73,8 @@ Current setup uses local loopback gateway binding, so SSH is the standard remote
 Use this exact prompt to resume safely:
 
 ```text
-Read /opt/coatue-claw/AGENTS.md and /opt/coatue-claw/docs/handoffs/live-session.md and continue from there.
-Use /opt/coatue-claw as the active repo.
+Read /opt/spclaw/AGENTS.md and /opt/spclaw/docs/handoffs/live-session.md and continue from there.
+Use /opt/spclaw as the active repo.
 Ship every change to git with handoff updates.
 ```
 
@@ -90,7 +90,7 @@ Ship every change to git with handoff updates.
 Run once to keep email + memory prune alive continuously:
 
 ```bash
-cd /opt/coatue-claw
+cd /opt/spclaw
 make openclaw-24x7-enable
 make openclaw-24x7-status
 ```

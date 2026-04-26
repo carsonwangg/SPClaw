@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from coatue_claw.hf_podcast import (
+from spclaw.hf_podcast import (
     PodcastQuote,
     _validate_quotes,
     build_podcast_analysis,
@@ -8,7 +8,7 @@ from coatue_claw.hf_podcast import (
     render_full_transcript_markdown,
     render_podcast_summary_markdown,
 )
-from coatue_claw.hf_youtube_transcript import PodcastTranscript, TranscriptSegment
+from spclaw.hf_youtube_transcript import PodcastTranscript, TranscriptSegment
 
 
 def _sample_transcript() -> PodcastTranscript:
@@ -56,7 +56,7 @@ def test_validate_quotes_drops_non_verbatim() -> None:
 
 def test_build_podcast_analysis_fallback(monkeypatch) -> None:
     transcript = _sample_transcript()
-    monkeypatch.setattr("coatue_claw.hf_podcast._model_analysis", lambda *args, **kwargs: None)
+    monkeypatch.setattr("spclaw.hf_podcast._model_analysis", lambda *args, **kwargs: None)
 
     analysis = build_podcast_analysis(transcript, question="focus on catalysts")
 

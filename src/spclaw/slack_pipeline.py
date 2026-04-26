@@ -9,7 +9,7 @@ import shlex
 import subprocess
 from typing import Any
 
-from coatue_claw.memory_runtime import MemoryRuntime
+from spclaw.memory_runtime import MemoryRuntime
 
 class PipelineError(RuntimeError):
     pass
@@ -60,15 +60,15 @@ def _utc_iso() -> str:
 
 
 def _data_root() -> Path:
-    return Path(os.environ.get("COATUE_CLAW_DATA_ROOT", "/opt/coatue-claw-data"))
+    return Path(os.environ.get("SPCLAW_DATA_ROOT", "/opt/spclaw-data"))
 
 
 def _repo_path() -> Path:
-    return Path(os.environ.get("COATUE_CLAW_REPO_PATH", "/opt/coatue-claw"))
+    return Path(os.environ.get("SPCLAW_REPO_PATH", "/opt/spclaw"))
 
 
 def _history_path() -> Path:
-    return Path(os.environ.get("COATUE_CLAW_DEPLOY_HISTORY_PATH", str(_data_root() / "db/deploy-history.json")))
+    return Path(os.environ.get("SPCLAW_DEPLOY_HISTORY_PATH", str(_data_root() / "db/deploy-history.json")))
 
 
 def _pipeline_env() -> dict[str, str]:
@@ -291,7 +291,7 @@ def run_checks() -> PipelineResult:
 
 def run_build_request(*, request: str, actor: str) -> PipelineResult:
     repo = _repo_path()
-    custom_cmd = os.environ.get("COATUE_CLAW_SLACK_BUILD_COMMAND", "").strip()
+    custom_cmd = os.environ.get("SPCLAW_SLACK_BUILD_COMMAND", "").strip()
     _write_pipeline_checkpoint(
         action="build_request",
         actor=actor,
@@ -313,13 +313,13 @@ def run_build_request(*, request: str, actor: str) -> PipelineResult:
     codex_check = _run(["/bin/zsh", "-lc", "command -v codex"], cwd=repo)
     if codex_check.returncode != 0:
         raise PipelineError(
-            "Build runner is not configured. Set `COATUE_CLAW_SLACK_BUILD_COMMAND` on the runtime host, "
+            "Build runner is not configured. Set `SPCLAW_SLACK_BUILD_COMMAND` on the runtime host, "
             "or install Codex CLI and retry."
         )
 
     prompt = (
-        "Read /opt/coatue-claw/AGENTS.md and /opt/coatue-claw/docs/handoffs/live-session.md, then continue from there. "
-        "Use /opt/coatue-claw as the active repo. Ship every change to git with handoff updates. "
+        "Read /opt/spclaw/AGENTS.md and /opt/spclaw/docs/handoffs/live-session.md, then continue from there. "
+        "Use /opt/spclaw as the active repo. Ship every change to git with handoff updates. "
         "If `rg` is unavailable on the runtime host, use `grep -R` (or install ripgrep) instead of failing. "
         f"User request: {request}. Requested by Slack user {actor}."
     )

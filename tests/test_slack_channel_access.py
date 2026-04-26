@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from coatue_claw.slack_channel_access import channels_to_join, parse_created_channel_id
+from spclaw.slack_channel_access import channels_to_join, parse_created_channel_id
 
 
 def test_parse_created_channel_id() -> None:

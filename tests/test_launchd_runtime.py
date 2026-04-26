@@ -4,7 +4,7 @@ from pathlib import Path
 import plistlib
 import subprocess
 
-from coatue_claw import launchd_runtime
+from spclaw import launchd_runtime
 
 
 def test_service_specs_build_expected_commands(tmp_path: Path, monkeypatch) -> None:
@@ -12,20 +12,20 @@ def test_service_specs_build_expected_commands(tmp_path: Path, monkeypatch) -> N
     data = tmp_path / "data"
     repo.mkdir()
     data.mkdir()
-    monkeypatch.setenv("COATUE_CLAW_REPO_ROOT", str(repo))
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(data))
-    monkeypatch.setenv("COATUE_CLAW_PYTHON_BIN", "/tmp/python")
-    monkeypatch.setenv("COATUE_CLAW_MEMORY_PRUNE_INTERVAL_SECONDS", "1800")
+    monkeypatch.setenv("SPCLAW_REPO_ROOT", str(repo))
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(data))
+    monkeypatch.setenv("SPCLAW_PYTHON_BIN", "/tmp/python")
+    monkeypatch.setenv("SPCLAW_MEMORY_PRUNE_INTERVAL_SECONDS", "1800")
 
     specs = launchd_runtime._service_specs()
     email = specs[launchd_runtime.EMAIL_LABEL]
-    assert email["ProgramArguments"] == ["/tmp/python", "-m", "coatue_claw.email_gateway", "serve"]
+    assert email["ProgramArguments"] == ["/tmp/python", "-m", "spclaw.email_gateway", "serve"]
     assert email["KeepAlive"] is True
     assert email["RunAtLoad"] is True
     assert email["EnvironmentVariables"]["PYTHONPATH"] == str(repo / "src")
 
     prune = specs[launchd_runtime.MEMORY_PRUNE_LABEL]
-    assert prune["ProgramArguments"] == ["/tmp/python", "-m", "coatue_claw.cli", "memory", "prune"]
+    assert prune["ProgramArguments"] == ["/tmp/python", "-m", "spclaw.cli", "memory", "prune"]
     assert prune["StartInterval"] == 1800
     assert prune["RunAtLoad"] is True
 
@@ -33,7 +33,7 @@ def test_service_specs_build_expected_commands(tmp_path: Path, monkeypatch) -> N
     assert memory_reconcile["ProgramArguments"] == [
         "/tmp/python",
         "-m",
-        "coatue_claw.cli",
+        "spclaw.cli",
         "memory",
         "reconcile-export",
         "--limit",
@@ -43,17 +43,17 @@ def test_service_specs_build_expected_commands(tmp_path: Path, monkeypatch) -> N
     assert memory_reconcile["RunAtLoad"] is True
 
     x_chart = specs[launchd_runtime.X_CHART_LABEL]
-    assert x_chart["ProgramArguments"] == ["/tmp/python", "-m", "coatue_claw.x_chart_daily", "run-once"]
+    assert x_chart["ProgramArguments"] == ["/tmp/python", "-m", "spclaw.x_chart_daily", "run-once"]
     assert x_chart["RunAtLoad"] is True
     assert x_chart["StartInterval"] == 3600
 
     spencer = specs[launchd_runtime.SPENCER_CHANGE_DIGEST_LABEL]
-    assert spencer["ProgramArguments"] == ["/tmp/python", "-m", "coatue_claw.spencer_change_digest", "run-once"]
+    assert spencer["ProgramArguments"] == ["/tmp/python", "-m", "spclaw.spencer_change_digest", "run-once"]
     assert spencer["RunAtLoad"] is False
     assert spencer["StartCalendarInterval"] == [{"Hour": 18, "Minute": 0}]
 
     board = specs[launchd_runtime.BOARD_SEAT_DAILY_LABEL]
-    assert board["ProgramArguments"] == ["/tmp/python", "-m", "coatue_claw.board_seat_daily", "run-once"]
+    assert board["ProgramArguments"] == ["/tmp/python", "-m", "spclaw.board_seat_daily", "run-once"]
     assert board["RunAtLoad"] is False
     assert board["StartCalendarInterval"] == [
         {"Weekday": 1, "Hour": 12, "Minute": 0},
@@ -64,7 +64,7 @@ def test_service_specs_build_expected_commands(tmp_path: Path, monkeypatch) -> N
     ]
 
     md = specs[launchd_runtime.MARKET_DAILY_LABEL]
-    assert md["ProgramArguments"] == ["/tmp/python", "-m", "coatue_claw.market_daily", "run-once"]
+    assert md["ProgramArguments"] == ["/tmp/python", "-m", "spclaw.market_daily", "run-once"]
     assert md["RunAtLoad"] is False
     assert md["StartCalendarInterval"] == [
         {"Weekday": 1, "Hour": 7, "Minute": 0},
@@ -80,7 +80,7 @@ def test_service_specs_build_expected_commands(tmp_path: Path, monkeypatch) -> N
     ]
 
     recap = specs[launchd_runtime.MARKET_DAILY_EARNINGS_RECAP_LABEL]
-    assert recap["ProgramArguments"] == ["/tmp/python", "-m", "coatue_claw.market_daily", "run-earnings-recap"]
+    assert recap["ProgramArguments"] == ["/tmp/python", "-m", "spclaw.market_daily", "run-earnings-recap"]
     assert recap["RunAtLoad"] is False
     assert recap["StartCalendarInterval"] == [
         {"Weekday": 1, "Hour": 19, "Minute": 0},
@@ -97,9 +97,9 @@ def test_write_service_plists(tmp_path: Path, monkeypatch) -> None:
     launch_agents = tmp_path / "launch-agents"
     repo.mkdir()
     data.mkdir()
-    monkeypatch.setenv("COATUE_CLAW_REPO_ROOT", str(repo))
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(data))
-    monkeypatch.setenv("COATUE_CLAW_LAUNCHAGENTS_DIR", str(launch_agents))
+    monkeypatch.setenv("SPCLAW_REPO_ROOT", str(repo))
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(data))
+    monkeypatch.setenv("SPCLAW_LAUNCHAGENTS_DIR", str(launch_agents))
 
     written = launchd_runtime.write_service_plists()
     assert set(written.keys()) == {
@@ -144,7 +144,7 @@ def test_resolve_services() -> None:
 
 
 def test_market_daily_schedule_env_override(monkeypatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_MD_TIMES", "08:05,15:40")
+    monkeypatch.setenv("SPCLAW_MD_TIMES", "08:05,15:40")
     assert launchd_runtime._market_daily_schedule() == [
         {"Weekday": 1, "Hour": 8, "Minute": 5},
         {"Weekday": 1, "Hour": 15, "Minute": 40},
@@ -160,8 +160,8 @@ def test_market_daily_schedule_env_override(monkeypatch) -> None:
 
 
 def test_board_seat_schedule_env_override_weekday(monkeypatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_TIME", "13:15")
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_WEEKDAYS_ONLY", "1")
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_TIME", "13:15")
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_WEEKDAYS_ONLY", "1")
     assert launchd_runtime._board_seat_schedule() == [
         {"Weekday": 1, "Hour": 13, "Minute": 15},
         {"Weekday": 2, "Hour": 13, "Minute": 15},
@@ -172,13 +172,13 @@ def test_board_seat_schedule_env_override_weekday(monkeypatch) -> None:
 
 
 def test_board_seat_schedule_env_override_daily(monkeypatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_TIME", "13:15")
-    monkeypatch.setenv("COATUE_CLAW_BOARD_SEAT_WEEKDAYS_ONLY", "0")
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_TIME", "13:15")
+    monkeypatch.setenv("SPCLAW_BOARD_SEAT_WEEKDAYS_ONLY", "0")
     assert launchd_runtime._board_seat_schedule() == [{"Hour": 13, "Minute": 15}]
 
 
 def test_market_daily_earnings_recap_schedule_env_override(monkeypatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_MD_EARNINGS_RECAP_TIME", "20:10")
+    monkeypatch.setenv("SPCLAW_MD_EARNINGS_RECAP_TIME", "20:10")
     assert launchd_runtime._market_daily_earnings_recap_schedule() == [
         {"Weekday": 1, "Hour": 20, "Minute": 10},
         {"Weekday": 2, "Hour": 20, "Minute": 10},
@@ -189,21 +189,21 @@ def test_market_daily_earnings_recap_schedule_env_override(monkeypatch) -> None:
 
 
 def test_launchctl_domains(monkeypatch) -> None:
-    monkeypatch.delenv("COATUE_CLAW_LAUNCHCTL_DOMAIN", raising=False)
+    monkeypatch.delenv("SPCLAW_LAUNCHCTL_DOMAIN", raising=False)
     domains = launchd_runtime._launchctl_domains()
     assert len(domains) == 2
     assert domains[0].startswith("gui/")
     assert domains[1].startswith("user/")
 
-    monkeypatch.setenv("COATUE_CLAW_LAUNCHCTL_DOMAIN", "user/501")
+    monkeypatch.setenv("SPCLAW_LAUNCHCTL_DOMAIN", "user/501")
     assert launchd_runtime._launchctl_domains() == ["user/501"]
 
 
 def test_bootstrap_retries_transient_io_error(monkeypatch) -> None:
     calls: list[int] = []
 
-    monkeypatch.setenv("COATUE_CLAW_LAUNCHCTL_DOMAIN", "gui/501")
-    monkeypatch.setenv("COATUE_CLAW_LAUNCHCTL_BOOTSTRAP_RETRIES", "3")
+    monkeypatch.setenv("SPCLAW_LAUNCHCTL_DOMAIN", "gui/501")
+    monkeypatch.setenv("SPCLAW_LAUNCHCTL_BOOTSTRAP_RETRIES", "3")
     monkeypatch.setattr(launchd_runtime.time, "sleep", lambda _: None)
 
     def fake_run(cmd: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -231,4 +231,4 @@ def test_enable_services_error_includes_label(monkeypatch) -> None:
         launchd_runtime.enable_services(services=[launchd_runtime.EMAIL_LABEL])
         raise AssertionError("expected RuntimeError")
     except RuntimeError as exc:
-        assert "failed enabling com.coatueclaw.email-gateway" in str(exc)
+        assert "failed enabling com.spclaw.email-gateway" in str(exc)

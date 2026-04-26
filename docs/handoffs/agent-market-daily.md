@@ -4,10 +4,10 @@
 - `codex/agent-market-daily`
 
 ## Suggested Worktree
-- `/Users/carsonwang/worktrees/coatue-claw/market-daily`
+- `/Users/carsonwang/worktrees/spclaw/market-daily`
 
 ## Ownership Scope
-- `src/coatue_claw/market_daily.py`
+- `src/spclaw/market_daily.py`
 - `tests/test_market_daily.py`
 - Market-daily runtime docs/handoffs
 
@@ -17,4 +17,4 @@
 ## Merge Notes
 - Rebase onto `origin/main` before merge.
 - Do not restart runtime from this branch; integrator handles deploy on `main`.
-- 2026-02-27 hotfix included `src/coatue_claw/x_chart_daily.py` to remove explicit OpenAI `temperature` on `gpt-5.2-chat-latest` calls (prevents `api_error` fallback copy warnings in `x chart now`).
+- 2026-02-27 hotfix included `src/spclaw/x_chart_daily.py` to remove explicit OpenAI `temperature` on `gpt-5.2-chat-latest` calls (prevents `api_error` fallback copy warnings in `x chart now`).

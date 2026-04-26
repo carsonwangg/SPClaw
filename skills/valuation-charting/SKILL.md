@@ -66,9 +66,9 @@ When rendering chart visuals, enforce this style block:
 
 When asked from Slack/OpenClaw, run:
 
-- `/opt/coatue-claw/.venv/bin/python -m coatue_claw.cli valuation-chart TICKER1,TICKER2,...`
+- `/opt/spclaw/.venv/bin/python -m spclaw.cli valuation-chart TICKER1,TICKER2,...`
 
-Use artifacts from `/opt/coatue-claw-data/artifacts/charts/`.
+Use artifacts from `/opt/spclaw-data/artifacts/charts/`.
 
 ## Slack Delivery Contract (Required)
 

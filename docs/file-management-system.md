@@ -6,10 +6,10 @@ Keep file operations local on Mac mini (so OpenClaw can freely rearrange) while 
 ## Architecture
 
 ### Local canonical paths (bot-owned)
-- `/opt/coatue-claw-data/files/working`
-- `/opt/coatue-claw-data/files/archive`
-- `/opt/coatue-claw-data/files/published`
-- `/opt/coatue-claw-data/files/incoming`
+- `/opt/spclaw-data/files/working`
+- `/opt/spclaw-data/files/archive`
+- `/opt/spclaw-data/files/published`
+- `/opt/spclaw-data/files/incoming`
 
 ### Shared Drive mirror (human-facing)
 Configured under `drive.root` in `config/file-bridge.json`:
@@ -22,7 +22,7 @@ Incoming contains an auto-generated read-only reference mirror:
 - `01_DROP_HERE_Incoming/_Latest_Reference_READ_ONLY`
 
 Default fallback in repo is local-only:
-- `/opt/coatue-claw-data/files/drive-share`
+- `/opt/spclaw-data/files/drive-share`
 
 Replace this with the actual Google Drive folder path on Mac mini (Google Drive Desktop mount) to publish for Spencer.
 
@@ -37,7 +37,7 @@ Replace this with the actual Google Drive folder path on Mac mini (Google Drive 
   - user uploads a file in Slack
   - bot downloads, classifies, and stores under local `incoming/{Universes|Companies|Industries}`
   - bot mirrors the same file to Drive `01_DROP_HERE_Incoming/{Universes|Companies|Industries}`
-  - ingest metadata is written to SQLite (`/opt/coatue-claw-data/db/file_ingest.sqlite`)
+  - ingest metadata is written to SQLite (`/opt/spclaw-data/db/file_ingest.sqlite`)
 
 Avoid direct human edits inside bot-owned local folders to prevent sync conflicts.
 

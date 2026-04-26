@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from coatue_claw.market_daily import (
+from spclaw.market_daily import (
     CatalystEvidence,
     EarningsPreviewItem,
     EarningsRecapRow,
@@ -34,7 +34,7 @@ from coatue_claw.market_daily import (
 
 @pytest.fixture(autouse=True)
 def _legacy_catalyst_mode_default(monkeypatch):
-    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "legacy_heuristic")
+    monkeypatch.setenv("SPCLAW_MD_CATALYST_MODE", "legacy_heuristic")
 
 
 def test_parse_times_defaults_and_custom() -> None:
@@ -75,10 +75,10 @@ def test_select_top_movers_tie_breaks_by_market_cap() -> None:
 def test_refresh_coatue_holdings_persists_rows(tmp_path: Path, monkeypatch) -> None:
     db = tmp_path / "md.sqlite"
     store = MarketDailyStore(db_path=db)
-    monkeypatch.setenv("COATUE_CLAW_MD_COATUE_CIK", "0001061768")
+    monkeypatch.setenv("SPCLAW_MD_COATUE_CIK", "0001061768")
 
     monkeypatch.setattr(
-        "coatue_claw.market_daily._latest_13f_filing",
+        "spclaw.market_daily._latest_13f_filing",
         lambda cik: {
             "cik": "0001061768",
             "accession_no": "0001061768-26-000001",
@@ -87,9 +87,9 @@ def test_refresh_coatue_holdings_persists_rows(tmp_path: Path, monkeypatch) -> N
             "filing_base": "https://example.com/filing",
         },
     )
-    monkeypatch.setattr("coatue_claw.market_daily._resolve_info_table_url", lambda filing_base: "https://example.com/infotable.xml")
+    monkeypatch.setattr("spclaw.market_daily._resolve_info_table_url", lambda filing_base: "https://example.com/infotable.xml")
     monkeypatch.setattr(
-        "coatue_claw.market_daily._fetch_text",
+        "spclaw.market_daily._fetch_text",
         lambda url, headers: """
 <informationTable xmlns=\"http://www.sec.gov/edgar/document/thirteenf/informationtable\">
   <infoTable>
@@ -113,8 +113,8 @@ def test_refresh_coatue_holdings_persists_rows(tmp_path: Path, monkeypatch) -> N
             return ("NVDA", "openfigi", 0.95)
         return (None, "openfigi_no_match", 0.0)
 
-    monkeypatch.setattr("coatue_claw.market_daily._resolve_ticker_via_openfigi", _openfigi)
-    monkeypatch.setattr("coatue_claw.market_daily._resolve_ticker_via_name", lambda issuer: ("SNOW", "name_search", 0.65))
+    monkeypatch.setattr("spclaw.market_daily._resolve_ticker_via_openfigi", _openfigi)
+    monkeypatch.setattr("spclaw.market_daily._resolve_ticker_via_name", lambda issuer: ("SNOW", "name_search", 0.65))
 
     result = refresh_coatue_holdings(store=store)
     assert result["updated"] is True
@@ -123,13 +123,13 @@ def test_refresh_coatue_holdings_persists_rows(tmp_path: Path, monkeypatch) -> N
 
 
 def test_run_once_dry_run_writes_artifact_and_dedupes(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
-    monkeypatch.setenv("COATUE_CLAW_MD_DB_PATH", str(tmp_path / "db/market_daily.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_MD_ARTIFACT_DIR", str(tmp_path / "artifacts/market-daily"))
-    monkeypatch.setenv("COATUE_CLAW_MD_CANDIDATE_SEED_PATH", str(tmp_path / "seed.csv"))
-    monkeypatch.setenv("COATUE_CLAW_MD_TZ", "UTC")
-    monkeypatch.setenv("COATUE_CLAW_MD_TOP_N", "3")
-    monkeypatch.setenv("COATUE_CLAW_MD_TMT_TOP_K", "40")
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_MD_DB_PATH", str(tmp_path / "db/market_daily.sqlite"))
+    monkeypatch.setenv("SPCLAW_MD_ARTIFACT_DIR", str(tmp_path / "artifacts/market-daily"))
+    monkeypatch.setenv("SPCLAW_MD_CANDIDATE_SEED_PATH", str(tmp_path / "seed.csv"))
+    monkeypatch.setenv("SPCLAW_MD_TZ", "UTC")
+    monkeypatch.setenv("SPCLAW_MD_TOP_N", "3")
+    monkeypatch.setenv("SPCLAW_MD_TMT_TOP_K", "40")
 
     (tmp_path / "seed.csv").write_text("ticker\nAAPL\nMSFT\nNVDA\nMETA\n", encoding="utf-8")
 
@@ -141,9 +141,9 @@ def test_run_once_dry_run_writes_artifact_and_dedupes(tmp_path: Path, monkeypatc
                 return base
             return base.astimezone(tz)
 
-    monkeypatch.setattr("coatue_claw.market_daily.datetime", Frozen)
-    monkeypatch.setattr("coatue_claw.market_daily._is_market_closed_now", lambda now_local: False)
-    monkeypatch.setattr("coatue_claw.market_daily._auto_refresh_holdings_if_stale", lambda store: None)
+    monkeypatch.setattr("spclaw.market_daily.datetime", Frozen)
+    monkeypatch.setattr("spclaw.market_daily._is_market_closed_now", lambda now_local: False)
+    monkeypatch.setattr("spclaw.market_daily._auto_refresh_holdings_if_stale", lambda store: None)
 
     def _fake_quotes(tickers: list[str]) -> list[QuoteSnapshot]:
         values = {
@@ -167,9 +167,9 @@ def test_run_once_dry_run_writes_artifact_and_dedupes(tmp_path: Path, monkeypatc
             )
         return out
 
-    monkeypatch.setattr("coatue_claw.market_daily._fetch_quote_snapshots", _fake_quotes)
+    monkeypatch.setattr("spclaw.market_daily._fetch_quote_snapshots", _fake_quotes)
     monkeypatch.setattr(
-        "coatue_claw.market_daily._build_catalyst_rows",
+        "spclaw.market_daily._build_catalyst_rows",
         lambda movers, slot_name: (
             [
                 CatalystEvidence(m.ticker, "x", "https://x.com/i/1", 5, "news", "https://example.com/news")
@@ -365,7 +365,7 @@ def test_reason_line_uses_generic_fallback_for_vague_x_only_text() -> None:
 
 
 def test_extract_causal_clause_prefers_causal_segment() -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     source = (
         "Intel Corporation (INTC) Stock Price, News, Quote & History - Yahoo Finance. "
@@ -378,7 +378,7 @@ def test_extract_causal_clause_prefers_causal_segment() -> None:
 
 
 def test_reason_quality_rejects_fragment_and_menu_text() -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     menu_reasons = md._reason_phrase_quality_rejections("Intel stock price, news, quote & history")
     fragment_reasons = md._reason_phrase_quality_rejections("after guidance and")
@@ -410,7 +410,7 @@ def test_fetch_yahoo_news_parses_nested_schema(monkeypatch) -> None:
             }
         ]
 
-    monkeypatch.setattr("coatue_claw.market_daily.yf.Ticker", lambda ticker: FakeTicker())
+    monkeypatch.setattr("spclaw.market_daily.yf.Ticker", lambda ticker: FakeTicker())
     title, url = _fetch_yahoo_news(
         ticker="ORCL",
         since_utc=datetime(2026, 2, 19, 0, 0, 0, tzinfo=UTC),
@@ -431,7 +431,7 @@ def test_session_anchor_open_uses_previous_market_close(monkeypatch) -> None:
         def history(self, **kwargs):
             return FakeBars()
 
-    monkeypatch.setattr("coatue_claw.market_daily.yf.Ticker", lambda ticker: FakeTicker())
+    monkeypatch.setattr("spclaw.market_daily.yf.Ticker", lambda ticker: FakeTicker())
     since = _session_anchor_start_utc(
         slot_name="open",
         now_utc=datetime(2026, 2, 23, 15, 0, 0, tzinfo=UTC),
@@ -445,7 +445,7 @@ def test_ddg_web_fallback_parses_result_links(monkeypatch) -> None:
       <a class="result__a" href="/l/?uddg=https%3A%2F%2Fstocktwits.com%2Fnews%2Fanthropic-net-drop">Cloudflare stock dropped after Anthropic launch</a>
     </body></html>
     """
-    monkeypatch.setattr("coatue_claw.market_daily._fetch_text", lambda url, headers: html)
+    monkeypatch.setattr("spclaw.market_daily._fetch_text", lambda url, headers: html)
     rows = _fetch_web_evidence_ddg(
         ticker="NET",
         aliases=["Cloudflare"],
@@ -458,7 +458,7 @@ def test_ddg_web_fallback_parses_result_links(monkeypatch) -> None:
 
 
 def test_ddg_resolve_handles_absolute_redirect_url() -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     resolved = md._ddg_resolve_url(
         "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fstocktwits.com%2Fnews%2Fanthropic-net-drop"
@@ -481,8 +481,8 @@ def test_google_serp_web_parses_snippets_and_answer_box(monkeypatch) -> None:
             }
         ],
     }
-    monkeypatch.setenv("COATUE_CLAW_MD_GOOGLE_SERP_API_KEY", "test-key")
-    monkeypatch.setattr("coatue_claw.market_daily._http_json", lambda url, headers, params=None, method="GET", body=None: payload)
+    monkeypatch.setenv("SPCLAW_MD_GOOGLE_SERP_API_KEY", "test-key")
+    monkeypatch.setattr("spclaw.market_daily._http_json", lambda url, headers, params=None, method="GET", body=None: payload)
     rows = _fetch_web_evidence_google_serp(
         ticker="BKNG",
         aliases=["Booking Holdings", "Booking.com"],
@@ -495,7 +495,7 @@ def test_google_serp_web_parses_snippets_and_answer_box(monkeypatch) -> None:
 
 
 def test_bkng_dominant_ai_threat_cluster_outputs_specific_reason(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     def _fake_collect(ticker, aliases, since_utc, pct_move=None):
         return (
@@ -526,9 +526,9 @@ def test_bkng_dominant_ai_threat_cluster_outputs_specific_reason(monkeypatch) ->
             "google_serp",
         )
 
-    monkeypatch.setattr("coatue_claw.market_daily._collect_evidence_for_ticker", _fake_collect)
-    monkeypatch.setattr("coatue_claw.market_daily._company_aliases", lambda ticker: ["Booking Holdings", "Booking.com"])
-    monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 23, 0, 0, 0, tzinfo=UTC))
+    monkeypatch.setattr("spclaw.market_daily._collect_evidence_for_ticker", _fake_collect)
+    monkeypatch.setattr("spclaw.market_daily._company_aliases", lambda ticker: ["Booking Holdings", "Booking.com"])
+    monkeypatch.setattr("spclaw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 23, 0, 0, 0, tzinfo=UTC))
     mover = QuoteSnapshot("BKNG", 100.0, 92.4, 100.0, -0.076, "2026-02-23T15:00:00+00:00")
     rows, lines = md._build_catalyst_rows(movers=[mover], slot_name="open")
     assert rows[0].confirmed_cluster == "ota_ai_disruption"
@@ -536,7 +536,7 @@ def test_bkng_dominant_ai_threat_cluster_outputs_specific_reason(monkeypatch) ->
 
 
 def test_direct_evidence_fallback_uses_specific_news_without_cluster_match(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     def _fake_collect(ticker, aliases, since_utc, pct_move=None):
         return (
@@ -556,9 +556,9 @@ def test_direct_evidence_fallback_uses_specific_news_without_cluster_match(monke
             "google_serp",
         )
 
-    monkeypatch.setattr("coatue_claw.market_daily._collect_evidence_for_ticker", _fake_collect)
-    monkeypatch.setattr("coatue_claw.market_daily._company_aliases", lambda ticker: ["AMD", "Advanced Micro Devices"])
-    monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 23, 0, 0, 0, tzinfo=UTC))
+    monkeypatch.setattr("spclaw.market_daily._collect_evidence_for_ticker", _fake_collect)
+    monkeypatch.setattr("spclaw.market_daily._company_aliases", lambda ticker: ["AMD", "Advanced Micro Devices"])
+    monkeypatch.setattr("spclaw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 23, 0, 0, 0, tzinfo=UTC))
     movers = [QuoteSnapshot("AMD", 100.0, 92.0, 100.0, -0.08, "2026-02-23T15:00:00+00:00")]
     rows, lines = md._build_catalyst_rows(movers=movers, slot_name="close")
     assert lines[0] != "Likely positioning/flow; no single confirmed catalyst."
@@ -567,7 +567,7 @@ def test_direct_evidence_fallback_uses_specific_news_without_cluster_match(monke
 
 
 def test_direct_evidence_fallback_skips_quote_directory_wrapper_and_uses_causal_headline(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     def _fake_collect(ticker, aliases, since_utc, pct_move=None):
         return (
@@ -597,9 +597,9 @@ def test_direct_evidence_fallback_skips_quote_directory_wrapper_and_uses_causal_
             "google_serp",
         )
 
-    monkeypatch.setattr("coatue_claw.market_daily._collect_evidence_for_ticker", _fake_collect)
-    monkeypatch.setattr("coatue_claw.market_daily._company_aliases", lambda ticker: ["Intel", "Intel Corporation"])
-    monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 24, 0, 0, 0, tzinfo=UTC))
+    monkeypatch.setattr("spclaw.market_daily._collect_evidence_for_ticker", _fake_collect)
+    monkeypatch.setattr("spclaw.market_daily._company_aliases", lambda ticker: ["Intel", "Intel Corporation"])
+    monkeypatch.setattr("spclaw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 24, 0, 0, 0, tzinfo=UTC))
     movers = [QuoteSnapshot("INTC", 100.0, 105.7, 100.0, 0.057, "2026-02-24T22:05:00+00:00")]
     rows, lines = md._build_catalyst_rows(movers=movers, slot_name="close")
     assert "quote & history" not in lines[0].lower()
@@ -610,7 +610,7 @@ def test_direct_evidence_fallback_skips_quote_directory_wrapper_and_uses_causal_
 
 
 def test_reason_line_falls_back_when_phrase_is_quote_directory_wrapper() -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     line = md._build_reason_line_from_phrase(
         pct_move=0.057,
@@ -620,7 +620,7 @@ def test_reason_line_falls_back_when_phrase_is_quote_directory_wrapper() -> None
 
 
 def test_hybrid_polish_accepts_clean_rewrite_when_deterministic_is_awkward(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     class _FakeCompletions:
         @staticmethod
@@ -645,9 +645,9 @@ def test_hybrid_polish_accepts_clean_rewrite_when_deterministic_is_awkward(monke
     class _FakeClient:
         chat = _FakeChat()
 
-    monkeypatch.setenv("COATUE_CLAW_MD_REASON_QUALITY_MODE", "hybrid")
-    monkeypatch.setenv("COATUE_CLAW_MD_REASON_POLISH_ENABLED", "1")
-    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: _FakeClient())
+    monkeypatch.setenv("SPCLAW_MD_REASON_QUALITY_MODE", "hybrid")
+    monkeypatch.setenv("SPCLAW_MD_REASON_POLISH_ENABLED", "1")
+    monkeypatch.setattr("spclaw.market_daily._openai_client", lambda: _FakeClient())
 
     def _fake_collect(ticker, aliases, since_utc, pct_move=None):
         return (
@@ -667,9 +667,9 @@ def test_hybrid_polish_accepts_clean_rewrite_when_deterministic_is_awkward(monke
             "google_serp",
         )
 
-    monkeypatch.setattr("coatue_claw.market_daily._collect_evidence_for_ticker", _fake_collect)
-    monkeypatch.setattr("coatue_claw.market_daily._company_aliases", lambda ticker: ["Intel", "Intel Corporation"])
-    monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 24, 0, 0, 0, tzinfo=UTC))
+    monkeypatch.setattr("spclaw.market_daily._collect_evidence_for_ticker", _fake_collect)
+    monkeypatch.setattr("spclaw.market_daily._company_aliases", lambda ticker: ["Intel", "Intel Corporation"])
+    monkeypatch.setattr("spclaw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 24, 0, 0, 0, tzinfo=UTC))
 
     movers = [QuoteSnapshot("INTC", 100.0, 105.7, 100.0, 0.057, "2026-02-24T22:05:00+00:00")]
     rows, lines = md._build_catalyst_rows(movers=movers, slot_name="close")
@@ -679,7 +679,7 @@ def test_hybrid_polish_accepts_clean_rewrite_when_deterministic_is_awkward(monke
 
 
 def test_hybrid_polish_falls_back_on_invalid_rewrite(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     class _FakeCompletions:
         @staticmethod
@@ -696,9 +696,9 @@ def test_hybrid_polish_falls_back_on_invalid_rewrite(monkeypatch) -> None:
     class _FakeClient:
         chat = _FakeChat()
 
-    monkeypatch.setenv("COATUE_CLAW_MD_REASON_QUALITY_MODE", "hybrid")
-    monkeypatch.setenv("COATUE_CLAW_MD_REASON_POLISH_ENABLED", "1")
-    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: _FakeClient())
+    monkeypatch.setenv("SPCLAW_MD_REASON_QUALITY_MODE", "hybrid")
+    monkeypatch.setenv("SPCLAW_MD_REASON_POLISH_ENABLED", "1")
+    monkeypatch.setattr("spclaw.market_daily._openai_client", lambda: _FakeClient())
 
     def _fake_collect(ticker, aliases, since_utc, pct_move=None):
         return (
@@ -718,9 +718,9 @@ def test_hybrid_polish_falls_back_on_invalid_rewrite(monkeypatch) -> None:
             "google_serp",
         )
 
-    monkeypatch.setattr("coatue_claw.market_daily._collect_evidence_for_ticker", _fake_collect)
-    monkeypatch.setattr("coatue_claw.market_daily._company_aliases", lambda ticker: ["Intel"])
-    monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 24, 0, 0, 0, tzinfo=UTC))
+    monkeypatch.setattr("spclaw.market_daily._collect_evidence_for_ticker", _fake_collect)
+    monkeypatch.setattr("spclaw.market_daily._company_aliases", lambda ticker: ["Intel"])
+    monkeypatch.setattr("spclaw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 24, 0, 0, 0, tzinfo=UTC))
 
     movers = [QuoteSnapshot("INTC", 100.0, 105.7, 100.0, 0.057, "2026-02-24T22:05:00+00:00")]
     rows, lines = md._build_catalyst_rows(movers=movers, slot_name="close")
@@ -729,7 +729,7 @@ def test_hybrid_polish_falls_back_on_invalid_rewrite(monkeypatch) -> None:
 
 
 def test_no_hallucination_guard_rejects_entity_drift(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     class _FakeCompletions:
         @staticmethod
@@ -750,9 +750,9 @@ def test_no_hallucination_guard_rejects_entity_drift(monkeypatch) -> None:
     class _FakeClient:
         chat = _FakeChat()
 
-    monkeypatch.setenv("COATUE_CLAW_MD_REASON_QUALITY_MODE", "hybrid")
-    monkeypatch.setenv("COATUE_CLAW_MD_REASON_POLISH_ENABLED", "1")
-    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: _FakeClient())
+    monkeypatch.setenv("SPCLAW_MD_REASON_QUALITY_MODE", "hybrid")
+    monkeypatch.setenv("SPCLAW_MD_REASON_POLISH_ENABLED", "1")
+    monkeypatch.setattr("spclaw.market_daily._openai_client", lambda: _FakeClient())
 
     def _fake_collect(ticker, aliases, since_utc, pct_move=None):
         return (
@@ -772,9 +772,9 @@ def test_no_hallucination_guard_rejects_entity_drift(monkeypatch) -> None:
             "google_serp",
         )
 
-    monkeypatch.setattr("coatue_claw.market_daily._collect_evidence_for_ticker", _fake_collect)
-    monkeypatch.setattr("coatue_claw.market_daily._company_aliases", lambda ticker: ["Intel"])
-    monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 24, 0, 0, 0, tzinfo=UTC))
+    monkeypatch.setattr("spclaw.market_daily._collect_evidence_for_ticker", _fake_collect)
+    monkeypatch.setattr("spclaw.market_daily._company_aliases", lambda ticker: ["Intel"])
+    monkeypatch.setattr("spclaw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 24, 0, 0, 0, tzinfo=UTC))
 
     movers = [QuoteSnapshot("INTC", 100.0, 105.7, 100.0, 0.057, "2026-02-24T22:05:00+00:00")]
     rows, lines = md._build_catalyst_rows(movers=movers, slot_name="close")
@@ -783,10 +783,10 @@ def test_no_hallucination_guard_rejects_entity_drift(monkeypatch) -> None:
 
 
 def test_direct_evidence_line_is_fallback_when_only_low_quality_phrase_exists(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
-    monkeypatch.setenv("COATUE_CLAW_MD_REASON_QUALITY_MODE", "deterministic")
-    monkeypatch.setenv("COATUE_CLAW_MD_REASON_POLISH_ENABLED", "0")
+    monkeypatch.setenv("SPCLAW_MD_REASON_QUALITY_MODE", "deterministic")
+    monkeypatch.setenv("SPCLAW_MD_REASON_POLISH_ENABLED", "0")
 
     def _fake_collect(ticker, aliases, since_utc, pct_move=None):
         return (
@@ -806,9 +806,9 @@ def test_direct_evidence_line_is_fallback_when_only_low_quality_phrase_exists(mo
             "google_serp",
         )
 
-    monkeypatch.setattr("coatue_claw.market_daily._collect_evidence_for_ticker", _fake_collect)
-    monkeypatch.setattr("coatue_claw.market_daily._company_aliases", lambda ticker: ["Intel"])
-    monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 24, 0, 0, 0, tzinfo=UTC))
+    monkeypatch.setattr("spclaw.market_daily._collect_evidence_for_ticker", _fake_collect)
+    monkeypatch.setattr("spclaw.market_daily._company_aliases", lambda ticker: ["Intel"])
+    monkeypatch.setattr("spclaw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 24, 0, 0, 0, tzinfo=UTC))
 
     movers = [QuoteSnapshot("INTC", 100.0, 105.7, 100.0, 0.057, "2026-02-24T22:05:00+00:00")]
     rows, lines = md._build_catalyst_rows(movers=movers, slot_name="close")
@@ -835,10 +835,10 @@ def test_debug_catalyst_returns_expected_shape(monkeypatch) -> None:
         since_utc="2026-02-20T21:00:00+00:00",
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._build_catalyst_for_mover",
+        "spclaw.market_daily._build_catalyst_for_mover",
         lambda mover, slot_name, since_utc: (evidence, "After Anthropic launched Claude security tooling, NET sold off."),
     )
-    monkeypatch.setattr("coatue_claw.market_daily._fetch_quote_snapshots", lambda tickers: [])
+    monkeypatch.setattr("spclaw.market_daily._fetch_quote_snapshots", lambda tickers: [])
     payload = debug_catalyst(ticker="NET", slot_name="open")
     assert payload["ok"] is True
     assert payload["ticker"] == "NET"
@@ -848,7 +848,7 @@ def test_debug_catalyst_returns_expected_shape(monkeypatch) -> None:
 
 
 def test_negative_mover_prefers_negative_driver_language(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     candidates = [
         md._EvidenceCandidate(
@@ -873,9 +873,9 @@ def test_negative_mover_prefers_negative_driver_language(monkeypatch) -> None:
         ),
     ]
 
-    monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 20, 0, 0, 0, tzinfo=UTC))
-    monkeypatch.setattr("coatue_claw.market_daily._company_aliases", lambda ticker: ["Cloudflare"])
-    monkeypatch.setattr("coatue_claw.market_daily._collect_evidence_for_ticker", lambda ticker, aliases, since_utc, pct_move=None: (candidates, []))
+    monkeypatch.setattr("spclaw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 20, 0, 0, 0, tzinfo=UTC))
+    monkeypatch.setattr("spclaw.market_daily._company_aliases", lambda ticker: ["Cloudflare"])
+    monkeypatch.setattr("spclaw.market_daily._collect_evidence_for_ticker", lambda ticker, aliases, since_utc, pct_move=None: (candidates, []))
 
     mover = QuoteSnapshot("NET", 100.0, 92.0, 100.0, -0.08, "2026-02-20T12:00:00+00:00")
     rows, lines = md._build_catalyst_rows(movers=[mover], slot_name="open")
@@ -884,7 +884,7 @@ def test_negative_mover_prefers_negative_driver_language(monkeypatch) -> None:
 
 
 def test_collect_evidence_triggers_web_when_directional_signal_missing(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     yahoo_candidates = [
         md._EvidenceCandidate(
@@ -910,13 +910,13 @@ def test_collect_evidence_triggers_web_when_directional_signal_missing(monkeypat
     ]
     calls = {"web": 0}
 
-    monkeypatch.setattr("coatue_claw.market_daily._fetch_yahoo_news_candidates", lambda ticker, aliases, since_utc: yahoo_candidates)
+    monkeypatch.setattr("spclaw.market_daily._fetch_yahoo_news_candidates", lambda ticker, aliases, since_utc: yahoo_candidates)
 
     def _fake_web(ticker, aliases, since_utc, pct_move=None):
         calls["web"] += 1
         return (web_candidates, "google_serp", [])
 
-    monkeypatch.setattr("coatue_claw.market_daily._fetch_web_evidence", _fake_web)
+    monkeypatch.setattr("spclaw.market_daily._fetch_web_evidence", _fake_web)
     rows, _, web_backend = md._collect_evidence_for_ticker(
         ticker="NET",
         aliases=["Cloudflare"],
@@ -929,7 +929,7 @@ def test_collect_evidence_triggers_web_when_directional_signal_missing(monkeypat
 
 
 def test_generic_wrapper_detection_blocks_tautologies() -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     assert md._is_generic_headline_wrapper(
         text="Why NET stock is down today",
@@ -940,7 +940,7 @@ def test_generic_wrapper_detection_blocks_tautologies() -> None:
 
 
 def test_generic_wrapper_detection_blocks_quote_directory_title() -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     title = "Intel Corporation (INTC) Stock Price, News, Quote & History - Yahoo Finance"
     assert md._is_quote_directory_title(title)
@@ -949,7 +949,7 @@ def test_generic_wrapper_detection_blocks_quote_directory_title() -> None:
 
 
 def test_quote_directory_url_is_rejected_even_without_obvious_title_phrase() -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     candidate = md._EvidenceCandidate(
         source_type="web",
@@ -968,27 +968,27 @@ def test_quote_directory_url_is_rejected_even_without_obvious_title_phrase() -> 
 
 
 def test_anthropic_cluster_extraction_maps_keywords() -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     keys = md._extract_driver_keywords("Cybersecurity stocks fell after Anthropic launched Claude Code Security tool")
     assert "anthropic_claude_cyber" in keys
 
 
 def test_regulatory_probe_cluster_extraction_maps_keywords() -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     keys = md._extract_driver_keywords("AppLovin shares slid after reports of an active SEC probe and ongoing investigation")
     assert "regulatory_probe" in keys
 
 
 def test_barrons_domain_counts_as_quality_source() -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     assert md._is_quality_domain("https://www.barrons.com/articles/applovin-stock-drops-probe-report-9e76d74f")
 
 
 def test_corroboration_gate_requires_two_independent_sources() -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     one_source = [
         md._EvidenceCandidate(
@@ -1019,7 +1019,7 @@ def test_corroboration_gate_requires_two_independent_sources() -> None:
 
 
 def test_net_crwd_shared_cluster_uses_specific_anthropic_reason(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     def _fake_collect(ticker, aliases, since_utc, pct_move=None):
         return (
@@ -1059,9 +1059,9 @@ def test_net_crwd_shared_cluster_uses_specific_anthropic_reason(monkeypatch) -> 
             [],
         )
 
-    monkeypatch.setattr("coatue_claw.market_daily._collect_evidence_for_ticker", _fake_collect)
-    monkeypatch.setattr("coatue_claw.market_daily._company_aliases", lambda ticker: [ticker])
-    monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 20, 0, 0, 0, tzinfo=UTC))
+    monkeypatch.setattr("spclaw.market_daily._collect_evidence_for_ticker", _fake_collect)
+    monkeypatch.setattr("spclaw.market_daily._company_aliases", lambda ticker: [ticker])
+    monkeypatch.setattr("spclaw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 20, 0, 0, 0, tzinfo=UTC))
 
     movers = [
         QuoteSnapshot("NET", 100.0, 92.0, 100.0, -0.08, "2026-02-20T12:00:00+00:00"),
@@ -1075,7 +1075,7 @@ def test_net_crwd_shared_cluster_uses_specific_anthropic_reason(monkeypatch) -> 
 
 
 def test_single_source_only_uses_uncertainty_fallback(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     def _fake_collect(ticker, aliases, since_utc, pct_move=None):
         return (
@@ -1094,9 +1094,9 @@ def test_single_source_only_uses_uncertainty_fallback(monkeypatch) -> None:
             [],
         )
 
-    monkeypatch.setattr("coatue_claw.market_daily._collect_evidence_for_ticker", _fake_collect)
-    monkeypatch.setattr("coatue_claw.market_daily._company_aliases", lambda ticker: [ticker])
-    monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 20, 0, 0, 0, tzinfo=UTC))
+    monkeypatch.setattr("spclaw.market_daily._collect_evidence_for_ticker", _fake_collect)
+    monkeypatch.setattr("spclaw.market_daily._company_aliases", lambda ticker: [ticker])
+    monkeypatch.setattr("spclaw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 20, 0, 0, 0, tzinfo=UTC))
 
     movers = [QuoteSnapshot("NET", 100.0, 92.0, 100.0, -0.08, "2026-02-20T12:00:00+00:00")]
     _, lines = md._build_catalyst_rows(movers=movers, slot_name="open")
@@ -1104,7 +1104,7 @@ def test_single_source_only_uses_uncertainty_fallback(monkeypatch) -> None:
 
 
 def test_app_regulatory_probe_cluster_outputs_specific_reason(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     def _fake_collect(ticker, aliases, since_utc, pct_move=None):
         return (
@@ -1135,9 +1135,9 @@ def test_app_regulatory_probe_cluster_outputs_specific_reason(monkeypatch) -> No
             "google_serp",
         )
 
-    monkeypatch.setattr("coatue_claw.market_daily._collect_evidence_for_ticker", _fake_collect)
-    monkeypatch.setattr("coatue_claw.market_daily._company_aliases", lambda ticker: ["AppLovin"])
-    monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 23, 0, 0, 0, tzinfo=UTC))
+    monkeypatch.setattr("spclaw.market_daily._collect_evidence_for_ticker", _fake_collect)
+    monkeypatch.setattr("spclaw.market_daily._company_aliases", lambda ticker: ["AppLovin"])
+    monkeypatch.setattr("spclaw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 23, 0, 0, 0, tzinfo=UTC))
 
     movers = [QuoteSnapshot("APP", 100.0, 92.5, 100.0, -0.075, "2026-02-23T15:00:00+00:00")]
     rows, lines = md._build_catalyst_rows(movers=movers, slot_name="open")
@@ -1146,7 +1146,7 @@ def test_app_regulatory_probe_cluster_outputs_specific_reason(monkeypatch) -> No
 
 
 def test_single_strong_quality_source_can_drive_decisive_primary_reason(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     def _fake_collect(ticker, aliases, since_utc, pct_move=None):
         return (
@@ -1165,9 +1165,9 @@ def test_single_strong_quality_source_can_drive_decisive_primary_reason(monkeypa
             [],
         )
 
-    monkeypatch.setattr("coatue_claw.market_daily._collect_evidence_for_ticker", _fake_collect)
-    monkeypatch.setattr("coatue_claw.market_daily._company_aliases", lambda ticker: [ticker])
-    monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 20, 0, 0, 0, tzinfo=UTC))
+    monkeypatch.setattr("spclaw.market_daily._collect_evidence_for_ticker", _fake_collect)
+    monkeypatch.setattr("spclaw.market_daily._company_aliases", lambda ticker: [ticker])
+    monkeypatch.setattr("spclaw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 20, 0, 0, 0, tzinfo=UTC))
 
     movers = [QuoteSnapshot("NET", 100.0, 92.0, 100.0, -0.08, "2026-02-20T12:00:00+00:00")]
     rows, lines = md._build_catalyst_rows(movers=movers, slot_name="open")
@@ -1176,7 +1176,7 @@ def test_single_strong_quality_source_can_drive_decisive_primary_reason(monkeypa
 
 
 def test_decisive_primary_reason_allows_strong_event_even_with_small_margin() -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     candidate = md._EvidenceCandidate(
         source_type="yahoo_news",
@@ -1197,7 +1197,7 @@ def test_decisive_primary_reason_allows_strong_event_even_with_small_margin() ->
 
 
 def test_cyber_basket_carries_anthropic_cause_to_net(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     def _fake_build(mover, slot_name, since_utc):
         if mover.ticker == "CRWD":
@@ -1235,8 +1235,8 @@ def test_cyber_basket_carries_anthropic_cause_to_net(monkeypatch) -> None:
         )
         return ev, "Shares fell after a major deal or contract update changed sentiment."
 
-    monkeypatch.setattr("coatue_claw.market_daily._build_catalyst_for_mover", _fake_build)
-    monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 20, 0, 0, 0, tzinfo=UTC))
+    monkeypatch.setattr("spclaw.market_daily._build_catalyst_for_mover", _fake_build)
+    monkeypatch.setattr("spclaw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 20, 0, 0, 0, tzinfo=UTC))
 
     movers = [
         QuoteSnapshot("NET", 100.0, 92.0, 100.0, -0.08, "2026-02-20T12:00:00+00:00"),
@@ -1249,7 +1249,7 @@ def test_cyber_basket_carries_anthropic_cause_to_net(monkeypatch) -> None:
 
 
 def test_generic_deal_contract_cluster_is_not_reused_across_movers(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     def _fake_build(mover, slot_name, since_utc):
         if mover.ticker == "NET":
@@ -1286,8 +1286,8 @@ def test_generic_deal_contract_cluster_is_not_reused_across_movers(monkeypatch) 
         )
         return ev, "Shares fell after Oracle Faces AI Lawsuits As Federal Cloud Contracts Expand."
 
-    monkeypatch.setattr("coatue_claw.market_daily._build_catalyst_for_mover", _fake_build)
-    monkeypatch.setattr("coatue_claw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 20, 0, 0, 0, tzinfo=UTC))
+    monkeypatch.setattr("spclaw.market_daily._build_catalyst_for_mover", _fake_build)
+    monkeypatch.setattr("spclaw.market_daily._session_window_since_utc", lambda slot_name: datetime(2026, 2, 20, 0, 0, 0, tzinfo=UTC))
 
     movers = [
         QuoteSnapshot("NET", 100.0, 92.0, 100.0, -0.08, "2026-02-20T12:00:00+00:00"),
@@ -1301,7 +1301,7 @@ def test_generic_deal_contract_cluster_is_not_reused_across_movers(monkeypatch) 
 
 
 def test_infer_expected_session_from_history() -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     after_close = [
         (datetime(2026, 2, 20, 21, 5, tzinfo=UTC), None, None, None),
@@ -1316,9 +1316,9 @@ def test_infer_expected_session_from_history() -> None:
 
 
 def test_recap_llm_unavailable_uses_deterministic_backup_bullets(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
-    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.setenv("SPCLAW_MD_CATALYST_MODE", "simple_synthesis")
     row = EarningsRecapRow(
         ticker="NVDA",
         company="NVIDIA",
@@ -1341,10 +1341,10 @@ def test_recap_llm_unavailable_uses_deterministic_backup_bullets(monkeypatch) ->
         score=0.86,
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._collect_synthesis_candidates",
+        "spclaw.market_daily._collect_synthesis_candidates",
         lambda ticker, aliases, since_utc, pct_move=None: ([anchor], [anchor], [], "google_serp"),
     )
-    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: None)
+    monkeypatch.setattr("spclaw.market_daily._openai_client", lambda: None)
     hydrated = md._hydrate_recap_row(
         row=row,
         since_utc=datetime(2026, 2, 20, 20, 0, 0, tzinfo=UTC),
@@ -1356,12 +1356,12 @@ def test_recap_llm_unavailable_uses_deterministic_backup_bullets(monkeypatch) ->
 
 
 def test_run_earnings_recap_skips_when_no_reporters(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
-    monkeypatch.setenv("COATUE_CLAW_MD_DB_PATH", str(tmp_path / "db/market_daily.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_MD_ARTIFACT_DIR", str(tmp_path / "artifacts/market-daily"))
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_MD_DB_PATH", str(tmp_path / "db/market_daily.sqlite"))
+    monkeypatch.setenv("SPCLAW_MD_ARTIFACT_DIR", str(tmp_path / "artifacts/market-daily"))
 
     monkeypatch.setattr(
-        "coatue_claw.market_daily._build_final_universe",
+        "spclaw.market_daily._build_final_universe",
         lambda store, refresh_holdings=True: (
             [QuoteSnapshot("AAPL", 1.0, 101.0, 100.0, 0.01, "2026-02-20T00:00:00+00:00")],
             {"AAPL": "top40"},
@@ -1370,7 +1370,7 @@ def test_run_earnings_recap_skips_when_no_reporters(tmp_path: Path, monkeypatch)
             None,
         ),
     )
-    monkeypatch.setattr("coatue_claw.market_daily._collect_reported_today_rows", lambda universe, now_utc=None: [])
+    monkeypatch.setattr("spclaw.market_daily._collect_reported_today_rows", lambda universe, now_utc=None: [])
     result = run_earnings_recap(manual=True, force=False, dry_run=True)
     assert result["ok"] is True
     assert result["posted"] is False
@@ -1378,11 +1378,11 @@ def test_run_earnings_recap_skips_when_no_reporters(tmp_path: Path, monkeypatch)
 
 
 def test_run_earnings_recap_selects_top4_and_writes_artifact(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
-    monkeypatch.setenv("COATUE_CLAW_MD_DB_PATH", str(tmp_path / "db/market_daily.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_MD_ARTIFACT_DIR", str(tmp_path / "artifacts/market-daily"))
-    monkeypatch.setenv("COATUE_CLAW_MD_TZ", "UTC")
-    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: None)
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_MD_DB_PATH", str(tmp_path / "db/market_daily.sqlite"))
+    monkeypatch.setenv("SPCLAW_MD_ARTIFACT_DIR", str(tmp_path / "artifacts/market-daily"))
+    monkeypatch.setenv("SPCLAW_MD_TZ", "UTC")
+    monkeypatch.setattr("spclaw.market_daily._openai_client", lambda: None)
 
     universe = [
         QuoteSnapshot("AAA", 100, 112, 100, 0.12, "2026-02-20T00:00:00+00:00"),
@@ -1392,7 +1392,7 @@ def test_run_earnings_recap_selects_top4_and_writes_artifact(tmp_path: Path, mon
         QuoteSnapshot("EEE", 60, 102, 100, 0.02, "2026-02-20T00:00:00+00:00"),
     ]
     monkeypatch.setattr(
-        "coatue_claw.market_daily._build_final_universe",
+        "spclaw.market_daily._build_final_universe",
         lambda store, refresh_holdings=True: (
             universe,
             {x.ticker: "top40" for x in universe},
@@ -1408,9 +1408,9 @@ def test_run_earnings_recap_selects_top4_and_writes_artifact(tmp_path: Path, mon
         EarningsRecapRow("DDD", "DDD Co", "2026-02-20", "after_close", 70.0, 96.0, 100.0, -0.04),
         EarningsRecapRow("EEE", "EEE Co", "2026-02-20", "after_close", 60.0, 102.0, 100.0, 0.02),
     ]
-    monkeypatch.setattr("coatue_claw.market_daily._collect_reported_today_rows", lambda universe, now_utc=None: rows)
+    monkeypatch.setattr("spclaw.market_daily._collect_reported_today_rows", lambda universe, now_utc=None: rows)
     monkeypatch.setattr(
-        "coatue_claw.market_daily._hydrate_recap_row",
+        "spclaw.market_daily._hydrate_recap_row",
         lambda row, since_utc, client: row
         if row.bullets
         else replace(
@@ -1434,14 +1434,14 @@ def test_run_earnings_recap_selects_top4_and_writes_artifact(tmp_path: Path, mon
 
 
 def test_run_earnings_recap_manual_daytime_does_not_block_scheduled_slot(tmp_path: Path, monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
-    monkeypatch.setenv("COATUE_CLAW_DATA_ROOT", str(tmp_path))
-    monkeypatch.setenv("COATUE_CLAW_MD_DB_PATH", str(tmp_path / "db/market_daily.sqlite"))
-    monkeypatch.setenv("COATUE_CLAW_MD_ARTIFACT_DIR", str(tmp_path / "artifacts/market-daily"))
-    monkeypatch.setenv("COATUE_CLAW_MD_TZ", "UTC")
-    monkeypatch.setenv("COATUE_CLAW_MD_EARNINGS_RECAP_TIME", "19:00")
-    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: None)
+    monkeypatch.setenv("SPCLAW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPCLAW_MD_DB_PATH", str(tmp_path / "db/market_daily.sqlite"))
+    monkeypatch.setenv("SPCLAW_MD_ARTIFACT_DIR", str(tmp_path / "artifacts/market-daily"))
+    monkeypatch.setenv("SPCLAW_MD_TZ", "UTC")
+    monkeypatch.setenv("SPCLAW_MD_EARNINGS_RECAP_TIME", "19:00")
+    monkeypatch.setattr("spclaw.market_daily._openai_client", lambda: None)
 
     class Frozen(datetime):
         _calls = [
@@ -1459,9 +1459,9 @@ def test_run_earnings_recap_manual_daytime_does_not_block_scheduled_slot(tmp_pat
                 base = cls._last
             return base if tz is None else base.astimezone(tz)
 
-    monkeypatch.setattr("coatue_claw.market_daily.datetime", Frozen)
+    monkeypatch.setattr("spclaw.market_daily.datetime", Frozen)
     monkeypatch.setattr(
-        "coatue_claw.market_daily._build_final_universe",
+        "spclaw.market_daily._build_final_universe",
         lambda store, refresh_holdings=True: (
             [QuoteSnapshot("CRM", 100.0, 103.0, 100.0, 0.03, "2026-02-25T19:00:00+00:00")],
             {"CRM": "top40"},
@@ -1471,13 +1471,13 @@ def test_run_earnings_recap_manual_daytime_does_not_block_scheduled_slot(tmp_pat
         ),
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._collect_reported_today_rows",
+        "spclaw.market_daily._collect_reported_today_rows",
         lambda universe, now_utc=None: [
             EarningsRecapRow("CRM", "Salesforce", "2026-02-25", "after_close", 100.0, 103.0, 100.0, 0.03)
         ],
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._hydrate_recap_row",
+        "spclaw.market_daily._hydrate_recap_row",
         lambda row, since_utc, client: replace(
             row,
             bullets=("Key catalyst: Demand held up [S1].", "Since regular close, shares traded +3.0% [S1]."),
@@ -1504,21 +1504,21 @@ def test_run_earnings_recap_manual_daytime_does_not_block_scheduled_slot(tmp_pat
 
 
 def test_catalyst_mode_defaults_to_simple(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
-    monkeypatch.delenv("COATUE_CLAW_MD_CATALYST_MODE", raising=False)
+    monkeypatch.delenv("SPCLAW_MD_CATALYST_MODE", raising=False)
     assert md._catalyst_mode() == "simple_synthesis"
 
 
 def test_relevance_mode_defaults_to_llm_first(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
-    monkeypatch.delenv("COATUE_CLAW_MD_RELEVANCE_MODE", raising=False)
+    monkeypatch.delenv("SPCLAW_MD_RELEVANCE_MODE", raising=False)
     assert md._relevance_mode() == "llm_first"
 
 
 def test_select_anchor_support_llm_parses_json() -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     class _FakeCompletions:
         @staticmethod
@@ -1567,7 +1567,7 @@ def test_select_anchor_support_llm_parses_json() -> None:
 
 
 def test_extract_article_context_from_html_prefers_body_text() -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     html = """
     <html><head><script>var x=1;</script></head>
@@ -1582,7 +1582,7 @@ def test_extract_article_context_from_html_prefers_body_text() -> None:
 
 
 def test_evidence_context_for_llm_includes_article_body(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     item = md._EvidenceCandidate(
         source_type="web",
@@ -1593,7 +1593,7 @@ def test_evidence_context_for_llm_includes_article_body(monkeypatch) -> None:
         score=0.8,
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._article_context_from_url",
+        "spclaw.market_daily._article_context_from_url",
         lambda url: "Article body: Netflix walked away from the Paramount path, reducing acquisition risk.",
     )
     merged = md._evidence_context_for_llm(item)
@@ -1602,10 +1602,10 @@ def test_evidence_context_for_llm_includes_article_body(monkeypatch) -> None:
 
 
 def test_simple_mode_outputs_full_sentence_not_after_wrapper(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
-    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
-    monkeypatch.setenv("COATUE_CLAW_MD_REASON_OUTPUT_MODE", "free_sentence")
+    monkeypatch.setenv("SPCLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.setenv("SPCLAW_MD_REASON_OUTPUT_MODE", "free_sentence")
     mover = QuoteSnapshot("AMD", 100.0, 108.8, 100.0, 0.088, "2026-02-25T22:00:00+00:00")
     candidates = [
         md._EvidenceCandidate(
@@ -1631,14 +1631,14 @@ def test_simple_mode_outputs_full_sentence_not_after_wrapper(monkeypatch) -> Non
     ]
 
     monkeypatch.setattr(
-        "coatue_claw.market_daily._collect_synthesis_candidates",
+        "spclaw.market_daily._collect_synthesis_candidates",
         lambda ticker, aliases, since_utc, pct_move=None: (candidates, candidates, [], "google_serp"),
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._synthesize_catalyst_sentence_simple",
+        "spclaw.market_daily._synthesize_catalyst_sentence_simple",
         lambda client, ticker, pct_move, anchor, supports: ("AMD rose as Meta agreed to buy up to $60 billion of AMD AI chips.", None),
     )
-    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: object())
+    monkeypatch.setattr("spclaw.market_daily._openai_client", lambda: object())
     evidence, line = md._build_catalyst_for_mover(
         mover=mover,
         slot_name="close",
@@ -1653,10 +1653,10 @@ def test_simple_mode_outputs_full_sentence_not_after_wrapper(monkeypatch) -> Non
 
 
 def test_llm_first_relevance_anchor_is_used(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
-    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
-    monkeypatch.setenv("COATUE_CLAW_MD_RELEVANCE_MODE", "llm_first")
+    monkeypatch.setenv("SPCLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.setenv("SPCLAW_MD_RELEVANCE_MODE", "llm_first")
     mover = QuoteSnapshot("SPOT", 100.0, 104.5, 100.0, 0.045, "2026-02-26T22:00:00+00:00")
     price_action = md._EvidenceCandidate(
         source_type="web",
@@ -1677,7 +1677,7 @@ def test_llm_first_relevance_anchor_is_used(monkeypatch) -> None:
         domain="quiverquant.com",
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._collect_synthesis_candidates",
+        "spclaw.market_daily._collect_synthesis_candidates",
         lambda ticker, aliases, since_utc, pct_move=None: (
             [price_action, upgrade],
             [price_action, upgrade],
@@ -1686,14 +1686,14 @@ def test_llm_first_relevance_anchor_is_used(monkeypatch) -> None:
         ),
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._select_anchor_support_llm",
+        "spclaw.market_daily._select_anchor_support_llm",
         lambda client, ticker, pct_move, candidates, max_support: (upgrade, [price_action], None),
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._synthesize_catalyst_sentence_simple",
+        "spclaw.market_daily._synthesize_catalyst_sentence_simple",
         lambda client, ticker, pct_move, anchor, supports: ("Spotify rose after an analyst upgrade highlighted margin upside.", None),
     )
-    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: object())
+    monkeypatch.setattr("spclaw.market_daily._openai_client", lambda: object())
 
     evidence, line = md._build_catalyst_for_mover(
         mover=mover,
@@ -1707,10 +1707,10 @@ def test_llm_first_relevance_anchor_is_used(monkeypatch) -> None:
 
 
 def test_simple_synthesis_soft_domain_gate_prefers_quality(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
-    monkeypatch.setenv("COATUE_CLAW_MD_SYNTH_DOMAIN_GATE", "soft")
-    monkeypatch.setenv("COATUE_CLAW_MD_SYNTH_MAX_RESULTS", "3")
+    monkeypatch.setenv("SPCLAW_MD_SYNTH_DOMAIN_GATE", "soft")
+    monkeypatch.setenv("SPCLAW_MD_SYNTH_MAX_RESULTS", "3")
     rows = [
         md._EvidenceCandidate("web", "a", "https://example-blog.com/a", None, 0.9, domain="example-blog.com"),
         md._EvidenceCandidate("web", "b", "https://www.reuters.com/b", None, 0.8, domain="reuters.com"),
@@ -1721,10 +1721,10 @@ def test_simple_synthesis_soft_domain_gate_prefers_quality(monkeypatch) -> None:
 
 
 def test_post_as_is_policy_keeps_non_empty_llm_sentence(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
-    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
-    monkeypatch.setenv("COATUE_CLAW_MD_POST_AS_IS", "1")
+    monkeypatch.setenv("SPCLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.setenv("SPCLAW_MD_POST_AS_IS", "1")
     mover = QuoteSnapshot("INTC", 100.0, 105.7, 100.0, 0.057, "2026-02-25T22:00:00+00:00")
     candidates = [
         md._EvidenceCandidate(
@@ -1741,17 +1741,17 @@ def test_post_as_is_policy_keeps_non_empty_llm_sentence(monkeypatch) -> None:
         ),
     ]
     monkeypatch.setattr(
-        "coatue_claw.market_daily._collect_synthesis_candidates",
+        "spclaw.market_daily._collect_synthesis_candidates",
         lambda ticker, aliases, since_utc, pct_move=None: (candidates, candidates, [], "google_serp"),
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._synthesize_catalyst_sentence_simple",
+        "spclaw.market_daily._synthesize_catalyst_sentence_simple",
         lambda client, ticker, pct_move, anchor, supports: (
             "According to Reuters, Intel and peers rose as semiconductor sentiment improved.",
             None,
         ),
     )
-    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: object())
+    monkeypatch.setattr("spclaw.market_daily._openai_client", lambda: object())
     evidence, line = md._build_catalyst_for_mover(
         mover=mover,
         slot_name="close",
@@ -1765,11 +1765,11 @@ def test_post_as_is_policy_keeps_non_empty_llm_sentence(monkeypatch) -> None:
 
 
 def test_simple_synthesis_no_candidates_uses_fallback(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
-    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.setenv("SPCLAW_MD_CATALYST_MODE", "simple_synthesis")
     monkeypatch.setattr(
-        "coatue_claw.market_daily._collect_synthesis_candidates",
+        "spclaw.market_daily._collect_synthesis_candidates",
         lambda ticker, aliases, since_utc, pct_move=None: ([], [], [], None),
     )
     mover = QuoteSnapshot("BKNG", 100.0, 105.1, 100.0, 0.051, "2026-02-25T22:00:00+00:00")
@@ -1783,9 +1783,9 @@ def test_simple_synthesis_no_candidates_uses_fallback(monkeypatch) -> None:
 
 
 def test_recap_end_to_end_uses_anchor_first_for_all_bullets(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
-    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.setenv("SPCLAW_MD_CATALYST_MODE", "simple_synthesis")
     row = EarningsRecapRow("AMD", "AMD", "2026-02-25", "after_close", 100.0, 108.8, 100.0, 0.088)
     anchor = md._EvidenceCandidate(
         source_type="yahoo_news",
@@ -1808,11 +1808,11 @@ def test_recap_end_to_end_uses_anchor_first_for_all_bullets(monkeypatch) -> None
         domain="reuters.com",
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._collect_synthesis_candidates",
+        "spclaw.market_daily._collect_synthesis_candidates",
         lambda ticker, aliases, since_utc, pct_move=None: ([anchor, support], [anchor, support], [], "google_serp"),
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._synthesize_earnings_recap_blocks",
+        "spclaw.market_daily._synthesize_earnings_recap_blocks",
         lambda client, row, anchor, supports: (
             (
                 "Key catalyst: AMD rose after Meta committed to a multi-year AI chip program [S1].",
@@ -1838,16 +1838,16 @@ def test_recap_end_to_end_uses_anchor_first_for_all_bullets(monkeypatch) -> None
 
 
 def test_web_candidate_without_publish_time_is_rejected_when_strict_enabled(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
-    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
-    monkeypatch.setenv("COATUE_CLAW_MD_GOOGLE_SERP_API_KEY", "test-key")
-    monkeypatch.setenv("COATUE_CLAW_MD_REQUIRE_IN_WINDOW_DATES", "1")
-    monkeypatch.setenv("COATUE_CLAW_MD_ALLOW_UNDATED_FALLBACK", "0")
-    monkeypatch.setenv("COATUE_CLAW_MD_PUBLISH_TIME_ENRICH_ENABLED", "0")
-    monkeypatch.setattr("coatue_claw.market_daily._fetch_yahoo_news_candidates", lambda ticker, aliases, since_utc: [])
+    monkeypatch.setenv("SPCLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.setenv("SPCLAW_MD_GOOGLE_SERP_API_KEY", "test-key")
+    monkeypatch.setenv("SPCLAW_MD_REQUIRE_IN_WINDOW_DATES", "1")
+    monkeypatch.setenv("SPCLAW_MD_ALLOW_UNDATED_FALLBACK", "0")
+    monkeypatch.setenv("SPCLAW_MD_PUBLISH_TIME_ENRICH_ENABLED", "0")
+    monkeypatch.setattr("spclaw.market_daily._fetch_yahoo_news_candidates", lambda ticker, aliases, since_utc: [])
     monkeypatch.setattr(
-        "coatue_claw.market_daily._fetch_web_evidence",
+        "spclaw.market_daily._fetch_web_evidence",
         lambda ticker, aliases, since_utc, pct_move=None: (
             [
                 md._EvidenceCandidate(
@@ -1873,12 +1873,12 @@ def test_web_candidate_without_publish_time_is_rejected_when_strict_enabled(monk
 
 
 def test_web_candidate_accepts_html_enriched_publish_time_in_window(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
-    monkeypatch.setenv("COATUE_CLAW_MD_REQUIRE_IN_WINDOW_DATES", "1")
-    monkeypatch.setenv("COATUE_CLAW_MD_ALLOW_UNDATED_FALLBACK", "0")
+    monkeypatch.setenv("SPCLAW_MD_REQUIRE_IN_WINDOW_DATES", "1")
+    monkeypatch.setenv("SPCLAW_MD_ALLOW_UNDATED_FALLBACK", "0")
     monkeypatch.setattr(
-        "coatue_claw.market_daily._parse_published_at_from_article_html",
+        "spclaw.market_daily._parse_published_at_from_article_html",
         lambda url: (datetime(2026, 2, 25, 20, 15, 0, tzinfo=UTC), "article_meta"),
     )
     rows, notes = md._enforce_time_integrity(
@@ -1902,9 +1902,9 @@ def test_web_candidate_accepts_html_enriched_publish_time_in_window(monkeypatch)
 
 
 def test_out_of_window_candidate_rejected_even_if_high_score(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
-    monkeypatch.setenv("COATUE_CLAW_MD_REQUIRE_IN_WINDOW_DATES", "1")
+    monkeypatch.setenv("SPCLAW_MD_REQUIRE_IN_WINDOW_DATES", "1")
     rows, notes = md._enforce_time_integrity(
         candidates=[
             md._EvidenceCandidate(
@@ -1923,9 +1923,9 @@ def test_out_of_window_candidate_rejected_even_if_high_score(monkeypatch) -> Non
 
 
 def test_historical_callback_text_rejected(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
-    monkeypatch.setenv("COATUE_CLAW_MD_REJECT_HISTORICAL_CALLBACK", "1")
+    monkeypatch.setenv("SPCLAW_MD_REJECT_HISTORICAL_CALLBACK", "1")
     rows, notes = md._enforce_time_integrity(
         candidates=[
             md._EvidenceCandidate(
@@ -1949,14 +1949,14 @@ def test_historical_callback_text_rejected(monkeypatch) -> None:
 
 
 def test_intc_regression_prefers_in_window_why_stock_soaring_link(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
-    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
-    monkeypatch.setenv("COATUE_CLAW_MD_GOOGLE_SERP_API_KEY", "test-key")
-    monkeypatch.setenv("COATUE_CLAW_MD_REQUIRE_IN_WINDOW_DATES", "1")
-    monkeypatch.setenv("COATUE_CLAW_MD_ALLOW_UNDATED_FALLBACK", "0")
-    monkeypatch.setenv("COATUE_CLAW_MD_REJECT_HISTORICAL_CALLBACK", "1")
-    monkeypatch.setenv("COATUE_CLAW_MD_PUBLISH_TIME_ENRICH_ENABLED", "0")
+    monkeypatch.setenv("SPCLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.setenv("SPCLAW_MD_GOOGLE_SERP_API_KEY", "test-key")
+    monkeypatch.setenv("SPCLAW_MD_REQUIRE_IN_WINDOW_DATES", "1")
+    monkeypatch.setenv("SPCLAW_MD_ALLOW_UNDATED_FALLBACK", "0")
+    monkeypatch.setenv("SPCLAW_MD_REJECT_HISTORICAL_CALLBACK", "1")
+    monkeypatch.setenv("SPCLAW_MD_PUBLISH_TIME_ENRICH_ENABLED", "0")
     class Frozen(datetime):
         @classmethod
         def now(cls, tz=None):
@@ -1965,7 +1965,7 @@ def test_intc_regression_prefers_in_window_why_stock_soaring_link(monkeypatch) -
                 return base
             return base.astimezone(tz)
 
-    monkeypatch.setattr("coatue_claw.market_daily.datetime", Frozen)
+    monkeypatch.setattr("spclaw.market_daily.datetime", Frozen)
 
     stale = md._EvidenceCandidate(
         source_type="yahoo_news",
@@ -1989,9 +1989,9 @@ def test_intc_regression_prefers_in_window_why_stock_soaring_link(monkeypatch) -
         published_confidence="high",
         published_source="serp_date",
     )
-    monkeypatch.setattr("coatue_claw.market_daily._fetch_yahoo_news_candidates", lambda ticker, aliases, since_utc: [stale])
+    monkeypatch.setattr("spclaw.market_daily._fetch_yahoo_news_candidates", lambda ticker, aliases, since_utc: [stale])
     monkeypatch.setattr(
-        "coatue_claw.market_daily._fetch_web_evidence",
+        "spclaw.market_daily._fetch_web_evidence",
         lambda ticker, aliases, since_utc, pct_move=None: ([fresh], "google_serp", []),
     )
     considered, selected, notes, _ = md._collect_synthesis_candidates(
@@ -2007,9 +2007,9 @@ def test_intc_regression_prefers_in_window_why_stock_soaring_link(monkeypatch) -
 
 
 def test_consensus_support_prefers_deal_family_for_intc_case(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
-    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.setenv("SPCLAW_MD_CATALYST_MODE", "simple_synthesis")
     mover = QuoteSnapshot("INTC", 100.0, 105.7, 100.0, 0.057, "2026-02-25T22:00:00+00:00")
     pricing = md._EvidenceCandidate(
         source_type="web",
@@ -2041,7 +2041,7 @@ def test_consensus_support_prefers_deal_family_for_intc_case(monkeypatch) -> Non
         domain="fool.com",
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._collect_synthesis_candidates",
+        "spclaw.market_daily._collect_synthesis_candidates",
         lambda ticker, aliases, since_utc, pct_move=None: (
             [deal_anchor, deal_support, pricing],
             [pricing, deal_anchor, deal_support],
@@ -2050,13 +2050,13 @@ def test_consensus_support_prefers_deal_family_for_intc_case(monkeypatch) -> Non
         ),
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._synthesize_catalyst_sentence_simple",
+        "spclaw.market_daily._synthesize_catalyst_sentence_simple",
         lambda client, ticker, pct_move, anchor, supports: (
             "According to Reuters, Intel shares rose after server CPU pricing headlines.",
             None,
         ),
     )
-    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: object())
+    monkeypatch.setattr("spclaw.market_daily._openai_client", lambda: object())
 
     evidence, line = md._build_catalyst_for_mover(
         mover=mover,
@@ -2074,9 +2074,9 @@ def test_consensus_support_prefers_deal_family_for_intc_case(monkeypatch) -> Non
 
 
 def test_links_follow_consensus_family_alignment(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
-    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.setenv("SPCLAW_MD_CATALYST_MODE", "simple_synthesis")
     mover = QuoteSnapshot("INTC", 100.0, 105.7, 100.0, 0.057, "2026-02-25T22:00:00+00:00")
     deal_anchor = md._EvidenceCandidate(
         source_type="web",
@@ -2107,7 +2107,7 @@ def test_links_follow_consensus_family_alignment(monkeypatch) -> None:
     )
 
     monkeypatch.setattr(
-        "coatue_claw.market_daily._collect_synthesis_candidates",
+        "spclaw.market_daily._collect_synthesis_candidates",
         lambda ticker, aliases, since_utc, pct_move=None: (
             [deal_anchor, deal_support, pricing_outlier],
             [pricing_outlier, deal_anchor, deal_support],
@@ -2116,13 +2116,13 @@ def test_links_follow_consensus_family_alignment(monkeypatch) -> None:
         ),
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._synthesize_catalyst_sentence_simple",
+        "spclaw.market_daily._synthesize_catalyst_sentence_simple",
         lambda client, ticker, pct_move, anchor, supports: (
             "Intel shares jumped close to 6% Tuesday after the company announced a multi-year AI partnership with SambaNova.",
             None,
         ),
     )
-    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: object())
+    monkeypatch.setattr("spclaw.market_daily._openai_client", lambda: object())
     evidence, line = md._build_catalyst_for_mover(
         mover=mover,
         slot_name="close",
@@ -2144,7 +2144,7 @@ def test_links_follow_consensus_family_alignment(monkeypatch) -> None:
 
 
 def test_debug_payload_includes_consensus_fields(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     mover = QuoteSnapshot("INTC", 100.0, 105.7, 100.0, 0.057, "2026-02-25T22:00:00+00:00")
     evidence = CatalystEvidence(
@@ -2169,8 +2169,8 @@ def test_debug_payload_includes_consensus_fields(monkeypatch) -> None:
         generation_policy="post_as_is",
     )
 
-    monkeypatch.setattr("coatue_claw.market_daily._fetch_quote_snapshots", lambda tickers: [mover])
-    monkeypatch.setattr("coatue_claw.market_daily._build_catalyst_for_mover", lambda mover, slot_name, since_utc: (evidence, "Intel shares jumped on a SambaNova AI partnership catalyst."))
+    monkeypatch.setattr("spclaw.market_daily._fetch_quote_snapshots", lambda tickers: [mover])
+    monkeypatch.setattr("spclaw.market_daily._build_catalyst_for_mover", lambda mover, slot_name, since_utc: (evidence, "Intel shares jumped on a SambaNova AI partnership catalyst."))
 
     payload = md.debug_catalyst(ticker="INTC", slot_name="close")
     assert payload["consensus_event_family"] == "deal_partnership"
@@ -2179,9 +2179,9 @@ def test_debug_payload_includes_consensus_fields(monkeypatch) -> None:
 
 
 def test_links_only_emit_time_valid_urls(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
-    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.setenv("SPCLAW_MD_CATALYST_MODE", "simple_synthesis")
     mover = QuoteSnapshot("INTC", 100.0, 105.7, 100.0, 0.057, "2026-02-25T22:00:00+00:00")
     valid = md._EvidenceCandidate(
         source_type="web",
@@ -2192,14 +2192,14 @@ def test_links_only_emit_time_valid_urls(monkeypatch) -> None:
         score=0.8,
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._collect_synthesis_candidates",
+        "spclaw.market_daily._collect_synthesis_candidates",
         lambda ticker, aliases, since_utc, pct_move=None: ([valid], [valid], [], "google_serp"),
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._synthesize_catalyst_sentence_simple",
+        "spclaw.market_daily._synthesize_catalyst_sentence_simple",
         lambda client, ticker, pct_move, anchor, supports: ("Intel gained as AMD's Meta deal boosted semiconductor sentiment.", None),
     )
-    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: object())
+    monkeypatch.setattr("spclaw.market_daily._openai_client", lambda: object())
     evidence, line = md._build_catalyst_for_mover(
         mover=mover,
         slot_name="close",
@@ -2217,9 +2217,9 @@ def test_links_only_emit_time_valid_urls(monkeypatch) -> None:
 
 
 def test_recap_uses_time_valid_evidence_only(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
-    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.setenv("SPCLAW_MD_CATALYST_MODE", "simple_synthesis")
     row = EarningsRecapRow("INTC", "Intel", "2026-02-25", "after_close", 100.0, 105.7, 100.0, 0.057)
     fresh = md._EvidenceCandidate(
         source_type="web",
@@ -2230,10 +2230,10 @@ def test_recap_uses_time_valid_evidence_only(monkeypatch) -> None:
         score=0.8,
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._collect_synthesis_candidates",
+        "spclaw.market_daily._collect_synthesis_candidates",
         lambda ticker, aliases, since_utc, pct_move=None: ([fresh], [fresh], [], "google_serp"),
     )
-    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: None)
+    monkeypatch.setattr("spclaw.market_daily._openai_client", lambda: None)
     hydrated = md._hydrate_recap_row(
         row=row,
         since_utc=datetime(2026, 2, 25, 21, 0, 0, tzinfo=UTC),
@@ -2245,9 +2245,9 @@ def test_recap_uses_time_valid_evidence_only(monkeypatch) -> None:
 
 
 def test_recap_citations_align_with_used_sources(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
-    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.setenv("SPCLAW_MD_CATALYST_MODE", "simple_synthesis")
     row = EarningsRecapRow("INTC", "Intel", "2026-02-25", "after_close", 100.0, 105.7, 100.0, 0.057)
     anchor = md._EvidenceCandidate(
         source_type="yahoo_news",
@@ -2266,11 +2266,11 @@ def test_recap_citations_align_with_used_sources(monkeypatch) -> None:
         score=0.78,
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._collect_synthesis_candidates",
+        "spclaw.market_daily._collect_synthesis_candidates",
         lambda ticker, aliases, since_utc, pct_move=None: ([anchor, support], [anchor, support], [], "google_serp"),
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._synthesize_earnings_recap_blocks",
+        "spclaw.market_daily._synthesize_earnings_recap_blocks",
         lambda client, row, anchor, supports: (
             (
                 "Key catalyst: Intel rose with semiconductor peers after AMD's Meta chip agreement [S1].",
@@ -2293,7 +2293,7 @@ def test_recap_citations_align_with_used_sources(monkeypatch) -> None:
 
 
 def test_recap_avoids_wrapper_text_in_bullets(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     wrapper = md._normalize_recap_sentence(
         "Intel stock price, news, quote & history [S1].",
@@ -2310,9 +2310,9 @@ def test_recap_avoids_wrapper_text_in_bullets(monkeypatch) -> None:
 
 
 def test_recap_intc_like_sector_sympathy_reason_is_captured(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
-    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.setenv("SPCLAW_MD_CATALYST_MODE", "simple_synthesis")
     row = EarningsRecapRow("INTC", "Intel", "2026-02-25", "after_close", 100.0, 105.7, 100.0, 0.057)
     anchor = md._EvidenceCandidate(
         source_type="yahoo_news",
@@ -2325,10 +2325,10 @@ def test_recap_intc_like_sector_sympathy_reason_is_captured(monkeypatch) -> None
         score=0.88,
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._collect_synthesis_candidates",
+        "spclaw.market_daily._collect_synthesis_candidates",
         lambda ticker, aliases, since_utc, pct_move=None: ([anchor], [anchor], [], "google_serp"),
     )
-    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: None)
+    monkeypatch.setattr("spclaw.market_daily._openai_client", lambda: None)
     hydrated = md._hydrate_recap_row(
         row=row,
         since_utc=datetime(2026, 2, 25, 21, 0, 0, tzinfo=UTC),
@@ -2338,10 +2338,10 @@ def test_recap_intc_like_sector_sympathy_reason_is_captured(monkeypatch) -> None
 
 
 def test_simple_synthesis_google_missing_uses_yahoo_only_not_ddg(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
-    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
-    monkeypatch.delenv("COATUE_CLAW_MD_GOOGLE_SERP_API_KEY", raising=False)
+    monkeypatch.setenv("SPCLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.delenv("SPCLAW_MD_GOOGLE_SERP_API_KEY", raising=False)
     monkeypatch.delenv("SERPAPI_API_KEY", raising=False)
     now_utc = datetime.now(UTC)
     since_utc = now_utc - timedelta(hours=6)
@@ -2354,14 +2354,14 @@ def test_simple_synthesis_google_missing_uses_yahoo_only_not_ddg(monkeypatch) ->
             score=0.8,
         )
     ]
-    monkeypatch.setattr("coatue_claw.market_daily._fetch_yahoo_news_candidates", lambda ticker, aliases, since_utc: yahoo)
+    monkeypatch.setattr("spclaw.market_daily._fetch_yahoo_news_candidates", lambda ticker, aliases, since_utc: yahoo)
     called = {"web": 0}
 
     def _fake_web(ticker, aliases, since_utc, pct_move=None):
         called["web"] += 1
         return ([], "ddg_html", [])
 
-    monkeypatch.setattr("coatue_claw.market_daily._fetch_web_evidence", _fake_web)
+    monkeypatch.setattr("spclaw.market_daily._fetch_web_evidence", _fake_web)
     _, selected, notes, backend = md._collect_synthesis_candidates(
         ticker="INTC",
         aliases=["Intel"],
@@ -2376,9 +2376,9 @@ def test_simple_synthesis_google_missing_uses_yahoo_only_not_ddg(monkeypatch) ->
 
 
 def test_model_unavailable_uses_anchor_backup_sentence(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
-    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.setenv("SPCLAW_MD_CATALYST_MODE", "simple_synthesis")
     mover = QuoteSnapshot("INTC", 100.0, 105.7, 100.0, 0.057, "2026-02-25T22:00:00+00:00")
     anchor = md._EvidenceCandidate(
         source_type="web",
@@ -2392,10 +2392,10 @@ def test_model_unavailable_uses_anchor_backup_sentence(monkeypatch) -> None:
         score=0.95,
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._collect_synthesis_candidates",
+        "spclaw.market_daily._collect_synthesis_candidates",
         lambda ticker, aliases, since_utc, pct_move=None: ([anchor], [anchor], [], "google_serp"),
     )
-    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: None)
+    monkeypatch.setattr("spclaw.market_daily._openai_client", lambda: None)
     evidence, line = md._build_catalyst_for_mover(
         mover=mover,
         slot_name="close",
@@ -2407,10 +2407,10 @@ def test_model_unavailable_uses_anchor_backup_sentence(monkeypatch) -> None:
 
 
 def test_llm_unavailable_strong_causal_candidate_still_specific(monkeypatch) -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
-    monkeypatch.setenv("COATUE_CLAW_MD_CATALYST_MODE", "simple_synthesis")
-    monkeypatch.setenv("COATUE_CLAW_MD_SYNTH_FORCE_BEST_GUESS", "1")
+    monkeypatch.setenv("SPCLAW_MD_CATALYST_MODE", "simple_synthesis")
+    monkeypatch.setenv("SPCLAW_MD_SYNTH_FORCE_BEST_GUESS", "1")
     mover = QuoteSnapshot("INTC", 100.0, 105.7, 100.0, 0.057, "2026-02-25T22:00:00+00:00")
     strong = md._EvidenceCandidate(
         source_type="web",
@@ -2420,10 +2420,10 @@ def test_llm_unavailable_strong_causal_candidate_still_specific(monkeypatch) -> 
         score=0.88,
     )
     monkeypatch.setattr(
-        "coatue_claw.market_daily._collect_synthesis_candidates",
+        "spclaw.market_daily._collect_synthesis_candidates",
         lambda ticker, aliases, since_utc, pct_move=None: ([strong], [strong], [], "google_serp"),
     )
-    monkeypatch.setattr("coatue_claw.market_daily._openai_client", lambda: None)
+    monkeypatch.setattr("spclaw.market_daily._openai_client", lambda: None)
     evidence, line = md._build_catalyst_for_mover(
         mover=mover,
         slot_name="close",
@@ -2434,7 +2434,7 @@ def test_llm_unavailable_strong_causal_candidate_still_specific(monkeypatch) -> 
 
 
 def test_technical_analysis_soft_penalty_lowers_rank() -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     now_utc = datetime.now(UTC)
     since = now_utc - timedelta(hours=6)
@@ -2461,7 +2461,7 @@ def test_technical_analysis_soft_penalty_lowers_rank() -> None:
 
 
 def test_roundup_penalty_prevents_generic_analyst_calls_link_win() -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     now_utc = datetime.now(UTC)
     since = now_utc - timedelta(hours=6)
@@ -2488,7 +2488,7 @@ def test_roundup_penalty_prevents_generic_analyst_calls_link_win() -> None:
 
 
 def test_sanitize_phrase_removes_aggregator_prefix() -> None:
-    from coatue_claw import market_daily as md
+    from spclaw import market_daily as md
 
     cleaned = md._sanitize_synth_phrase("FinancialContent - Why Is Intel (INTC) Stock Soaring Today")
     assert cleaned == "Why Is Intel (INTC) Stock Soaring Today"

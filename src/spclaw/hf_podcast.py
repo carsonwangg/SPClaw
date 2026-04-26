@@ -6,7 +6,7 @@ import os
 import re
 from typing import Any
 
-from coatue_claw.hf_youtube_transcript import PodcastTranscript, TranscriptSegment
+from spclaw.hf_youtube_transcript import PodcastTranscript, TranscriptSegment
 
 try:
     from openai import OpenAI
@@ -188,7 +188,7 @@ def _model_analysis(transcript: PodcastTranscript, *, question: str | None, outp
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
         return None
-    model = (os.environ.get("COATUE_CLAW_HFA_MODEL", "gpt-5.2-chat-latest") or "gpt-5.2-chat-latest").strip()
+    model = (os.environ.get("SPCLAW_HFA_MODEL", "gpt-5.2-chat-latest") or "gpt-5.2-chat-latest").strip()
     client = OpenAI(api_key=api_key)
     text = transcript_excerpt(transcript, max_chars=90_000)
     prompt_parts: list[str] = [

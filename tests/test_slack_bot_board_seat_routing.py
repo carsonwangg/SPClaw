@@ -12,8 +12,8 @@ pytest.importorskip("slack_bolt")
 def _import_slack_bot(monkeypatch):
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test-token")
     monkeypatch.setenv("SLACK_SIGNING_SECRET", "test-signing-secret")
-    sys.modules.pop("coatue_claw.slack_bot", None)
-    return importlib.import_module("coatue_claw.slack_bot")
+    sys.modules.pop("spclaw.slack_bot", None)
+    return importlib.import_module("spclaw.slack_bot")
 
 
 def test_explicit_bs_command_fail_closed_on_handler_miss(monkeypatch) -> None:

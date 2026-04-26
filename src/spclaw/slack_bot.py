@@ -16,29 +16,27 @@ from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_sdk.errors import SlackApiError
 
-from coatue_claw.board_seat_daily import run_once as run_board_seat_once
-from coatue_claw.board_seat_daily import status as board_seat_status
-from coatue_claw.chart_intent import parse_chart_intent
-from coatue_claw.chart_metrics import METRIC_SPECS, metric_label
-from coatue_claw.chart_title_context import infer_chart_title_context
-from coatue_claw.cli import run_diligence
-from coatue_claw.hf_analyst import HFAError, analyze_podcast_url as run_hfa_podcast
-from coatue_claw.hf_analyst import analyze_thread as run_hfa_thread
-from coatue_claw.hf_analyst import extract_youtube_urls
-from coatue_claw.hf_analyst import format_hfa_slack_summary, hfa_status as hfa_status_lookup
-from coatue_claw.hf_analyst import parse_hfa_control_instruction, parse_hfa_intent, record_dm_autorun, record_dm_podcast_autorun, should_run_dm_autorun, should_run_dm_podcast_autorun
-from coatue_claw.memory_extraction import parse_memory_lookup_query
-from coatue_claw.memory_runtime import MemoryRuntime
-from coatue_claw.market_daily import MarketDailyError
-from coatue_claw.market_daily import debug_catalyst as market_daily_debug_catalyst
-from coatue_claw.market_daily import holdings as market_daily_holdings
-from coatue_claw.market_daily import refresh_coatue_holdings as market_daily_refresh_holdings
-from coatue_claw.market_daily import run_earnings_recap as run_market_daily_earnings_recap
-from coatue_claw.market_daily import run_once as run_market_daily_once
-from coatue_claw.market_daily import set_override as market_daily_set_override
-from coatue_claw.market_daily import status as market_daily_status
-from coatue_claw.online_universe import discover_online_tickers
-from coatue_claw.runtime_settings import (
+from spclaw.chart_intent import parse_chart_intent
+from spclaw.chart_metrics import METRIC_SPECS, metric_label
+from spclaw.chart_title_context import infer_chart_title_context
+from spclaw.cli import run_diligence
+from spclaw.hf_analyst import HFAError, analyze_podcast_url as run_hfa_podcast
+from spclaw.hf_analyst import analyze_thread as run_hfa_thread
+from spclaw.hf_analyst import extract_youtube_urls
+from spclaw.hf_analyst import format_hfa_slack_summary, hfa_status as hfa_status_lookup
+from spclaw.hf_analyst import parse_hfa_control_instruction, parse_hfa_intent, record_dm_autorun, record_dm_podcast_autorun, should_run_dm_autorun, should_run_dm_podcast_autorun
+from spclaw.memory_extraction import parse_memory_lookup_query
+from spclaw.memory_runtime import MemoryRuntime
+from spclaw.market_daily import MarketDailyError
+from spclaw.market_daily import debug_catalyst as market_daily_debug_catalyst
+from spclaw.market_daily import holdings as market_daily_holdings
+from spclaw.market_daily import refresh_coatue_holdings as market_daily_refresh_holdings
+from spclaw.market_daily import run_earnings_recap as run_market_daily_earnings_recap
+from spclaw.market_daily import run_once as run_market_daily_once
+from spclaw.market_daily import set_override as market_daily_set_override
+from spclaw.market_daily import status as market_daily_status
+from spclaw.online_universe import discover_online_tickers
+from spclaw.runtime_settings import (
     PromotionError,
     RuntimeSettingsError,
     format_settings_summary,
@@ -48,16 +46,16 @@ from coatue_claw.runtime_settings import (
     undo_last_settings_promotion,
     update_runtime_setting,
 )
-from coatue_claw.spencer_change_log import (
+from spclaw.spencer_change_log import (
     SpencerChangeLog,
     format_changes as format_spencer_changes,
     is_spencer_user,
     looks_like_change_request,
 )
-from coatue_claw.slack_channel_access import channels_to_join, parse_created_channel_id
-from coatue_claw.slack_config_intent import parse_config_intent
-from coatue_claw.slack_file_ingest import ingest_slack_files
-from coatue_claw.slack_pipeline import (
+from spclaw.slack_channel_access import channels_to_join, parse_created_channel_id
+from spclaw.slack_config_intent import parse_config_intent
+from spclaw.slack_file_ingest import ingest_slack_files
+from spclaw.slack_pipeline import (
     PipelineError,
     deploy_history,
     format_pipeline_result,
@@ -67,11 +65,11 @@ from coatue_claw.slack_pipeline import (
     run_deploy_latest,
     undo_last_deploy,
 )
-from coatue_claw.slack_pipeline_intent import parse_pipeline_intent
-from coatue_claw.slack_routing import is_explicit_board_seat_command, is_explicit_hfa_command, should_default_route_message, should_route_message_event
-from coatue_claw.slack_x_chart_intent import parse_x_chart_post_intent
-from coatue_claw.slack_x_intent import parse_x_digest_intent
-from coatue_claw.universe_store import (
+from spclaw.slack_pipeline_intent import parse_pipeline_intent
+from spclaw.slack_routing import is_explicit_board_seat_command, is_explicit_hfa_command, should_default_route_message, should_route_message_event
+from spclaw.slack_x_chart_intent import parse_x_chart_post_intent
+from spclaw.slack_x_intent import parse_x_digest_intent
+from spclaw.universe_store import (
     add_to_universe,
     find_relevant_universe_name,
     list_universes,
@@ -81,15 +79,15 @@ from coatue_claw.universe_store import (
     save_universe,
     universe_path,
 )
-from coatue_claw.valuation_chart import _format_readable_date, run_valuation_chart
-from coatue_claw.x_chart_daily import XChartError, add_source as add_x_chart_source
-from coatue_claw.x_chart_daily import list_sources as list_x_chart_sources
-from coatue_claw.x_chart_daily import run_chart_for_post_url
-from coatue_claw.x_chart_daily import run_chart_scout_once
-from coatue_claw.x_chart_daily import status as x_chart_status
-from coatue_claw.x_digest import XDigestError, build_x_digest, format_x_digest_summary
+from spclaw.valuation_chart import _format_readable_date, run_valuation_chart
+from spclaw.x_chart_daily import XChartError, add_source as add_x_chart_source
+from spclaw.x_chart_daily import list_sources as list_x_chart_sources
+from spclaw.x_chart_daily import run_chart_for_post_url
+from spclaw.x_chart_daily import run_chart_scout_once
+from spclaw.x_chart_daily import status as x_chart_status
+from spclaw.x_digest import XDigestError, build_x_digest, format_x_digest_summary
 
-load_dotenv("/opt/coatue-claw/.env.prod")
+load_dotenv("/opt/spclaw/.env.prod")
 
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
@@ -119,7 +117,6 @@ class PendingChartFeedback:
 PENDING_CHART_CHOICES: dict[str, PendingChartChoice] = {}
 PENDING_CHART_FEEDBACK: dict[str, PendingChartFeedback] = {}
 PIPELINE_LOCK = threading.Lock()
-BOARD_SEAT_RUN_LOCK = threading.Lock()
 _MEMORY_RUNTIME: MemoryRuntime | None = None
 _SPENCER_CHANGE_LOG: SpencerChangeLog | None = None
 
@@ -239,7 +236,6 @@ def _format_chart_usage() -> str:
         "- `hfa status` / `status`\n"
         "- `hfa control show|clear|mode freeform|instruction <text>`\n"
         "- `md now` / `md status` / `md holdings refresh`\n"
-        "- `bs now` / `bs status`\n"
         "- `x digest <topic|ticker|handle> [last 24h] [limit 50]`\n"
         "- `x chart now` (run chart-scout winner now)\n"
         "- `x chart sources` / `x chart add @handle priority 1.2`\n"
@@ -762,7 +758,7 @@ def _capture_git_memory_request(
 
 
 def _change_notify_user_ids() -> list[str]:
-    raw = (os.environ.get("COATUE_CLAW_CHANGE_NOTIFY_USER_IDS", "U0AGD28QSQG") or "").strip()
+    raw = (os.environ.get("SPCLAW_CHANGE_NOTIFY_USER_IDS", "U0AGD28QSQG") or "").strip()
     ids = [item.strip() for item in raw.split(",") if item.strip()]
     return ids or ["U0AGD28QSQG"]
 
@@ -770,7 +766,7 @@ def _change_notify_user_ids() -> list[str]:
 def _memory_md_path() -> Path:
     return Path(
         os.environ.get(
-            "COATUE_CLAW_CHANGE_MEMORY_MD_PATH",
+            "SPCLAW_CHANGE_MEMORY_MD_PATH",
             "/Users/spclaw/.openclaw/workspace/MEMORY.md",
         )
     )
@@ -1007,10 +1003,10 @@ def _auto_join_channel(channel_id: str) -> tuple[bool, str]:
 
 
 def _bootstrap_public_channel_access() -> None:
-    enabled_raw = os.environ.get("COATUE_CLAW_SLACK_AUTOJOIN_PUBLIC_CHANNELS", "1").strip().lower()
+    enabled_raw = os.environ.get("SPCLAW_SLACK_AUTOJOIN_PUBLIC_CHANNELS", "1").strip().lower()
     enabled = enabled_raw not in {"0", "false", "no", "off"}
     if not enabled:
-        logger.info("Slack public-channel auto-join disabled by COATUE_CLAW_SLACK_AUTOJOIN_PUBLIC_CHANNELS=%s", enabled_raw)
+        logger.info("Slack public-channel auto-join disabled by SPCLAW_SLACK_AUTOJOIN_PUBLIC_CHANNELS=%s", enabled_raw)
         return
 
     cursor: str | None = None
@@ -1361,14 +1357,14 @@ def _handle_x_digest_command(*, text: str, channel: str | None, thread_ts: str, 
     if intent.kind == "status":
         configured = any(
             bool(os.environ.get(key, "").strip())
-            for key in ("COATUE_CLAW_X_BEARER_TOKEN", "X_BEARER_TOKEN", "COATUE_CLAW_TWITTER_BEARER_TOKEN")
+            for key in ("SPCLAW_X_BEARER_TOKEN", "X_BEARER_TOKEN", "SPCLAW_TWITTER_BEARER_TOKEN")
         )
         say(
             text=(
                 "X digest status:\n"
                 f"- bearer_token_configured: `{configured}`\n"
-                f"- api_base: `{os.environ.get('COATUE_CLAW_X_API_BASE', 'https://api.x.com')}`\n"
-                f"- digest_dir: `{os.environ.get('COATUE_CLAW_X_DIGEST_DIR', '/opt/coatue-claw-data/artifacts/x-digest')}`"
+                f"- api_base: `{os.environ.get('SPCLAW_X_API_BASE', 'https://api.x.com')}`\n"
+                f"- digest_dir: `{os.environ.get('SPCLAW_X_DIGEST_DIR', '/opt/spclaw-data/artifacts/x-digest')}`"
             ),
             thread_ts=thread_ts,
         )
@@ -1654,201 +1650,6 @@ def _handle_market_daily_command(*, text: str, channel: str | None, thread_ts: s
         return True
 
     say(text="Try `md help` for market-daily commands.", thread_ts=thread_ts)
-    return True
-
-
-@contextmanager
-def _temporary_env(values: dict[str, str | None]):
-    previous: dict[str, str | None] = {}
-    for key, value in values.items():
-        previous[key] = os.environ.get(key)
-        if value is None:
-            os.environ.pop(key, None)
-        else:
-            os.environ[key] = value
-    try:
-        yield
-    finally:
-        for key, value in previous.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-
-
-def _slug_text(value: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
-
-
-def _channel_name_from_id(channel_id: str | None) -> str | None:
-    if not channel_id:
-        return None
-    try:
-        resp = app.client.conversations_info(channel=channel_id)
-        row = resp.get("channel") if isinstance(resp, dict) else None
-        if isinstance(row, dict):
-            name = str(row.get("name") or "").strip()
-            if name:
-                return name
-    except Exception:
-        logger.exception("Failed to resolve channel name for board-seat command channel=%s", channel_id)
-    return None
-
-
-def _handle_board_seat_command(*, text: str, channel: str | None, thread_ts: str, say) -> bool:
-    stripped = _strip_slack_mentions(text).strip()
-    lower = stripped.lower()
-    if not re.match(r"^(bs|board\s+seat)\b", lower):
-        return False
-
-    if re.fullmatch(r"(bs|board\s+seat)(\s+help)?", lower):
-        say(
-            text=(
-                "Board Seat commands:\n"
-                "- `bs now` (run now for this portco channel)\n"
-                "- `bs now dry` (preview only)\n"
-                "- `bs now for <Company>` (run in current channel for explicit company)\n"
-                "- `bs status`"
-            ),
-            thread_ts=thread_ts,
-        )
-        return True
-
-    if re.fullmatch(r"(bs|board\s+seat)\s+status", lower):
-        try:
-            payload = board_seat_status()
-        except Exception as exc:
-            say(text=f"Board Seat status failed: {exc}", thread_ts=thread_ts)
-            return True
-        lines = [
-            "Board Seat status:",
-            f"- format_version: `{payload.get('format_version')}`",
-            f"- status: `{payload.get('status')}`",
-            f"- enabled: `{payload.get('board_seat_enabled')}`",
-            f"- schedule_time: `{payload.get('schedule_time')}`",
-            f"- target_lock_days: `{payload.get('target_lock_days')}`",
-        ]
-        portcos = payload.get("portcos") if isinstance(payload.get("portcos"), list) else []
-        lines.append(f"- portcos: `{len(portcos)}`")
-        say(text="\n".join(lines), thread_ts=thread_ts)
-        return True
-
-    if not re.match(r"^(bs|board\s+seat)\s+now\b", lower):
-        say(text="Try `bs help` for board-seat commands.", thread_ts=thread_ts)
-        return True
-
-    is_dry_run = bool(re.search(r"\b(dry|dry-run)\b", lower))
-    company_hint_match = re.search(r"\bfor\s+(.+)$", stripped, flags=re.IGNORECASE)
-    company_hint = company_hint_match.group(1).strip() if company_hint_match else ""
-
-    try:
-        status_payload = board_seat_status()
-    except Exception as exc:
-        say(text=f"Board Seat command failed to load status: {exc}", thread_ts=thread_ts)
-        return True
-
-    portcos = status_payload.get("portcos") if isinstance(status_payload.get("portcos"), list) else []
-    channel_name = _channel_name_from_id(channel)
-    channel_slug = _slug_text(channel_name or "")
-
-    selected_company = ""
-    if company_hint:
-        hint_slug = _slug_text(company_hint)
-        for row in portcos:
-            if not isinstance(row, dict):
-                continue
-            company = str(row.get("company") or "").strip()
-            if company and _slug_text(company) == hint_slug:
-                selected_company = company
-                break
-        if not selected_company:
-            say(text=f"Unknown Board Seat company: `{company_hint}`", thread_ts=thread_ts)
-            return True
-    else:
-        for row in portcos:
-            if not isinstance(row, dict):
-                continue
-            company = str(row.get("company") or "").strip()
-            channel_ref = str(row.get("channel_ref") or "").strip()
-            if not company:
-                continue
-            if channel_slug and _slug_text(channel_ref) == channel_slug:
-                selected_company = company
-                break
-            if channel_slug and _slug_text(company) == channel_slug:
-                selected_company = company
-                break
-
-    if not selected_company:
-        say(
-            text=(
-                "Could not infer the portco for this channel.\n"
-                "Use: `bs now for <Company>`"
-            ),
-            thread_ts=thread_ts,
-        )
-        return True
-
-    selected_channel_ref = channel_name or channel or ""
-    scope_value = f"{selected_company}:{selected_channel_ref}"
-    say(
-        text=(
-            f"Running Board Seat now for `{selected_company}` "
-            f"({ 'dry-run' if is_dry_run else 'live' })..."
-        ),
-        thread_ts=thread_ts,
-    )
-    try:
-        with BOARD_SEAT_RUN_LOCK:
-            with _temporary_env(
-                {
-                    "COATUE_CLAW_BOARD_SEAT_PORTCOS": scope_value,
-                    "COATUE_CLAW_BOARD_SEAT_CHANNEL_DISCOVERY": "static",
-                }
-            ):
-                result = run_board_seat_once(force=True, dry_run=is_dry_run)
-    except Exception as exc:
-        say(text=f"Board Seat run failed: {exc}", thread_ts=thread_ts)
-        return True
-
-    sent_rows = [row for row in (result.get("sent") or []) if str(row.get("company") or "") == selected_company]
-    if sent_rows:
-        row = sent_rows[-1]
-        target = str(row.get("target") or "").strip() or "n/a"
-        reason = str(row.get("reason") or "sent")
-        say(
-            text=(
-                "Board Seat completed.\n"
-                f"- company: `{selected_company}`\n"
-                f"- target: `{target}`\n"
-                f"- mode: `{'dry_run' if is_dry_run else 'live'}`\n"
-                f"- reason: `{reason}`"
-            ),
-            thread_ts=thread_ts,
-        )
-        return True
-
-    skipped_rows = [row for row in (result.get("skipped") or []) if str(row.get("company") or "") == selected_company]
-    if skipped_rows:
-        row = skipped_rows[-1]
-        say(
-            text=(
-                "Board Seat did not post.\n"
-                f"- company: `{selected_company}`\n"
-                f"- reason: `{row.get('reason', 'unknown')}`\n"
-                f"- gate_reason: `{row.get('gate_reason', '')}`"
-            ),
-            thread_ts=thread_ts,
-        )
-        return True
-
-    say(
-        text=(
-            "Board Seat run completed but no company row matched in output.\n"
-            f"- company: `{selected_company}`"
-        ),
-        thread_ts=thread_ts,
-    )
     return True
 
 
@@ -2576,7 +2377,7 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
                         text=(
                             "Online discovery did not find enough tickers.\n"
                             "Reply with explicit tickers or use a saved universe, e.g. "
-                            "`@Coatue Claw use universe defense`."
+                            "`@SPClaw use universe defense`."
                         ),
                         thread_ts=thread_ts,
                     )
@@ -2707,8 +2508,8 @@ def _handle_slack_request_event(*, event, say, source_event: str, memory_source:
                 text=(
                     "I couldn’t confidently build a full ticker set from that prompt.\n"
                     "Please choose one of these:\n"
-                    "- `@Coatue Claw online`\n"
-                    "- `@Coatue Claw use universe NAME`\n"
+                    "- `@SPClaw online`\n"
+                    "- `@SPClaw use universe NAME`\n"
                     f"{suggested_line}"
                     f"Metric ids: `{metric_examples}`\n"
                     "Default behavior: YoY Revenue Growth on y-axis unless you specify otherwise."

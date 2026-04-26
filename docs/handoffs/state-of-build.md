@@ -1,14 +1,14 @@
-# Coatue Claw - State of Build
+# SPClaw - State of Build
 
 ## Snapshot Date
 - 2026-02-17
 
 ## What Is Implemented
 - Python package scaffold using `src/` layout and `claw` CLI entrypoint.
-- CLI command in `src/coatue_claw/cli.py`:
+- CLI command in `src/spclaw/cli.py`:
   - `claw diligence TICKER`
-  - Generates markdown packet to `/opt/coatue-claw-data/artifacts/packets/<TICKER>-<timestamp>.md`.
-- Slack bot in `src/coatue_claw/slack_bot.py` using Slack Bolt Socket Mode:
+  - Generates markdown packet to `/opt/spclaw-data/artifacts/packets/<TICKER>-<timestamp>.md`.
+- Slack bot in `src/spclaw/slack_bot.py` using Slack Bolt Socket Mode:
   - Handles `app_mention` events.
   - Parses `diligence TICKER` from mention text (supports `<@...>` mention tokens and `$TICKER` forms).
   - Runs diligence packet generation and replies in thread.
@@ -19,10 +19,10 @@
   - `python-dotenv`
 
 ## Operational Setup
-- Production env file present at `/opt/coatue-claw/.env.prod`.
+- Production env file present at `/opt/spclaw/.env.prod`.
 - Bot runs on Mac mini as a user `launchd` agent:
   - `~/Library/LaunchAgents/com.coatue.claw.slack-bot.plist`
-  - logs to `/opt/coatue-claw-data/logs/slack-bot.log`
+  - logs to `/opt/spclaw-data/logs/slack-bot.log`
 
 ## Current Known Issue
 - Bot process connects to Slack Socket Mode successfully.
@@ -39,5 +39,5 @@
 ## Immediate Next Steps
 1. In Slack app config, verify Event Subscriptions includes bot event `app_mention` and Socket Mode is enabled.
 2. Reinstall app to workspace after any permission/event changes.
-3. Ensure bot is added to target channel, then test `@coatue_claw diligence SNOW`.
+3. Ensure bot is added to target channel, then test `@spclaw diligence SNOW`.
 4. Expand CLI output from template to real research pipeline inputs.

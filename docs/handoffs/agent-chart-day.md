@@ -4,11 +4,11 @@
 - `codex/agent-chart-day`
 
 ## Suggested Worktree
-- `/Users/carsonwang/worktrees/coatue-claw/chart-day`
+- `/Users/carsonwang/worktrees/spclaw/chart-day`
 
 ## Ownership Scope
-- `src/coatue_claw/x_chart_daily.py`
-- `src/coatue_claw/slack_x_chart_intent.py`
+- `src/spclaw/x_chart_daily.py`
+- `src/spclaw/slack_x_chart_intent.py`
 - `tests/test_x_chart_daily.py`
 - X-chart runtime docs/handoffs
 

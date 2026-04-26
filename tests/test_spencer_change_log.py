@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from coatue_claw.spencer_change_log import (
+from spclaw.spencer_change_log import (
     SpencerChangeLog,
     format_changes,
     is_spencer_user,
@@ -113,7 +113,7 @@ def test_list_changes_filter_request_kind(tmp_path: Path) -> None:
 
 def test_export_memory_git_queue_writes_markdown(tmp_path: Path, monkeypatch) -> None:
     repo_root = tmp_path / "repo"
-    monkeypatch.setenv("COATUE_CLAW_REPO_PATH", str(repo_root))
+    monkeypatch.setenv("SPCLAW_REPO_PATH", str(repo_root))
     db_path = tmp_path / "spencer.sqlite"
     log = SpencerChangeLog(db_path=db_path)
     log.capture_request(
@@ -138,7 +138,7 @@ def test_export_memory_git_queue_writes_markdown(tmp_path: Path, monkeypatch) ->
 
 def test_reconcile_link_sets_commit_and_ledger(tmp_path: Path, monkeypatch) -> None:
     repo_root = tmp_path / "repo"
-    monkeypatch.setenv("COATUE_CLAW_REPO_PATH", str(repo_root))
+    monkeypatch.setenv("SPCLAW_REPO_PATH", str(repo_root))
     db_path = tmp_path / "spencer.sqlite"
     log = SpencerChangeLog(db_path=db_path)
     change_id = log.capture_request(
@@ -156,7 +156,7 @@ def test_reconcile_link_sets_commit_and_ledger(tmp_path: Path, monkeypatch) -> N
         commit="42d00dbc83478e67e4177806c3c6fddeb2290ed4",
         resolved_by="codex",
         note="implemented in batch session",
-        mapped_paths="src/coatue_claw/slack_bot.py,src/coatue_claw/spencer_change_log.py",
+        mapped_paths="src/spclaw/slack_bot.py,src/spclaw/spencer_change_log.py",
     )
     assert result["ok"] is True
     assert result["updated"] == [change_id]
@@ -173,7 +173,7 @@ def test_reconcile_link_sets_commit_and_ledger(tmp_path: Path, monkeypatch) -> N
 
 def test_reconcile_status_counts_only_memory_git(tmp_path: Path, monkeypatch) -> None:
     repo_root = tmp_path / "repo"
-    monkeypatch.setenv("COATUE_CLAW_REPO_PATH", str(repo_root))
+    monkeypatch.setenv("SPCLAW_REPO_PATH", str(repo_root))
     db_path = tmp_path / "spencer.sqlite"
     log = SpencerChangeLog(db_path=db_path)
     log.capture_request(

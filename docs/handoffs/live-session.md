@@ -1,12 +1,12 @@
-# Live Session Handoff (Coatue Claw)
+# Live Session Handoff (SPClaw)
 
 ## Objective
 Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Update (2026-02-28, fail-closed board-seat command routing)
-- Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/slack_routing.py`:
+- Updated `/Users/carsonwang/worktrees/spclaw/board-seat/src/spclaw/slack_routing.py`:
   - added `is_explicit_board_seat_command(text)` for explicit `bs` / `board seat` command detection with mention stripping.
-- Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/slack_bot.py`:
+- Updated `/Users/carsonwang/worktrees/spclaw/board-seat/src/spclaw/slack_bot.py`:
   - explicit board-seat commands are handled fail-closed near the HFA fast path:
     - no fallthrough to memory/pipeline/chart/diligence/fallback handlers on `bs` command miss.
   - routing miss response is now deterministic:
@@ -18,14 +18,14 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `PYTHONPATH=src python3 -m pytest -q tests/test_slack_routing.py tests/test_slack_pipeline_intent.py tests/test_slack_bot_board_seat_routing.py` -> `13 passed, 1 skipped`
 
 ## Update (2026-02-28, board-seat candidate source config: LLM-first only)
-- Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/.env.example`:
-  - `COATUE_CLAW_BOARD_SEAT_LLM_CANDIDATE_GEN_ENABLED=1`
-  - `COATUE_CLAW_BOARD_SEAT_LLM_FIRST_MODE=1`
-  - `COATUE_CLAW_BOARD_SEAT_WEB_CANDIDATE_ENRICHMENT=0`
+- Updated `/Users/carsonwang/worktrees/spclaw/board-seat/.env.example`:
+  - `SPCLAW_BOARD_SEAT_LLM_CANDIDATE_GEN_ENABLED=1`
+  - `SPCLAW_BOARD_SEAT_LLM_FIRST_MODE=1`
+  - `SPCLAW_BOARD_SEAT_WEB_CANDIDATE_ENRICHMENT=0`
 - Purpose: immediately stop web-headline candidate enrichment from introducing non-company targets; keep target generation LLM-first only.
 
 ## Update (2026-02-27, board-seat v8 guardrails relaxed for output continuity)
-- Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/board_seat_daily.py`:
+- Updated `/Users/carsonwang/worktrees/spclaw/board-seat/src/spclaw/board_seat_daily.py`:
   - v8 quality gate now treats format constraints as guidance:
     - section coverage and bullet-count are warning-level unless critically incomplete.
     - only critical failures (empty/artifact/major-structure failure) block posting.
@@ -33,7 +33,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - quality fail codes still recorded for diagnostics, but no longer over-block otherwise valid drafts.
 
 ## Update (2026-02-27, board-seat v8 full-context concise + no-fallback diagnostics)
-- Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/board_seat_daily.py`:
+- Updated `/Users/carsonwang/worktrees/spclaw/board-seat/src/spclaw/board_seat_daily.py`:
   - format version moved to `v8_full_context_concise`.
   - draft contract changed to concise full-context sections:
     - `Thesis`
@@ -50,44 +50,44 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - quality failure now posts diagnostic warning and marks run `draft_quality_failed`.
 
 ## Update (2026-02-27, board-seat warning-only mode; rewrite fallback removed)
-- Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/board_seat_daily.py`:
+- Updated `/Users/carsonwang/worktrees/spclaw/board-seat/src/spclaw/board_seat_daily.py`:
   - removed memory-rewrite fallback path from draft generation.
   - quality failures now stay in `web_synth` mode and post deterministic v7 draft with `quality_fail_codes`.
   - thread warning behavior is now warning-only (`⚠️ Quality warning: verify key claims before action.`), with no “fallback mode used” wording.
   - warning thread is posted when `quality_fail_codes` are present (not tied to memory-rewrite mode).
-- Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/.env.example`:
-  - marked `COATUE_CLAW_BOARD_SEAT_MEMORY_REWRITE_*` knobs as deprecated/no-op.
-  - clarified `COATUE_CLAW_BOARD_SEAT_MEMORY_REWRITE_THREAD_WARNING` controls warning-thread posting only.
+- Updated `/Users/carsonwang/worktrees/spclaw/board-seat/.env.example`:
+  - marked `SPCLAW_BOARD_SEAT_MEMORY_REWRITE_*` knobs as deprecated/no-op.
+  - clarified `SPCLAW_BOARD_SEAT_MEMORY_REWRITE_THREAD_WARNING` controls warning-thread posting only.
 
 ## Update (2026-02-27, board-seat legacy v7 restored as default)
-- Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/board_seat_daily.py`:
+- Updated `/Users/carsonwang/worktrees/spclaw/board-seat/src/spclaw/board_seat_daily.py`:
   - default board-seat format switched to `v7_legacy_with_target_line`.
   - simple mode path is now disabled; legacy v7 runtime path is forced.
   - legacy v7 draft contract restored in generator/quality gate:
     - `Thesis` with labeled lines: `Idea`, `What target does`, `Why now`, `What's different`, `MOS/risks`, `Bottom line`
     - `{Company} context` with `Current efforts`, `Domain fit/gaps`
     - `Funding snapshot` with `History`, `Latest round/backers`
-- Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/.env.example`:
-  - `COATUE_CLAW_BOARD_SEAT_SIMPLE_MODE=0` as documented default.
-- Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/AGENTS.md` board-seat contract to reflect v7 structure.
+- Updated `/Users/carsonwang/worktrees/spclaw/board-seat/.env.example`:
+  - `SPCLAW_BOARD_SEAT_SIMPLE_MODE=0` as documented default.
+- Updated `/Users/carsonwang/worktrees/spclaw/board-seat/AGENTS.md` board-seat contract to reflect v7 structure.
 
 ## Update (2026-02-27, board-seat `bs now` routed to `board_seat_daily`)
-- Updated `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/slack_bot.py`:
+- Updated `/Users/carsonwang/worktrees/spclaw/board-seat/src/spclaw/slack_bot.py`:
   - added `bs` command handling in conversational Slack path:
     - `bs help`
     - `bs status`
     - `bs now`
-  - `bs now` now runs the real board-seat pipeline (`board_seat_daily.run_once(force=True, dry_run=False)`) scoped to the current mapped channel/company via temporary `COATUE_CLAW_BOARD_SEAT_PORTCOS`.
+  - `bs now` now runs the real board-seat pipeline (`board_seat_daily.run_once(force=True, dry_run=False)`) scoped to the current mapped channel/company via temporary `SPCLAW_BOARD_SEAT_PORTCOS`.
   - this removes mismatch with legacy conversational copy paths and ensures `bs now` uses the same formatter/output contract as scheduled board-seat runs.
   - successful runs now reply in-thread with target/confidence/message metadata; skipped runs return reason/gate/evaluation counts.
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py tests/test_launchd_runtime.py tests/test_slack_routing.py tests/test_slack_pipeline_intent.py` -> `52 passed`
 
 ## Update (2026-02-27, chart-only candidate gate for chart-day selection)
-- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/src/coatue_claw/x_chart_daily.py`:
+- Updated `/Users/carsonwang/worktrees/spclaw/chart-day/src/spclaw/x_chart_daily.py`:
   - `_candidate_pool_for_post(...)` now drops candidates that do not pass `_has_reconstructable_chart_data(...)`.
   - this enforces chart-day selection to prefer posts with parseable chart/graph structure, not generic illustration images.
-- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/tests/test_x_chart_daily.py`:
+- Updated `/Users/carsonwang/worktrees/spclaw/chart-day/tests/test_x_chart_daily.py`:
   - added `test_candidate_pool_excludes_non_chart_images_even_if_score_is_higher`.
   - added default autouse test fixture to keep reconstructability deterministic in tests; non-chart behavior is still covered by explicit monkeypatches in targeted tests.
   - added default autouse test fixture to clear `OPENAI_API_KEY` for deterministic test behavior on hosts where live LLM env vars are present.
@@ -95,12 +95,12 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `96 passed`
 
 ## Update (2026-02-27, enforce `chart_label == title` across chart-day)
-- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/src/coatue_claw/x_chart_daily.py`:
+- Updated `/Users/carsonwang/worktrees/spclaw/chart-day/src/spclaw/x_chart_daily.py`:
   - `chart_label` is now synchronized to final `headline` in style draft generation.
   - manual `run-post-url --title` override now updates both `headline` and `chart_label`.
   - renderer no longer truncates chart label text independently; it preserves exact label text and fails closed on overflow (`Chart label layout overflow without truncation.`).
   - removed independent chart-label rewrite behavior in `_sanitize_style_copy(...)` so label cannot diverge from title path.
-- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/tests/test_x_chart_daily.py`:
+- Updated `/Users/carsonwang/worktrees/spclaw/chart-day/tests/test_x_chart_daily.py`:
   - added regression tests:
     - `test_style_draft_chart_label_matches_headline_llm_path`
     - `test_style_draft_chart_label_matches_headline_fallback_path`
@@ -110,36 +110,36 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `88 passed`
 
 ## Update (2026-02-27, removed sentence splitter in chart-day title extraction)
-- Updated `/Users/carsonwang/worktrees/coatue-claw/chart-day/src/coatue_claw/x_chart_daily.py`:
+- Updated `/Users/carsonwang/worktrees/spclaw/chart-day/src/spclaw/x_chart_daily.py`:
   - `_extract_first_sentence(...)` no longer splits on punctuation.
   - this prevents abbreviation-driven truncation like `U.S.` -> `Number of U.S.` in generated title/takeaway inputs.
-- Updated regression expectation in `/Users/carsonwang/worktrees/coatue-claw/chart-day/tests/test_x_chart_daily.py` for takeaway finalization behavior after splitter removal.
+- Updated regression expectation in `/Users/carsonwang/worktrees/spclaw/chart-day/tests/test_x_chart_daily.py` for takeaway finalization behavior after splitter removal.
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `85 passed`
 
 ## Update (2026-02-27, MD richer article-context grounding for LLM relevance + one-liner)
-- Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
+- Implemented in `/Users/carsonwang/worktrees/spclaw/market-daily/src/spclaw/market_daily.py`:
   - added article-body context extraction + cache for catalyst evidence URLs.
   - LLM relevance selection (`_select_anchor_support_llm`) and one-line synthesis (`_synthesize_catalyst_sentence_simple`) now receive enriched article context for top candidates, not only headline/snippet text.
   - new controls:
-    - `COATUE_CLAW_MD_ARTICLE_CONTEXT_ENABLED` (default `1`)
-    - `COATUE_CLAW_MD_ARTICLE_CONTEXT_TIMEOUT_MS` (default `3500`)
-    - `COATUE_CLAW_MD_ARTICLE_CONTEXT_MAX_CHARS` (default `6000`)
-    - `COATUE_CLAW_MD_ARTICLE_CONTEXT_LIMIT` (default `4`)
+    - `SPCLAW_MD_ARTICLE_CONTEXT_ENABLED` (default `1`)
+    - `SPCLAW_MD_ARTICLE_CONTEXT_TIMEOUT_MS` (default `3500`)
+    - `SPCLAW_MD_ARTICLE_CONTEXT_MAX_CHARS` (default `6000`)
+    - `SPCLAW_MD_ARTICLE_CONTEXT_LIMIT` (default `4`)
   - status payload now exposes these context-enrichment settings.
-- Added tests in `/Users/carsonwang/worktrees/coatue-claw/market-daily/tests/test_market_daily.py`:
+- Added tests in `/Users/carsonwang/worktrees/spclaw/market-daily/tests/test_market_daily.py`:
   - `test_extract_article_context_from_html_prefers_body_text`
   - `test_evidence_context_for_llm_includes_article_body`
 
 ## Update (2026-02-26, MD LLM-first relevance mode for catalyst anchor/support selection)
-- Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
-  - added `COATUE_CLAW_MD_RELEVANCE_MODE` (`llm_first` default, `deterministic` fallback mode).
+- Implemented in `/Users/carsonwang/worktrees/spclaw/market-daily/src/spclaw/market_daily.py`:
+  - added `SPCLAW_MD_RELEVANCE_MODE` (`llm_first` default, `deterministic` fallback mode).
   - simple-synthesis now asks the model to pick anchor/support evidence IDs from ranked candidates (`_select_anchor_support_llm(...)`) before sentence generation.
   - if relevance selection fails/LLM unavailable, path falls back automatically to existing deterministic consensus+anchor logic.
   - when LLM relevance selection succeeds:
     - selected anchor/support are used directly for sentence generation and link alignment.
     - `synth_generation_mode` emits `simple_synthesis_llm_first`.
-- Added tests in `/Users/carsonwang/worktrees/coatue-claw/market-daily/tests/test_market_daily.py`:
+- Added tests in `/Users/carsonwang/worktrees/spclaw/market-daily/tests/test_market_daily.py`:
   - `test_relevance_mode_defaults_to_llm_first`
   - `test_select_anchor_support_llm_parses_json`
   - `test_llm_first_relevance_anchor_is_used`
@@ -147,25 +147,25 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `PYTHONPATH=src python3 -m pytest -q tests/test_market_daily.py tests/test_launchd_runtime.py` -> `89 passed`
 
 ## Update (2026-02-26, MD catalyst anchor quality improvement for price-action vs true cause)
-- Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
+- Implemented in `/Users/carsonwang/worktrees/spclaw/market-daily/src/spclaw/market_daily.py`:
   - added deterministic `_is_price_action_only_text(...)` detector to down-rank non-causal “how it traded” blurbs.
   - evidence scoring now applies a price-action-only penalty so causal explainers win ranking.
   - deterministic candidate gate now rejects price-action-only text for fallback-specific line generation.
   - anchor selection now:
     - penalizes price-action-only candidates,
     - boosts analyst-action causals (`upgrade`/`downgrade`/`price target`/`rating`).
-- Added regression tests in `/Users/carsonwang/worktrees/coatue-claw/market-daily/tests/test_market_daily.py`:
+- Added regression tests in `/Users/carsonwang/worktrees/spclaw/market-daily/tests/test_market_daily.py`:
   - `test_price_action_only_penalty_lowers_rank_vs_causal_upgrade`
   - `test_anchor_picker_prefers_upgrade_explainer_over_price_action`
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_market_daily.py tests/test_launchd_runtime.py` -> `86 passed`
 
 ## Update (2026-02-26, earnings recap manual-vs-scheduled slot isolation)
-- Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
+- Implemented in `/Users/carsonwang/worktrees/spclaw/market-daily/src/spclaw/market_daily.py`:
   - `run_earnings_recap(...)` now records daytime manual runs under `slot_name=earnings_recap_manual` when run outside the scheduled recap window.
   - scheduled run keeps `slot_name=earnings_recap`.
   - this prevents a daytime manual/test recap from consuming the nightly 7:00 PM PT scheduled slot.
-- Added regression test in `/Users/carsonwang/worktrees/coatue-claw/market-daily/tests/test_market_daily.py`:
+- Added regression test in `/Users/carsonwang/worktrees/spclaw/market-daily/tests/test_market_daily.py`:
   - `test_run_earnings_recap_manual_daytime_does_not_block_scheduled_slot`
   - validates same-day manual daytime run no longer blocks scheduled recap.
 - Validation:
@@ -174,26 +174,26 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Update (2026-02-26, board-seat hard reset scaffold)
 - Board Seat was intentionally scrapped to start fresh after repeated output quality failures.
-- Replaced `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py` with a reset scaffold:
+- Replaced `/Users/carsonwang/SPClaw/src/spclaw/board_seat_daily.py` with a reset scaffold:
   - `run-once` now skips all portcos with `reason=feature_reset_in_progress` while reset mode is on.
   - `status` now reports `status=reset_scaffold`, `reset_mode`, `board_seat_enabled`, and memory counts.
   - CLI contract is preserved (`run-once`, `status`, `seed-target`, `target-memory`, `export-ledger`, `refresh-funding`, `funding-quality-report`), but funding commands return `not_implemented` during reset.
   - target memory storage remains available for manual seeding and later rebuild continuity.
-- New reset env defaults documented in `/Users/carsonwang/CoatueClaw/.env.example`:
-  - `COATUE_CLAW_BOARD_SEAT_RESET_MODE=1`
-  - `COATUE_CLAW_BOARD_SEAT_ENABLED=0`
-- Replaced test suite in `/Users/carsonwang/CoatueClaw/tests/test_board_seat_daily.py` with reset-scaffold coverage.
+- New reset env defaults documented in `/Users/carsonwang/SPClaw/.env.example`:
+  - `SPCLAW_BOARD_SEAT_RESET_MODE=1`
+  - `SPCLAW_BOARD_SEAT_ENABLED=0`
+- Replaced test suite in `/Users/carsonwang/SPClaw/tests/test_board_seat_daily.py` with reset-scaffold coverage.
 
 ## Update (2026-02-26, board-seat writing fix v3: strict synthesis + fail-closed diagnostic)
-- Implemented strict no-passthrough writing mode in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
+- Implemented strict no-passthrough writing mode in `/Users/carsonwang/SPClaw/src/spclaw/board_seat_daily.py`:
   - defaults now enforce:
-    - `COATUE_CLAW_BOARD_SEAT_WRITING_MODE=synthetic_strict`
-    - `COATUE_CLAW_BOARD_SEAT_QUALITY_MODE=strict`
-    - `COATUE_CLAW_BOARD_SEAT_DELIVERY_MODE=diagnostic_fallback`
-    - `COATUE_CLAW_BOARD_SEAT_QUOTE_OVERLAP_MAX=0.28`
+    - `SPCLAW_BOARD_SEAT_WRITING_MODE=synthetic_strict`
+    - `SPCLAW_BOARD_SEAT_QUALITY_MODE=strict`
+    - `SPCLAW_BOARD_SEAT_DELIVERY_MODE=diagnostic_fallback`
+    - `SPCLAW_BOARD_SEAT_QUOTE_OVERLAP_MAX=0.28`
   - new synthesis controls:
-    - `COATUE_CLAW_BOARD_SEAT_SYNTH_MIN_FIELD_SCORE=0.72`
-    - `COATUE_CLAW_BOARD_SEAT_SYNTH_REWRITE_MAX=3`
+    - `SPCLAW_BOARD_SEAT_SYNTH_MIN_FIELD_SCORE=0.72`
+    - `SPCLAW_BOARD_SEAT_SYNTH_REWRITE_MAX=3`
 - Copy/passthrough controls strengthened:
   - stricter fact-card claim normalization (short factual claims only, CTA/nav/quote-like text dropped).
   - strict-mode hard fail on `quote_overlap_high`, semantic near-duplicate fields, and target-selection mismatch.
@@ -215,7 +215,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
 
 ## Update (2026-02-26, board-seat recovery v2: candidate-first + light guardrails)
-- Implemented in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
+- Implemented in `/Users/carsonwang/SPClaw/src/spclaw/board_seat_daily.py`:
   - candidate-first target selection pipeline:
     - new candidate pool builder from snippets + acquisition rows + search rows + rotation/defaults.
     - per-candidate evidence collection and deterministic scoring.
@@ -223,36 +223,36 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - drafting now uses selected-candidate context in the writer evidence payload.
   - quality gate now supports `light` mode:
     - quality and critic checks are advisory warnings (non-blocking) with one rewrite attempt.
-    - posting defaults to best cleaned draft (`COATUE_CLAW_BOARD_SEAT_DELIVERY_MODE=post`).
+    - posting defaults to best cleaned draft (`SPCLAW_BOARD_SEAT_DELIVERY_MODE=post`).
   - hard gates preserved/enforced:
     - company-only target validity.
-    - strict cooldown repeat block via target memory (`COATUE_CLAW_BOARD_SEAT_TARGET_LOCK_DAYS`).
+    - strict cooldown repeat block via target memory (`SPCLAW_BOARD_SEAT_TARGET_LOCK_DAYS`).
   - default configuration changes:
-    - `COATUE_CLAW_BOARD_SEAT_DELIVERY_MODE=post`
-    - `COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET=0`
-    - `COATUE_CLAW_BOARD_SEAT_QUOTE_OVERLAP_MAX=0.55`
+    - `SPCLAW_BOARD_SEAT_DELIVERY_MODE=post`
+    - `SPCLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET=0`
+    - `SPCLAW_BOARD_SEAT_QUOTE_OVERLAP_MAX=0.55`
     - added:
-      - `COATUE_CLAW_BOARD_SEAT_SELECTION_MODE=candidate_first`
-      - `COATUE_CLAW_BOARD_SEAT_CANDIDATE_POOL_SIZE=8`
-      - `COATUE_CLAW_BOARD_SEAT_CANDIDATE_EVIDENCE_PER_TARGET=6`
-      - `COATUE_CLAW_BOARD_SEAT_QUALITY_MODE=light`
-      - `COATUE_CLAW_BOARD_SEAT_CRITIC_ENABLED=1`
+      - `SPCLAW_BOARD_SEAT_SELECTION_MODE=candidate_first`
+      - `SPCLAW_BOARD_SEAT_CANDIDATE_POOL_SIZE=8`
+      - `SPCLAW_BOARD_SEAT_CANDIDATE_EVIDENCE_PER_TARGET=6`
+      - `SPCLAW_BOARD_SEAT_QUALITY_MODE=light`
+      - `SPCLAW_BOARD_SEAT_CRITIC_ENABLED=1`
   - run payload observability expanded:
     - `candidate_pool_size`, `candidate_shortlist`, `candidate_selected`, `candidate_selection_reason`, `candidate_selection_urls`
     - `quality_warnings`
     - `hard_gate_applied`
     - cooldown diagnostics (`cooldown_matched_posted_at_utc`) on hard-gate blocks.
-- Updated `/Users/carsonwang/CoatueClaw/.env.example` with new defaults/knobs for candidate-first and light quality mode.
-- Updated tests in `/Users/carsonwang/CoatueClaw/tests/test_board_seat_daily.py` for new hard-gate and delivery behavior, plus candidate selection payload coverage.
+- Updated `/Users/carsonwang/SPClaw/.env.example` with new defaults/knobs for candidate-first and light quality mode.
+- Updated tests in `/Users/carsonwang/SPClaw/tests/test_board_seat_daily.py` for new hard-gate and delivery behavior, plus candidate selection payload coverage.
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `79 passed`
   - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
 
 ## Update (2026-02-26, board-seat why-now thematic non-blocking relaxation)
-- Updated `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py` so `why_now` no longer blocks Board Seat posting when evidence is sparse:
+- Updated `/Users/carsonwang/SPClaw/src/spclaw/board_seat_daily.py` so `why_now` no longer blocks Board Seat posting when evidence is sparse:
   - new defaults:
-    - `COATUE_CLAW_BOARD_SEAT_WHY_NOW_MODE=thematic_non_blocking`
-    - `COATUE_CLAW_BOARD_SEAT_WHY_NOW_THEME_WINDOW_DAYS=120`
+    - `SPCLAW_BOARD_SEAT_WHY_NOW_MODE=thematic_non_blocking`
+    - `SPCLAW_BOARD_SEAT_WHY_NOW_THEME_WINDOW_DAYS=120`
   - added thematic fallback synthesis path for weak/empty `why_now`:
     - auto-generates a concise “past few months” trend line from available evidence context.
   - quality gate behavior changed:
@@ -269,19 +269,19 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - widened metadata enrichment beyond only tier-1 domain suffixes (still excluding wrapper/social/low-quality URLs).
 
 ## Update (2026-02-26, board-seat diagnostic observability propagation fix)
-- Patched `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py` to fix missing diagnostic payload maps after retarget/repitch copy flows:
+- Patched `/Users/carsonwang/SPClaw/src/spclaw/board_seat_daily.py` to fix missing diagnostic payload maps after retarget/repitch copy flows:
   - preserved new quality fields through all `BoardSeatDraft(...)` copy constructors:
     - `quality_failure_codes`
     - `fact_cards_count_by_field`
     - `quote_overlap_by_field`
   - hardened `_quality_fields_payload(...)` and `_high_conf_new_target_gate(...)` to always emit keyed defaults for all thesis fields.
-- Added tests in `/Users/carsonwang/CoatueClaw/tests/test_board_seat_daily.py`:
+- Added tests in `/Users/carsonwang/SPClaw/tests/test_board_seat_daily.py`:
   - payload map defaults present
   - target gate map defaults present
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `75 passed`
   - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
-- Deploy + runtime verification on Mac mini (`/opt/coatue-claw`):
+- Deploy + runtime verification on Mac mini (`/opt/spclaw`):
   - pulled `main` to `67934bf`, restarted OpenClaw, re-enabled 24x7, Slack probe healthy.
   - canary dry-run and live run confirmed payload maps now populated (not empty):
     - `fact_cards_count_by_field` includes all thesis fields with integer counts.
@@ -290,24 +290,24 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - channel `#anduril`, `ts=1772075456.507279`.
 
 ## Update (2026-02-26, board-seat fact-cards + diagnostic fallback recovery)
-- Implemented Board Seat output recovery in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
+- Implemented Board Seat output recovery in `/Users/carsonwang/SPClaw/src/spclaw/board_seat_daily.py`:
   - added fact-card pipeline (`FactCard`, `_build_fact_cards`) so writer input is sectioned claim cards instead of raw prose snippets.
   - added quote-overlap quality guard (`_quote_overlap_score`, `_quote_overlap_by_field`) with env threshold:
-    - `COATUE_CLAW_BOARD_SEAT_QUOTE_OVERLAP_MAX=0.22`
+    - `SPCLAW_BOARD_SEAT_QUOTE_OVERLAP_MAX=0.22`
   - added delivery router behavior:
-    - `COATUE_CLAW_BOARD_SEAT_DELIVERY_MODE=diagnostic_fallback|skip|post`
+    - `SPCLAW_BOARD_SEAT_DELIVERY_MODE=diagnostic_fallback|skip|post`
     - on unrecoverable quality failure in `diagnostic_fallback`, bot posts compact diagnostic text in the same portco channel instead of bad thesis text.
   - diagnostic posts are now persisted for audit with `source=quality_diagnostic_post`.
   - new env knobs implemented and documented:
-    - `COATUE_CLAW_BOARD_SEAT_FACT_CARD_MODE=always`
-    - `COATUE_CLAW_BOARD_SEAT_DIAGNOSTIC_MAX_REASONS=4`
-    - `COATUE_CLAW_BOARD_SEAT_DIAGNOSTIC_INCLUDE_URLS=1`
+    - `SPCLAW_BOARD_SEAT_FACT_CARD_MODE=always`
+    - `SPCLAW_BOARD_SEAT_DIAGNOSTIC_MAX_REASONS=4`
+    - `SPCLAW_BOARD_SEAT_DIAGNOSTIC_INCLUDE_URLS=1`
   - run payload expansion:
     - `delivery_mode_applied`, `quality_blocked`, `quality_failure_codes`, `fact_cards_count_by_field`, `quote_overlap_by_field`
   - status metrics expansion:
     - `diagnostic_fallback_count_7d`, `top_quality_failure_codes_7d`, `quote_overlap_violations_7d`, `fact_card_coverage_7d`
-- Updated `/Users/carsonwang/CoatueClaw/.env.example` with the new delivery/fact-card/diagnostic knobs.
-- Added/updated tests in `/Users/carsonwang/CoatueClaw/tests/test_board_seat_daily.py`:
+- Updated `/Users/carsonwang/SPClaw/.env.example` with the new delivery/fact-card/diagnostic knobs.
+- Added/updated tests in `/Users/carsonwang/SPClaw/tests/test_board_seat_daily.py`:
   - quote-overlap rejection regression
   - diagnostic-fallback delivery behavior
   - status/payload coverage for new fields
@@ -316,7 +316,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
 
 ## Update (2026-02-26, board-seat research+critic strict fail-closed pipeline)
-- Implemented strict Research+Critic quality recovery in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
+- Implemented strict Research+Critic quality recovery in `/Users/carsonwang/SPClaw/src/spclaw/board_seat_daily.py`:
   - default source policy switched to `tiered_trusted_first`.
   - added tier/page-type evidence modeling (`tier_1/2/3`, `news_report`, `press_release`, `product_docs`, `pricing_nav`, `company_profile`, `social`, `wrapper`).
   - section-aware evidence bundles are now produced for:
@@ -325,13 +325,13 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `whats_different_evidence`
     - `mos_risks_evidence`
   - added semantic Why-now recency assessment with new knobs:
-    - `COATUE_CLAW_BOARD_SEAT_WHY_NOW_RECENCY_DAYS` (default `45`)
+    - `SPCLAW_BOARD_SEAT_WHY_NOW_RECENCY_DAYS` (default `45`)
     - keeps `24h` phrasing rejection.
   - added critic scoring thresholds and model loop:
-    - `COATUE_CLAW_BOARD_SEAT_CRITIC_MIN_FIELD_SCORE` (default `0.70`)
-    - `COATUE_CLAW_BOARD_SEAT_CRITIC_MIN_OVERALL_SCORE` (default `0.78`)
+    - `SPCLAW_BOARD_SEAT_CRITIC_MIN_FIELD_SCORE` (default `0.70`)
+    - `SPCLAW_BOARD_SEAT_CRITIC_MIN_OVERALL_SCORE` (default `0.78`)
     - `_llm_critic_assess` + `_merge_quality_assessments` in rewrite loop.
-  - fail-closed behavior remains enforced (`COATUE_CLAW_BOARD_SEAT_QUALITY_FAIL_POLICY=skip`): posts skip with `reason=quality_gate_failed` after retries.
+  - fail-closed behavior remains enforced (`SPCLAW_BOARD_SEAT_QUALITY_FAIL_POLICY=skip`): posts skip with `reason=quality_gate_failed` after retries.
   - expanded sent/skipped payload observability:
     - `quality_field_scores`
     - `quality_failed_fields`
@@ -343,8 +343,8 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `top_failed_fields_7d`
     - `avg_rewrite_attempts_7d`
     - plus current quality/critic/source policy settings.
-- Added env examples in `/Users/carsonwang/CoatueClaw/.env.example` for all new knobs, including source policy and evidence fetch controls.
-- Test coverage updated in `/Users/carsonwang/CoatueClaw/tests/test_board_seat_daily.py` for:
+- Added env examples in `/Users/carsonwang/SPClaw/.env.example` for all new knobs, including source policy and evidence fetch controls.
+- Test coverage updated in `/Users/carsonwang/SPClaw/tests/test_board_seat_daily.py` for:
   - semantic recency validation
   - tiered source policy filtering
   - section evidence bundle contract
@@ -354,11 +354,11 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
 
 ## Update (2026-02-26, board-seat fail-closed quality gate + auto-revision)
-- Implemented Board Seat quality gate and rewrite loop in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
+- Implemented Board Seat quality gate and rewrite loop in `/Users/carsonwang/SPClaw/src/spclaw/board_seat_daily.py`:
   - source hygiene soft-block for low-signal web copy (`Book a Demo`, `See Pricing`, menu/CTA fragments).
   - deterministic draft quality assessor (`_assess_draft_quality`) with artifact contamination, near-duplicate line detection, information density checks, and soft evidence-coherence scoring.
-  - reviewer rewrite loop (`_quality_gate_draft`) with configurable retries (`COATUE_CLAW_BOARD_SEAT_REWRITE_MAX_RETRIES`, default `4`).
-  - fail-closed skip behavior when quality cannot be recovered (`reason=quality_gate_failed`) controlled by `COATUE_CLAW_BOARD_SEAT_QUALITY_FAIL_POLICY=skip`.
+  - reviewer rewrite loop (`_quality_gate_draft`) with configurable retries (`SPCLAW_BOARD_SEAT_REWRITE_MAX_RETRIES`, default `4`).
+  - fail-closed skip behavior when quality cannot be recovered (`reason=quality_gate_failed`) controlled by `SPCLAW_BOARD_SEAT_QUALITY_FAIL_POLICY=skip`.
   - fallback drafts now also pass through the same quality gate before posting (no fail-open fallback leak).
   - run payload observability added for `sent`/`skipped` rows:
     - `quality_gate_passed`
@@ -373,13 +373,13 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `quality_fail_policy`
     - `review_model`
     - `last_quality_run_metrics`
-- Added env examples in `/Users/carsonwang/CoatueClaw/.env.example`:
-  - `COATUE_CLAW_BOARD_SEAT_QUALITY_GATE_ENABLED=1`
-  - `COATUE_CLAW_BOARD_SEAT_REWRITE_MAX_RETRIES=4`
-  - `COATUE_CLAW_BOARD_SEAT_SOURCE_GATE_MODE=soft_block`
-  - `COATUE_CLAW_BOARD_SEAT_QUALITY_FAIL_POLICY=skip`
-  - `COATUE_CLAW_BOARD_SEAT_REVIEW_MODEL=gpt-5.2-chat-latest`
-- Added regression coverage in `/Users/carsonwang/CoatueClaw/tests/test_board_seat_daily.py`:
+- Added env examples in `/Users/carsonwang/SPClaw/.env.example`:
+  - `SPCLAW_BOARD_SEAT_QUALITY_GATE_ENABLED=1`
+  - `SPCLAW_BOARD_SEAT_REWRITE_MAX_RETRIES=4`
+  - `SPCLAW_BOARD_SEAT_SOURCE_GATE_MODE=soft_block`
+  - `SPCLAW_BOARD_SEAT_QUALITY_FAIL_POLICY=skip`
+  - `SPCLAW_BOARD_SEAT_REVIEW_MODEL=gpt-5.2-chat-latest`
+- Added regression coverage in `/Users/carsonwang/SPClaw/tests/test_board_seat_daily.py`:
   - CTA contamination cleanup (`Book a Demo` / `See Pricing`) in run output.
   - soft source-gate target-description filtering.
   - near-duplicate thesis quality detection.
@@ -391,12 +391,12 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `PYTHONPATH=src python3 -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
 
 ## Update (2026-02-25, board-seat candidate quality recovery: medium+new + broad weighted scoring)
-- Implemented candidate quality recovery in `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/board_seat_daily.py`:
+- Implemented candidate quality recovery in `/Users/carsonwang/worktrees/spclaw/board-seat/src/spclaw/board_seat_daily.py`:
   - target confidence model now defaults to `broad_weighted_v1` with deterministic score bands:
-    - `COATUE_CLAW_BOARD_SEAT_CONFIDENCE_HIGH_MIN` (default `2.40`)
-    - `COATUE_CLAW_BOARD_SEAT_CONFIDENCE_MEDIUM_MIN` (default `1.35`)
+    - `SPCLAW_BOARD_SEAT_CONFIDENCE_HIGH_MIN` (default `2.40`)
+    - `SPCLAW_BOARD_SEAT_CONFIDENCE_MEDIUM_MIN` (default `1.35`)
   - gate policy now allows **new + High/Medium** when enabled:
-    - `COATUE_CLAW_BOARD_SEAT_ALLOW_MEDIUM_NEW_TARGET=1` (default)
+    - `SPCLAW_BOARD_SEAT_ALLOW_MEDIUM_NEW_TARGET=1` (default)
   - conceptual target rejection expanded via `_is_conceptual_target_name(...)` and shared validation:
     - blocks generic targets like `LLMs`, `ROI`, `workflow`, `platform`
     - preserves concrete startup names like `Browserbase`, `Scale AI`
@@ -405,7 +405,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `target_confidence_reasons`
     - `target_validation_reason`
   - dry-run/live `sent` + `skipped` rows now include the confidence debug fields for diagnosis.
-- Added/updated regression coverage in `/Users/carsonwang/worktrees/coatue-claw/board-seat/tests/test_board_seat_daily.py`:
+- Added/updated regression coverage in `/Users/carsonwang/worktrees/spclaw/board-seat/tests/test_board_seat_daily.py`:
   - conceptual `LLMs` target rejected and retargeted to concrete company
   - medium-confidence new target allowed under broad weighted model
   - low-score target still rejected
@@ -415,22 +415,22 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Update (2026-02-25, board-seat API health + Brave key alias support)
 - Diagnosed OpenAI board-seat quality degradation causes:
-  - `COATUE_CLAW_BRAVE_API_KEY` was set, but resolver only read `BRAVE_SEARCH_API_KEY`; Brave rows were effectively disabled.
+  - `SPCLAW_BRAVE_API_KEY` was set, but resolver only read `BRAVE_SEARCH_API_KEY`; Brave rows were effectively disabled.
   - SerpAPI endpoint currently responds `HTTP 429 Too Many Requests` for board-seat queries in this environment, yielding zero Google rows.
-- Implemented key resolver compatibility in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
+- Implemented key resolver compatibility in `/Users/carsonwang/SPClaw/src/spclaw/board_seat_daily.py`:
   - `_brave_search_api_key()` now accepts both:
-    - `COATUE_CLAW_BRAVE_API_KEY`
+    - `SPCLAW_BRAVE_API_KEY`
     - `BRAVE_SEARCH_API_KEY`
 - Added regression test:
-  - `/Users/carsonwang/CoatueClaw/tests/test_board_seat_daily.py::test_brave_api_key_accepts_coatue_claw_alias`
+  - `/Users/carsonwang/SPClaw/tests/test_board_seat_daily.py::test_brave_api_key_accepts_spclaw_alias`
 - Updated env sample:
-  - `/Users/carsonwang/CoatueClaw/.env.example` now lists `COATUE_CLAW_BRAVE_API_KEY`.
+  - `/Users/carsonwang/SPClaw/.env.example` now lists `SPCLAW_BRAVE_API_KEY`.
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `46 passed`
   - `PYTHONPATH=src python3 -m pytest -q` -> `310 passed`
 
 ## Update (2026-02-25, strict new-target gate: skip when no high-confidence new target)
-- Implemented a strict board-seat post gate in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
+- Implemented a strict board-seat post gate in `/Users/carsonwang/SPClaw/src/spclaw/board_seat_daily.py`:
   - posts now require both:
     - a **new target** (not already in target memory for that company)
     - **High confidence** target evidence (`High` from source-confidence scoring)
@@ -438,10 +438,10 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `reason=no_high_confidence_new_target`
     - `gate_reason` in `{invalid_target,target_not_new,target_confidence_not_high}`
 - Added env control (default enabled):
-  - `COATUE_CLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET=1`
+  - `SPCLAW_BOARD_SEAT_REQUIRE_HIGH_CONF_NEW_TARGET=1`
 - Status payload now surfaces the gate mode:
   - `require_high_conf_new_target`
-- Added regression coverage in `/Users/carsonwang/CoatueClaw/tests/test_board_seat_daily.py`:
+- Added regression coverage in `/Users/carsonwang/SPClaw/tests/test_board_seat_daily.py`:
   - low-confidence target gets rejected by gate
   - non-new target gets rejected even when source confidence is high
   - run-once dry-run skips when gate is not satisfied
@@ -450,12 +450,12 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `PYTHONPATH=src python3 -m pytest -q` -> `309 passed`
 
 ## Update (2026-02-25, board-seat target hardening to reject conceptual/non-company targets)
-- Fixed board-seat target selection in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py` so conceptual labels do not pass as acquisition targets:
+- Fixed board-seat target selection in `/Users/carsonwang/SPClaw/src/spclaw/board_seat_daily.py` so conceptual labels do not pass as acquisition targets:
   - added `aifirst` to `ACQ_PLACEHOLDER_TARGETS`
   - added `ai-first` / `ai first` to `ACQ_INVALID_TARGET_TERMS`
   - added `roi` to `TARGET_TOKEN_STOPWORDS`
   - introduced `_canonical_target_key(...)` and used it in target validation/candidate filtering to reject possessive/pluralized self-target variants (for example `OpenAIs` for `OpenAI`)
-- Added regression coverage in `/Users/carsonwang/CoatueClaw/tests/test_board_seat_daily.py`:
+- Added regression coverage in `/Users/carsonwang/SPClaw/tests/test_board_seat_daily.py`:
   - `test_is_valid_target_name_rejects_ai_first_placeholder`
   - `test_is_valid_target_name_rejects_possessive_company_variant`
   - `test_is_valid_target_name_rejects_metric_token`
@@ -465,18 +465,18 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `PYTHONPATH=src python3 -m pytest -q` -> `306 passed`
 
 ## Update (2026-02-24, board-seat sqlite connection lifecycle fix for ledger FD exhaustion)
-- Fixed file-descriptor leak in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
+- Fixed file-descriptor leak in `/Users/carsonwang/SPClaw/src/spclaw/board_seat_daily.py`:
   - `BoardSeatStore._connect()` is now a context manager that always commits/rolls back and closes the sqlite connection.
   - previous behavior relied on sqlite connection context semantics, which do not close the connection and can accumulate open descriptors under repeated board-seat operations.
-- Added regression coverage in `/Users/carsonwang/CoatueClaw/tests/test_board_seat_daily.py`:
+- Added regression coverage in `/Users/carsonwang/SPClaw/tests/test_board_seat_daily.py`:
   - `test_store_connect_context_closes_connection` validates commit + close behavior for `_connect()` context lifecycle.
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `38 passed`
   - `PYTHONPATH=src python3 -m pytest -q` -> `257 passed`
 
 ### Runtime verification (Mac mini)
-1. Pulled latest `main` (`6a62458`) to `/opt/coatue-claw`, restarted gateway, and re-ran board-seat dry-run:
-   - `/opt/coatue-claw/.venv/bin/python -m coatue_claw.board_seat_daily run-once --force --dry-run`
+1. Pulled latest `main` (`6a62458`) to `/opt/spclaw`, restarted gateway, and re-ran board-seat dry-run:
+   - `/opt/spclaw/.venv/bin/python -m spclaw.board_seat_daily run-once --force --dry-run`
 2. Confirmed ledger payload no longer reports FD exhaustion:
    - `ledger_error=None`
    - `ledger` now includes expected output paths:
@@ -490,12 +490,12 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - Integrated `origin/codex/agent-board-seat` into `main`:
   - merge commit: `fd8a942` (`Merge board-seat funding hardening and strict repitch governance`)
   - merge conflicts resolved in:
-    - `/Users/carsonwang/CoatueClaw/Makefile`
-    - `/Users/carsonwang/CoatueClaw/docs/handoffs/current-plan.md`
-    - `/Users/carsonwang/CoatueClaw/docs/handoffs/live-session.md`
+    - `/Users/carsonwang/SPClaw/Makefile`
+    - `/Users/carsonwang/SPClaw/docs/handoffs/current-plan.md`
+    - `/Users/carsonwang/SPClaw/docs/handoffs/live-session.md`
 - Integrator validation on merged tree:
   - `PYTHONPATH=src python3 -m pytest -q` -> `256 passed`
-- Mac mini deploy verification (`/opt/coatue-claw`):
+- Mac mini deploy verification (`/opt/spclaw`):
   - pulled latest `main` and restarted runtime via `make openclaw-restart`
   - `make openclaw-slack-status` recovered to healthy probe (`ok=true`) after restart settle
   - `make openclaw-board-seat-status` confirms:
@@ -503,7 +503,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - funding quality/verification payloads present
   - `make openclaw-board-seat-refresh-funding` completed (`entities_refreshed=23`)
   - `make openclaw-board-seat-funding-report` completed:
-    - `/opt/coatue-claw-data/artifacts/board-seat/funding-quality-report-2026-02-24.md`
+    - `/opt/spclaw-data/artifacts/board-seat/funding-quality-report-2026-02-24.md`
   - `make openclaw-board-seat-run-once DRY_RUN=1 FORCE=1` executed:
     - strict repitch gate active (`repitch_not_significant_enough` paths surfaced)
     - hard 14-day no-repeat behavior active
@@ -511,10 +511,10 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - ledger export reported `[Errno 24] Too many open files` on target ledger write path (non-fatal for run result; follow-up candidate).
 
 ## Update (2026-02-24, launchd 24x7 enable resilience for transient bootstrap errors)
-- Hardened `/Users/carsonwang/CoatueClaw/src/coatue_claw/launchd_runtime.py` against intermittent launchctl bootstrap failures seen in `make openclaw-24x7-enable`:
-  - `_bootstrap(...)` now retries transient `Input/output error` failures (configurable via `COATUE_CLAW_LAUNCHCTL_BOOTSTRAP_RETRIES`, default `3`).
+- Hardened `/Users/carsonwang/SPClaw/src/spclaw/launchd_runtime.py` against intermittent launchctl bootstrap failures seen in `make openclaw-24x7-enable`:
+  - `_bootstrap(...)` now retries transient `Input/output error` failures (configurable via `SPCLAW_LAUNCHCTL_BOOTSTRAP_RETRIES`, default `3`).
   - `enable_services(...)` now raises label-specific errors (`failed enabling <label>: ...`) so failing service is explicit.
-- Added regression coverage in `/Users/carsonwang/CoatueClaw/tests/test_launchd_runtime.py`:
+- Added regression coverage in `/Users/carsonwang/SPClaw/tests/test_launchd_runtime.py`:
   - retry path succeeds after first transient bootstrap failure
   - enable error includes failing service label
 - Validation:
@@ -522,14 +522,14 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `PYTHONPATH=src python3 -m pytest -q tests/test_market_daily.py tests/test_launchd_runtime.py` -> `44 passed`
 
 ### Runtime verification (Mac mini)
-1. Pulled `main` to `/opt/coatue-claw` (`da144cd`) and restarted gateway:
+1. Pulled `main` to `/opt/spclaw` (`da144cd`) and restarted gateway:
    - `make openclaw-restart`
 2. Re-ran 24x7 enable:
    - `make openclaw-24x7-enable` -> success
 3. Verified scheduler load state:
    - `make openclaw-24x7-status` shows all service labels loaded, including:
-     - `com.coatueclaw.market-daily`
-     - `com.coatueclaw.market-daily-earnings-recap`
+     - `com.spclaw.market-daily`
+     - `com.spclaw.market-daily-earnings-recap`
 4. Verified Slack health:
    - `make openclaw-slack-status` -> `probe.ok=true`
 
@@ -538,35 +538,35 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - Mac mini SSH host alias is `mini` (`ssh mini`)
   - explicit guardrail added to avoid storing SSH passwords/secrets in git
 - Integrator deploy/health check was executed via `ssh mini`:
-  - pulled latest `main` in `/opt/coatue-claw` (now at `e5ffeb7`)
+  - pulled latest `main` in `/opt/spclaw` (now at `e5ffeb7`)
   - `make openclaw-restart` succeeded
   - `make openclaw-slack-status` probe now reports `ok: true`
   - `make openclaw-slack-logs` confirms Slack socket mode connected
 
 ## Update (2026-02-24, HFA V1 docs-first workflow shipped on `codex/agent-hf-analyst`)
 - Implemented HFA V1 modules:
-  - `src/coatue_claw/hf_document_extract.py`
-  - `src/coatue_claw/hf_prompt_contract.py`
-  - `src/coatue_claw/hf_store.py`
-  - `src/coatue_claw/hf_analyst.py`
+  - `src/spclaw/hf_document_extract.py`
+  - `src/spclaw/hf_prompt_contract.py`
+  - `src/spclaw/hf_store.py`
+  - `src/spclaw/hf_analyst.py`
 - Implemented docs-first extraction for:
   - PDF (`pypdf`)
   - DOCX (`python-docx`)
   - PPTX (`python-pptx`)
   - TXT/MD/CSV (native read path)
-- Added HFA run persistence and audit tables in `/opt/coatue-claw-data/db/hf_analyst.sqlite`:
+- Added HFA run persistence and audit tables in `/opt/spclaw-data/db/hf_analyst.sqlite`:
   - `hf_runs`
   - `hf_run_inputs`
   - `hf_run_sections`
   - `hf_dm_autoruns`
-- Added CLI surface in `src/coatue_claw/cli.py`:
+- Added CLI surface in `src/spclaw/cli.py`:
   - `claw hfa analyze --channel <id> --thread-ts <ts> [--question "..."] [--dry-run]`
   - `claw hfa status [--channel <id>] [--thread-ts <ts>]`
-- Added Slack HFA workflow in `src/coatue_claw/slack_bot.py`:
+- Added Slack HFA workflow in `src/spclaw/slack_bot.py`:
   - explicit `hfa analyze [optional question]`
   - explicit `hfa status`
   - DM auto-run on new file sets only (deduped by file-set hash in `hf_dm_autoruns`)
-- Added HFA memory writeback helper in `src/coatue_claw/memory_runtime.py`:
+- Added HFA memory writeback helper in `src/spclaw/memory_runtime.py`:
   - `ingest_hfa_facts(...)` persists thesis/catalysts/risks/score/artifact pointer
   - no full memo body writeback
 - Added tests:
@@ -582,17 +582,17 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - `PYTHONPATH=src python3 -m pytest -q tests/test_hf_document_extract.py tests/test_hf_prompt_contract.py tests/test_hf_analyst.py` -> `12 passed`
 - `PYTHONPATH=src python3 -m pytest -q tests/test_memory_runtime.py tests/test_slack_routing.py tests/test_slack_file_ingest.py` -> `9 passed`
 - `PYTHONPATH=src python3 -m pytest -q` -> `240 passed`
-- `python3 -m compileall -q src/coatue_claw/hf_document_extract.py src/coatue_claw/hf_prompt_contract.py src/coatue_claw/hf_store.py src/coatue_claw/hf_analyst.py src/coatue_claw/cli.py src/coatue_claw/slack_bot.py src/coatue_claw/memory_runtime.py` -> pass
+- `python3 -m compileall -q src/spclaw/hf_document_extract.py src/spclaw/hf_prompt_contract.py src/spclaw/hf_store.py src/spclaw/hf_analyst.py src/spclaw/cli.py src/spclaw/slack_bot.py src/spclaw/memory_runtime.py` -> pass
 
 ### Integrator Runtime Steps (after merge to `main`)
-1. `cd /opt/coatue-claw && git pull origin main`
+1. `cd /opt/spclaw && git pull origin main`
 2. `make openclaw-restart`
 3. `make openclaw-slack-status`
 4. In Slack thread with uploaded docs, run:
    - `hfa analyze`
 5. In DM with uploaded docs (no command), verify single auto-run and no duplicate rerun on same file set.
 ## Update (2026-02-24, MD catalyst + link relevance hardening for AMD/INTC regression)
-- Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
+- Implemented in `/Users/carsonwang/worktrees/spclaw/market-daily/src/spclaw/market_daily.py`:
   - Added deterministic `_is_low_signal_x_post(...)` gate and applied it before X evidence candidate scoring.
   - Added direct evidence fallback path for catalyst generation:
     - if cluster confirmation/decisive-primary fails, high-quality Yahoo/Web causal headlines can still generate specific reason lines.
@@ -603,7 +603,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - Added `CatalystEvidence` trace fields:
     - `cause_mode`, `cause_source_type`, `cause_source_url`
   - Added artifact/debug trace output for cause fields.
-- Tests updated in `/Users/carsonwang/worktrees/coatue-claw/market-daily/tests/test_market_daily.py`:
+- Tests updated in `/Users/carsonwang/worktrees/spclaw/market-daily/tests/test_market_daily.py`:
   - promo X spam rejection
   - direct evidence fallback without cluster match
   - fallback link policy (`[X]` suppressed)
@@ -618,20 +618,20 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 3. Run `md debug AMD` / `md debug INTC` after next cycle and verify `cause_mode` + `cause_source_*` fields in debug output.
 
 ## Update (2026-02-24, Market Daily earnings preview + 7PM recap)
-- Implemented in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/market_daily.py`:
+- Implemented in `/Users/carsonwang/worktrees/spclaw/market-daily/src/spclaw/market_daily.py`:
   - Morning `open` slot MD posts now append `Earnings After Close Today` using final MD universe members.
   - Added nightly earnings recap runner:
-    - command: `python -m coatue_claw.market_daily run-earnings-recap`
-    - default schedule time: `19:00` local runtime (`COATUE_CLAW_MD_EARNINGS_RECAP_TIME`)
+    - command: `python -m spclaw.market_daily run-earnings-recap`
+    - default schedule time: `19:00` local runtime (`SPCLAW_MD_EARNINGS_RECAP_TIME`)
     - recap selection: top 4 same-day reporters by absolute move since regular close
     - output contract: 2-4 bullet recap per ticker with source links; deterministic fallback when LLM unavailable.
-- CLI wiring in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/cli.py`:
+- CLI wiring in `/Users/carsonwang/worktrees/spclaw/market-daily/src/spclaw/cli.py`:
   - `claw market-daily run-earnings-recap --manual|--force|--dry-run|--channel`
-- Slack wiring in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/slack_bot.py`:
+- Slack wiring in `/Users/carsonwang/worktrees/spclaw/market-daily/src/spclaw/slack_bot.py`:
   - `md earnings now`
   - `md earnings now force`
-- launchd/runtime wiring in `/Users/carsonwang/worktrees/coatue-claw/market-daily/src/coatue_claw/launchd_runtime.py`:
-  - new service label: `com.coatueclaw.market-daily-earnings-recap`
+- launchd/runtime wiring in `/Users/carsonwang/worktrees/spclaw/market-daily/src/spclaw/launchd_runtime.py`:
+  - new service label: `com.spclaw.market-daily-earnings-recap`
   - included in `marketdaily` service selector and `all` bundle.
 - ops/runbook updates:
   - `Makefile`: `openclaw-market-daily-earnings-recap-run-once`
@@ -651,10 +651,10 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
    - `make openclaw-market-daily-earnings-recap-run-once DRY_RUN=1`
    - Slack: `md status` should show `earnings_recap_time`.
 ## Update (2026-02-24, Board Seat hard 14-day no-repeat + strict repitch evidence gate)
-- Implemented strict repitch governance in `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/board_seat_daily.py`:
+- Implemented strict repitch governance in `/Users/carsonwang/worktrees/spclaw/board-seat/src/spclaw/board_seat_daily.py`:
   - hard no-repeat rule: same target cannot be re-pitched within `14` days (non-bypassable).
-  - default target lock updated to `14` days (`COATUE_CLAW_BOARD_SEAT_TARGET_LOCK_DAYS`, minimum enforced 14).
-  - `COATUE_CLAW_BOARD_SEAT_ALLOW_REPEAT_TARGETS=1` now only bypasses configurable lock window beyond 14 days; it cannot bypass the hard 14-day rule.
+  - default target lock updated to `14` days (`SPCLAW_BOARD_SEAT_TARGET_LOCK_DAYS`, minimum enforced 14).
+  - `SPCLAW_BOARD_SEAT_ALLOW_REPEAT_TARGETS=1` now only bypasses configurable lock window beyond 14 days; it cannot bypass the hard 14-day rule.
 - Added continuous promising-target event tracking:
   - new DB table: `board_seat_target_events`
   - each run tracks event flow for promising targets (current target + rotation + target memory) and stores normalized event rows with:
@@ -678,12 +678,12 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `repitch_new_evidence_json`
 
 ### Validation
-- `python3 -m compileall -q src/coatue_claw/board_seat_daily.py` -> pass
+- `python3 -m compileall -q src/spclaw/board_seat_daily.py` -> pass
 - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `37 passed`
 - `PYTHONPATH=src python3 -m pytest -q` -> `236 passed`
 
 ## Update (2026-02-24, Board Seat funding accuracy hardening: web-first + warning-mode)
-- Implemented funding accuracy hardening in `/Users/carsonwang/worktrees/coatue-claw/board-seat/src/coatue_claw/board_seat_daily.py`:
+- Implemented funding accuracy hardening in `/Users/carsonwang/worktrees/spclaw/board-seat/src/spclaw/board_seat_daily.py`:
   - `FundingSnapshot` expanded with:
     - `evidence_count`
     - `distinct_domains`
@@ -693,13 +693,13 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - funding evidence pipeline now normalizes and scores web rows before extraction:
     - canonical URL normalization + dedupe
     - low-signal row rejection
-    - top-N evidence selection (`COATUE_CLAW_BOARD_SEAT_FUNDING_WEB_TOP_ROWS`, default `8`)
+    - top-N evidence selection (`SPCLAW_BOARD_SEAT_FUNDING_WEB_TOP_ROWS`, default `8`)
     - conflict flag detection (`major_round_mismatch`, `major_amount_mismatch`, `minor_date_variance`)
   - funding confidence/verification contract added:
     - env controls:
-      - `COATUE_CLAW_BOARD_SEAT_FUNDING_MIN_DOMAINS` (default `2`)
-      - `COATUE_CLAW_BOARD_SEAT_FUNDING_LOW_CONF_THRESHOLD` (default `0.55`)
-      - `COATUE_CLAW_BOARD_SEAT_FUNDING_WARNING_MODE` (default `1`)
+      - `SPCLAW_BOARD_SEAT_FUNDING_MIN_DOMAINS` (default `2`)
+      - `SPCLAW_BOARD_SEAT_FUNDING_LOW_CONF_THRESHOLD` (default `0.55`)
+      - `SPCLAW_BOARD_SEAT_FUNDING_WARNING_MODE` (default `1`)
     - low-confidence funding now appends warning line:
       - `Warning: Funding data is low-confidence; verify before action.`
   - status telemetry expanded:
@@ -714,7 +714,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `openclaw-board-seat-funding-report`
 
 ### Validation
-- `python3 -m compileall -q src/coatue_claw/board_seat_daily.py` -> pass
+- `python3 -m compileall -q src/spclaw/board_seat_daily.py` -> pass
 - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `35 passed`
 
 ### Tests added/updated
@@ -726,41 +726,41 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - status funding quality metric payload coverage
 
 ### Immediate runtime steps (Mac mini integrator)
-1. `cd /opt/coatue-claw && git pull origin main`
-2. Set runtime keys in `/opt/coatue-claw/.env.prod` for web-first funding:
+1. `cd /opt/spclaw && git pull origin main`
+2. Set runtime keys in `/opt/spclaw/.env.prod` for web-first funding:
    - `BRAVE_SEARCH_API_KEY`
-   - `COATUE_CLAW_BOARD_SEAT_GOOGLE_SERP_API_KEY` (or `SERPAPI_API_KEY`)
-   - keep `COATUE_CLAW_BOARD_SEAT_CRUNCHBASE_ENABLED=0` until Crunchbase key is provisioned
+   - `SPCLAW_BOARD_SEAT_GOOGLE_SERP_API_KEY` (or `SERPAPI_API_KEY`)
+   - keep `SPCLAW_BOARD_SEAT_CRUNCHBASE_ENABLED=0` until Crunchbase key is provisioned
 3. `make openclaw-restart`
 4. `make openclaw-board-seat-status`
 5. `make openclaw-board-seat-refresh-funding`
 6. `make openclaw-board-seat-funding-report`
 
 ## Update (2026-02-24, parallel Codex branch/worktree protocol + agent handoff docs)
-- Added parallel-branch operating protocol to `/Users/carsonwang/CoatueClaw/AGENTS.md`:
+- Added parallel-branch operating protocol to `/Users/carsonwang/SPClaw/AGENTS.md`:
   - branch naming standard: `codex/agent-board-seat`, `codex/agent-chart-day`, `codex/agent-hf-analyst`, `codex/agent-market-daily`
   - integrator-only deploy gate preserved (`main` merge -> restart + runtime verification).
 - Added per-agent continuity docs:
-  - `/Users/carsonwang/CoatueClaw/docs/handoffs/agent-board-seat.md`
-  - `/Users/carsonwang/CoatueClaw/docs/handoffs/agent-chart-day.md`
-  - `/Users/carsonwang/CoatueClaw/docs/handoffs/agent-hf-analyst.md`
-  - `/Users/carsonwang/CoatueClaw/docs/handoffs/agent-market-daily.md`
+  - `/Users/carsonwang/SPClaw/docs/handoffs/agent-board-seat.md`
+  - `/Users/carsonwang/SPClaw/docs/handoffs/agent-chart-day.md`
+  - `/Users/carsonwang/SPClaw/docs/handoffs/agent-hf-analyst.md`
+  - `/Users/carsonwang/SPClaw/docs/handoffs/agent-market-daily.md`
 - Worktree bootstrap target paths standardized:
-  - `/Users/carsonwang/worktrees/coatue-claw/board-seat`
-  - `/Users/carsonwang/worktrees/coatue-claw/chart-day`
-  - `/Users/carsonwang/worktrees/coatue-claw/hf-analyst`
-  - `/Users/carsonwang/worktrees/coatue-claw/market-daily`
+  - `/Users/carsonwang/worktrees/spclaw/board-seat`
+  - `/Users/carsonwang/worktrees/spclaw/chart-day`
+  - `/Users/carsonwang/worktrees/spclaw/hf-analyst`
+  - `/Users/carsonwang/worktrees/spclaw/market-daily`
 - Created and pushed parallel role branches:
   - `origin/codex/agent-board-seat`
   - `origin/codex/agent-chart-day`
   - `origin/codex/agent-hf-analyst`
   - `origin/codex/agent-market-daily`
 - Verified active worktrees and branch mapping:
-  - `/Users/carsonwang/CoatueClaw` -> `main`
-  - `/Users/carsonwang/worktrees/coatue-claw/board-seat` -> `codex/agent-board-seat`
-  - `/Users/carsonwang/worktrees/coatue-claw/chart-day` -> `codex/agent-chart-day`
-  - `/Users/carsonwang/worktrees/coatue-claw/hf-analyst` -> `codex/agent-hf-analyst`
-  - `/Users/carsonwang/worktrees/coatue-claw/market-daily` -> `codex/agent-market-daily`
+  - `/Users/carsonwang/SPClaw` -> `main`
+  - `/Users/carsonwang/worktrees/spclaw/board-seat` -> `codex/agent-board-seat`
+  - `/Users/carsonwang/worktrees/spclaw/chart-day` -> `codex/agent-chart-day`
+  - `/Users/carsonwang/worktrees/spclaw/hf-analyst` -> `codex/agent-hf-analyst`
+  - `/Users/carsonwang/worktrees/spclaw/market-daily` -> `codex/agent-market-daily`
 
 ### Immediate next steps
 1. Start one Codex session per worktree and keep edits within role-owned files.
@@ -768,7 +768,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 3. Merge to `main` via integrator queue only; restart runtime once per merged batch.
 
 ## Update (2026-02-24, Board Seat V6 structured headers + target funding reliability)
-- Implemented Board Seat V6 in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`.
+- Implemented Board Seat V6 in `/Users/carsonwang/SPClaw/src/spclaw/board_seat_daily.py`.
 - Output contract changes now live:
   - removed `Idea confidence` line from thesis.
   - added required `*Target does:*` directly under `*Idea:*`.
@@ -782,8 +782,8 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - plaintext message remains canonical for storage, memory parsing, repeat guard, and backfill.
   - if Slack rejects rich-text blocks (`invalid_blocks`/`invalid_arguments`), posting auto-falls back to plaintext contract.
 - Funding reliability updates:
-  - default funding scope is target company (`COATUE_CLAW_BOARD_SEAT_FUNDING_SCOPE=target`).
-  - Crunchbase API is primary funding provider when key is set (`COATUE_CLAW_CRUNCHBASE_API_KEY`).
+  - default funding scope is target company (`SPCLAW_BOARD_SEAT_FUNDING_SCOPE=target`).
+  - Crunchbase API is primary funding provider when key is set (`SPCLAW_CRUNCHBASE_API_KEY`).
   - web funding fallback merges Brave + Google SERP evidence when Crunchbase is unavailable or sparse.
   - unknown funding fallback remains explicit:
     - `Target funding data is limited; verify via Crunchbase/PitchBook before action.`
@@ -793,7 +793,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ### Validation
 - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `28 passed`
-- `python3 -m compileall -q src/coatue_claw/board_seat_daily.py` -> pass
+- `python3 -m compileall -q src/spclaw/board_seat_daily.py` -> pass
 
 ### Tests added/updated
 - rejects 24h `Why now` phrasing at draft validation.
@@ -802,11 +802,11 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - verifies funding resolution prefers Crunchbase primary when available.
 
 ### Immediate runtime steps (Mac mini)
-1. `cd /opt/coatue-claw && git pull origin main`
+1. `cd /opt/spclaw && git pull origin main`
 2. `make openclaw-restart`
 3. `make openclaw-slack-status`
 4. Dry-run one channel:
-   - `COATUE_CLAW_BOARD_SEAT_PORTCOS='OpenAI:openai' /opt/coatue-claw/.venv/bin/python -m coatue_claw.board_seat_daily run-once --force --dry-run`
+   - `SPCLAW_BOARD_SEAT_PORTCOS='OpenAI:openai' /opt/spclaw/.venv/bin/python -m spclaw.board_seat_daily run-once --force --dry-run`
 5. Live-post one channel and verify rendering:
    - header styling visible
    - `Target does` present
@@ -814,9 +814,9 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
    - funding snapshot is target-scoped
 
 ## Update (2026-02-24, X-chart scheduled slot miss fix for Morning/Afternoon/Evening posts)
-- Root cause identified in `src/coatue_claw/x_chart_daily.py`:
+- Root cause identified in `src/spclaw/x_chart_daily.py`:
   - launchd runs scout on `StartInterval=3600`, which drifts by minute offset from service load time.
-  - slot detection previously only posted when runtime minute was within ±20 of `COATUE_CLAW_X_CHART_WINDOWS` (`09:00,12:00,18:00`), so an offset runtime (for example `:34`) could miss all slots.
+  - slot detection previously only posted when runtime minute was within ±20 of `SPCLAW_X_CHART_WINDOWS` (`09:00,12:00,18:00`), so an offset runtime (for example `:34`) could miss all slots.
 - Fixed `_slot_key(...)` behavior:
   - scheduled runs now map to the most recent elapsed configured window on that local day.
   - dedupe (`was_slot_posted`) still guarantees one post per slot/day.
@@ -830,31 +830,31 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ### Runtime verification (Mac mini)
 1. Deployed latest main (`bb0472f`) and restarted runtime:
-   - `cd /opt/coatue-claw && git pull origin main`
+   - `cd /opt/spclaw && git pull origin main`
    - `make openclaw-restart`
 2. Verified scheduler/service health:
-   - `make openclaw-24x7-status` -> `com.coatueclaw.x-chart-daily` loaded
+   - `make openclaw-24x7-status` -> `com.spclaw.x-chart-daily` loaded
    - `make openclaw-x-chart-status` showed stale scheduled pointer pre-fix (`last_scheduled_posted_at_utc=2026-02-21...`)
 3. Live validation at `Tue Feb 24 10:55:57 PST 2026`:
-   - `/opt/coatue-claw/.venv/bin/python -m coatue_claw.x_chart_daily run-once`
+   - `/opt/spclaw/.venv/bin/python -m spclaw.x_chart_daily run-once`
    - result posted scheduled slot `2026-02-24-09:00` with convention `Coatue Chart of the Morning`
    - `make openclaw-x-chart-status` now shows refreshed scheduled post timestamp (`2026-02-24T18:56:04.178971+00:00`)
 
 ## Update (2026-02-24, Board Seat V6 target-memory lock + ledger + format guard)
-- Implemented hard target-memory controls in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`:
+- Implemented hard target-memory controls in `/Users/carsonwang/SPClaw/src/spclaw/board_seat_daily.py`:
   - new SQLite table: `board_seat_target_memory`
-  - per-company target lock window via `COATUE_CLAW_BOARD_SEAT_TARGET_LOCK_DAYS` (default `30`)
-  - repeat-target bypass toggle only by explicit override: `COATUE_CLAW_BOARD_SEAT_ALLOW_REPEAT_TARGETS=1`
+  - per-company target lock window via `SPCLAW_BOARD_SEAT_TARGET_LOCK_DAYS` (default `30`)
+  - repeat-target bypass toggle only by explicit override: `SPCLAW_BOARD_SEAT_ALLOW_REPEAT_TARGETS=1`
 - Repeat-prevention now checks target key before text-similarity fallback:
   - if a target was recently pitched (for example `Epirus` for `Anduril`), board-seat auto-retargets to the next candidate.
   - if no alternate target is available, post is skipped with explicit reason `repeat_target_within_lock_window`.
 - Added persistent target ledger exports:
   - artifact paths:
-    - `/opt/coatue-claw-data/artifacts/board-seat/board-seat-target-ledger.csv`
-    - `/opt/coatue-claw-data/artifacts/board-seat/board-seat-target-ledger.json`
+    - `/opt/spclaw-data/artifacts/board-seat/board-seat-target-ledger.csv`
+    - `/opt/spclaw-data/artifacts/board-seat/board-seat-target-ledger.json`
   - Google Drive mirror support:
     - default mirror path: `/Users/spclaw/Documents/SPClaw Database/Companies/Board-Seat`
-    - configurable via `COATUE_CLAW_BOARD_SEAT_LEDGER_MIRROR_PATH`
+    - configurable via `SPCLAW_BOARD_SEAT_LEDGER_MIRROR_PATH`
 - Backfill parser broadened to include legacy numbered board-seat messages (for example `1. Idea title`, `Target(s) / sector`) so historical targets enter memory.
 - Added deterministic format contract validator before post:
   - rejects numbered templates and missing labeled fields
@@ -872,15 +872,15 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ### Immediate runtime steps
 1. On Mac mini, seed Epirus into target memory:
-   - `/opt/coatue-claw/.venv/bin/python -m coatue_claw.board_seat_daily seed-target --company Anduril --target Epirus`
+   - `/opt/spclaw/.venv/bin/python -m spclaw.board_seat_daily seed-target --company Anduril --target Epirus`
 2. Restart + health check:
-   - `make -C /opt/coatue-claw openclaw-restart`
-   - `make -C /opt/coatue-claw openclaw-slack-status`
+   - `make -C /opt/spclaw openclaw-restart`
+   - `make -C /opt/spclaw openclaw-slack-status`
 3. Verify ledger mirror files exist under:
    - `/Users/spclaw/Documents/SPClaw Database/Companies/Board-Seat/`
 
 ## Update (2026-02-24, Board Seat V5 target-first sources + confidence)
-- Implemented Board Seat V5 in `/Users/carsonwang/CoatueClaw/src/coatue_claw/board_seat_daily.py`.
+- Implemented Board Seat V5 in `/Users/carsonwang/SPClaw/src/spclaw/board_seat_daily.py`.
 - `format_version` bumped to:
   - `v5_target_first_confidence_sources`
 - New deterministic source policy path:
@@ -906,14 +906,14 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - when refs are missing, fallback search links are target-oriented (not funding-oriented)
 
 ### Public config added
-- `COATUE_CLAW_BOARD_SEAT_SOURCE_POLICY` (default `target_first_3_1`)
-- `COATUE_CLAW_BOARD_SEAT_INCLUDE_FUNDING_LINKS` (default `0`)
-- `COATUE_CLAW_BOARD_SEAT_TARGET_MIN_QUALITY_SOURCES` (default `1`)
-- `COATUE_CLAW_BOARD_SEAT_TARGET_MIN_TOTAL_SOURCES` (default `2`)
-- `COATUE_CLAW_BOARD_SEAT_LOW_SIGNAL_MODE` (default `candidate_with_confidence`)
+- `SPCLAW_BOARD_SEAT_SOURCE_POLICY` (default `target_first_3_1`)
+- `SPCLAW_BOARD_SEAT_INCLUDE_FUNDING_LINKS` (default `0`)
+- `SPCLAW_BOARD_SEAT_TARGET_MIN_QUALITY_SOURCES` (default `1`)
+- `SPCLAW_BOARD_SEAT_TARGET_MIN_TOTAL_SOURCES` (default `2`)
+- `SPCLAW_BOARD_SEAT_LOW_SIGNAL_MODE` (default `candidate_with_confidence`)
 
 ### Tests
-- Updated `/Users/carsonwang/CoatueClaw/tests/test_board_seat_daily.py` for V5.
+- Updated `/Users/carsonwang/SPClaw/tests/test_board_seat_daily.py` for V5.
 - Added coverage for:
   - source classification (target/parent/funding)
   - target-first composer mix and funding-link exclusion
@@ -924,7 +924,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - Result: `19 passed`
 
 ### Runtime verification (Mac mini)
-- Pulled and deployed commit `8a1a72a` to `/opt/coatue-claw`.
+- Pulled and deployed commit `8a1a72a` to `/opt/spclaw`.
 - Restarted gateway:
   - `make openclaw-restart`
 - Verified Slack health:
@@ -932,7 +932,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - Verified board-seat module state:
   - `make openclaw-board-seat-status` -> `format_version: v5_target_first_confidence_sources`
 - Dry-run verification (OpenAI):
-  - `COATUE_CLAW_BOARD_SEAT_PORTCOS='OpenAI:openai' /opt/coatue-claw/.venv/bin/python -m coatue_claw.board_seat_daily run-once --force --dry-run`
+  - `SPCLAW_BOARD_SEAT_PORTCOS='OpenAI:openai' /opt/spclaw/.venv/bin/python -m spclaw.board_seat_daily run-once --force --dry-run`
   - preview includes `*Idea confidence:* ...` and v5 source block.
 
 ### Immediate next steps
@@ -957,7 +957,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - `PYTHONPATH=src python3 -m pytest -q` -> `212 passed`
 
 ## Update (2026-02-24, Board Seat Readability V3 labeled hierarchy)
-- Implemented Board Seat readability V3 in `/opt/coatue-claw/src/coatue_claw/board_seat_daily.py`.
+- Implemented Board Seat readability V3 in `/opt/spclaw/src/spclaw/board_seat_daily.py`.
 - Format is now deterministic labeled-line hierarchy (no bullet subheaders):
   - `*Thesis*` with fixed lines:
     - `*Why now:* ...`
@@ -991,19 +991,19 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ### Validation (this session)
 - Targeted board-seat tests:
-  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_board_seat_daily.py`
+  - `PYTHONPATH=/opt/spclaw/src /opt/spclaw/.venv/bin/python -m pytest -q /opt/spclaw/tests/test_board_seat_daily.py`
   - Result: `12 passed`
 - Full suite smoke:
-  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q`
+  - `PYTHONPATH=/opt/spclaw/src /opt/spclaw/.venv/bin/python -m pytest -q`
   - Result: `3` unrelated/pre-existing failures in Spencer change label defaults:
     - `tests/test_spencer_change_digest.py::test_run_once_dry_run_includes_carson_label`
     - `tests/test_spencer_change_log.py::test_is_spencer_user_defaults`
     - `tests/test_spencer_change_log.py::test_requester_label_defaults`
 - Dry-run check for hierarchy output:
-  - `COATUE_CLAW_BOARD_SEAT_PORTCOS='OpenAI:openai' ... run-once --force --dry-run`
+  - `SPCLAW_BOARD_SEAT_PORTCOS='OpenAI:openai' ... run-once --force --dry-run`
   - Confirmed labeled-line hierarchy and spacing in preview output.
 - Live Anduril run check:
-  - `COATUE_CLAW_BOARD_SEAT_PORTCOS='Anduril:anduril' ... run-once --force`
+  - `SPCLAW_BOARD_SEAT_PORTCOS='Anduril:anduril' ... run-once --force`
   - Expected skip preserved: `repeat_investment_without_significant_change`.
 
 ## Update (2026-02-24, live Slack conversational path mismatch)
@@ -1018,7 +1018,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `*Funding snapshot*` -> `*History:*`, `*Latest round/backers:*`
   - explicitly disallows bulletized labels (`• Why now`, etc.).
 - Gateway restarted after prompt update:
-  - `make -C /opt/coatue-claw openclaw-restart`
+  - `make -C /opt/spclaw openclaw-restart`
   - health re-verified with `openclaw-status` + `openclaw-slack-status` (`probe.ok=true`).
 
 ### Important operational note
@@ -1026,7 +1026,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - For portability, keep this section in handoff so future sessions can re-apply after machine/profile resets.
 
 ## Update (2026-02-24, Board Seat V2 format + funding snapshot)
-- Implemented Board Seat V2 in `/opt/coatue-claw/src/coatue_claw/board_seat_daily.py`:
+- Implemented Board Seat V2 in `/opt/spclaw/src/spclaw/board_seat_daily.py`:
   - deterministic sectioned output for all portcos:
     - `*Board Seat as a Service — {Company}*`
     - `*Thesis*` (max 2 bullets)
@@ -1042,8 +1042,8 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - Added funding data pipeline with additive DB cache table:
   - new SQLite table: `board_seat_funding_cache`
   - resolver order:
-    1) manual seed JSON (`COATUE_CLAW_BOARD_SEAT_FUNDING_MANUAL_PATH`)
-    2) fresh cache (`COATUE_CLAW_BOARD_SEAT_FUNDING_TTL_DAYS`, default 14)
+    1) manual seed JSON (`SPCLAW_BOARD_SEAT_FUNDING_MANUAL_PATH`)
+    2) fresh cache (`SPCLAW_BOARD_SEAT_FUNDING_TTL_DAYS`, default 14)
     3) Brave web refresh + extraction
     4) explicit unknown snapshot fallback
   - source tracking emits `manual_seed` / `cache` / `web_refresh` / `unknown`
@@ -1063,10 +1063,10 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ### Validation (this session)
 - Targeted:
-  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_board_seat_daily.py`
+  - `PYTHONPATH=/opt/spclaw/src /opt/spclaw/.venv/bin/python -m pytest -q /opt/spclaw/tests/test_board_seat_daily.py`
   - Result: `13 passed`
 - Full smoke:
-  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q`
+  - `PYTHONPATH=/opt/spclaw/src /opt/spclaw/.venv/bin/python -m pytest -q`
   - Result: `3` failures outside board-seat module (pre-existing Spencer label defaults):
     - `tests/test_spencer_change_digest.py::test_run_once_dry_run_includes_carson_label`
     - `tests/test_spencer_change_log.py::test_is_spencer_user_defaults`
@@ -1074,7 +1074,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ### Next Steps
 1. Run live `board seat run-once --force` and verify Slack output in `#anduril` matches V2 structure and skim budget.
-2. Add/seed `COATUE_CLAW_BOARD_SEAT_FUNDING_MANUAL_PATH` JSON for top portcos to improve funding quality and reduce web variance.
+2. Add/seed `SPCLAW_BOARD_SEAT_FUNDING_MANUAL_PATH` JSON for top portcos to improve funding quality and reduce web variance.
 3. Separately fix Spencer change-tracker default user mapping to restore full-suite green.
 
 ## Update (2026-02-24, runtime follow-up)
@@ -1112,13 +1112,13 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ### Validation (this session)
 - Targeted tests:
-  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_x_chart_daily.py /opt/coatue-claw/tests/test_slack_x_chart_intent.py`
+  - `PYTHONPATH=/opt/spclaw/src /opt/spclaw/.venv/bin/python -m pytest -q /opt/spclaw/tests/test_x_chart_daily.py /opt/spclaw/tests/test_slack_x_chart_intent.py`
   - Result: `74 passed`
 - Live post check:
   - `run-post-url https://x.com/KobeissiLetter/status/2026040229535047769`
   - posted successfully with `copy_rewrite_reason=title_takeaway_role_swapped` and review checks passed (`takeaway_single_sentence=true`, `title_takeaway_role_ok=true`)
 - Full suite smoke:
-  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q`
+  - `PYTHONPATH=/opt/spclaw/src /opt/spclaw/.venv/bin/python -m pytest -q`
   - Result: `3` pre-existing Spencer change-tracker failures (unchanged):
     - `tests/test_spencer_change_digest.py::test_run_once_dry_run_includes_carson_label`
     - `tests/test_spencer_change_log.py::test_is_spencer_user_defaults`
@@ -1142,10 +1142,10 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ### Validation (this session)
 - Targeted tests:
-  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_x_chart_daily.py /opt/coatue-claw/tests/test_slack_x_chart_intent.py`
+  - `PYTHONPATH=/opt/spclaw/src /opt/spclaw/.venv/bin/python -m pytest -q /opt/spclaw/tests/test_x_chart_daily.py /opt/spclaw/tests/test_slack_x_chart_intent.py`
   - Result: `70 passed`.
 - Full suite smoke:
-  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q`
+  - `PYTHONPATH=/opt/spclaw/src /opt/spclaw/.venv/bin/python -m pytest -q`
   - Result: `3` pre-existing failures in Spencer change tracker modules:
     - `tests/test_spencer_change_digest.py::test_run_once_dry_run_includes_carson_label`
     - `tests/test_spencer_change_log.py::test_is_spencer_user_defaults`
@@ -1159,16 +1159,16 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Current Status (2026-02-23)
 - OpenAI model policy updated to premium defaults (no frugal mode):
-  - `COATUE_CLAW_BOARD_SEAT_MODEL` default -> `gpt-5.2-chat-latest`
-  - `COATUE_CLAW_X_CHART_TITLE_MODEL` default -> `gpt-5.2-chat-latest`
-  - `COATUE_CLAW_X_CHART_VISION_MODEL` default -> `gpt-4.1`
-  - `COATUE_CLAW_MEMORY_EMBED_MODEL` default -> `text-embedding-3-large`
-  - `COATUE_CLAW_MD_MODEL` default -> `gpt-5.2-chat-latest`
+  - `SPCLAW_BOARD_SEAT_MODEL` default -> `gpt-5.2-chat-latest`
+  - `SPCLAW_X_CHART_TITLE_MODEL` default -> `gpt-5.2-chat-latest`
+  - `SPCLAW_X_CHART_VISION_MODEL` default -> `gpt-4.1`
+  - `SPCLAW_MEMORY_EMBED_MODEL` default -> `text-embedding-3-large`
+  - `SPCLAW_MD_MODEL` default -> `gpt-5.2-chat-latest`
   - Mac mini `.env.prod` set to these premium runtime values and OpenClaw restarted.
 - MD BKNG catalyst miss fix is now shipped with Google-first evidence:
   - web retrieval is now `google_serp` primary with `ddg_html` fallback (instead of DDG-only)
   - Google payload parsing now includes `organic_results`, `news_results`, and `answer_box` snippets
-  - retrieval depth increased (`COATUE_CLAW_MD_WEB_MAX_RESULTS=20` default)
+  - retrieval depth increased (`SPCLAW_MD_WEB_MAX_RESULTS=20` default)
   - BKNG-specific query templates + aliases added (`Booking Holdings`, `Booking.com`, `OTA`)
   - new BKNG causal clusters:
     - `ota_ai_disruption`
@@ -1179,8 +1179,8 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - selected cluster + cluster scoring diagnostics
     - web backend used (`google_serp` vs `ddg_html`)
   - decisive defaults tuned to reduce over-fallback:
-    - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_SCORE=0.60`
-    - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_MARGIN=0.03`
+    - `SPCLAW_MD_DECISIVE_PRIMARY_REASON_MIN_SCORE=0.60`
+    - `SPCLAW_MD_DECISIVE_PRIMARY_REASON_MIN_MARGIN=0.03`
   - tests:
     - `PYTHONPATH=src pytest -q tests/test_market_daily.py` => `28 passed`
     - `PYTHONPATH=src pytest -q` => `162 passed`
@@ -1190,9 +1190,9 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - fallback line remains only when evidence is weak/ambiguous:
     - `Likely positioning/flow; no single confirmed catalyst.`
   - new knobs:
-    - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_ENABLED` (default `1`)
-    - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_SCORE` (default `0.60`)
-    - `COATUE_CLAW_MD_DECISIVE_PRIMARY_REASON_MIN_MARGIN` (default `0.03`)
+    - `SPCLAW_MD_DECISIVE_PRIMARY_REASON_ENABLED` (default `1`)
+    - `SPCLAW_MD_DECISIVE_PRIMARY_REASON_MIN_SCORE` (default `0.60`)
+    - `SPCLAW_MD_DECISIVE_PRIMARY_REASON_MIN_MARGIN` (default `0.03`)
   - test added:
     - `test_single_strong_quality_source_can_drive_decisive_primary_reason`
 - MD basket-cause coherence now handles the NET/CRWD Anthropic case:
@@ -1239,8 +1239,8 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - evidence windows are now session-anchored instead of fixed-hour:
     - open slot starts at previous regular-session close
     - close slot starts at same-day session open
-    - lookback cap enforced by `COATUE_CLAW_MD_MAX_LOOKBACK_HOURS` (default `96`)
-  - X retrieval now uses richer ticker+alias query and configurable depth (`COATUE_CLAW_MD_X_MAX_RESULTS`, default `50`)
+    - lookback cap enforced by `SPCLAW_MD_MAX_LOOKBACK_HOURS` (default `96`)
+  - X retrieval now uses richer ticker+alias query and configurable depth (`SPCLAW_MD_X_MAX_RESULTS`, default `50`)
   - evidence scoring now includes source quality, recency, mention strength, driver keywords, and directional move-aware ranking
   - fallback reason line now uses concise default:
     - `Likely positioning/flow; no single confirmed catalyst.`
@@ -1259,7 +1259,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - local validation:
     - `PYTHONPATH=src pytest -q tests/test_market_daily.py tests/test_launchd_runtime.py tests/test_slack_channel_access.py tests/test_slack_pipeline.py tests/test_slack_routing.py`
     - `26 passed`
-  - local dry-run to `/opt/coatue-claw-data` cannot execute from laptop sandbox due path permission; runtime verification is required on Mac mini.
+  - local dry-run to `/opt/spclaw-data` cannot execute from laptop sandbox due path permission; runtime verification is required on Mac mini.
 - Follow-on MD tuning shipped after initial reliability patch:
   - fallback now triggers on weak directional signal and low source diversity (not only low score)
   - catalyst selection now applies move-direction-aware ranking (down movers prefer down-cause evidence)
@@ -1292,8 +1292,8 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `tests/test_market_daily.py::test_relevant_ticker_post_filters_ambiguous_short_tickers`
 
 - MD (Market Daily) 2x/day feature is now implemented in repo (`main`) with Slack/CLI/runtime wiring:
-  - new module: `src/coatue_claw/market_daily.py`
-  - SQLite store: `/opt/coatue-claw-data/db/market_daily.sqlite`
+  - new module: `src/spclaw/market_daily.py`
+  - SQLite store: `/opt/spclaw-data/db/market_daily.sqlite`
     - tables: `md_runs`, `md_universe_snapshots`, `md_coatue_holdings`, `md_overrides`, `md_cusip_ticker_cache`
   - universe flow:
     - seed file: `config/md_tmt_seed_universe.csv`
@@ -1319,9 +1319,9 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `claw market-daily refresh-coatue-holdings`
     - `claw market-daily include <TICKER>` / `exclude <TICKER>`
   - launchd service added:
-    - label: `com.coatueclaw.market-daily`
+    - label: `com.spclaw.market-daily`
     - schedule: weekdays at `07:00` and `14:15` local time
-    - program: `python -m coatue_claw.market_daily run-once`
+    - program: `python -m spclaw.market_daily run-once`
   - Make targets added:
     - `openclaw-market-daily-status`
     - `openclaw-market-daily-run-once`
@@ -1337,7 +1337,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `make openclaw-market-daily-status`
   - `make openclaw-market-daily-run-once DRY_RUN=1`
   - `make openclaw-24x7-enable` (loads new market-daily launchd plist)
-  - `make openclaw-24x7-status` (confirm `com.coatueclaw.market-daily` loaded)
+  - `make openclaw-24x7-status` (confirm `com.spclaw.market-daily` loaded)
 
 - Change tracker now captures both Spencer + Carson requests with requester attribution:
   - default tracked users include `Spencer Peterson` + `Carson Wang`
@@ -1348,9 +1348,9 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `change requests`
     - `tracked changes`
   - optional override via env:
-    - `COATUE_CLAW_CHANGE_TRACKER_USERS` (format `user_id:label,...`)
+    - `SPCLAW_CHANGE_TRACKER_USERS` (format `user_id:label,...`)
 - Board Seat-as-a-Service daily scheduler shipped for portco channels:
-  - new runtime module: `src/coatue_claw/board_seat_daily.py`
+  - new runtime module: `src/spclaw/board_seat_daily.py`
   - daily post per company/channel with duplicate guard (one post per company per local day)
   - default portco channel map:
     - `anduril`, `anthropic`, `cursor`, `neuralink`, `openai`, `physical-intelligence`, `ramp`, `spacex`, `stripe`, `sunday-robotics`
@@ -1358,7 +1358,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `Signal`, `Board lens`, `Watchlist`, `Team ask`
   - channel context source: recent Slack history in each channel (default 24h lookback); fallback template when no high-signal context exists
   - Slack scope fallback: if `conversations:read` is unavailable (`missing_scope`), service posts by channel name directly and skips history-context enrichment
-  - launchd service added: `com.coatueclaw.board-seat-daily` (`COATUE_CLAW_BOARD_SEAT_TIME`, default `08:30`)
+  - launchd service added: `com.spclaw.board-seat-daily` (`SPCLAW_BOARD_SEAT_TIME`, default `08:30`)
   - Make targets added:
     - `openclaw-board-seat-status`
     - `openclaw-board-seat-run-once`
@@ -1367,19 +1367,19 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `tests/test_launchd_runtime.py` updated for new service
 - X chart pipeline now runs as hourly scout + windowed post:
   - every run ingests candidates into a persistent `observed_candidates` pool in SQLite
-  - scheduled posting windows still use `COATUE_CLAW_X_CHART_WINDOWS` (`09:00,12:00,18:00` default)
+  - scheduled posting windows still use `SPCLAW_X_CHART_WINDOWS` (`09:00,12:00,18:00` default)
   - at post time, winner is ranked from pooled candidates observed since the previous scheduled post (not just the current fetch)
   - non-window runs now return `reason: scouted_pool_updated` after refreshing the pool
   - pool retention/pruning controls:
-    - `COATUE_CLAW_X_CHART_POOL_KEEP_DAYS` (default `10`)
-    - `COATUE_CLAW_X_CHART_POOL_LIMIT` (default `600`)
+    - `SPCLAW_X_CHART_POOL_KEEP_DAYS` (default `10`)
+    - `SPCLAW_X_CHART_POOL_LIMIT` (default `600`)
 - Naming convention updated from “Chart of the Day” to slot naming:
   - `Coatue Chart of the Morning`
   - `Coatue Chart of the Afternoon`
   - `Coatue Chart of the Evening`
   - naming is applied to Slack initial comment + uploaded file title
 - launchd scheduler updated for hourly scout cadence:
-  - `com.coatueclaw.x-chart-daily` now runs every `3600s` by default (`COATUE_CLAW_X_CHART_SCOUT_INTERVAL_SECONDS`)
+  - `com.spclaw.x-chart-daily` now runs every `3600s` by default (`SPCLAW_X_CHART_SCOUT_INTERVAL_SECONDS`)
   - posting still occurs only when the hourly run lands in an allowed window
 - tests added/updated:
   - `test_run_chart_scout_outside_window_updates_pool`
@@ -1395,8 +1395,8 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - diversity pool: candidates within `90%` of top score
     - pick least-recently-used source from that pool; otherwise keep top score winner
   - env controls:
-    - `COATUE_CLAW_X_CHART_SOURCE_VARIETY_LOOKBACK` (default `6`)
-    - `COATUE_CLAW_X_CHART_SOURCE_VARIETY_SCORE_FLOOR` (default `0.90`)
+    - `SPCLAW_X_CHART_SOURCE_VARIETY_LOOKBACK` (default `6`)
+    - `SPCLAW_X_CHART_SOURCE_VARIETY_SCORE_FLOOR` (default `0.90`)
   - tests added:
     - `test_pick_winner_prefers_variety_within_score_floor`
     - `test_pick_winner_keeps_top_when_alternative_too_low`
@@ -1427,16 +1427,16 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - updated tests cover source-snip posting path and no-rebuild requirement
 - Spencer change-review + daily digest shipped:
   - Spencer requests are auto-captured from Slack (tracked user IDs: `spcoatue` + `spencermpeter` by default)
-  - persisted DB: `/opt/coatue-claw-data/db/spencer_changes.sqlite`
+  - persisted DB: `/opt/spclaw-data/db/spencer_changes.sqlite`
   - statuses: `captured`, `handled`, `implemented`, `blocked`, `needs_followup`
   - review commands in Slack:
     - `spencer changes`
     - `spencer changes open`
     - `spencer changes last 50`
   - daily DM digest runtime added:
-    - service label: `com.coatueclaw.spencer-change-digest`
-    - schedule env: `COATUE_CLAW_SPENCER_CHANGE_DIGEST_TIME` (default `18:00`)
-    - recipients env: `COATUE_CLAW_SPENCER_CHANGE_DIGEST_DM_USER_IDS`
+    - service label: `com.spclaw.spencer-change-digest`
+    - schedule env: `SPCLAW_SPENCER_CHANGE_DIGEST_TIME` (default `18:00`)
+    - recipients env: `SPCLAW_SPENCER_CHANGE_DIGEST_DM_USER_IDS`
   - Make targets added:
     - `openclaw-spencer-digest-status`
     - `openclaw-spencer-digest-run-once`
@@ -1445,32 +1445,32 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `tests/test_spencer_change_digest.py`
   - Mac mini runtime validation:
     - pulled latest (`5b26ea9`), restarted OpenClaw, and enabled scheduler service
-    - `make openclaw-24x7-status` confirms `com.coatueclaw.spencer-change-digest` is loaded
+    - `make openclaw-24x7-status` confirms `com.spclaw.spencer-change-digest` is loaded
     - forced send test succeeded:
-      - `/opt/coatue-claw/.venv/bin/python -m coatue_claw.spencer_change_digest run-once --force`
+      - `/opt/spclaw/.venv/bin/python -m spclaw.spencer_change_digest run-once --force`
       - Slack post delivered to user channel `U0AGD28QSQG` (`ts=1771557014.620259`)
   - reliability hardening:
     - digest sender now retries across Slack token sources (env + `~/.openclaw/openclaw.json`)
     - if `conversations.open` lacks scope, it falls back to App Home DM posting (`channel=<user_id>`)
 - Spencer-request governance log shipped:
   - bot now auto-captures change requests from Spencer accounts (`spcoatue`/`spencermpeter` user IDs) when messages look like bot-change asks
-  - each request is persisted in SQLite (`/opt/coatue-claw-data/db/spencer_changes.sqlite`) with status lifecycle:
+  - each request is persisted in SQLite (`/opt/spclaw-data/db/spencer_changes.sqlite`) with status lifecycle:
     - `captured`, `handled`, `implemented`, `blocked`, `needs_followup`
   - request status is auto-updated inline as bot workflows execute (settings/pipeline/chart/x digest/universe/diligence paths)
   - new Slack review commands:
     - `spencer changes`
     - `spencer changes open`
     - `spencer changes last 50`
-  - env override for tracked Spencer IDs: `COATUE_CLAW_SPENCER_USER_IDS`
+  - env override for tracked Spencer IDs: `SPCLAW_SPENCER_USER_IDS`
   - tests added: `tests/test_spencer_change_log.py`
 - Slack channel access hardening shipped for new channels:
   - bot now auto-joins newly created public channels via `channel_created` handler + `conversations.join`
   - bot also performs startup bootstrap over existing public channels and joins channels where it is not yet a member
-  - env flag: `COATUE_CLAW_SLACK_AUTOJOIN_PUBLIC_CHANNELS` (default `1`, set `0` to disable)
+  - env flag: `SPCLAW_SLACK_AUTOJOIN_PUBLIC_CHANNELS` (default `1`, set `0` to disable)
   - private channels still require manual invite (Slack platform limitation)
   - tests added: `tests/test_slack_channel_access.py`
 - X Chart destination channel updated to `#charting` for scheduled/manual chart posts.
-  - Mac mini runtime env set: `COATUE_CLAW_X_CHART_SLACK_CHANNEL=C0AFXM2MWAV` (`#charting`)
+  - Mac mini runtime env set: `SPCLAW_X_CHART_SLACK_CHANNEL=C0AFXM2MWAV` (`#charting`)
 - X Chart post-publish checklist loop shipped:
   - each Slack-posted chart is now reviewed against a persisted checklist (`post_reviews` in `x_chart_daily.sqlite`)
   - checklist coverage includes copy limits, US relevance, axis labels, grouped-series validity, and artifact-size integrity
@@ -1501,7 +1501,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - validation: `PYTHONPATH=src pytest -q` => `105 passed`
 - OpenClaw gateway handoff hardening shipped (`main`):
   - added deterministic CLI entrypoint for tweet URL chart requests:
-    - `/opt/coatue-claw/.venv/bin/python -m coatue_claw.x_chart_daily run-post-url <x-url> [--channel <id>]`
+    - `/opt/spclaw/.venv/bin/python -m spclaw.x_chart_daily run-post-url <x-url> [--channel <id>]`
   - this allows gateway-side natural-language Slack handling to call the strict rebuild-only chart path instead of ad hoc screenshot replies
   - runtime note: Mac mini workspace guidance at `~/.openclaw/workspace/AGENTS.md` now explicitly instructs the gateway agent to use `run-post-url` for tweet URL chart requests and avoid relative media paths
   - test added: `test_cli_run_post_url_command`
@@ -1530,7 +1530,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `api.vxtwitter.com` fallback fetch for text/media on specific post URLs
   - renderer now attempts vision bar extraction first (before mode heuristics), improving reconstruction rate on tweet charts that lack explicit bar keywords
   - title heuristics now include explicit employees-vs-robots narrative handling (for posts like `$AMZN ... employees ... robots`) to avoid raw/fragmented headline/subheading text
-  - global post gate added (`COATUE_CLAW_X_CHART_REQUIRE_REBUILD`, default on):
+  - global post gate added (`SPCLAW_X_CHART_REQUIRE_REBUILD`, default on):
     - if numeric reconstruction is not reliable, Slack posting is skipped with explicit error (no screenshot fallback output)
   - validation: `PYTHONPATH=src pytest -q` => `98 passed`
 - Slack natural-language compound X-post handling shipped (`main`):
@@ -1542,9 +1542,9 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `Please make a chart of the day from this post <x-url> and add this guy to our twitter list`
     - `Output a coatue style chart from this post <x-url>`
   - implemented in:
-    - `src/coatue_claw/slack_x_chart_intent.py`
-    - `src/coatue_claw/slack_bot.py` (compound handler wired before strict `x chart ...` parser)
-    - `src/coatue_claw/x_chart_daily.py` (`run_chart_for_post_url`)
+    - `src/spclaw/slack_x_chart_intent.py`
+    - `src/spclaw/slack_bot.py` (compound handler wired before strict `x chart ...` parser)
+    - `src/spclaw/x_chart_daily.py` (`run_chart_for_post_url`)
   - validation: `PYTHONPATH=src pytest -q` => `95 passed`
 - X Chart readability pass shipped (`main`):
   - removed generated timestamp line from top-left chart header (less clutter)
@@ -1562,7 +1562,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - small chart label (what the graph shows)
   - bar reconstruction no longer emits placeholder-style `G1..G10` labels
   - stricter reconstruction gates now reject low-quality bar parses instead of rendering misleading synthetic bars
-  - optional OpenAI vision extraction added for bar charts (`OPENAI_API_KEY` + `COATUE_CLAW_X_CHART_VISION_ENABLED=1`) to recover real bar labels/values when possible
+  - optional OpenAI vision extraction added for bar charts (`OPENAI_API_KEY` + `SPCLAW_X_CHART_VISION_ENABLED=1`) to recover real bar labels/values when possible
   - renderer now supports non-normalized bar values (including negatives) and dynamic y-axis labels when vision extraction returns concrete units
   - test suite updated and green (`PYTHONPATH=src pytest -q` => `90 passed`)
 - Repo is synced on `main` and used as the cross-device source of truth.
@@ -1573,7 +1573,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - supports configurable axis metrics (EV/LTM multiple, YoY growth, LTM revenue, market cap, enterprise value, debt, cash, latest quarter revenue)
 - Chart footer branding text (`COATUE CLAW`) has been removed; only footnote/citation text remains.
 - CSV-backed universe workflow is implemented:
-  - storage path: `/opt/coatue-claw-data/db/universes/*.csv`
+  - storage path: `/opt/spclaw-data/db/universes/*.csv`
   - Slack natural commands: create/list/show/add/remove universes
   - chart requests with missing or underspecified tickers now prompt for source:
     - `online` discovery
@@ -1602,8 +1602,8 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `promote current settings` to auto-commit/push runtime defaults to `main`
   - `undo last promotion` to auto-`git revert` the last settings promotion commit
 - Added runtime settings persistence and audit modules:
-  - `src/coatue_claw/runtime_settings.py`
-  - `src/coatue_claw/slack_config_intent.py`
+  - `src/spclaw/runtime_settings.py`
+  - `src/spclaw/slack_config_intent.py`
   - defaults file tracked in git: `config/runtime-defaults.json`
 - Added Slack deploy pipeline workflow (admin-gated, single-job lock):
   - `deploy latest` -> pull + restart + Slack probe status
@@ -1612,19 +1612,19 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `show pipeline status` / `show deploy history`
   - `build: <request>` -> runs Codex CLI on runtime host by default (or custom command via env)
 - Added deploy pipeline modules:
-  - `src/coatue_claw/slack_pipeline.py`
-  - `src/coatue_claw/slack_pipeline_intent.py`
-  - deploy history file: `/opt/coatue-claw-data/db/deploy-history.json`
+  - `src/spclaw/slack_pipeline.py`
+  - `src/spclaw/slack_pipeline_intent.py`
+  - deploy history file: `/opt/spclaw-data/db/deploy-history.json`
 - Replaced diligence template output with deep neutral memo generation:
-  - new module: `src/coatue_claw/diligence_report.py`
+  - new module: `src/spclaw/diligence_report.py`
   - `claw diligence TICKER` now outputs the 8-section neutral investment memo format with evidence-based citations
   - data sources in memo: company profile, statements, valuation/balance sheet metrics, and recent reporting metadata (via Yahoo Finance/yfinance)
   - Slack mention parsing now accepts both `diligence` and common typo `dilligence`
   - diligence now performs a database-first local report check before online fetch:
-    - local sources: `/opt/coatue-claw-data/db/file_ingest.sqlite` + `/opt/coatue-claw-data/artifacts/packets/*.md`
+    - local sources: `/opt/spclaw-data/db/file_ingest.sqlite` + `/opt/spclaw-data/artifacts/packets/*.md`
     - memo now includes matched local report references and local-check timestamp in sources
 - Added hybrid memory subsystem (structured-first + semantic fallback):
-  - SQLite + FTS5 memory DB: `/opt/coatue-claw-data/db/memory.sqlite`
+  - SQLite + FTS5 memory DB: `/opt/spclaw-data/db/memory.sqlite`
   - auto fact extraction from Slack mentions (`profile`, `relationship`, `decision`, `convention`)
   - decay tiers with TTL refresh-on-access (`permanent`, `stable`, `active`, `session`, `checkpoint`)
   - memory CLI commands: `claw memory status|query|prune|extract-daily|checkpoint`
@@ -1637,7 +1637,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - pre-flight pipeline checkpoints now auto-write before `deploy_latest`, `undo_last_deploy`, and `build_request`
   - optional semantic retrieval path via LanceDB/OpenAI embeddings when configured
 - Added file management bridge (local-first + shared mirror):
-  - module: `src/coatue_claw/file_bridge.py`
+  - module: `src/spclaw/file_bridge.py`
   - config: `config/file-bridge.json`
   - runbook: `docs/file-management-system.md`
   - Make targets:
@@ -1652,11 +1652,11 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - Spencer-facing category subfolders are provisioned under `01_DROP_HERE_Incoming`, `02_READ_ONLY_Latest_AUTO`, and `03_READ_ONLY_Archive_AUTO` (`Universes`, `Companies`, `Industries`)
   - `01_DROP_HERE_Incoming/_Latest_Reference_READ_ONLY` auto-mirrors Latest for visibility and is excluded from pull ingestion
   - Slack file uploads are now auto-ingested (download + category routing + SQLite audit + Drive mirror):
-    - module: `src/coatue_claw/slack_file_ingest.py`
-    - DB: `/opt/coatue-claw-data/db/file_ingest.sqlite`
-    - wired in `src/coatue_claw/slack_bot.py` (`message`, `file_shared`, and `app_mention` with file attachments)
+    - module: `src/spclaw/slack_file_ingest.py`
+    - DB: `/opt/spclaw-data/db/file_ingest.sqlite`
+    - wired in `src/spclaw/slack_bot.py` (`message`, `file_shared`, and `app_mention` with file attachments)
 - Added email interaction channel (optional poller):
-  - module: `src/coatue_claw/email_gateway.py`
+  - module: `src/spclaw/email_gateway.py`
   - runbook: `docs/email-integration.md`
   - Make targets:
     - `openclaw-email-status`
@@ -1669,13 +1669,13 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `files status`
     - `help`
   - email attachments auto-ingest into local + Drive category folders with audit DB:
-    - `/opt/coatue-claw-data/db/email_gateway.sqlite`
+    - `/opt/spclaw-data/db/email_gateway.sqlite`
   - diligence parsing now uses context-aware ticker extraction (body-first, stopword filtering) so phrases like `Testing Dilligence` + `Diligence SNOW please` resolve to ticker `SNOW` instead of `DILIGENCE`
 - Added 24/7 runtime supervision for email + memory pruning:
-  - module: `src/coatue_claw/launchd_runtime.py`
+  - module: `src/spclaw/launchd_runtime.py`
   - launchd services:
-    - `com.coatueclaw.email-gateway` (always-on `email_gateway serve` with KeepAlive)
-    - `com.coatueclaw.memory-prune` (hourly `claw memory prune` via StartInterval)
+    - `com.spclaw.email-gateway` (always-on `email_gateway serve` with KeepAlive)
+    - `com.spclaw.memory-prune` (hourly `claw memory prune` via StartInterval)
   - launchctl domain fallback support for remote SSH operations (`gui/<uid>` then `user/<uid>`)
   - Make targets:
     - `openclaw-24x7-enable`
@@ -1686,13 +1686,13 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - Session shipping protocol is codified in `AGENTS.md` and templated in `docs/handoffs/ship-template.md`.
 
 ## What Was Implemented
-- Added valuation chart engine in `/opt/coatue-claw/src/coatue_claw/valuation_chart.py`.
-- Added CLI command in `/opt/coatue-claw/src/coatue_claw/cli.py`:
+- Added valuation chart engine in `/opt/spclaw/src/spclaw/valuation_chart.py`.
+- Added CLI command in `/opt/spclaw/src/spclaw/cli.py`:
   - `claw valuation-chart SNOW,MDB,DDOG`
-- Added Slack command handling in `/opt/coatue-claw/src/coatue_claw/slack_bot.py`:
+- Added Slack command handling in `/opt/spclaw/src/spclaw/slack_bot.py`:
   - mention pattern for graph/chart + EV/LTM/growth tickers
   - uploads PNG + CSV + JSON + raw provider JSON artifacts
-- Added unit tests in `/opt/coatue-claw/tests/test_valuation_chart.py`.
+- Added unit tests in `/opt/spclaw/tests/test_valuation_chart.py`.
 - Added workspace skill for OpenClaw runtime:
   - `/Users/spclaw/.openclaw/workspace/skills/valuation-charting/SKILL.md`
 
@@ -1710,7 +1710,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `stale_fundamentals`
 
 ## Artifacts
-- Charts/data write to `/opt/coatue-claw-data/artifacts/charts/`:
+- Charts/data write to `/opt/spclaw-data/artifacts/charts/`:
   - `valuation-scatter-*.png`
   - `valuation-scatter-*.csv`
   - `valuation-scatter-*.json`
@@ -1738,12 +1738,12 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 - Email gateway tests added/validated: command parsing, disabled-mode safety, and attachment ingest routing.
 - 24/7 runtime service tests added/validated:
   - local: `PYTHONPATH=src pytest -q tests/test_launchd_runtime.py` => `4 passed`
-  - Mac mini: `/opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_launchd_runtime.py tests/test_email_gateway.py` => `7 passed`
+  - Mac mini: `/opt/spclaw/.venv/bin/python -m pytest -q tests/test_launchd_runtime.py tests/test_email_gateway.py` => `7 passed`
 - Mac mini runtime validation (2026-02-19):
-  - pulled `a49f887` then `95fb26d` in `/opt/coatue-claw`
+  - pulled `a49f887` then `95fb26d` in `/opt/spclaw`
   - `make openclaw-24x7-enable` succeeded for:
-    - `com.coatueclaw.email-gateway`
-    - `com.coatueclaw.memory-prune`
+    - `com.spclaw.email-gateway`
+    - `com.spclaw.memory-prune`
   - `make openclaw-24x7-status` reports:
     - email service: `loaded=true`, `state=running`
     - memory prune service: `loaded=true`, `last_exit_code=0` (idle between scheduled runs is expected)
@@ -1751,7 +1751,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - `make openclaw-email-status` confirms email channel enabled with expected allowlist senders
 - Email diligence parsing hardening validation (commit `19b2099`):
   - local tests: `PYTHONPATH=src pytest -q tests/test_email_gateway.py` => `3 passed`
-  - Mac mini tests: `/opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_email_gateway.py` => `3 passed`
+  - Mac mini tests: `/opt/spclaw/.venv/bin/python -m pytest -q tests/test_email_gateway.py` => `3 passed`
   - Mac mini direct parser check:
     - `parse_email_command('Testing Dilligence', 'Diligence SNOW please')`
     - result: `EmailCommand(kind='diligence', arg='SNOW')`
@@ -1768,7 +1768,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - replaced raw full-memo PDF text dump with a professionally sectioned diligence brief layout (clean headings, wrapped bullets, readable spacing)
   - tests added for readable summary + attachment contract (`tests/test_email_gateway.py`)
   - Mac mini validation:
-    - `/opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_email_gateway.py` => `4 passed`
+    - `/opt/spclaw/.venv/bin/python -m pytest -q tests/test_email_gateway.py` => `4 passed`
     - direct runtime check confirms:
       - `has_local_path=False`
       - attachment filename ends with `.pdf`
@@ -1799,13 +1799,13 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
       - payload begins with `%PDF`
     - user-facing summary title now reports `Title: SNOW Diligence Report`
 - Slack default routing upgrade (this session):
-  - added routing helper module: `src/coatue_claw/slack_routing.py`
+  - added routing helper module: `src/spclaw/slack_routing.py`
   - plain Slack messages now run through OpenClaw request handling by default
   - explicit `@user` mentions are excluded from default routing
   - `app_mention` flow remains supported and now shares common request handler logic with default-routed messages
   - tests: `tests/test_slack_routing.py`
   - Mac mini deployment validation (`86bce9d`):
-    - `/opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_slack_routing.py` => `3 passed`
+    - `/opt/spclaw/.venv/bin/python -m pytest -q tests/test_slack_routing.py` => `3 passed`
     - `make openclaw-restart` + `make openclaw-slack-status` => Slack probe `ok=true`
     - `make openclaw-24x7-status` => email/memory launchd services still healthy
   - deployed on Mac mini via `0173404` and validated:
@@ -1814,18 +1814,18 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - email 24/7 service restored and running (`make openclaw-24x7-status`)
 - X digest feature (this session):
   - implemented official X API digest path (no browser scraping dependency):
-    - new digest engine: `src/coatue_claw/x_digest.py`
-    - new Slack intent parser: `src/coatue_claw/slack_x_intent.py`
+    - new digest engine: `src/spclaw/x_digest.py`
+    - new Slack intent parser: `src/spclaw/slack_x_intent.py`
     - Slack commands wired:
       - `x digest <query> [last Nh] [limit N]`
       - `x status`
     - CLI command wired:
       - `claw x-digest "QUERY" --hours 24 --limit 50`
     - artifact contract:
-      - writes markdown digest to `/opt/coatue-claw-data/artifacts/x-digest` (override via `COATUE_CLAW_X_DIGEST_DIR`)
+      - writes markdown digest to `/opt/spclaw-data/artifacts/x-digest` (override via `SPCLAW_X_DIGEST_DIR`)
     - env contract:
-      - `COATUE_CLAW_X_BEARER_TOKEN` (required; runtime only, never in git)
-      - optional `COATUE_CLAW_X_API_BASE`
+      - `SPCLAW_X_BEARER_TOKEN` (required; runtime only, never in git)
+      - optional `SPCLAW_X_API_BASE`
   - tests added:
     - `tests/test_slack_x_intent.py`
     - `tests/test_x_digest.py`
@@ -1834,13 +1834,13 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
   - operator note:
     - token was provided in chat; rotate/regenerate it in X Developer portal and set the new token in runtime `.env.prod` only
   - Mac mini deploy + runtime verification completed:
-    - pulled `main` to `/opt/coatue-claw` at commit `5dfdd03`
-    - set `COATUE_CLAW_X_BEARER_TOKEN` in `/opt/coatue-claw/.env.prod`
+    - pulled `main` to `/opt/spclaw` at commit `5dfdd03`
+    - set `SPCLAW_X_BEARER_TOKEN` in `/opt/spclaw/.env.prod`
     - restarted runtime: `make openclaw-restart`
     - verified Slack health: `make openclaw-slack-status` probe `ok=true`
     - verified live X API path using runtime env:
       - `build_x_digest("snowflake", hours=24, max_results=10)` succeeded
-      - output written to `/opt/coatue-claw-data/artifacts/x-digest/snowflake-20260219-061237.md`
+      - output written to `/opt/spclaw-data/artifacts/x-digest/snowflake-20260219-061237.md`
 - Slack no-mention routing hotfix on Mac mini:
   - root cause from runtime logs:
     - `slack-auto-reply ... reason=\"no-mention\" skipping channel message`
@@ -1851,20 +1851,20 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - `make openclaw-restart`
     - `make openclaw-slack-status` => probe `ok=true`
   - expected behavior after fix:
-    - plain channel messages (e.g., `x status`) are routed to OpenClaw without requiring `@Coatue Claw`
+    - plain channel messages (e.g., `x status`) are routed to OpenClaw without requiring `@SPClaw`
 - X chart scout daily winner feature (this session):
   - implemented automated chart scouting + posting engine:
-    - module: `src/coatue_claw/x_chart_daily.py`
+    - module: `src/spclaw/x_chart_daily.py`
     - persists source trust/ranking + post history in SQLite:
-      - `/opt/coatue-claw-data/db/x_chart_daily.sqlite`
+      - `/opt/spclaw-data/db/x_chart_daily.sqlite`
     - writes per-slot markdown artifacts:
-      - `/opt/coatue-claw-data/artifacts/x-chart-daily/*.md`
+      - `/opt/spclaw-data/artifacts/x-chart-daily/*.md`
   - source strategy:
     - seeded prioritized source list with `@fiscal_AI` and additional high-signal accounts
     - auto-discovers and promotes new X sources based on engagement
     - ingests supplemental candidates from Visual Capitalist feed (`https://www.visualcapitalist.com/feed/`)
   - scheduling:
-    - added launchd service `com.coatueclaw.x-chart-daily`
+    - added launchd service `com.spclaw.x-chart-daily`
     - default windows: `09:00,12:00,18:00` with configurable timezone (default `America/Los_Angeles`)
   - Slack controls added:
     - `x chart now`
@@ -1891,18 +1891,18 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
     - Slack post token resolution now falls back to `~/.openclaw/openclaw.json` (`channels.slack.botToken`) when `SLACK_BOT_TOKEN` env is missing/inactive
     - Slack posting retries with fallback token when env token is rejected (`account_inactive`, `invalid_auth`, `token_revoked`)
   - Mac mini deploy/verification:
-    - pulled `main` to `/opt/coatue-claw` at commit `c3f64d0`
+    - pulled `main` to `/opt/spclaw` at commit `c3f64d0`
     - runtime env configured:
-      - `COATUE_CLAW_X_CHART_SLACK_CHANNEL=#charting`
-      - `COATUE_CLAW_X_CHART_TIMEZONE=America/Los_Angeles`
-      - `COATUE_CLAW_X_CHART_WINDOWS=09:00,12:00,18:00`
+      - `SPCLAW_X_CHART_SLACK_CHANNEL=#charting`
+      - `SPCLAW_X_CHART_TIMEZONE=America/Los_Angeles`
+      - `SPCLAW_X_CHART_WINDOWS=09:00,12:00,18:00`
     - launchd scheduler enabled and healthy:
       - `make openclaw-24x7-enable`
-      - `make openclaw-24x7-status` shows `com.coatueclaw.x-chart-daily` loaded
+      - `make openclaw-24x7-status` shows `com.spclaw.x-chart-daily` loaded
     - manual proof-of-life post succeeded:
       - `make openclaw-x-chart-run-once` posted winner to `#charting`
       - sample winner: `@Barchart` post `https://x.com/Barchart/status/2024274150118859021`
-      - artifact: `/opt/coatue-claw-data/artifacts/x-chart-daily/manual-20260218-224336-x.md`
+      - artifact: `/opt/spclaw-data/artifacts/x-chart-daily/manual-20260218-224336-x.md`
   - Chart-of-the-day style formatter (this session):
     - integrated a new Coatue-style rendered image card into x-chart posting flow
     - renderer uses design cues from Coatue `C:\\Takes` + valuation-chart skill style language:
@@ -1915,7 +1915,7 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
       - summary text message in channel
       - threaded `Coatue Chart of the Day` styled PNG upload
     - output artifact path:
-      - `/opt/coatue-claw-data/artifacts/x-chart-daily/<slot>-styled.png`
+      - `/opt/spclaw-data/artifacts/x-chart-daily/<slot>-styled.png`
   - chart-quality filter update:
     - X candidates now must pass chart-like text/data signal checks before ranking
     - reduces false positives (e.g., headline photos without chart context)
@@ -1954,10 +1954,10 @@ Ship valuation charting into the OpenClaw-native Slack workflow.
 
 ## Next Step to Validate in Slack
 Send in `#charting`:
-- `@Coatue Claw plot EV/Revenue multiples and revenue growth for SNOW,MDB,DDOG,NOW,CRWD`
-- `@Coatue Claw graph SNOW,MDB,DDOG with x axis market cap and y axis ltm revenue`
-- `@Coatue Claw create universe defense with PLTR,LMT,RTX,NOC,GD,LDOS`
-- `@Coatue Claw make me a valuation chart for defense stocks` then reply `@Coatue Claw use universe defense` or `@Coatue Claw online`
+- `@SPClaw plot EV/Revenue multiples and revenue growth for SNOW,MDB,DDOG,NOW,CRWD`
+- `@SPClaw graph SNOW,MDB,DDOG with x axis market cap and y axis ltm revenue`
+- `@SPClaw create universe defense with PLTR,LMT,RTX,NOC,GD,LDOS`
+- `@SPClaw make me a valuation chart for defense stocks` then reply `@SPClaw use universe defense` or `@SPClaw online`
 - Confirm rendered title headline is prompt-relevant (`Defense Stocks` / similar) and footnote is left-aligned.
 - Confirm category guide appears inside unused plot whitespace and does not consume a dedicated right gutter.
 - Confirm each successful chart post includes the in-thread adjustments follow-up prompt right after artifact upload.
@@ -1975,28 +1975,28 @@ Then confirm bot returns:
    - reinstall app after scope/event changes
 2. Run all Slack validation prompts above in `#charting`.
 3. Validate plain-English settings commands in Slack:
-   - `@Coatue Claw show my settings`
-   - `@Coatue Claw going forward look for 12 peers`
-   - `@Coatue Claw use market cap as the default x-axis`
-   - `@Coatue Claw when you finish a chart, ask us if we want ticker changes`
-4. Validate `@Coatue Claw promote current settings` commits/pushes to `main` and reports commit hash in-thread.
-5. Validate `@Coatue Claw undo last promotion` produces a revert commit and restarts runtime.
+   - `@SPClaw show my settings`
+   - `@SPClaw going forward look for 12 peers`
+   - `@SPClaw use market cap as the default x-axis`
+   - `@SPClaw when you finish a chart, ask us if we want ticker changes`
+4. Validate `@SPClaw promote current settings` commits/pushes to `main` and reports commit hash in-thread.
+5. Validate `@SPClaw undo last promotion` produces a revert commit and restarts runtime.
 6. Validate Slack deploy pipeline in `#claw-lab`:
-   - `@Coatue Claw deploy latest`
-   - `@Coatue Claw run checks`
-   - `@Coatue Claw show pipeline status`
-   - `@Coatue Claw show deploy history`
+   - `@SPClaw deploy latest`
+   - `@SPClaw run checks`
+   - `@SPClaw show pipeline status`
+   - `@SPClaw show deploy history`
 7. Validate diligence memo output in Slack:
-    - `@Coatue Claw diligence SNOW`
-    - `@Coatue Claw dilligence MDB` (typo alias path)
+    - `@SPClaw diligence SNOW`
+    - `@SPClaw dilligence MDB` (typo alias path)
     - confirm memo includes all required neutral sections plus source/timestamp attribution
     - confirm memo includes local database precheck summary and local report references when available
 8. Validate memory flows in Slack:
-   - `@Coatue Claw remember my daughter's birthday is June 3rd`
-   - `@Coatue Claw what is my daughter's birthday?`
-   - `@Coatue Claw memory status`
-   - `@Coatue Claw memory checkpoint`
-9. Configure `SLACK_PIPELINE_ADMINS` and optional `COATUE_CLAW_SLACK_BUILD_COMMAND` in runtime env for production permissions/runner control.
+   - `@SPClaw remember my daughter's birthday is June 3rd`
+   - `@SPClaw what is my daughter's birthday?`
+   - `@SPClaw memory status`
+   - `@SPClaw memory checkpoint`
+9. Configure `SLACK_PIPELINE_ADMINS` and optional `SPCLAW_SLACK_BUILD_COMMAND` in runtime env for production permissions/runner control.
 9. Validate 24/7 persistence after next Mac mini reboot:
    - run `make openclaw-24x7-status`
    - confirm both services auto-restart as `loaded=true` and `state=running`
@@ -2004,23 +2004,23 @@ Then confirm bot returns:
 11. Validate end-to-end category workflow with Spencer:
     - Spencer drops a file into `01_DROP_HERE_Incoming/{Universes|Companies|Industries}`
     - run `make openclaw-files-sync-pull`
-    - confirm file appears in `/opt/coatue-claw-data/files/incoming/{Universes|Companies|Industries}`
+    - confirm file appears in `/opt/spclaw-data/files/incoming/{Universes|Companies|Industries}`
 12. Validate Slack upload ingestion with Spencer:
     - Spencer uploads a file in Slack (without bot mention)
     - confirm bot thread ack shows routed category
-    - confirm file appears in `/opt/coatue-claw-data/files/incoming/{Universes|Companies|Industries}`
-    - confirm record exists in `/opt/coatue-claw-data/db/file_ingest.sqlite`
-13. Configure email env vars in `/opt/coatue-claw/.env.prod` and validate:
+    - confirm file appears in `/opt/spclaw-data/files/incoming/{Universes|Companies|Industries}`
+    - confirm record exists in `/opt/spclaw-data/db/file_ingest.sqlite`
+13. Configure email env vars in `/opt/spclaw/.env.prod` and validate:
     - `make openclaw-email-status`
     - `make openclaw-email-run-once`
     - send test email `diligence SNOW` and confirm reply
-14. On Mac mini, set chart scout env in `/opt/coatue-claw/.env.prod`:
-    - `COATUE_CLAW_X_CHART_SLACK_CHANNEL=<channel-id>`
-    - `COATUE_CLAW_X_CHART_TIMEZONE=America/Los_Angeles`
-    - `COATUE_CLAW_X_CHART_WINDOWS=09:00,12:00,18:00`
+14. On Mac mini, set chart scout env in `/opt/spclaw/.env.prod`:
+    - `SPCLAW_X_CHART_SLACK_CHANNEL=<channel-id>`
+    - `SPCLAW_X_CHART_TIMEZONE=America/Los_Angeles`
+    - `SPCLAW_X_CHART_WINDOWS=09:00,12:00,18:00`
 15. Run:
     - `make openclaw-24x7-enable`
-    - `make openclaw-24x7-status` (confirm `com.coatueclaw.x-chart-daily` loaded)
+    - `make openclaw-24x7-status` (confirm `com.spclaw.x-chart-daily` loaded)
 16. Dry-run source quality and posting:
     - `make openclaw-x-chart-sources`
     - `make openclaw-x-chart-run-once`
@@ -2029,7 +2029,7 @@ Then confirm bot returns:
 
 ## 2026-02-19 - Slack Build Runner rg Fallback
 - Issue observed: Slack `build:`/behavior-refine flow failed inside `codex exec` when generated command used `rg` on hosts without ripgrep (`zsh: command not found: rg`).
-- Code update: `src/coatue_claw/slack_pipeline.py`
+- Code update: `src/spclaw/slack_pipeline.py`
   - Added explicit build-runner prompt guidance: if `rg` is unavailable, use `grep -R` (or install ripgrep) instead of failing.
 - Tests:
   - Added `test_run_build_request_prompt_includes_rg_fallback` in `tests/test_slack_pipeline.py`.
@@ -2048,7 +2048,7 @@ Then confirm bot returns:
 - Issue fixed: Chart-of-the-* titles could become ungrammatical from noisy/truncated source copy (example observed in Slack: `Institutional investors sold a are at an extreme`).
 - Root cause:
   - subject extraction occasionally preserved a partial action phrase (`sold a`), then narrative template appended `are at an extreme`.
-- Code updates in `/Users/carsonwang/CoatueClaw/src/coatue_claw/x_chart_daily.py`:
+- Code updates in `/Users/carsonwang/SPClaw/src/spclaw/x_chart_daily.py`:
   - added subject cleanup before narrative synthesis (`_clean_subject_for_headline`)
   - added singular/plural copula selection (`_subject_is_plural`) so templates use `is/are` correctly
   - added explicit institutional net-seller/net-buyer narrative rules
@@ -2060,7 +2060,7 @@ Then confirm bot returns:
   - validation run: `PYTHONPATH=src pytest -q tests/test_x_chart_daily.py` -> `44 passed`
 
 ### Immediate Next Steps
-1. Deploy latest `main` to `/opt/coatue-claw` and restart runtime (`make openclaw-restart`).
+1. Deploy latest `main` to `/opt/spclaw` and restart runtime (`make openclaw-restart`).
 2. Run manual post-url smoke tests with known noisy titles and verify coherent final headline in Slack.
 3. Monitor next scheduled morning/afternoon/evening chart posts for title quality regressions.
 
@@ -2084,14 +2084,14 @@ Then confirm bot returns:
   - no dedicated `regulatory/probe` cause cluster;
   - Barron's (`barrons.com`) was not treated as a quality cause domain;
   - APP-specific web retrieval queries were too generic.
-- Code updates in `/Users/carsonwang/CoatueClaw/src/coatue_claw/market_daily.py`:
+- Code updates in `/Users/carsonwang/SPClaw/src/spclaw/market_daily.py`:
   - added APP alias overrides (`AppLovin`, `AppLovin Corporation`, `AppLovin Corp`);
   - added `regulatory_probe` driver cluster + event phrase (`reports of an active SEC probe.`);
   - added cluster priority bonus for `regulatory_probe`;
   - added `barrons.com` to both domain weights and quality-domain allowlist;
   - expanded APP web queries (`sec probe`, `regulatory probe`, `short seller report`);
   - boosted directional/decisive recognition for probe/investigation/regulatory wording.
-- Tests added in `/Users/carsonwang/CoatueClaw/tests/test_market_daily.py`:
+- Tests added in `/Users/carsonwang/SPClaw/tests/test_market_daily.py`:
   - `test_regulatory_probe_cluster_extraction_maps_keywords`
   - `test_barrons_domain_counts_as_quality_source`
   - `test_app_regulatory_probe_cluster_outputs_specific_reason`
@@ -2109,7 +2109,7 @@ Then confirm bot returns:
   - takeaway text was length-constrained but not validated for sentence completeness;
   - degenerate one-token LLM outputs (`U.S`) could survive as headline/chart label;
   - scout winner selection did not switch candidates when top copy quality was poor.
-- Code updates in `/opt/coatue-claw/src/coatue_claw/x_chart_daily.py`:
+- Code updates in `/opt/spclaw/src/spclaw/x_chart_daily.py`:
   - added deterministic copy-quality helpers:
     - `_is_complete_sentence`
     - `_finalize_takeaway_sentence`
@@ -2133,23 +2133,23 @@ Then confirm bot returns:
     - rewrites copy as needed;
     - returns diagnostics (`copy_rewrite_applied`, `copy_rewrite_reason`, `candidate_fallback_used=false`).
   - expanded post-publish review checklist and persisted these checks in review payload.
-- Tests added in `/opt/coatue-claw/tests/test_x_chart_daily.py`:
+- Tests added in `/opt/spclaw/tests/test_x_chart_daily.py`:
   - `test_takeaway_sentence_validator_rejects_fragment_fell_to_lowest`
   - `test_takeaway_sentence_finalizer_returns_complete_sentence`
   - `test_style_draft_rewrites_degenerate_fields_and_fragment_takeaway`
   - `test_run_chart_scout_falls_back_when_top_candidate_copy_is_bad`
   - `test_run_chart_for_post_url_rewrites_takeaway_but_keeps_requested_url`
 - Validation:
-  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_x_chart_daily.py` -> `49 passed`.
-  - full suite smoke: `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q` -> 3 pre-existing unrelated failures in `test_spencer_change_digest` / `test_spencer_change_log`.
+  - `PYTHONPATH=/opt/spclaw/src /opt/spclaw/.venv/bin/python -m pytest -q /opt/spclaw/tests/test_x_chart_daily.py` -> `49 passed`.
+  - full suite smoke: `PYTHONPATH=/opt/spclaw/src /opt/spclaw/.venv/bin/python -m pytest -q` -> 3 pre-existing unrelated failures in `test_spencer_change_digest` / `test_spencer_change_log`.
 - Runtime smoke checks completed:
-  - `make -C /opt/coatue-claw openclaw-x-chart-run-once`
-  - `/opt/coatue-claw/.venv/bin/python -m coatue_claw.x_chart_daily run-post-url https://x.com/Barchart/status/2025715989384663396`
+  - `make -C /opt/spclaw openclaw-x-chart-run-once`
+  - `/opt/spclaw/.venv/bin/python -m spclaw.x_chart_daily run-post-url https://x.com/Barchart/status/2025715989384663396`
   - both posted successfully and emitted rewrite diagnostics; review checks reported complete-sentence and non-degenerate copy.
 
 ### Immediate Next Steps
 1. Pull latest `main` on Mac mini runtime and restart (`make openclaw-restart`).
-2. In Slack `#charting`, run `@Coatue Claw x chart now` and confirm takeaway is a complete sentence with no clipped ending.
+2. In Slack `#charting`, run `@SPClaw x chart now` and confirm takeaway is a complete sentence with no clipped ending.
 3. Run one explicit URL request and confirm posted source URL is unchanged while takeaway is rewritten when needed.
 4. Triage unrelated full-suite failures in `tests/test_spencer_change_digest.py` and `tests/test_spencer_change_log.py` separately from X-chart pipeline.
 
@@ -2158,7 +2158,7 @@ Then confirm bot returns:
 - Root cause:
   - title pipeline had length + degenerate checks but no deterministic headline-phrase completeness gate;
   - `U.S.` abbreviation splitting in first-sentence extraction could collapse subject parsing and degrade headline quality.
-- Code updates in `/opt/coatue-claw/src/coatue_claw/x_chart_daily.py`:
+- Code updates in `/opt/spclaw/src/spclaw/x_chart_daily.py`:
   - added headline-quality helpers:
     - `_is_complete_headline_phrase`
     - `_finalize_headline_phrase`
@@ -2182,7 +2182,7 @@ Then confirm bot returns:
   - explicit URL behavior remains strict:
     - requested URL is preserved
     - run errors if headline remains invalid after rewrite.
-- Tests added/updated in `/opt/coatue-claw/tests/test_x_chart_daily.py`:
+- Tests added/updated in `/opt/spclaw/tests/test_x_chart_daily.py`:
   - `test_headline_phrase_validator_rejects_fragment_home_sellers_now_is`
   - `test_headline_phrase_finalizer_returns_empty_for_dangling_copula`
   - `test_style_draft_rewrites_broken_headline_phrase`
@@ -2191,8 +2191,8 @@ Then confirm bot returns:
   - `test_run_chart_for_post_url_errors_when_headline_unrecoverable`
   - expanded explicit-URL rewrite regression to assert headline validity.
 - Validation:
-  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_x_chart_daily.py` -> `55 passed`.
-  - full smoke: `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q` -> unchanged unrelated failures:
+  - `PYTHONPATH=/opt/spclaw/src /opt/spclaw/.venv/bin/python -m pytest -q /opt/spclaw/tests/test_x_chart_daily.py` -> `55 passed`.
+  - full smoke: `PYTHONPATH=/opt/spclaw/src /opt/spclaw/.venv/bin/python -m pytest -q` -> unchanged unrelated failures:
     - `tests/test_spencer_change_digest.py::test_run_once_dry_run_includes_carson_label`
     - `tests/test_spencer_change_log.py::test_is_spencer_user_defaults`
     - `tests/test_spencer_change_log.py::test_requester_label_defaults`
@@ -2207,8 +2207,8 @@ Then confirm bot returns:
 
 ## 2026-02-23 - Board Seat Non-Repeat Guardrail (Anduril)
 - User signal captured from `#anduril`: Spencer explicitly flagged repeated investment pitches (example callout: repeated Epirus idea) and requested net-new ideas unless material change.
-- Runtime module updated: `/opt/coatue-claw/src/coatue_claw/board_seat_daily.py`
-  - added persistent pitch-history store table: `board_seat_pitches` in `/opt/coatue-claw-data/db/board_seat_daily.sqlite`
+- Runtime module updated: `/opt/spclaw/src/spclaw/board_seat_daily.py`
+  - added persistent pitch-history store table: `board_seat_pitches` in `/opt/spclaw-data/db/board_seat_daily.sqlite`
   - pitch-history schema stores:
     - company/channel metadata
     - message text + extracted investment text
@@ -2228,13 +2228,13 @@ Then confirm bot returns:
     - if still repeated, skips posting with explicit reason `repeat_investment_without_significant_change`
   - LLM prompt now receives prior investment theses and is instructed not to repeat absent clear context change.
   - status payload now includes `pitch_counts` by company.
-- Tests added/updated in `/opt/coatue-claw/tests/test_board_seat_daily.py`:
+- Tests added/updated in `/opt/spclaw/tests/test_board_seat_daily.py`:
   - extraction test for structured investment text
   - repeat-without-change skip behavior
   - allow-post when significant change exists
   - history-backfill parsing test
 - Validation:
-  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_board_seat_daily.py` -> `9 passed`
+  - `PYTHONPATH=/opt/spclaw/src /opt/spclaw/.venv/bin/python -m pytest -q /opt/spclaw/tests/test_board_seat_daily.py` -> `9 passed`
   - full smoke remains unchanged with 3 unrelated pre-existing failures in Spencer-change tests.
 - Live runtime verification:
   - forced dry-run for Anduril now returns skip reason `repeat_investment_without_significant_change`
@@ -2250,7 +2250,7 @@ Then confirm bot returns:
 3. Expand repeat detector from textual similarity to named-investment entity tracking (e.g., Epirus/Shield AI/Saronic) if repeated-name risk remains high.
 
 ## 2026-02-23 - X Chart Fragment-Tail Guardrails (Title + Takeaway)
-- Runtime module updated: `/opt/coatue-claw/src/coatue_claw/x_chart_daily.py`
+- Runtime module updated: `/opt/spclaw/src/spclaw/x_chart_daily.py`
   - added deterministic tail-fragment dictionaries:
     - `TRAILING_DETERMINERS`
     - `TRAILING_QUALIFIERS`
@@ -2277,7 +2277,7 @@ Then confirm bot returns:
     - `_post_publish_checklist(...).checks.takeaway_tail_complete`
     - `_post_winner_to_slack(...).review.checks.headline_tail_complete`
     - `_post_winner_to_slack(...).review.checks.takeaway_tail_complete`
-- Tests updated in `/opt/coatue-claw/tests/test_x_chart_daily.py`:
+- Tests updated in `/opt/spclaw/tests/test_x_chart_daily.py`:
   - `test_headline_validator_rejects_trailing_possessive_fragment`
   - `test_takeaway_validator_rejects_trailing_possessive_fragment`
   - `test_headline_finalizer_returns_empty_for_clipped_their_fragment`
@@ -2286,8 +2286,8 @@ Then confirm bot returns:
   - `test_run_chart_scout_falls_back_when_top_candidate_has_fragment_tail`
   - updated explicit URL rewrite regression to assert fragment-tail rewrite behavior and diagnostics.
 - Validation:
-  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_x_chart_daily.py` -> `61 passed`
-  - full smoke: `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q` -> unchanged unrelated failures:
+  - `PYTHONPATH=/opt/spclaw/src /opt/spclaw/.venv/bin/python -m pytest -q /opt/spclaw/tests/test_x_chart_daily.py` -> `61 passed`
+  - full smoke: `PYTHONPATH=/opt/spclaw/src /opt/spclaw/.venv/bin/python -m pytest -q` -> unchanged unrelated failures:
     - `tests/test_spencer_change_digest.py::test_run_once_dry_run_includes_carson_label`
     - `tests/test_spencer_change_log.py::test_is_spencer_user_defaults`
     - `tests/test_spencer_change_log.py::test_requester_label_defaults`
@@ -2298,7 +2298,7 @@ Then confirm bot returns:
 3. Trigger one explicit URL post for a fragment-prone source and confirm URL is preserved with rewritten coherent copy.
 
 ## 2026-02-23 - X Chart Run-On Clause Fix (Takeaway + Role Stability)
-- Runtime module updated: `/opt/coatue-claw/src/coatue_claw/x_chart_daily.py`
+- Runtime module updated: `/opt/spclaw/src/spclaw/x_chart_daily.py`
   - added deterministic unjoined-clause detection for takeaway copy:
     - `_has_unjoined_clause_boundary(text)`
     - `_first_unjoined_clause_boundary_index(text)`
@@ -2317,7 +2317,7 @@ Then confirm bot returns:
     - `takeaway_clause_boundary_ok` added to style/review check payloads.
   - role-stability hardening:
     - `_enforce_title_takeaway_roles(...)` now compacts run-on headlines to concise locked-term-safe core sentence when role order is otherwise valid.
-- Tests updated in `/opt/coatue-claw/tests/test_x_chart_daily.py`:
+- Tests updated in `/opt/spclaw/tests/test_x_chart_daily.py`:
   - `test_takeaway_validator_rejects_market_cap_ai_runon`
   - `test_takeaway_finalizer_repairs_unjoined_clause_boundary`
   - `test_role_enforcement_compacts_runon_headline_when_role_order_is_valid`
@@ -2325,9 +2325,9 @@ Then confirm bot returns:
     - `US stocks erase nearly -$800 billion in market cap while AI disruption fears spread and trade war headlines return.`
 - Validation:
   - targeted:
-    - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_x_chart_daily.py /opt/coatue-claw/tests/test_slack_x_chart_intent.py` -> `77 passed`
+    - `PYTHONPATH=/opt/spclaw/src /opt/spclaw/.venv/bin/python -m pytest -q /opt/spclaw/tests/test_x_chart_daily.py /opt/spclaw/tests/test_slack_x_chart_intent.py` -> `77 passed`
   - full smoke:
-    - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q` -> unchanged unrelated failures:
+    - `PYTHONPATH=/opt/spclaw/src /opt/spclaw/.venv/bin/python -m pytest -q` -> unchanged unrelated failures:
       - `tests/test_spencer_change_digest.py::test_run_once_dry_run_includes_carson_label`
       - `tests/test_spencer_change_log.py::test_is_spencer_user_defaults`
       - `tests/test_spencer_change_log.py::test_requester_label_defaults`
@@ -2349,18 +2349,18 @@ Then confirm bot returns:
 3. Keep Spencer-change identity failures out of this charting branch and patch separately.
 
 ## 2026-02-23 - X Chart Post Copy Cleanup + #charting Purge Attempt
-- Runtime module updated: `/opt/coatue-claw/src/coatue_claw/x_chart_daily.py`
+- Runtime module updated: `/opt/spclaw/src/spclaw/x_chart_daily.py`
   - removed `- Render: ...` line from Slack chart post `initial_comment` output.
   - post summary now includes only:
     - Source
     - Title
     - Key takeaway
     - Link
-- Test updated: `/opt/coatue-claw/tests/test_x_chart_daily.py`
+- Test updated: `/opt/spclaw/tests/test_x_chart_daily.py`
   - `test_post_winner_preserves_takeaway_punctuation_in_slack_comment` now asserts `- Render:` is absent.
 - Validation:
   - targeted tests:
-    - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_x_chart_daily.py /opt/coatue-claw/tests/test_slack_x_chart_intent.py` -> `77 passed`
+    - `PYTHONPATH=/opt/spclaw/src /opt/spclaw/.venv/bin/python -m pytest -q /opt/spclaw/tests/test_x_chart_daily.py /opt/spclaw/tests/test_slack_x_chart_intent.py` -> `77 passed`
 - Slack channel cleanup run (`#charting`, channel id `C0AFXM2MWAV`):
   - API delete pass results:
     - `messages_seen: 48`
@@ -2378,29 +2378,29 @@ Then confirm bot returns:
 
 ## 2026-02-23 - DM Routing Fix for SPClaw
 - Runtime modules updated:
-  - `/opt/coatue-claw/src/coatue_claw/slack_routing.py`
+  - `/opt/spclaw/src/spclaw/slack_routing.py`
     - added `should_route_message_event(text, channel_type)`:
       - always routes non-empty direct-message events (`channel_type=im`), even if the DM includes `<@SPClaw>` mention markup.
       - preserves existing mention-based default routing behavior for channel messages.
-  - `/opt/coatue-claw/src/coatue_claw/slack_bot.py`
+  - `/opt/spclaw/src/spclaw/slack_bot.py`
     - `handle_message` now uses `should_route_message_event(...)` instead of only `should_default_route_message(...)`.
     - DM events are tagged as `source_event=slack-message-dm` for logging/memory source traceability.
 - Tests updated:
-  - `/opt/coatue-claw/tests/test_slack_routing.py`
+  - `/opt/spclaw/tests/test_slack_routing.py`
     - added `test_should_route_message_event_im_always_routes_nonempty`
     - added `test_should_route_message_event_non_im_follows_default_rules`
 - Validation:
-  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_slack_routing.py /opt/coatue-claw/tests/test_x_chart_daily.py /opt/coatue-claw/tests/test_slack_x_chart_intent.py` -> `82 passed`
+  - `PYTHONPATH=/opt/spclaw/src /opt/spclaw/.venv/bin/python -m pytest -q /opt/spclaw/tests/test_slack_routing.py /opt/spclaw/tests/test_x_chart_daily.py /opt/spclaw/tests/test_slack_x_chart_intent.py` -> `82 passed`
   - runtime restart:
     - `make openclaw-restart` (gateway restarted)
-    - `make openclaw-slack-status` -> Slack probe `ok=true`, bot `coatue_claw` connected.
+    - `make openclaw-slack-status` -> Slack probe `ok=true`, bot `spclaw` connected.
 
 ### Immediate Next Steps
 1. DM `SPClaw` a plain message and a second message including `@SPClaw` to verify both trigger replies.
 2. If DM still does not trigger, check Slack app Event Subscriptions include DM `message` events (`message.im`) and reinstall app.
 
 ## 2026-02-23 - Board Seat Styling + Source Links (Global Default)
-- Runtime module updated: `/opt/coatue-claw/src/coatue_claw/board_seat_daily.py`
+- Runtime module updated: `/opt/spclaw/src/spclaw/board_seat_daily.py`
   - BoardSeat draft schema now carries source links:
     - `BoardSeatDraft.source_urls`
   - Added deterministic source-link normalization/fallback helpers:
@@ -2416,16 +2416,16 @@ Then confirm bot returns:
     - prefer funding/LLM-provided URLs when available
     - if missing, auto-add deterministic Google reference queries so links are always present
   - Sanitizer now preserves/normalizes source URLs from draft first, then funding snapshot fallback.
-- Tests updated: `/opt/coatue-claw/tests/test_board_seat_daily.py`
+- Tests updated: `/opt/spclaw/tests/test_board_seat_daily.py`
   - `test_v3_message_structure_uses_labeled_lines_not_bullets` now asserts `*Sources*` exists.
   - `test_v3_context_and_funding_use_labeled_lines` now asserts clickable source links are rendered.
   - `test_run_once_dry_run_v3_contains_hierarchy_sections` now asserts sources section exists in preview.
   - added `test_render_board_seat_message_uses_fallback_sources_when_missing`.
 - Validation:
   - targeted:
-    - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_board_seat_daily.py` -> `13 passed`
+    - `PYTHONPATH=/opt/spclaw/src /opt/spclaw/.venv/bin/python -m pytest -q /opt/spclaw/tests/test_board_seat_daily.py` -> `13 passed`
   - full smoke:
-    - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q` -> unchanged unrelated failures:
+    - `PYTHONPATH=/opt/spclaw/src /opt/spclaw/.venv/bin/python -m pytest -q` -> unchanged unrelated failures:
       - `tests/test_spencer_change_digest.py::test_run_once_dry_run_includes_carson_label`
       - `tests/test_spencer_change_log.py::test_is_spencer_user_defaults`
       - `tests/test_spencer_change_log.py::test_requester_label_defaults`
@@ -2433,8 +2433,8 @@ Then confirm bot returns:
   - `/Users/spclaw/.openclaw/workspace/AGENTS.md`
   - Portco idea template switched to markdown bold markers (`**...**`) and now explicitly requires a clickable `Sources` section with at least two links.
   - Gateway restarted and health re-checked:
-    - `make -C /opt/coatue-claw openclaw-restart`
-    - `make -C /opt/coatue-claw openclaw-slack-status` -> probe `ok=true`
+    - `make -C /opt/spclaw openclaw-restart`
+    - `make -C /opt/spclaw openclaw-slack-status` -> probe `ok=true`
 
 ### Immediate Next Steps
 1. In Slack `#anduril` (or any portco channel), request a fresh board-seat idea and confirm section labels render as bold and include `Sources` links.
@@ -2454,8 +2454,8 @@ Then confirm bot returns:
   - Updated OpenClaw config channel map to include `#openai`:
     - added `C0AFZ2YSQN9: { enabled: true, requireMention: false }`
   - Restarted gateway and verified health:
-    - `make -C /opt/coatue-claw openclaw-restart`
-    - `make -C /opt/coatue-claw openclaw-slack-status` -> probe `ok=true`
+    - `make -C /opt/spclaw openclaw-restart`
+    - `make -C /opt/spclaw openclaw-slack-status` -> probe `ok=true`
   - Posted a heartbeat message directly to `#openai` as delivery check:
     - `chat_postMessage(channel=C0AFZ2YSQN9, text='SPClaw runtime check...')` -> success.
 
@@ -2480,10 +2480,10 @@ Then confirm bot returns:
 
 ### Immediate Next Steps
 1. Ask user to test in any previously non-responsive channel (for example `#openai`) and confirm response path is live.
-2. If a newly created channel is missed in the future, run another join sweep or verify `COATUE_CLAW_SLACK_AUTOJOIN_PUBLIC_CHANNELS=1`.
+2. If a newly created channel is missed in the future, run another join sweep or verify `SPCLAW_SLACK_AUTOJOIN_PUBLIC_CHANNELS=1`.
 
 ## 2026-02-23 - Board Seat V4 (Acquisition/Acquihire + Named Citations)
-- Runtime module updated: `/opt/coatue-claw/src/coatue_claw/board_seat_daily.py`
+- Runtime module updated: `/opt/spclaw/src/spclaw/board_seat_daily.py`
   - format version bumped:
     - `BOARD_SEAT_FORMAT_VERSION = "v4_acq_acquihire_named_sources"`
   - `BoardSeatDraft` schema expanded:
@@ -2503,7 +2503,7 @@ Then confirm bot returns:
     - `Idea:` is parsed as part of thesis/core investment signal.
   - acquisition evidence collection added:
     - `_acquisition_search_rows(...)` uses Brave search (when key exists) for acquisition/acquihire-target evidence rows.
-- Tests updated: `/opt/coatue-claw/tests/test_board_seat_daily.py`
+- Tests updated: `/opt/spclaw/tests/test_board_seat_daily.py`
   - migrated to V4 expectations and added coverage for:
     - explicit `Idea` line
     - invalid non-acquisition thesis rejection
@@ -2513,9 +2513,9 @@ Then confirm bot returns:
     - legacy parse compatibility.
 - Validation:
   - targeted:
-    - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_board_seat_daily.py` -> `15 passed`
+    - `PYTHONPATH=/opt/spclaw/src /opt/spclaw/.venv/bin/python -m pytest -q /opt/spclaw/tests/test_board_seat_daily.py` -> `15 passed`
   - full smoke:
-    - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q` -> unchanged unrelated failures:
+    - `PYTHONPATH=/opt/spclaw/src /opt/spclaw/.venv/bin/python -m pytest -q` -> unchanged unrelated failures:
       - `tests/test_spencer_change_digest.py::test_run_once_dry_run_includes_carson_label`
       - `tests/test_spencer_change_log.py::test_is_spencer_user_defaults`
       - `tests/test_spencer_change_log.py::test_requester_label_defaults`
@@ -2526,8 +2526,8 @@ Then confirm bot returns:
     - explicit `Idea` labeled line
     - named source+title citation lines (no Source 1/2/3)
   - runtime restarted and verified healthy:
-    - `make -C /opt/coatue-claw openclaw-restart`
-    - `make -C /opt/coatue-claw openclaw-slack-status` (`probe.ok=true`)
+    - `make -C /opt/spclaw openclaw-restart`
+    - `make -C /opt/spclaw openclaw-slack-status` (`probe.ok=true`)
 
 ### Immediate Next Steps
 1. In `#openai`, send: `give me a new board seat idea` and verify first thesis line is `Idea: Acquire/Acquihire ...`.
@@ -2536,14 +2536,14 @@ Then confirm bot returns:
 ## 2026-02-23 - Board Seat V4 Fallback Target Hardening
 - Issue found during dry-run validation:
   - low-signal fallback produced invalid placeholder target text (`Idea: Acquire No ...`) for `OpenAI`.
-- Fix shipped in `src/coatue_claw/board_seat_daily.py`:
+- Fix shipped in `src/spclaw/board_seat_daily.py`:
   - added `no` to acquisition placeholder target blocklist.
   - tightened target candidate extraction to skip ultra-short candidates (`len < 3`).
 - Tests:
   - added regression in `tests/test_board_seat_daily.py`:
     - `test_best_effort_idea_line_avoids_placeholder_no_target`
   - targeted suite:
-    - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_board_seat_daily.py` -> `16 passed`
+    - `PYTHONPATH=/opt/spclaw/src /opt/spclaw/.venv/bin/python -m pytest -q /opt/spclaw/tests/test_board_seat_daily.py` -> `16 passed`
 - Runtime validation:
   - dry run now yields valid best-effort idea line:
     - `Idea: Acquire Stealth AI Systems ...`
@@ -2558,21 +2558,21 @@ Then confirm bot returns:
   - explicit Slack prefix trigger: `git-memory:`
   - queueing for git reconciliation using existing change tracker.
 - Code changes:
-  - `src/coatue_claw/slack_bot.py`
+  - `src/spclaw/slack_bot.py`
     - detects `git-memory:` at message start
     - captures queue items as:
       - `request_kind=memory_git`
       - `trigger_mode=git_memory_prefix`
       - `source_ref=slack://... | memory:/Users/spclaw/.openclaw/workspace/memory/YYYY-MM-DD.md`
     - preserves runtime memory ingestion and replies with queue id/status in-thread.
-  - `src/coatue_claw/spencer_change_log.py`
+  - `src/spclaw/spencer_change_log.py`
     - schema migration adds: `request_kind`, `trigger_mode`, `source_ref`, `related_commit`
     - new tracker methods:
       - `reconcile_status()`
       - `export_memory_git_queue(...)`
       - `reconcile_link(...)`
     - `list_changes(...)` now supports `request_kind` and `open_only` filters.
-  - `src/coatue_claw/cli.py`
+  - `src/spclaw/cli.py`
     - added:
       - `claw memory reconcile-status`
       - `claw memory reconcile-export --limit N`
@@ -2584,7 +2584,7 @@ Then confirm bot returns:
   - `spencer changes memory`
   - `change requests memory`
 - Validation:
-  - `PYTHONPATH=/opt/coatue-claw/src /opt/coatue-claw/.venv/bin/python -m pytest -q /opt/coatue-claw/tests/test_spencer_change_log.py /opt/coatue-claw/tests/test_spencer_change_digest.py` -> `14 passed`
+  - `PYTHONPATH=/opt/spclaw/src /opt/spclaw/.venv/bin/python -m pytest -q /opt/spclaw/tests/test_spencer_change_log.py /opt/spclaw/tests/test_spencer_change_digest.py` -> `14 passed`
 
 ### Immediate Next Steps
 1. Restart runtime and verify Slack probe healthy.
@@ -2594,11 +2594,11 @@ Then confirm bot returns:
 ## 2026-02-24 - Scheduled Memory Reconcile Export Enabled
 - User request: schedule memory-git queue export so laptop/git view stays fresh without manual steps.
 - Code shipped:
-  - `src/coatue_claw/launchd_runtime.py`
-    - added service `com.coatueclaw.memory-reconcile-export`
-    - runs `python -m coatue_claw.cli memory reconcile-export --limit <N>`
-    - default cadence: 15 minutes (`COATUE_CLAW_MEMORY_RECONCILE_INTERVAL_SECONDS=900`)
-    - queue limit env: `COATUE_CLAW_MEMORY_RECONCILE_EXPORT_LIMIT` (default `200`)
+  - `src/spclaw/launchd_runtime.py`
+    - added service `com.spclaw.memory-reconcile-export`
+    - runs `python -m spclaw.cli memory reconcile-export --limit <N>`
+    - default cadence: 15 minutes (`SPCLAW_MEMORY_RECONCILE_INTERVAL_SECONDS=900`)
+    - queue limit env: `SPCLAW_MEMORY_RECONCILE_EXPORT_LIMIT` (default `200`)
     - new selector: `--service memoryreconcile`
   - `Makefile`
     - `openclaw-memory-reconcile-status`
@@ -2609,22 +2609,22 @@ Then confirm bot returns:
     - service spec / all-services / selector coverage updated.
 - Runtime action on Mac mini:
   - enabled service directly:
-    - `/opt/coatue-claw/.venv/bin/python -m coatue_claw.launchd_runtime enable --service memoryreconcile`
+    - `/opt/spclaw/.venv/bin/python -m spclaw.launchd_runtime enable --service memoryreconcile`
   - status now shows:
-    - `com.coatueclaw.memory-reconcile-export` loaded in `gui/501`, `last_exit_code=0`.
+    - `com.spclaw.memory-reconcile-export` loaded in `gui/501`, `last_exit_code=0`.
   - manual checks passed:
-    - `make -C /opt/coatue-claw openclaw-memory-reconcile-status`
-    - `make -C /opt/coatue-claw openclaw-memory-reconcile-export`
+    - `make -C /opt/spclaw openclaw-memory-reconcile-status`
+    - `make -C /opt/spclaw openclaw-memory-reconcile-export`
 
 ### Immediate Next Steps
 1. Send one `git-memory:` message in Slack and confirm queue file refreshes automatically within 15 minutes.
-2. If needed, tune interval by setting `COATUE_CLAW_MEMORY_RECONCILE_INTERVAL_SECONDS` in `.env.prod` and rerun `make openclaw-24x7-enable`.
+2. If needed, tune interval by setting `SPCLAW_MEMORY_RECONCILE_INTERVAL_SECONDS` in `.env.prod` and rerun `make openclaw-24x7-enable`.
 
 ## 2026-02-24 - Auto DM Alert for Behavior Change Requests
 - User request: for every Slack behavior-change ask, auto-notify Carson and confirm:
   - A) request added to memory markdown
   - B) request queued for git reconciliation upload path.
-- Shipped in `src/coatue_claw/slack_bot.py`:
+- Shipped in `src/spclaw/slack_bot.py`:
   - detects behavior-change asks in plain language (not just `git-memory:` prefix)
   - captures as `memory_git` queue item with trigger mode:
     - `git_memory_prefix` or `auto_behavior_request`
@@ -2633,10 +2633,10 @@ Then confirm bot returns:
   - sends immediate DM to Carson (or env-configured notify users)
   - posts in-thread acknowledgement with queue ID.
 - Tracker update:
-  - `src/coatue_claw/spencer_change_log.py` now accepts `auto_behavior_request` trigger mode.
+  - `src/spclaw/spencer_change_log.py` now accepts `auto_behavior_request` trigger mode.
 - Config knobs:
-  - `COATUE_CLAW_CHANGE_NOTIFY_USER_IDS` (default Carson ID)
-  - `COATUE_CLAW_CHANGE_MEMORY_MD_PATH` (default `/Users/spclaw/.openclaw/workspace/MEMORY.md`)
+  - `SPCLAW_CHANGE_NOTIFY_USER_IDS` (default Carson ID)
+  - `SPCLAW_CHANGE_MEMORY_MD_PATH` (default `/Users/spclaw/.openclaw/workspace/MEMORY.md`)
 - Validation:
   - targeted tests: `20 passed`
   - full suite: `223 passed`
@@ -2650,14 +2650,14 @@ Then confirm bot returns:
 
 ## 2026-02-24 - X Chart Winner Selection: 3-Day Source Repeat Cooldown
 - User preference implemented: same source account may repeat, but not within 3 days of its most recent posted chart when alternatives exist.
-- Runtime module updated: `/opt/coatue-claw/src/coatue_claw/x_chart_daily.py`
-  - added `_source_repeat_days()` reading `COATUE_CLAW_X_CHART_SOURCE_REPEAT_DAYS` (default `3`)
+- Runtime module updated: `/opt/spclaw/src/spclaw/x_chart_daily.py`
+  - added `_source_repeat_days()` reading `SPCLAW_X_CHART_SOURCE_REPEAT_DAYS` (default `3`)
   - `_pick_winner(...)` now:
     - builds `source_last_posted` from recent posted slots
     - filters candidates from sources posted within cooldown window
     - applies existing score-floor source-variety ranking on cooled pool
     - falls back to original score pool if cooldown would otherwise empty the set
-- Tests updated: `/opt/coatue-claw/tests/test_x_chart_daily.py`
+- Tests updated: `/opt/spclaw/tests/test_x_chart_daily.py`
   - `test_pick_winner_enforces_source_repeat_cooldown_with_alternative`
   - `test_pick_winner_allows_recent_source_when_no_alternative`
 - Validation:
@@ -2666,11 +2666,11 @@ Then confirm bot returns:
 
 ### Immediate Next Steps
 1. Observe next scheduled chart windows and confirm no same-source repeats within 3 days unless no viable alternative exists.
-2. If too restrictive in live flow, reduce `COATUE_CLAW_X_CHART_SOURCE_REPEAT_DAYS` to `2` in `.env.prod`.
+2. If too restrictive in live flow, reduce `SPCLAW_X_CHART_SOURCE_REPEAT_DAYS` to `2` in `.env.prod`.
 
 ## 2026-02-24 - X Chart Reinforcement: Preferred Sources + Style-Quality Score
 - User input: reinforce chart-of-day scout toward Spencer-preferred chart style and source accounts.
-- Shipped in `src/coatue_claw/x_chart_daily.py`:
+- Shipped in `src/spclaw/x_chart_daily.py`:
   - added preferred default source seeds:
     - `stock_unlock` priority `1.45`
     - `stripe` priority `1.4`
@@ -2691,7 +2691,7 @@ Then confirm bot returns:
 
 ## 2026-02-24 - X Chart Reinforcement: Preferred Topic Tags + Source Handles
 - User confirmed preferred examples and requested reinforcement on both topic coverage and account inclusion.
-- Shipped in `src/coatue_claw/x_chart_daily.py`:
+- Shipped in `src/spclaw/x_chart_daily.py`:
   - added topic-keyword tags across theme/signal/style dictionaries for:
     - backlog inflection
     - AI data-center power-demand narratives
@@ -2712,22 +2712,22 @@ Then confirm bot returns:
 
 ## Update (2026-02-24, integrator deploy: Market Daily no-X patch on main)
 - Integrated `origin/codex/agent-market-daily` into `main` (merge commit: `d6c2bdd`).
-- Phase A validation/deploy completed on `/opt/coatue-claw`:
-  - `PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_market_daily.py` -> `40 passed`
-  - `PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
+- Phase A validation/deploy completed on `/opt/spclaw`:
+  - `PYTHONPATH=src /opt/spclaw/.venv/bin/python -m pytest -q tests/test_market_daily.py` -> `40 passed`
+  - `PYTHONPATH=src /opt/spclaw/.venv/bin/python -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
   - `make openclaw-restart`
   - `make openclaw-slack-status` -> probe recovered healthy (`ok=true`, `status=200`)
   - `make openclaw-market-daily-run-once FORCE=1` -> posted (`run_id=7`)
   - `make openclaw-market-daily-earnings-recap-run-once FORCE=1` -> `no_reporters` cleanly (`run_id=8`)
 - No-X checks confirmed from artifact/debug output:
-  - `/opt/coatue-claw-data/artifacts/market-daily/md-close-20260225-022458.md` footer now reads:
+  - `/opt/spclaw-data/artifacts/market-daily/md-close-20260225-022458.md` footer now reads:
     - `Sources: Yahoo fast_info + Yahoo news + web search`
   - mover lines include `[News]` / `[Web]` only (no `[X]`).
   - `debug-catalyst INTC --slot close` returns links map with only `news`/`web` fields (no `x`).
 - Follow-up required (Phase B): reject quote-directory wrapper titles from catalyst phrase selection (INTC currently still picks Yahoo quote-page style wrapper title).
 
 ## Update (2026-02-24, Market Daily Intel headline-quality hardening)
-- Implemented deterministic wrapper-title rejection in `src/coatue_claw/market_daily.py` for quote-directory style evidence text.
+- Implemented deterministic wrapper-title rejection in `src/spclaw/market_daily.py` for quote-directory style evidence text.
 - Added wrapper-title guardrails at all required gates:
   - `_normalize_evidence_candidates(...)` now tags wrapper titles with `reject_reason="generic_wrapper"`.
   - `_pick_direct_cause_candidate(...)` now skips wrapper-title candidates.
@@ -2738,11 +2738,11 @@ Then confirm bot returns:
   - direct-evidence path skips wrapper title when a better causal headline exists.
   - INTC-like wrapper phrase path falls back (never emits wrapper text in rendered reason line).
 - Validation:
-  - `PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_market_daily.py` -> `43 passed`
-  - `PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
+  - `PYTHONPATH=src /opt/spclaw/.venv/bin/python -m pytest -q tests/test_market_daily.py` -> `43 passed`
+  - `PYTHONPATH=src /opt/spclaw/.venv/bin/python -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
 - Runtime verification:
   - `make openclaw-restart` + `make openclaw-slack-status` probe healthy (`ok=true`).
-  - `make openclaw-market-daily-run-once FORCE=1` artifact: `/opt/coatue-claw-data/artifacts/market-daily/md-close-20260225-023157.md`.
+  - `make openclaw-market-daily-run-once FORCE=1` artifact: `/opt/spclaw-data/artifacts/market-daily/md-close-20260225-023157.md`.
   - INTC line now: `Likely positioning/flow; no single confirmed catalyst.` (no quote-directory wrapper phrase).
 
 ## Update (2026-02-24, integrator merge/deploy of latest Market Daily role-branch fixes)
@@ -2751,8 +2751,8 @@ Then confirm bot returns:
 - Validation:
   - exact checklist commands using system python failed because `pytest` is not installed in `/usr/bin/python3` (`No module named pytest`).
   - equivalent venv validations passed:
-    - `PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_market_daily.py` -> `47 passed`
-    - `PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
+    - `PYTHONPATH=src /opt/spclaw/.venv/bin/python -m pytest -q tests/test_market_daily.py` -> `47 passed`
+    - `PYTHONPATH=src /opt/spclaw/.venv/bin/python -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
 - Runtime checks:
   - `make openclaw-restart`
   - `make openclaw-slack-status` -> probe `ok=true`, `status=200`
@@ -2776,8 +2776,8 @@ Then confirm bot returns:
 - Validation:
   - checklist `python3 -m pytest` commands failed on mini (`No module named pytest`)
   - venv validation passed:
-    - `PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_market_daily.py` -> `53 passed`
-    - `PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
+    - `PYTHONPATH=src /opt/spclaw/.venv/bin/python -m pytest -q tests/test_market_daily.py` -> `53 passed`
+    - `PYTHONPATH=src /opt/spclaw/.venv/bin/python -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
 - Runtime verification:
   - `make openclaw-restart`
   - `make openclaw-slack-status` -> probe `ok=true`
@@ -2789,7 +2789,7 @@ Then confirm bot returns:
   - AMD line: `Shares rose after Meta inks deal with AMD for chips—and equity.`
   - `debug-catalyst INTC --slot close` keys include `cause_render_mode=fallback`, `cause_raw_phrase`, `cause_final_phrase`; links are only `news`/`web`.
 - Rollback flag:
-  - `COATUE_CLAW_MD_REASON_QUALITY_MODE=deterministic` was **not** required.
+  - `SPCLAW_MD_REASON_QUALITY_MODE=deterministic` was **not** required.
 
 ## Update (2026-02-24, integrator deploy of Market Daily simple catalyst synthesis)
 - Merged `origin/codex/agent-market-daily` into `main` at merge commit `c862aaf` (includes `f71eaa1`).
@@ -2797,8 +2797,8 @@ Then confirm bot returns:
 - Validation:
   - checklist `python3 -m pytest` failed on mini due missing global pytest / Python 3.9 compatibility (`datetime.UTC` import).
   - venv validation passed:
-    - `PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_market_daily.py` -> `56 passed`
-    - `PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
+    - `PYTHONPATH=src /opt/spclaw/.venv/bin/python -m pytest -q tests/test_market_daily.py` -> `56 passed`
+    - `PYTHONPATH=src /opt/spclaw/.venv/bin/python -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
 - Status confirms new defaults:
   - `catalyst_mode='simple_synthesis'`
   - `synth_max_results=5`
@@ -2818,7 +2818,7 @@ Then confirm bot returns:
     - `synth_candidates_considered` / `synth_candidates_used` / `synth_chosen_urls`
     - `cause_render_mode='simple_best_guess'`
 - Rollback flag was not needed. Legacy rollback remains available via:
-  - `COATUE_CLAW_MD_CATALYST_MODE=legacy_heuristic`
+  - `SPCLAW_MD_CATALYST_MODE=legacy_heuristic`
 
 ## Update (2026-02-24, Market Daily time-integrity guardrails merged/deployed)
 - Integrated `origin/codex/agent-market-daily` into `main` via merge commit `d59ca97` (includes `43c84ed`).
@@ -2866,8 +2866,8 @@ Then confirm bot returns:
   - `make openclaw-restart`
   - `make openclaw-slack-status` probe healthy (`ok=true`)
   - forced runs posted:
-    - close artifact: `/opt/coatue-claw-data/artifacts/market-daily/md-close-20260225-051636.md`
-    - recap artifact: `/opt/coatue-claw-data/artifacts/market-daily/md-earnings-recap-20260225-051342.md`
+    - close artifact: `/opt/spclaw-data/artifacts/market-daily/md-close-20260225-051636.md`
+    - recap artifact: `/opt/spclaw-data/artifacts/market-daily/md-earnings-recap-20260225-051342.md`
 - Slack verification results:
   - no `[X]` links and no `X recent search` footer
   - sources footer remains no-X (`Yahoo fast_info + Yahoo news + web search`)
@@ -2893,8 +2893,8 @@ Then confirm bot returns:
   - `make openclaw-restart` completed.
   - first Slack probe returned transient gateway close (`1006`), subsequent probe healthy (`ok=true`, `status=200`).
   - forced runs posted:
-    - close artifact: `/opt/coatue-claw-data/artifacts/market-daily/md-close-20260225-062530.md`
-    - earnings recap artifact: `/opt/coatue-claw-data/artifacts/market-daily/md-earnings-recap-20260225-062849.md`
+    - close artifact: `/opt/spclaw-data/artifacts/market-daily/md-close-20260225-062530.md`
+    - earnings recap artifact: `/opt/spclaw-data/artifacts/market-daily/md-earnings-recap-20260225-062849.md`
 - Slack/diagnostic verification:
   - close mover lines are free-sentence style and do not contain malformed `after According to ...` fragments in this run.
   - no `[X]` links and no X footer text.
@@ -2906,14 +2906,14 @@ Then confirm bot returns:
     - `generation_policy=post_as_is`
   - INTC stale Morgan callback is rejected under time-integrity gates.
 - Production env defaults confirmed in `.env.prod`:
-  - `COATUE_CLAW_MD_REASON_OUTPUT_MODE=free_sentence`
-  - `COATUE_CLAW_MD_SYNTH_SUPPORT_COUNT=2`
-  - `COATUE_CLAW_MD_POST_AS_IS=1`
+  - `SPCLAW_MD_REASON_OUTPUT_MODE=free_sentence`
+  - `SPCLAW_MD_SYNTH_SUPPORT_COUNT=2`
+  - `SPCLAW_MD_POST_AS_IS=1`
 - Follow-up note:
   - debug output still shows INTC rendered `links.web` on a support URL while anchor/source URL is Yahoo in-window; quality is improved but link-to-anchor strictness may need one more deterministic tie-break rule.
 
 ## Update (2026-02-25, Market Daily consensus-event + no-attribution catalyst correction)
-- Implemented INTC catalyst correction in `src/coatue_claw/market_daily.py` on `main`:
+- Implemented INTC catalyst correction in `src/spclaw/market_daily.py` on `main`:
   - replaced anchor-first sentence behavior with consensus-first winner selection (`_pick_consensus_winner`) over top synthesis candidates.
   - added deterministic event-family classification (`deal_partnership`, `pricing`, `guidance`, `analyst_move`, `regulatory`, `earnings`, `other`).
   - enforced no-publisher-attribution sentence output via `_strip_publisher_attribution`.
@@ -2924,15 +2924,15 @@ Then confirm bot returns:
   - `consensus_winner_url`
   - `attribution_stripped`
 - Tests:
-  - `PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_market_daily.py` -> `72 passed`
-  - `PYTHONPATH=src /opt/coatue-claw/.venv/bin/python -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
+  - `PYTHONPATH=src /opt/spclaw/.venv/bin/python -m pytest -q tests/test_market_daily.py` -> `72 passed`
+  - `PYTHONPATH=src /opt/spclaw/.venv/bin/python -m pytest -q tests/test_launchd_runtime.py` -> `8 passed`
 - Runtime checks:
   - `make openclaw-restart`
   - `make openclaw-slack-status` healthy (`ok=true`, status `200`) after restart
   - `make openclaw-market-daily-run-once FORCE=1` posted close artifact:
-    - `/opt/coatue-claw-data/artifacts/market-daily/md-close-20260225-071156.md`
+    - `/opt/spclaw-data/artifacts/market-daily/md-close-20260225-071156.md`
   - `make openclaw-market-daily-earnings-recap-run-once FORCE=1` posted recap artifact:
-    - `/opt/coatue-claw-data/artifacts/market-daily/md-earnings-recap-20260225-071334.md`
+    - `/opt/spclaw-data/artifacts/market-daily/md-earnings-recap-20260225-071334.md`
 - INTC verification snippets (post-fix):
   - close line now uses catalyst-only partnership framing (no Reuters attribution):
     - `Intel shares rose about 5.7% after the company announced a multiyear AI partnership with SambaNova ...`
@@ -2952,7 +2952,7 @@ Then confirm bot returns:
   - resulting commit on `main`: `0f78583` (`market-daily: rewrite earnings recap to anchor-first end-to-end`)
 - Cherry-pick conflict resolution summary:
   - kept `main` continuity in handoff docs during conflict resolution.
-  - resolved `src/coatue_claw/market_daily.py` conflict and retained current mover consensus/no-attribution behavior while accepting recap rewrite.
+  - resolved `src/spclaw/market_daily.py` conflict and retained current mover consensus/no-attribution behavior while accepting recap rewrite.
   - follow-up fix applied post-cherry-pick so recap keeps anchor+support citation ordering (without applying mover-family filter to recap rows).
 - Validation status:
   - checklist host `python3` commands failed on mini (`No module named pytest`; Python 3.9 `datetime.UTC` import mismatch).
@@ -2963,7 +2963,7 @@ Then confirm bot returns:
   - `make openclaw-restart`
   - `make openclaw-slack-status` healthy after restart (`ok=true`, status `200`)
   - `make openclaw-market-daily-earnings-recap-run-once FORCE=1` posted:
-    - `/opt/coatue-claw-data/artifacts/market-daily/md-earnings-recap-20260225-180006.md`
+    - `/opt/spclaw-data/artifacts/market-daily/md-earnings-recap-20260225-180006.md`
   - `make openclaw-slack-logs` captured current channel runtime logs.
 - Acceptance check snapshot (latest forced recap run):
   - Recap posted only when reporters existed (`reporters=3`).
@@ -2975,7 +2975,7 @@ Then confirm bot returns:
   - dry-run recap invocation in this environment can stall intermittently; force-run path completed and was used for production verification.
 
 ## Update (2026-02-25, board-seat company-only target enforcement)
-- Implemented global company-only target resolution in `src/coatue_claw/board_seat_daily.py` on `codex/agent-board-seat`.
+- Implemented global company-only target resolution in `src/spclaw/board_seat_daily.py` on `codex/agent-board-seat`.
 - New behavior:
   - `Idea` targets are resolved as company entities before gating/render.
   - deterministic alias mapping defaults include `next.js -> Vercel` (extendable via env JSON).
@@ -2985,8 +2985,8 @@ Then confirm bot returns:
   - `target_original`
   - `target_resolution_reason` (`as_extracted`, `alias_mapped`, `fallback_rotation`, `fallback_default`, `invalid_after_resolution`)
 - Additional implementation details:
-  - company-target requirement env reader: `COATUE_CLAW_BOARD_SEAT_REQUIRE_COMPANY_TARGET` (default on)
-  - alias map env reader: `COATUE_CLAW_BOARD_SEAT_TARGET_COMPANY_ALIAS_JSON`
+  - company-target requirement env reader: `SPCLAW_BOARD_SEAT_REQUIRE_COMPANY_TARGET` (default on)
+  - alias map env reader: `SPCLAW_BOARD_SEAT_TARGET_COMPANY_ALIAS_JSON`
   - source selection in sanitize path now uses resolved `idea_line` so target-confidence/source classification aligns with final company target.
 - Validation:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_board_seat_daily.py` -> `55 passed`
@@ -3002,9 +3002,9 @@ Then confirm bot returns:
 ## Update (2026-02-25, board-seat writing quality recovery)
 - Implemented LLM-passthrough writing recovery with evidence-grounded prompting:
   - new env controls:
-    - `COATUE_CLAW_BOARD_SEAT_MAX_LINE_WORDS=0` (default: no hard cap)
-    - `COATUE_CLAW_BOARD_SEAT_WRITING_MODE=llm_passthrough`
-    - `COATUE_CLAW_BOARD_SEAT_STRIP_OBVIOUS_ARTIFACTS=1`
+    - `SPCLAW_BOARD_SEAT_MAX_LINE_WORDS=0` (default: no hard cap)
+    - `SPCLAW_BOARD_SEAT_WRITING_MODE=llm_passthrough`
+    - `SPCLAW_BOARD_SEAT_STRIP_OBVIOUS_ARTIFACTS=1`
   - `_build_draft` now builds and passes an explicit evidence pack (target rows + acquisition rows + funding summary) to `_llm_draft`.
   - prompt now requires field-specific outputs (`target_does`, `why_now`, `whats_different`, `mos_risks`) and removes the old `<=18 words` constraint.
 - Added minimal passthrough cleanup and dedup guards:
@@ -3028,10 +3028,10 @@ Then confirm bot returns:
   - Posted a manual real-research board-seat message to `#openai` at Slack ts `1772060668.808919` while extractor hardening is being stabilized for fully automated target selection.
 
 ## Update (2026-02-26, market-daily recap manual-slot dedupe verification)
-- Integrator verification run completed on /opt/coatue-claw main.
+- Integrator verification run completed on /opt/spclaw main.
 - Cherry-pick 95ddd47 resolved as empty on this host, indicating behavior already present in main.
 - Tests: test_market_daily.py 79 passed; test_launchd_runtime.py 10 passed.
-- Runtime: openclaw restart and slack status probe healthy; 24x7 status shows com.coatueclaw.market-daily-earnings-recap loaded.
+- Runtime: openclaw restart and slack status probe healthy; 24x7 status shows com.spclaw.market-daily-earnings-recap loaded.
 - Slot check: outside-window manual run wrote slot earnings_recap_manual.
 - Scheduled-path run used slot earnings_recap and result was no_reporters, not blocked by manual-slot reuse.
 
@@ -3040,7 +3040,7 @@ Then confirm bot returns:
 - Validation: tests/test_market_daily.py 81 passed; tests/test_launchd_runtime.py 10 passed (venv python).
 - Runtime restarted; Slack status probe healthy after restart transient.
 - market_daily status confirms article_context_enabled/article_context_timeout_ms/article_context_max_chars/article_context_limit plus relevance_mode=llm_first.
-- Dry-run artifact: /opt/coatue-claw-data/artifacts/market-daily/md-open-20260227-174225.md.
+- Dry-run artifact: /opt/spclaw-data/artifacts/market-daily/md-open-20260227-174225.md.
 - Smoke: md now force posted via run-once; debug-catalyst NFLX close shows richer context fields but anchor still selected from web explainer set (TipRanks/247/Invezz), so article-context quality tuning remains follow-up.
 
 ## Update (2026-02-27, chart-day `$` render hardening)
@@ -3088,25 +3088,25 @@ Then confirm bot returns:
   - `PYTHONPATH=src python3 -m pytest -q tests/test_x_chart_daily.py` -> `95 passed`.
 
 ## Update (2026-02-27, Slack Board Seat manual command)
-- Added explicit Slack command handler for Board Seat manual runs in `src/coatue_claw/slack_bot.py`.
+- Added explicit Slack command handler for Board Seat manual runs in `src/spclaw/slack_bot.py`.
 - New commands:
   - `bs now` (live run-now for current portco channel)
   - `bs now dry` (dry-run preview for current portco channel)
   - `bs now for <Company>` (explicit company override in current channel)
   - `bs status` / `bs help`
 - Command executes scheduler-equivalent `board_seat_daily.run_once(force=True, dry_run=...)` path, scoped to a single company/channel via temporary env override:
-  - `COATUE_CLAW_BOARD_SEAT_PORTCOS=<Company>:<channel>`
-  - `COATUE_CLAW_BOARD_SEAT_CHANNEL_DISCOVERY=static`
+  - `SPCLAW_BOARD_SEAT_PORTCOS=<Company>:<channel>`
+  - `SPCLAW_BOARD_SEAT_CHANNEL_DISCOVERY=static`
 - Added lock-guarded temporary-env wrapper in Slack bot to avoid cross-request env leakage during run invocation.
 - Validation:
-  - `python3 -m compileall -q src/coatue_claw/slack_bot.py`
+  - `python3 -m compileall -q src/spclaw/slack_bot.py`
   - `PYTHONPATH=src python3 -m pytest -q tests/test_slack_routing.py` -> `5 passed`.
 
 ## Update (2026-02-28, HFA fail-closed Slack routing guard)
 - Implemented explicit HFA command fail-closed routing in Slack bot to prevent generic fallback prose for HFA invocations.
-- New routing detector in `src/coatue_claw/slack_routing.py`:
+- New routing detector in `src/spclaw/slack_routing.py`:
   - `is_explicit_hfa_command(text)` matches explicit HFA command shapes (`hfa ...`, `analyze`, `quotes`, `podcast`, `status`) after mention stripping.
-- Slack event flow change in `src/coatue_claw/slack_bot.py`:
+- Slack event flow change in `src/spclaw/slack_bot.py`:
   - still attempts normal `_handle_hfa_command(...)` first,
   - if explicit HFA command is detected but handler does not claim it, bot now returns:
     - `HFA command routing failed...` guidance message,
@@ -3121,9 +3121,9 @@ Then confirm bot returns:
 - Deployed `main` commit `bd93330` (from `origin/codex/agent-hf-analyst`) with source-file persistence to KB directories.
 - Runtime reinstall/restart complete; Slack status probe is healthy.
 - Data checks:
-  - `/opt/coatue-claw-data/artifacts/hf-analyst/` is present with expected artifacts.
-  - `/opt/coatue-claw-data/kb/sources/pdf` and `/opt/coatue-claw-data/kb/sources/docs` are not present yet.
+  - `/opt/spclaw-data/artifacts/hf-analyst/` is present with expected artifacts.
+  - `/opt/spclaw-data/kb/sources/pdf` and `/opt/spclaw-data/kb/sources/docs` are not present yet.
   - `hf_runs` currently contains only legacy CLI podcast rows; no Slack `hfa analyze` file-thread runs yet.
 - Manual validation still required:
   - run `@SPClaw hfa analyze` in a Slack thread containing a PDF,
-  - then verify `hf_run_inputs.local_path` points under `/opt/coatue-claw-data/kb/sources/...`.
+  - then verify `hf_run_inputs.local_path` points under `/opt/spclaw-data/kb/sources/...`.

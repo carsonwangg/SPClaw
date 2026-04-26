@@ -4,12 +4,12 @@
 - `codex/agent-hf-analyst`
 
 ## Suggested Worktree
-- `/Users/carsonwang/worktrees/coatue-claw/hf-analyst`
+- `/Users/carsonwang/worktrees/spclaw/hf-analyst`
 
 ## Ownership Scope
-- New HF analyst module(s) under `src/coatue_claw/`
-- HF routing in `src/coatue_claw/slack_bot.py`
-- HF command surface in `src/coatue_claw/cli.py`
+- New HF analyst module(s) under `src/spclaw/`
+- HF routing in `src/spclaw/slack_bot.py`
+- HF command surface in `src/spclaw/cli.py`
 - HF tests under `tests/`
 
 ## Validation
@@ -22,13 +22,13 @@
 
 ## Current Ship Status (2026-02-24)
 - HFA V1 implementation is complete in this branch:
-  - `src/coatue_claw/hf_document_extract.py`
-  - `src/coatue_claw/hf_prompt_contract.py`
-  - `src/coatue_claw/hf_store.py`
-  - `src/coatue_claw/hf_analyst.py`
-  - CLI wiring in `src/coatue_claw/cli.py`
-  - Slack wiring in `src/coatue_claw/slack_bot.py`
-  - memory helper extension in `src/coatue_claw/memory_runtime.py`
+  - `src/spclaw/hf_document_extract.py`
+  - `src/spclaw/hf_prompt_contract.py`
+  - `src/spclaw/hf_store.py`
+  - `src/spclaw/hf_analyst.py`
+  - CLI wiring in `src/spclaw/cli.py`
+  - Slack wiring in `src/spclaw/slack_bot.py`
+  - memory helper extension in `src/spclaw/memory_runtime.py`
 - Tests added:
   - `tests/test_hf_document_extract.py`
   - `tests/test_hf_prompt_contract.py`
@@ -45,18 +45,18 @@
 
 ## Current Ship Status (2026-02-26)
 - HFA Podcast V1 is implemented on this branch:
-  - Added `src/coatue_claw/hf_youtube_transcript.py` (YouTube parsing, captions-first transcript, ASR fallback orchestration).
-  - Added `src/coatue_claw/hf_podcast.py` (summary + top-quote extraction/validation + markdown renderers).
-  - Extended `src/coatue_claw/hf_store.py`:
+  - Added `src/spclaw/hf_youtube_transcript.py` (YouTube parsing, captions-first transcript, ASR fallback orchestration).
+  - Added `src/spclaw/hf_podcast.py` (summary + top-quote extraction/validation + markdown renderers).
+  - Extended `src/spclaw/hf_store.py`:
     - `hf_runs.run_kind` (`thread_docs` / `podcast_youtube`)
     - `hf_podcast_inputs`
     - `hf_dm_podcast_autoruns` dedupe table.
-  - Extended `src/coatue_claw/hf_analyst.py` with `analyze_podcast_url(...)`, YouTube URL extraction, and podcast DM dedupe helpers.
-  - Extended `src/coatue_claw/cli.py` with `claw hfa podcast --url ... [--question ...] [--dry-run]`.
-  - Extended `src/coatue_claw/slack_bot.py` with:
+  - Extended `src/spclaw/hf_analyst.py` with `analyze_podcast_url(...)`, YouTube URL extraction, and podcast DM dedupe helpers.
+  - Extended `src/spclaw/cli.py` with `claw hfa podcast --url ... [--question ...] [--dry-run]`.
+  - Extended `src/spclaw/slack_bot.py` with:
     - `hfa podcast <url> [question]` command path
     - DM YouTube auto-run + dedupe.
-  - Extended `src/coatue_claw/memory_runtime.py` HFA writeback to accept source tags (podcast uses `hfa-podcast-analysis`).
+  - Extended `src/spclaw/memory_runtime.py` HFA writeback to accept source tags (podcast uses `hfa-podcast-analysis`).
 - Tests added:
   - `tests/test_hf_podcast.py`
   - `tests/test_hf_youtube_transcript.py`
@@ -66,19 +66,19 @@
 
 ## Patch Status (2026-02-26)
 - ASR fallback compatibility patch added for podcast transcription:
-  - `src/coatue_claw/hf_youtube_transcript.py` retries transcription without `response_format` when model/API rejects `verbose_json`.
+  - `src/spclaw/hf_youtube_transcript.py` retries transcription without `response_format` when model/API rejects `verbose_json`.
   - fixes production failure mode on mini where ASR model rejects verbose response format.
 - Regression coverage:
   - `tests/test_hf_youtube_transcript.py::test_asr_transcript_retries_without_response_format_on_incompatible_model`
 
 ## Patch Status (2026-02-27)
 - HFA thread-doc mode now fails closed when model output is unavailable/unparseable.
-- `src/coatue_claw/hf_analyst.py` no longer falls back to `_fallback_draft` in `analyze_thread`.
+- `src/spclaw/hf_analyst.py` no longer falls back to `_fallback_draft` in `analyze_thread`.
 - Failure reason is propagated as `analysis_generation_failed:<reason>` to Slack/CLI paths.
 
 ## Patch Status (2026-02-27)
 - Added memory-backed runtime HFA output controls (Slack configurable): strict/freeform mode + instruction text.
-- Control commands are handled in `src/coatue_claw/slack_bot.py` via `hfa control ...`.
+- Control commands are handled in `src/spclaw/slack_bot.py` via `hfa control ...`.
 
 ## Patch Status (2026-02-27)
 - Simplified HFA output controls to one mode (`freeform`) with memory-backed instruction tuning.

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from coatue_claw.slack_x_intent import parse_x_digest_intent
+from spclaw.slack_x_intent import parse_x_digest_intent
 
 
 def test_parse_basic_x_digest() -> None:
@@ -13,7 +13,7 @@ def test_parse_basic_x_digest() -> None:
 
 
 def test_parse_x_digest_with_window_and_limit() -> None:
-    intent = parse_x_digest_intent("@Coatue Claw x digest snowflake ai last 48h limit 80")
+    intent = parse_x_digest_intent("@SPClaw x digest snowflake ai last 48h limit 80")
     assert intent is not None
     assert intent.kind == "digest"
     assert intent.query == "snowflake ai"
